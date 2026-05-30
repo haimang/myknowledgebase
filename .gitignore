@@ -1,1 +1,54 @@
 legacy-family/
+
+# Python build artifacts
+*.egg-info/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+build/
+dist/
+*.egg
+*.whl
+
+# Test / lint caches
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Data files (keep .gitkeep)
+data/db/*
+!data/db/.gitkeep
+data/logs/*
+!data/logs/.gitkeep
+data/tmp/*
+!data/tmp/.gitkeep
+data/objects/raw/*
+!data/objects/raw/.gitkeep
+data/objects/cleaned/*
+!data/objects/cleaned/.gitkeep
+data/objects/structured/*
+!data/objects/structured/.gitkeep
+data/objects/constructed/*
+!data/objects/constructed/.gitkeep
+data/objects/exports/*
+!data/objects/exports/.gitkeep
