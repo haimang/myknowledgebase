@@ -1,0 +1,15 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "smind-workflow-core"
+version = "0.1.0"
+requires-python = ">=3.9"
+dependencies = [
+  "smind-common>=0.1.0",
+  "smind-storage-sqlite>=0.1.0",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]
