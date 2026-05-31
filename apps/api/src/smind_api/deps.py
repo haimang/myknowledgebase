@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Iterator
 from dataclasses import dataclass
 from functools import lru_cache
 from sqlite3 import Connection
@@ -30,16 +31,31 @@ def _ensure_vec_migrated(db_path: str) -> None:
     conn.close()
 
 
-def get_core_conn() -> Connection:
+def get_core_conn() -> Iterator[Connection]:
+    """Yield a core connection, closing it when the request ends.
+
+    F2-01 (G-CR2-01 / part-cr-2.md R1): generator dependency so FastAPI runs
+    the ``finally`` on request teardown -> no per-request connection leak.
+    Endpoint signatures (``Depends(get_core_conn)``) are unchanged.
+    """
     settings = load_settings()
     _ensure_core_migrated(settings.core_db_path)
-    return CoreSQLiteEngine(settings.core_db_path).connect()
+    conn = CoreSQLiteEngine(settings.core_db_path).connect()
+    try:
+        yield conn
+    finally:
+        conn.close()
 
 
-def get_vec_conn() -> Connection:
+def get_vec_conn() -> Iterator[Connection]:
+    """Yield a vector connection, closing it when the request ends."""
     settings = load_settings()
     _ensure_vec_migrated(settings.vec_db_path)
-    return VecSQLiteEngine(settings.vec_db_path).connect()
+    conn = VecSQLiteEngine(settings.vec_db_path).connect()
+    try:
+        yield conn
+    finally:
+        conn.close()
 
 
 @dataclass

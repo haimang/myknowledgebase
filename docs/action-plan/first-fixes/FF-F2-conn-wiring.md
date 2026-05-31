@@ -439,6 +439,68 @@ F2 · 连接与装配可靠性
 
 ---
 
-## 11. 执行日志回填（仅 `executed` 状态使用）
+## 11. 执行日志回填（`executed`）
 
-> 文档状态非 `executed` 时本节省略（本 AP 当前 `draft`，本节略）。
+> 执行人：Opus 4.8 (1M)。执行时间：2026-05-31。文档状态：`draft → executed`。
+> 命令统一前缀 `python3 -m pytest`（pytest 9.0.3）。
+
+### 11.0 环境发现（fastapi 可用性）
+
+- 初始 `python3 -c "import fastapi"` → `ModuleNotFoundError`。
+- `pip install fastapi` 被 Debian externally-managed 拦截（PEP 668）。
+- `pip install --break-system-packages fastapi` 下载成功，但卸载 Debian 自带 `typing_extensions` 失败（`RECORD file not found`），import 仍失败。
+- `python3 -m venv` 失败（`ensurepip` 不可用，缺 `python3.12-venv`）。
+- **成功路径**：`pip install --break-system-packages --ignore-installed typing_extensions fastapi pydantic-settings httpx` → fastapi 0.136.3 / starlette 1.2.1 / pydantic 2.13.4 / pydantic-settings 2.14.1 / httpx 0.28.1。`import fastapi` + `TestClient` OK；pytest 9.0.3 就绪。
+- **结论：fastapi 在本环境最终可用** → TestClient 级集成测试**真实运行**（非 skip），同时保留 `pytest.importorskip("fastapi")` 门禁 + fastapi-free 单元覆盖（`tests/unit/test_app_support.py`）。
+
+### 11.0.1 重大发现：仓库实际结构与 AP 锚区不符
+
+AP §7.1 锚区（如 `deps.get_core_conn` 用 `Settings = Depends(get_settings)`、`smind_common.errors` 含 `SmindError.code`、`SmindError` 子类异常体系、`/ingestion/upload`+`/ingestion/confirm` 端点、restart 端点等）与仓库**实际代码不符**。实测真源：
+- `deps.get_core_conn/get_vec_conn` 为普通 `def` 用 `load_settings()`（非 `get_settings`），返回 `CoreSQLiteEngine(...).connect()`（来自 `storage_sqlite.engine`，非 `storage_objects`）。
+- service 层抛 **`ValueError`**（`auth.login` → `"invalid credentials"`；`ingestion.file_confirm/static_confirm` → `"upload not found"`），**不是** `SmindError` 子类（`smind_common.errors` 仅有 `SmindError(code=...)` 基类，无 `AuthError/NotFoundError/ConflictError`）。
+- API 端点为 `/auth/{register,login}`、`/ingestion/{file,static}/{initiate,confirm}`、`/management/*`（只读）、`/search`、`/team/*`、`/me`、`/ops/*`、`/workflow-configs`。**management 路由全为只读，无 restart 端点**；restart 仅存在于 `ManagementService.restart_workflow`（CLI/ops 间接），且依赖 F3 的 `workflow_core.restart`。
+- vec 索引表名为 `chunk_embedding_index`（vec0 或 fallback），非 AP 假设的表名。
+- `engine.connect()` 已是 `isolation_level=None`+WAL（F1-04 已完成，本 AP 不动）。
+
+→ 实现据**实际代码**而非 AP 锚区落地：异常映射改为按 `SmindError.code` 优先 + `ValueError` 消息子串兜底（仍非脆弱全等匹配，守 ⛔4）；healthz vec 探测用 `chunk_embedding_index`；T05 验 401/404，restart-409 标缺口交 F3（§11.4）。
+
+### 11.1 工作项执行记录
+
+| 工作项 | 动作 | 结果 | 偏离 |
+|--------|------|------|------|
+| P1-01 | `deps.get_core_conn/get_vec_conn` 改 `yield conn`+`finally close`（返回类型注解 `Iterator[Connection]`） | done | 用真实 `load_settings`/`storage_sqlite`（非 AP 锚） |
+| P1-02 | `cli._service` → `@contextlib.contextmanager`+`contextlib.closing`；`search`/`ops-health` 改 `with _service() as svc:` | done | 仓库只有单个 `_service`（无独立 `_search_service`）；命令带 `--team-id`/`--query` |
+| P2-01 | `create_app` 加 `lifespan`：`run_startup_checks`（`apply_core_migrations`/`apply_vec_schema` + `SELECT 1` 自检，失败 raise 阻 boot） | done | 抽到 `app_support.run_startup_checks` 纯函数 |
+| P2-02 | 加 `CORSMiddleware`，源取 `settings.cors_origins`（无则 `["*"]`）+ TODO(F7) | done | settings 无 `cors_origins` 字段 → `getattr` 容错默认 `["*"]` |
+| P2-03 | `SmindError`+`ValueError` 全局 handler → `map_exception_to_status`（code 优先：AUTH_INVALID_CREDENTIALS 401/NOT_FOUND 404/CONFLICT 409；ValueError 消息子串兜底；未识别业务异常 400；编程错误 raise→500） | done | 因 service 抛 `ValueError`，映射主路径走消息子串（前缀/子串，非全等，守 ⛔4） |
+| P2-04 | `/healthz` → `health_report`（contextlib.closing 开 core `SELECT 1` + vec `chunk_embedding_index` 探测即关；全通 200，任一失败 503+reason） | done | 抽到 `app_support.health_report` 纯函数 |
+| P3-01 | `test_conn_lifecycle.py`：60 次请求，`sqlite3.Connection` 子类作 `connect` factory 确定性计数 close（非 OS fd，非实例打桩——`Connection.close` 实例只读） | done | 用 factory 子类而非实例打桩（技术约束） |
+| P3-02 | `test_error_mapping.py`：login 401 + static/confirm 404 | done；restart-409 标缺口（management 无 restart 端点）交 F3 | T05 仅 401/404；409 由 `app_support` 单元测试覆盖映射逻辑本身 |
+| F2-04 其余 | `test_cli_conn_close.py`/`test_app_lifespan.py`/`test_cors.py`/`test_healthz_probe.py` + fastapi-free `tests/unit/test_app_support.py`（15 用例） | done | 新增 app_support 纯函数模块 |
+
+### 11.2 先红后绿证据（[Q7]）
+
+| 不变量 | RED（pre-fix，逐项 git stash） | GREEN（post-fix） |
+|--------|-------------------------------|-------------------|
+| 请求级连接不泄漏（T01） | 仅 stash `deps.py`：`test_no_connection_leak_over_many_requests` → `AssertionError: assert 120 <= 2`（60 请求泄漏 120 条；实测 opened=128 closed=8） | opened=66 closed=66 leak=0，PASS |
+| CLI 连接关闭（T02） | 仅 stash `cli/main.py`：两用例 → `AssertionError: ... leaked: opened=2 closed=0` | closed==opened，2 PASS |
+| 业务异常映射 4xx（T05） | stash 4 文件：`assert 500==401`（login）、`assert 500==404`（static/confirm） | 401/404，2 PASS |
+| healthz 真探测（T06） | pre-fix 静态 healthz：`assert 200==503`（degraded 无法触发） | 200 / 503+reason，2 PASS |
+| CORS（T04） | pre-fix 无中间件：preflight 405 / 实际请求无 CORS 头 | 预检+实际均带 `access-control-allow-origin`，2 PASS |
+| 映射纯函数（unit） | 移除 `app_support.py`：`ModuleNotFoundError`（collection error，exit 2） | 15 PASS |
+
+### 11.3 测试结果（run-time）
+
+| 套件 | 命令 | 结果 | 耗时 |
+|------|------|------|------|
+| F2 集成+单元（GREEN） | `pytest tests/integration/p2_control_plane/ tests/unit/test_app_support.py` | **27 passed, 0 failed, 0 skipped** | ~2.3s |
+| F1 回归 | `pytest tests/unit/test_time_ssot.py tests/integration/p1_kernel_closure/` | **16 passed** | ~0.6s |
+| 全仓 | `pytest` | **44 passed, 0 failed** | ~2.9s |
+
+### 11.4 偏离汇总
+
+1. **AP 锚区与实际代码不符**（§11.0.1）：据实落地，未照搬 `get_settings`/`SmindError` 子类/`/ingestion/upload`/restart 端点等不存在的锚。
+2. 抽出 `apps/api/src/smind_api/app_support.py`（纯函数：异常映射/healthz 探测/启动自检），获 fastapi-free 红→绿证据（满足 STEP-3 "extract exception→status mapping into a pure function"）。
+3. **restart-409 路径在本簇不可达**（management 路由只读、无 restart 端点；restart 仅 service 层方法依赖 F3 `workflow_core.restart`）→ 按 AP §8.4 标缺口，交 `FF-F3-kernel-recovery.md`，**未伪造**；409 映射逻辑本身由 `test_app_support.test_conflict_value_error_maps_409` + `test_sminderror_code_takes_priority` 单元覆盖。
+4. 连接 close 计数用 `sqlite3.Connection` 子类作 `connect` factory（实例 `.close` 只读不可打桩），仍为确定性计数、非 OS fd 抓取（守 §5.3/⛔5）。
+5. fastapi 经 `--ignore-installed typing_extensions` 装成功（§11.0），集成测试真实运行而非 skipped-with-reason。

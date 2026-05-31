@@ -1,4 +1,6 @@
 import argparse
+import contextlib
+from collections.abc import Iterator
 
 from management import ManagementService
 from smind_config.loader import load_settings
@@ -8,17 +10,27 @@ from storage_sqlite.migrations.runner import apply_core_migrations
 from vector_sqlite_vec import VecSQLiteEngine, apply_vec_schema
 
 
-def _service() -> ManagementService:
+@contextlib.contextmanager
+def _service() -> Iterator[ManagementService]:
+    """Yield a ManagementService, closing both connections on exit.
+
+    F2-02 (G-CR2-01 app-level / part-cr-8.md R6): the core+vec connections are
+    owned by this context manager so they are closed when the CLI command
+    finishes -> no per-invocation connection leak.
+    """
     settings = load_settings()
-    core_conn = CoreSQLiteEngine(settings.core_db_path).connect()
-    vec_conn = VecSQLiteEngine(settings.vec_db_path).connect()
-    apply_core_migrations(core_conn)
-    apply_vec_schema(vec_conn)
-    return ManagementService(
-        core_conn,
-        vec_conn=vec_conn,
-        object_store=FileSystemObjectStore(settings.object_store_dir),
-    )
+    with contextlib.closing(
+        CoreSQLiteEngine(settings.core_db_path).connect()
+    ) as core_conn, contextlib.closing(
+        VecSQLiteEngine(settings.vec_db_path).connect()
+    ) as vec_conn:
+        apply_core_migrations(core_conn)
+        apply_vec_schema(vec_conn)
+        yield ManagementService(
+            core_conn,
+            vec_conn=vec_conn,
+            object_store=FileSystemObjectStore(settings.object_store_dir),
+        )
 
 
 def main() -> int:
@@ -38,11 +50,14 @@ def main() -> int:
         print(f"ok env={settings.app_env}")
         return 0
     if args.command == "search":
-        items = _service().search(team_id=args.team_id, query=args.query, limit=args.limit)
+        with _service() as svc:
+            items = svc.search(team_id=args.team_id, query=args.query, limit=args.limit)
         print({"count": len(items), "items": items})
         return 0
     if args.command == "ops-health":
-        print(_service().health(team_id=args.team_id))
+        with _service() as svc:
+            result = svc.health(team_id=args.team_id)
+        print(result)
         return 0
     return 0
 
