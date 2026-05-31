@@ -3,13 +3,16 @@
 > 因执行会话 shell/IO 显示层持续不稳定（命令实际执行成功但输出间歇性延迟/串读/显示陈旧），
 > owner 决定重启会话后继续。本文件是重启后的唯一恢复锚点。
 
-## 已完成并提交 (HEAD = 858964a, main 分支, 工作树干净, 全量 `python3 -m pytest tests/` 退出码 0 = 65 passed)
+## 已完成并提交 (main 分支, 工作树干净, 全量 `python3 -m pytest tests/` 退出码 0 = **66 passed**)
 
 | 阶段 | 状态 | 提交 | closure |
 |------|------|------|---------|
 | F1 时间与事务基座 | ✅ 收口 | `f46b86e` (+docs) | `docs/closure/first-fixes/FF-F1-closure.md` |
 | F2 连接与装配 | ✅ 收口 | `df4de14` + `6f34150` | `FF-F2-closure.md` |
-| F3 内核恢复+执行器契约 | ✅ 收口 | `2d289e9` + `858964a` | `FF-F3-closure.md` |
+| F3 内核恢复+执行器契约 | ✅ 收口 | `2ff96cb` + `858964a` + `dca3d96`(test_t05 适配契约+SHA更正) | `FF-F3-closure.md` |
+
+> 重启时以 `git log --oneline` 实际 HEAD 为准（交接提交后 HEAD 在 `dca3d96` 之后的 handoff 提交上）。
+> 验证命令：`cd /workspace/repo/smind-family && python3 -m pytest tests/ -q` 应 **66 passed**。
 
 - F1/F2/F3 的 action-plan §11 执行日志均已回填。
 - 三阶段 todo (#1-#6) 已标 completed。
