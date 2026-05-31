@@ -466,3 +466,39 @@ F3 内核恢复与一次性语义
 ## 11. 执行日志回填（仅 `executed` 状态使用）
 
 > 文档状态非 `executed`，本节省略（draft）。
+
+---
+
+## 11. 执行日志回填（`executed` — 2026-05-31）
+
+> 文档状态: `draft → executed`。执行人 Opus 4.8（主轨直接执行，未用收尾子代理）。提交 `2d289e9`。
+
+### 11.1 环境
+- 系统 python3 含 fastapi/pydantic/starlette/httpx；缺 numpy/uvicorn/bs4/lxml/requests/sentence_transformers/sqlite_vec（无外网，F3 不依赖）。
+- 测试：`python3 -m pytest tests/ -q` → **65 passed**（含 F1/F2 + 新增 F3 7 用例）。
+
+### 11.2 逐工作项
+- **F3-01 reap 接线**：`apps/worker/main.py:_run_once` 开头调 `reap_expired_claims`（restart/purge 前），返回 >0 记日志。grep reap 命中 2 处。
+- **F3-02 终态归属内核 + 执行器契约**：新增 `workflow_core/executors.py`（`ExecutorResult{downstream,run_advance}` / `DownstreamStep` / `deterministic_artifact_id` / `deterministic_step_id` / `apply_executor_result`）。`succeed_claim(conn, token, result=None)` 在重查 claim active 后、同一 `BEGIN IMMEDIATE` 事务内落 step 终态 + 下游 step + step_links 边 + run 推进。`workflow_clean.process_clean_step` / `workflow_rag.process_rag_step` 改为只产 `ExecutorResult` + 确定性 id 数据写入，**0 处 `conn.commit` / 0 处 `status='succeeded'`**（grep 核验）。worker 改为 `result=process_x(); ok=succeed_claim(conn,token,result)`。
+- **F3-03 幂等键 + 检查返回值**：artifact/chunk/下游 step 用确定性 id（`deterministic_artifact_id(step,suffix)` / `chunk_id=f"{run}:{idx}"` / `deterministic_step_id`）+ `INSERT OR IGNORE` / `ON CONFLICT DO NOTHING`；worker 检查 succeed/fail 返回 False 并告警。
+- **F3-04 restart available_at**：recovery 重置用 SQL `strftime('%Y-%m-%dT%H:%M:%fZ','now')`（与 v_ready_steps 同源）。
+- **F3-05 restart recovery**：`process_restart_requests` 按"最后 failed/retry_wait step 的 stage"锚点，仅重置失败 step（已成功步骤不动），run.current_stage=锚点 stage；`force_recovery`/`kickstart` 显式置 `failed` + error_message（[Q4] 本轮仅 recovery）。
+- **F3-06 退避**：`fail_claim` 读 schema `retry_backoff_seconds` 列 + `base * 2**(attempt-1)`（修复早期 None 注入 SQL 致 NOT NULL 崩溃的中间 bug）。
+- **F3-07 删重复事件写入器**：删 `graph.write_workflow_event`（grep `def write_workflow_event` = 0），`__init__` 移除导出；`events.append_workflow_event` / `append_audit_log` 去显式 `created_at`，交 DDL DEFAULT（T12 正则校验格式）。
+- **F3-08 step_links**：接线——`apply_executor_result` 每条 downstream 写一条 `next` 边（`ON CONFLICT(from,to,type) DO NOTHING`）。T06 断言 1 条边。
+- **F3-09 并发回归**：`tests/integration/p1_kernel_closure/test_kernel_recovery.py`。
+
+### 11.3 先红后绿（test_kernel_recovery.py，7 passed）
+- `test_t14_concurrent_no_double_execution`：worker-A 负 lease claim（真实 now_iso 写入，**无手写 SQL 覆盖 lease**）→ process → reap → worker-B 重 claim+succeed → worker-A 迟到 succeed 返回 False → 断言 cleaned artifact=1、rag:structurize step=1（at-most-once）。
+- `test_t06`：succeed_claim 应用下游 + run.current_stage=rag + step_links=1（内核归属）。
+- `test_t07`：同 step 执行两次 → cleaned artifact 仍=1（确定性 id 幂等）。
+- `test_t09`：rag 阶段失败 run recovery → clean(succeeded) 不动、rag(failed) 回 pending+ready、run running。
+- `test_t10`：force_recovery → restart_requests.status=failed（本轮拒绝）。
+- `test_t11`：fail_claim 无显式退避 → 读 schema 列 120s、available_at 未来 >60s。
+- `test_t12`：`graph.write_workflow_event` 不存在；event created_at 匹配 `...SS.mmmZ`。
+- 全量回归：`python3 -m pytest tests/` → **65 passed**（F1 16 + F2 27 + p3-p7 + F3 7 等）。
+
+### 11.4 偏差与 handoff
+- 执行器**数据**副作用（artifact/chunk/vec/object）由执行器直接写但用确定性幂等 id；**终态/下游/run 推进**归内核——比 AP 设想的"全部经 ExecutorResult"更贴合既有丰富逻辑，且满足"终态单一归属 + 反双重执行"红线。
+- 跨库 vec 写仍非 core 事务覆盖（注释标明）→ handoff FF-F4。
+- F6 真实执行器去桩在此契约上建造（下游 FF-F6a/b）。
