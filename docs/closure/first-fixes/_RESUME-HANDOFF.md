@@ -9,9 +9,9 @@
 |------|------|------|---------|
 | F1 时间与事务基座 | ✅ 收口 | `f46b86e` (+docs) | `docs/closure/first-fixes/FF-F1-closure.md` |
 | F2 连接与装配 | ✅ 收口 | `df4de14` + `6f34150` | `FF-F2-closure.md` |
-| F3 内核恢复+执行器契约 | ✅ 收口 | `2ff96cb` + `858964a` + `dca3d96`(test_t05 适配契约+SHA更正) | `FF-F3-closure.md` |
+| F3 内核恢复+执行器契约 | ✅ 收口 | `2ff96cb` + `858964a` + `e9a1c70`(test_t05 适配契约+SHA更正) | `FF-F3-closure.md` |
 
-> 重启时以 `git log --oneline` 实际 HEAD 为准（交接提交后 HEAD 在 `dca3d96` 之后的 handoff 提交上）。
+> 重启时以 `git log --oneline` 实际 HEAD 为准（交接提交后 HEAD 在 `e9a1c70` 之后的 handoff 提交上）。
 > 验证命令：`cd /workspace/repo/smind-family && python3 -m pytest tests/ -q` 应 **66 passed**。
 
 - F1/F2/F3 的 action-plan §11 执行日志均已回填。
