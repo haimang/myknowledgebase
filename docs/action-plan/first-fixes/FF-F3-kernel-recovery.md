@@ -471,7 +471,7 @@ F3 内核恢复与一次性语义
 
 ## 11. 执行日志回填（`executed` — 2026-05-31）
 
-> 文档状态: `draft → executed`。执行人 Opus 4.8（主轨直接执行，未用收尾子代理）。提交 `2d289e9`。
+> 文档状态: `draft → executed`。执行人 Opus 4.8（主轨直接执行，未用收尾子代理）。提交 `2ff96cb`。
 
 ### 11.1 环境
 - 系统 python3 含 fastapi/pydantic/starlette/httpx；缺 numpy/uvicorn/bs4/lxml/requests/sentence_transformers/sqlite_vec（无外网，F3 不依赖）。

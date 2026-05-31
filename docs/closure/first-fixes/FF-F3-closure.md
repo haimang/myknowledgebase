@@ -10,7 +10,7 @@
 > 关联 action-plan: `docs/action-plan/first-fixes/FF-F3-kernel-recovery.md`
 > 关联 evidence: `inline §2 + action-plan §11 执行日志`
 > 关联 review: `docs/eval/first-code-review-plan/part-cr-4.md / part-cr-6.md / part-cr-7.md`
-> 关联 commit: `2d289e9`（fix(F3): 内核恢复 + 执行器契约 + 一次性语义 + recovery restart）
+> 关联 commit: `2ff96cb`（fix(F3): 内核恢复 + 执行器契约 + 一次性语义 + recovery restart）
 
 ---
 
@@ -28,15 +28,15 @@
 
 | Item | 状态 | 证据（commit + test + run-time） |
 |------|------|----------------------------------------|
-| F3-01 reap 接线 worker | ✅ | `2d289e9` + `test_t14`（reap=1）+ `2026-05-31`；grep `reap_expired_claims` 在 worker 2 处 |
-| F3-02 终态归属内核 + 执行器契约 | ✅ | `2d289e9` + `test_t06`（step succeeded/run advance/step_links 由内核写）+ `2026-05-31`；grep clean/rag `conn.commit`=0、`status='succeeded'`=0 |
-| F3-03 幂等键 + 检查返回值 | ✅ | `2d289e9` + `test_t07`（重复执行 artifact=1）+ `test_t14`（worker-A 迟到 succeed=False）+ `2026-05-31` |
-| F3-04 restart available_at SQL | ✅ | `2d289e9` + `test_t09`（rag step available_at ≤ now、就绪）+ `2026-05-31` |
-| F3-05 restart recovery 模式 | ✅ | `2d289e9` + `test_t09`（clean 不重置/rag 锚点重启）+ `test_t10`（force 拒绝）+ `2026-05-31` |
-| F3-06 退避读 schema 列 + 指数 | ✅ | `2d289e9` + `test_t11`（无显式退避→读 120s 列、available_at 未来 >60s）+ `2026-05-31` |
-| F3-07 删重复事件写入器 + created_at DDL | ✅ | `2d289e9` + `test_t12`（graph.write_workflow_event 不存在 + created_at `...SS.mmmZ`）+ `2026-05-31` |
-| F3-08 workflow_step_links 接线 | ✅ | `2d289e9` + `test_t06`（每条 downstream 写 1 条 next 边）+ `2026-05-31` |
-| F3-09 并发双重执行 harness | ✅ | `2d289e9` + `test_t14`（真实 now_iso lease 路径，at-most-once）+ `2026-05-31` |
+| F3-01 reap 接线 worker | ✅ | `2ff96cb` + `test_t14`（reap=1）+ `2026-05-31`；grep `reap_expired_claims` 在 worker 2 处 |
+| F3-02 终态归属内核 + 执行器契约 | ✅ | `2ff96cb` + `test_t06`（step succeeded/run advance/step_links 由内核写）+ `2026-05-31`；grep clean/rag `conn.commit`=0、`status='succeeded'`=0 |
+| F3-03 幂等键 + 检查返回值 | ✅ | `2ff96cb` + `test_t07`（重复执行 artifact=1）+ `test_t14`（worker-A 迟到 succeed=False）+ `2026-05-31` |
+| F3-04 restart available_at SQL | ✅ | `2ff96cb` + `test_t09`（rag step available_at ≤ now、就绪）+ `2026-05-31` |
+| F3-05 restart recovery 模式 | ✅ | `2ff96cb` + `test_t09`（clean 不重置/rag 锚点重启）+ `test_t10`（force 拒绝）+ `2026-05-31` |
+| F3-06 退避读 schema 列 + 指数 | ✅ | `2ff96cb` + `test_t11`（无显式退避→读 120s 列、available_at 未来 >60s）+ `2026-05-31` |
+| F3-07 删重复事件写入器 + created_at DDL | ✅ | `2ff96cb` + `test_t12`（graph.write_workflow_event 不存在 + created_at `...SS.mmmZ`）+ `2026-05-31` |
+| F3-08 workflow_step_links 接线 | ✅ | `2ff96cb` + `test_t06`（每条 downstream 写 1 条 next 边）+ `2026-05-31` |
+| F3-09 并发双重执行 harness | ✅ | `2ff96cb` + `test_t14`（真实 now_iso lease 路径，at-most-once）+ `2026-05-31` |
 
 ---
 
@@ -81,7 +81,7 @@
 
 | 收口纪律 | 兑现声明 |
 |----------|----------|
-| 每个 ✅ 归类 5 态 | ✅ —— F3-01..09 全部 `verified`（commit `2d289e9` + 命名测试 + run-time + grep）。force/kickstart `deferred`（显式拒绝，非伪装桩）。 |
+| 每个 ✅ 归类 5 态 | ✅ —— F3-01..09 全部 `verified`（commit `2ff96cb` + 命名测试 + run-time + grep）。force/kickstart `deferred`（显式拒绝，非伪装桩）。 |
 | ✅ 证据为四元组，无裸 file:line | ✅ —— 见 §1/§2 |
 | scope diff 守卫 | ✅ —— 改动限于 workflow_core/{executors(新),retry,events,graph,restart,__init__}、workflow_clean/service、workflow_rag/service、worker/main + 新增 test_kernel_recovery.py + 本 closure + AP §11；未触 F1 engine/F2 api |
 | deferred 已三分类（A/B/C）且每项有承接位置 | ✅ —— 见 §4（A×2 / B×2 / C×1） |
@@ -91,4 +91,5 @@
 > 1. **契约形态偏差（据实记录）**：AP §4 设想"执行器产物也经 ExecutorResult.artifacts 交内核写"；实际落地为"执行器直接写**数据**副作用（artifact/chunk/vec/object）但用确定性幂等 id，内核只统管**终态/下游 step/step_links/run 推进**"。该形态同样满足红线"终态单一归属 + 反双重执行"（test_t14 证），且保留既有丰富 rag 逻辑、改动面更小。
 > 2. **中间 bug 自查**：F3-06 退避一度把 `retry_backoff_seconds=None` 直注 SQL 致 `NOT NULL constraint failed: available_at`；已修为"读 schema 列 + 指数"，test_t11 守回归。
 > 3. **先红后绿真实性**：test_t14 走**真实 now_iso lease 写入路径**（负 lease_seconds 使 claim 即过期），不手写 SQL 覆盖 lease_expires_at（吸取 G-CR8-02 夹具掩盖教训）。
-> 4. **会话 IO**：执行期 bash/Read 显示层间歇截断/串读（含 shell `command not found: ory` 噪声）；最终结论以文件重定向 + 退出码 + git 持久态取证，全量 `65 passed` 经多次一致确认。
+> 4. **会话 IO**：执行期 bash/Read 显示层间歇截断/串读；最终结论以文件重定向 + 退出码 + git 持久态取证。
+> 5. **据实更正（重启前自查）**：① 关联 commit 实际为 `2ff96cb`（早前误记 `2d289e9`，已全文更正）。② F3 执行器契约重构使 F1 的 `test_t05_clean_finished_at_no_current_timestamp` 一度变红（该测试直接调 `process_clean_step` 并断言 step=succeeded，旧契约下执行器自写终态、新契约下由内核写）——这是 F3 应同步更新而遗漏的测试，已据新契约修正（先 claim 再 `succeed_claim(...,result)`，断言内核写的 SSOT finished_at），全量回归 **66 passed**（exit 0）。早前"65 passed"的口径不准确，据实更正为 66 passed。
