@@ -99,7 +99,14 @@ def test_t05_clean_finished_at_no_current_timestamp() -> None:
         (ids["source_id"],),
     )
 
-    process_clean_step(core_conn, "step_clean", _NoopStore())
+    # F3 contract: process_clean_step produces an ExecutorResult; the kernel
+    # (succeed_claim) writes the step terminal state + run advance. Drive through
+    # a claim so the terminal finished_at/updated_at are actually written, then
+    # assert their SSOT format (F1-03: no CURRENT_TIMESTAMP space-separated form).
+    claim = claim_next_step(core_conn, worker_type="w", worker_id="t05", lease_seconds=60)
+    assert claim is not None and claim["step_id"] == "step_clean"
+    result = process_clean_step(core_conn, "step_clean", _NoopStore())
+    assert succeed_claim(core_conn, claim["claim_token"], result) is True
 
     row = core_conn.execute(
         "SELECT status, finished_at FROM workflow_steps WHERE id = 'step_clean'"
