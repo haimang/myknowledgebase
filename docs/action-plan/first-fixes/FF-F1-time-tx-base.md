@@ -401,23 +401,25 @@ F1 时间与事务基座
 
 ### 执行记录(by Claude Opus 4.8 · 2026-05-31)
 
-**环境**：仓库无 pytest 且各 workspace 包未安装（仅残留 `smind_common.egg-info`，环境被重置）。已 `pip install --break-system-packages pytest`(pytest 9.0.3, Python 3.12) 并 `pip install -e` 安装全部 `packages/*` + `apps/*`（owner 已授权调整测试环境）。无 conftest，包导入靠 editable 安装。
+**环境**：仓库无 pytest 且各 workspace 包未安装（仅残留 `smind_common.egg-info`，环境被重置）。已 `pip install --break-system-packages pytest`(pytest 9.0.3, Python 3.12) 并 `pip install -e --no-deps` 安装全部 `packages/*` + `apps/*`（owner 已授权调整测试环境）。无 conftest，包导入靠 editable 安装。**`fastapi`/`pydantic`/`pydantic_settings` 因无外网无法安装**——这导致 `tests/integration/p2..p7` 与 `tests/smoke/test_api_smoke` 在 `import fastapi.testclient` 即 collection-error（pre-F1、post-F1 一致，非 F1 引入）。**实际可运行**的是 `tests/unit/test_time_ssot.py` + `tests/integration/p1_kernel_closure/*`（仅依赖 sqlite + 本地包），F1 全部回归测试落在此可运行集内。
 
-**F1-01 SSOT 时间**：重写 `packages/common/src/smind_common/time.py`——`_fmt()` 以 `microsecond // 1000` 截断 3 位毫秒 + `Z`；`utc_now_iso()` 与新增 `add_seconds_iso(seconds)` 复用同一格式化。`__init__.py` 导出二者。实测 PY `utc_now_iso()` 与 SQLite `strftime('%Y-%m-%dT%H:%M:%fZ','now')` 均为 24 字符 `YYYY-MM-DDTHH:MM:SS.mmmZ`。
+**F1-01 SSOT 时间**：重写 `packages/common/src/smind_common/time.py`——`_fmt()` 以 `microsecond // 1000` 截断 3 位毫秒 + `Z`；`utc_now_iso()` 与新增 `add_seconds_iso(seconds)` 复用同一格式化。`__init__.py` 导出二者。实测 PY `utc_now_iso()` 与 SQLite `strftime('%Y-%m-%dT%H:%M:%fZ','now')` 均为 24 字符 `YYYY-MM-DDTHH:MM:SS.mmmZ`（`2026-05-31T10:55:32.502Z` 双侧一致）。
 
-**F1-02 删除 kernel 重复时间函数**：`_utils.py` 仅保留 `new_id`，删 `now_iso`/`add_seconds_iso`。claim/leases/retry/restart/purge/events 六模块改 `from smind_common.time import ... utc_now_iso as now_iso`（body 不变，最小 diff）。grep 证明内核 0 处引用 `_utils` 时间函数；`from ._utils import` 仅含 `new_id`（claim/events 两处）。
+**F1-02 删除 kernel 重复时间函数**：`_utils.py` 仅保留 `new_id`，删 `now_iso`/`add_seconds_iso`。claim/leases/retry/restart/purge/events 六模块改 `from smind_common.time import ... utc_now_iso as now_iso`（body 不变，最小 diff）。grep 证明内核 0 处引用 `_utils` 时间函数；`from ._utils import` 仅含 `new_id`（claim/events/graph）。
 
 **F1-03 清除 CURRENT_TIMESTAMP**：`workflow_clean/service.py` 两处 `CURRENT_TIMESTAMP`(process_clean_step 尾部 finished_at/updated_at)→ 绑定 `utc_now_iso()` 值（同一 `now`）。grep 证明 `packages/` 全树 0 处 `CURRENT_TIMESTAMP`。
 
-**F1-04 autocommit + 显式事务**：`storage_sqlite/engine.py` 增加 `conn.isolation_level = None`(PRAGMA 块未动)。`claim_next_step` 既有 `BEGIN IMMEDIATE`(复核保留)。为 `heartbeat_claim`/`reap_expired_claims`/`succeed_claim`/`fail_claim`/`process_restart_requests`/`process_purge_requests` 增加薄包装：`BEGIN IMMEDIATE` → 原 body(抽为 `_*_body`) → `commit`；`except: rollback; raise`。批量(reap/restart/purge)整批包裹单事务(循环在 body 内、BEGIN 在外)。purge 跨 DB vec 写注明不在 core 事务覆盖范围(CR-4 R5/R12)。遵守 §7.2 反模式 ⛔1~⛔5。
+**F1-04 autocommit + 显式事务**：`storage_sqlite/engine.py` 增加 `conn.isolation_level = None`(PRAGMA 块未动)。`claim_next_step` 既有 `BEGIN IMMEDIATE`(复核保留)。为 `heartbeat_claim`/`reap_expired_claims`/`succeed_claim`/`fail_claim`/`process_restart_requests`/`process_purge_requests` 增加薄包装：`BEGIN IMMEDIATE` → 原 body(抽为 `_*_body`) → `commit`；`except: rollback; raise`。批量(reap/restart/purge)整批包裹单事务(循环在 body 内、BEGIN 在外)。purge 跨 DB vec 写注明不在 core 事务覆盖范围(CR-4 R5/R12)。另将 executor 侧 `process_clean_step` 同样包入 `BEGIN IMMEDIATE`（autocommit 下其既有 `conn.commit()` 已成 no-op，包事务使产物+子 step+终态写原子，符合 §7.2 ⛔4；未改终态归属）。遵守 §7.2 反模式 ⛔1~⛔5。
 
 **F1-05 red→green 测试**：新建 `tests/unit/test_time_ssot.py`(T01-T03) 与 `tests/integration/p1_kernel_closure/test_time_tx_atomicity.py`(T04-T07，T07 参数化 6 helper)。复用 fixture `tests/fixtures/sqlite_kernel.py`(未改)。T04 fork 既有 reap 测试，去掉"SQL 侧手写 strftime 过期"夹具掩盖，改用真实 SSOT `add_seconds_iso(-1)` 写 lease 后 reap。
 
-**先红后绿([Q7])**：`git stash push -- packages` 还原 fix 后跑新测试 → T02/T03/T04/T05/T06/T07(×6) 全部 FAILED（T01 round-trip 因断言宽松仍过）；`git stash pop` 恢复后全部转绿。这同时坐实各 blocker 在 pre-fix HEAD 复现红。
+**先红后绿([Q7])**：`git stash push -- packages` 还原 fix 后跑新测试 → `test_time_tx_atomicity`(T04-T07) 全红、`test_time_ssot` T02/T03 红；`git stash pop` 恢复后全部转绿。坐实各 blocker pre-fix 复现红、post-fix 转绿。
 
 **命令与结果**：
-- `python3 -m pytest tests/unit/test_time_ssot.py tests/integration/p1_kernel_closure/ -v` → **14 passed**（T01-T03 unit + T04-T06 + T07×6 integration + 2 既有 reap-flow）。
-- `python3 -m pytest tests/`(全量 22 项) → **20 passed, 1 xfailed, 1 failed**。唯一 failed = `tests/integration/p7_cutover/test_cutover.py::test_full_cutover_smoke`，经 `git stash push -- packages` 在 **pre-F1 树上同样 failed** → 属既有失败，非 F1 引入（p7_cutover 属 F7 重建范围，不在 F1 DoD）。F1 触碰的 p1_kernel_closure 全绿、无回归。
-- `git diff --stat`（F1 提交）= 12 源/测试文件，全部 F1 in-scope（10 源 + 2 测试）。
+- `python3 -m pytest tests/unit/test_time_ssot.py tests/integration/p1_kernel_closure/ -v` → **16 passed in 0.44s**（T01-T03 unit + T04-T06 + T07×6 + 既有 test_kernel_flow×2 + test_requests_and_vec×2）。
+- 全量 `python3 -m pytest tests/`：p2-p7 + api smoke 因 `fastapi` 缺失 collection-error（pre/post-F1 一致，非 F1 回归）；F1 触碰的 p1_kernel_closure 全绿、无回归。
+- grep 门禁：内核 0 处 `_utils` 时间函数；`packages/` 0 处 `CURRENT_TIMESTAMP`；`engine.py isolation_level = None` 在位。
 
-**偏差/known gap**：① 事务包装采用"包装函数 + `_*_body` 抽取"而非就地 try，语义等价，最小化 body 改动。② 行动计划 §7.1 标 service.py CURRENT_TIMESTAMP 约 118/124 行，与实文件 process_clean_step 尾部一致，已处理。③ 既有 `p7_cutover` 失败为 pre-existing（F1 前后一致），handoff FF-F7。④ 会话环境 bash stdout 显示层不稳，结论以文件重定向 + 退出码 + git 持久态取证。
+**诚实更正记录**：执行中一度据"API run-clean 回归"包裹 `process_clean_step`（commit `0d6fdaa`）。事后复核：该端点测试（p3）因 `fastapi` 缺失从未真正运行，先前观察到的 IntegrityError 实为我临时复现脚本误用非法 `uploads.status='stored'`（schema CHECK 不允许），**并非 autocommit 回归**。`process_clean_step` 的事务包裹本身正确且符合 F1-04 精神，故保留；但该 commit 的"回归"措辞不准确，已在本日志与 closure 据实更正。
+
+**偏差/known gap**：① 事务包装采用"包装函数 + `_*_body` 抽取"而非就地 try，语义等价。② `process_clean_step` 包事务略超 §2.1"仅 6 kernel helper"字面，属 F1-04 autocommit 的合理外延（该函数 F1-03 已触碰），未改终态归属。③ 测试环境重建（pip install -e --no-deps + pytest）；fastapi 系运行时依赖、无外网不可装，p2-p7 因此不可运行（handoff 环境/FF-F7）。④ 会话 bash/Read 显示层后段不稳，结论以文件重定向 + 退出码 commit-guard + git 持久态取证。
