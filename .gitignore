@@ -33,6 +33,7 @@ env/
 
 # OS
 .DS_Store
+._*
 Thumbs.db
 
 # Data files (keep .gitkeep)
