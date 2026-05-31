@@ -1,15 +1,25 @@
 from sqlite3 import Connection
 
-from ._utils import now_iso
+from smind_common.time import utc_now_iso as now_iso
 from .events import append_audit_log, append_workflow_event
 
 
 def succeed_claim(conn: Connection, claim_token: str) -> bool:
+    conn.execute("BEGIN IMMEDIATE")
+    try:
+        return _succeed_claim_body(conn, claim_token)
+    except Exception:
+        conn.rollback()
+        raise
+
+
+def _succeed_claim_body(conn: Connection, claim_token: str) -> bool:
     claim = conn.execute(
         "SELECT * FROM task_claims WHERE claim_token = ? AND status = 'active'",
         (claim_token,),
     ).fetchone()
     if not claim:
+        conn.commit()
         return False
     now = now_iso()
     conn.execute(
@@ -73,6 +83,28 @@ def fail_claim(
     error_message: str = "executor failed",
     retry_backoff_seconds: int = 1,
 ) -> bool:
+    conn.execute("BEGIN IMMEDIATE")
+    try:
+        return _fail_claim_body(
+            conn,
+            claim_token,
+            error_code=error_code,
+            error_message=error_message,
+            retry_backoff_seconds=retry_backoff_seconds,
+        )
+    except Exception:
+        conn.rollback()
+        raise
+
+
+def _fail_claim_body(
+    conn: Connection,
+    claim_token: str,
+    *,
+    error_code: str = "EXECUTOR_FAILURE",
+    error_message: str = "executor failed",
+    retry_backoff_seconds: int = 1,
+) -> bool:
     claim = conn.execute(
         """
         SELECT tc.*, ws.attempt_count, ws.max_attempts
@@ -83,6 +115,7 @@ def fail_claim(
         (claim_token,),
     ).fetchone()
     if not claim:
+        conn.commit()
         return False
     now = now_iso()
     retryable = 1 if claim["attempt_count"] < claim["max_attempts"] else 0

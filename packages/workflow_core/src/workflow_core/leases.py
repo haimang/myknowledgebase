@@ -1,30 +1,47 @@
 from sqlite3 import Connection
 
-from ._utils import add_seconds_iso, now_iso
+from smind_common.time import add_seconds_iso, utc_now_iso as now_iso
 from .events import append_audit_log, append_workflow_event
 
 
 def heartbeat_claim(conn: Connection, claim_token: str, *, lease_seconds: int = 60) -> bool:
-    row = conn.execute(
-        "SELECT id FROM task_claims WHERE claim_token = ? AND status = 'active'",
-        (claim_token,),
-    ).fetchone()
-    if not row:
-        return False
-    now = now_iso()
-    conn.execute(
-        """
-        UPDATE task_claims
-        SET last_heartbeat_at = ?, lease_expires_at = ?
-        WHERE claim_token = ? AND status = 'active'
-        """,
-        (now, add_seconds_iso(lease_seconds), claim_token),
-    )
-    conn.commit()
-    return True
+    conn.execute("BEGIN IMMEDIATE")
+    try:
+        row = conn.execute(
+            "SELECT id FROM task_claims WHERE claim_token = ? AND status = 'active'",
+            (claim_token,),
+        ).fetchone()
+        if not row:
+            conn.commit()
+            return False
+        now = now_iso()
+        conn.execute(
+            """
+            UPDATE task_claims
+            SET last_heartbeat_at = ?, lease_expires_at = ?
+            WHERE claim_token = ? AND status = 'active'
+            """,
+            (now, add_seconds_iso(lease_seconds), claim_token),
+        )
+        conn.commit()
+        return True
+    except Exception:
+        conn.rollback()
+        raise
 
 
 def reap_expired_claims(conn: Connection) -> int:
+    # Whole batch wrapped in one BEGIN IMMEDIATE so partial reaping cannot
+    # occur under autocommit (CR-4 R12; F1-04 batch boundary).
+    conn.execute("BEGIN IMMEDIATE")
+    try:
+        return _reap_expired_claims_body(conn)
+    except Exception:
+        conn.rollback()
+        raise
+
+
+def _reap_expired_claims_body(conn: Connection) -> int:
     claims = conn.execute(
         """
         SELECT tc.*, ws.attempt_count, ws.max_attempts

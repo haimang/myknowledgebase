@@ -8,6 +8,7 @@ from uuid import uuid4
 
 from cleaners_universal import clean_payload
 from providers_dedicated import maybe_clean_with_provider
+from smind_common.time import utc_now_iso
 from storage_objects import FileSystemObjectStore
 
 
@@ -114,16 +115,17 @@ def process_clean_step(conn: Connection, step_id: str, object_store: FileSystemO
             json.dumps({"artifact_id": artifact_id}),
         ),
     )
+    now = utc_now_iso()
     conn.execute(
-        "UPDATE workflow_steps SET status='succeeded', finished_at=CURRENT_TIMESTAMP WHERE id = ?",
-        (step_id,),
+        "UPDATE workflow_steps SET status='succeeded', finished_at=? WHERE id = ?",
+        (now, step_id),
     )
     conn.execute(
         """
         UPDATE workflow_runs
-        SET status='running', current_stage='rag', updated_at=CURRENT_TIMESTAMP
+        SET status='running', current_stage='rag', updated_at=?
         WHERE id = ?
         """,
-        (run["id"],),
+        (now, run["id"]),
     )
     conn.commit()

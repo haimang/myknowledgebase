@@ -5,7 +5,7 @@ from sqlite3 import Connection
 
 from storage_sqlite.repositories.requests import RestartRequestRepository
 
-from ._utils import now_iso
+from smind_common.time import utc_now_iso as now_iso
 from .events import append_audit_log, append_workflow_event
 
 
@@ -27,6 +27,17 @@ def create_restart_request(
 
 
 def process_restart_requests(conn: Connection) -> int:
+    # Whole batch wrapped in one BEGIN IMMEDIATE (autocommit; F1-04 batch
+    # boundary — keeps existing single-transaction semantics under autocommit).
+    conn.execute("BEGIN IMMEDIATE")
+    try:
+        return _process_restart_requests_body(conn)
+    except Exception:
+        conn.rollback()
+        raise
+
+
+def _process_restart_requests_body(conn: Connection) -> int:
     requests = conn.execute(
         "SELECT * FROM restart_requests WHERE status = 'pending' ORDER BY created_at ASC"
     ).fetchall()

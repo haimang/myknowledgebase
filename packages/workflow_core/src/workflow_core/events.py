@@ -3,7 +3,9 @@ from __future__ import annotations
 import json
 from sqlite3 import Connection
 
-from ._utils import new_id, now_iso
+from smind_common.time import utc_now_iso as now_iso
+
+from ._utils import new_id
 
 
 def append_workflow_event(

@@ -2,7 +2,9 @@ from __future__ import annotations
 
 from sqlite3 import Connection, Row
 
-from ._utils import add_seconds_iso, new_id, now_iso
+from smind_common.time import add_seconds_iso, utc_now_iso as now_iso
+
+from ._utils import new_id
 from .events import append_audit_log, append_workflow_event
 
 

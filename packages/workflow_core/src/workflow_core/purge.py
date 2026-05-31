@@ -5,7 +5,7 @@ from sqlite3 import Connection
 from storage_sqlite.repositories.requests import PurgeRequestRepository
 from vector_sqlite_vec import VectorStore
 
-from ._utils import now_iso
+from smind_common.time import utc_now_iso as now_iso
 from .events import append_audit_log, append_workflow_event
 
 
@@ -27,6 +27,20 @@ def create_purge_request(
 
 
 def process_purge_requests(conn: Connection, vec_conn: Connection | None) -> int:
+    # Whole batch wrapped in one BEGIN IMMEDIATE on the core connection
+    # (autocommit; F1-04 batch boundary). NOTE (CR-4 R5/R12): the cross-DB
+    # vec write via ``VectorStore(vec_conn).delete_chunks`` is a SEPARATE
+    # connection and is NOT covered by this core transaction — F1 guarantees
+    # core-side atomicity only; vec reconciliation is out of scope here.
+    conn.execute("BEGIN IMMEDIATE")
+    try:
+        return _process_purge_requests_body(conn, vec_conn)
+    except Exception:
+        conn.rollback()
+        raise
+
+
+def _process_purge_requests_body(conn: Connection, vec_conn: Connection | None) -> int:
     requests = conn.execute(
         "SELECT * FROM purge_requests WHERE status = 'pending' ORDER BY created_at ASC"
     ).fetchall()
@@ -88,6 +102,7 @@ def process_purge_requests(conn: Connection, vec_conn: Connection | None) -> int
             (marked_at, target_document_id, req["team_id"]),
         )
         if vec_conn is not None and chunk_ids:
+            # NOT covered by the core BEGIN IMMEDIATE above (separate vec DB).
             VectorStore(vec_conn, workspace_key=req["team_id"]).delete_chunks(chunk_ids)
         purged_at = now_iso()
         conn.execute(
