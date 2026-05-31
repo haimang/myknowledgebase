@@ -3,13 +3,17 @@ from __future__ import annotations
 import hashlib
 import json
 from sqlite3 import Connection, Row
-from uuid import uuid4
 
 from rag_constructor import build_chunks
 from rag_structurizer import structurize_text
 from rag_vectorizer import embed_text
 from storage_objects import FileSystemObjectStore
 from vector_sqlite_vec import VectorStore
+from workflow_core.executors import (
+    DownstreamStep,
+    ExecutorResult,
+    deterministic_artifact_id,
+)
 
 
 def _latest_artifact(conn: Connection, run_id: str, kind: str) -> Row:
@@ -38,7 +42,12 @@ def process_rag_step(
     workspace_key: str,
     step_id: str,
     object_store: FileSystemObjectStore,
-) -> None:
+) -> ExecutorResult:
+    """RAG executor (F3-02 contract): write data side-effects with deterministic
+    idempotency keys and RETURN downstream/run-advance intent. Does NOT mark the
+    step succeeded, set the run terminal state, or commit — the kernel
+    (succeed_claim) owns terminal state inside the claim transaction.
+    """
     step = conn.execute("SELECT * FROM workflow_steps WHERE id = ?", (step_id,)).fetchone()
     if step is None:
         raise ValueError(f"step not found: {step_id}")
@@ -48,14 +57,15 @@ def process_rag_step(
     if run is None:
         raise ValueError(f"run not found: {step['workflow_run_id']}")
     stage = step["stage"]
+
     if stage == "rag:structurize":
         cleaned_artifact = _latest_artifact(conn, run["id"], "cleaned_text")
         cleaned = _artifact_payload(cleaned_artifact)
         structured = structurize_text(cleaned.get("text", ""))
-        structured_artifact_id = str(uuid4())
+        structured_artifact_id = deterministic_artifact_id(step_id, "structured_json")
         conn.execute(
             """
-            INSERT INTO artifacts(
+            INSERT OR IGNORE INTO artifacts(
               id, team_id, workflow_run_id, workflow_step_id, source_id, document_id,
               artifact_type, storage_backend, mime_type, metadata_json
             ) VALUES (?, ?, ?, ?, ?, ?, 'structured_json', 'sqlite_ref', 'application/json', ?)
@@ -79,38 +89,33 @@ def process_rag_step(
             """,
             (structured_artifact_id, run["document_id"]),
         )
-        conn.execute(
-            """
-            INSERT INTO workflow_steps(
-              id, team_id, workflow_run_id, parent_step_id, step_key,
-              stage, action, payload_json, status
-            )
-            VALUES (?, ?, ?, ?, ?, 'rag:construct', 'rag.construct', ?, 'pending')
-            """,
-            (
-                str(uuid4()),
-                run["team_id"],
-                run["id"],
-                step["id"],
-                f"rag-construct-{uuid4().hex}",
-                json.dumps({"run_id": run["id"]}),
-            ),
+        return ExecutorResult(
+            downstream=[
+                DownstreamStep(
+                    step_key=f"rag:construct:{step_id}",
+                    stage="rag:construct",
+                    action="rag.construct",
+                    payload={"run_id": run["id"]},
+                )
+            ],
         )
-    elif stage == "rag:construct":
+
+    if stage == "rag:construct":
         structured_artifact = _latest_artifact(conn, run["id"], "structured_json")
         structured = _artifact_payload(structured_artifact)
         chunks = build_chunks(structured.get("paragraphs", []))
         vector_store = VectorStore(vec_conn, workspace_key=workspace_key)
         chunk_ids: list[str] = []
         for index, text in enumerate(chunks):
-            chunk_id = str(uuid4())
+            # F3-03: deterministic ids -> re-execution rewrites identical rows.
+            chunk_id = f"{run['id']}:{index}"
             content_hash = hashlib.sha256(text.encode("utf-8")).hexdigest()
-            chunk_text_artifact_id = str(uuid4())
-            chunk_text_key = f"chunks/{run['team_id']}/{run['id']}/{chunk_id}.txt"
+            chunk_text_artifact_id = deterministic_artifact_id(step_id, f"chunk_text:{index}")
+            chunk_text_key = f"chunks/{run['team_id']}/{run['id']}/{index}.txt"
             object_store.put_text(chunk_text_key, text)
             conn.execute(
                 """
-                INSERT INTO artifacts(
+                INSERT OR IGNORE INTO artifacts(
                   id, team_id, workflow_run_id, workflow_step_id, source_id, document_id,
                   artifact_type, storage_backend, object_key, mime_type, content_hash,
                   size_bytes, metadata_json
@@ -131,7 +136,7 @@ def process_rag_step(
             )
             conn.execute(
                 """
-                INSERT INTO chunks(
+                INSERT OR IGNORE INTO chunks(
                   id, team_id, workflow_run_id, document_id,
                   source_artifact_id, content_artifact_id,
                   chunk_index, content_hash, token_count, char_count, section_path_json, vec_status,
@@ -177,10 +182,10 @@ def process_rag_step(
                 (chunk_id,),
             )
             chunk_ids.append(chunk_id)
-        constructed_artifact_id = str(uuid4())
+        constructed_artifact_id = deterministic_artifact_id(step_id, "constructed_json")
         conn.execute(
             """
-            INSERT INTO artifacts(
+            INSERT OR IGNORE INTO artifacts(
               id, team_id, workflow_run_id, workflow_step_id, source_id, document_id,
               artifact_type, storage_backend, mime_type, metadata_json
             ) VALUES (?, ?, ?, ?, ?, ?, 'constructed_json', 'sqlite_ref', 'application/json', ?)
@@ -206,28 +211,7 @@ def process_rag_step(
             """,
             (constructed_artifact_id, run["document_id"]),
         )
-        conn.execute(
-            """
-            UPDATE workflow_runs
-            SET status='completed',
-                current_stage='completed',
-                finished_at=strftime('%Y-%m-%dT%H:%M:%fZ', 'now'),
-                updated_at=strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
-            WHERE id = ?
-            """,
-            (run["id"],),
-        )
-    else:
-        raise ValueError(f"unsupported rag stage: {stage}")
+        # Terminal rag stage: kernel advances the run to completed.
+        return ExecutorResult(run_advance={"status": "completed", "current_stage": "completed"})
 
-    conn.execute(
-        """
-        UPDATE workflow_steps
-        SET status='succeeded',
-            finished_at=strftime('%Y-%m-%dT%H:%M:%fZ', 'now'),
-            updated_at=strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
-        WHERE id = ?
-        """,
-        (step_id,),
-    )
-    conn.commit()
+    raise ValueError(f"unsupported rag stage: {stage}")

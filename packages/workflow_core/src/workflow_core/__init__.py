@@ -1,5 +1,6 @@
 from .claim import claim_next_step
-from .graph import write_workflow_event
+from .events import append_audit_log, append_workflow_event
+from .executors import DownstreamStep, ExecutorResult
 from .health import collect_health
 from .leases import heartbeat_claim, reap_expired_claims
 from .purge import create_purge_request, process_purge_requests
@@ -9,15 +10,18 @@ from .scheduler import WorkflowScheduler
 
 __all__ = [
     "claim_next_step",
+    "append_audit_log",
+    "append_workflow_event",
+    "DownstreamStep",
+    "ExecutorResult",
+    "collect_health",
     "heartbeat_claim",
     "reap_expired_claims",
-    "succeed_claim",
-    "fail_claim",
-    "write_workflow_event",
-    "create_restart_request",
-    "process_restart_requests",
     "create_purge_request",
     "process_purge_requests",
-    "collect_health",
+    "create_restart_request",
+    "process_restart_requests",
+    "fail_claim",
+    "succeed_claim",
     "WorkflowScheduler",
 ]

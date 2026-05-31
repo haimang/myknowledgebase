@@ -79,35 +79,68 @@ def _process_restart_requests_body(conn: Connection) -> int:
                 payload={"request_id": req["id"], "reason": "workflow not found"},
             )
             continue
-        updated_at = now_iso()
-        conn.execute(
+        mode = req["mode"] or "recovery"
+        # [Q4] recovery only this round; force/kickstart explicitly deferred.
+        if mode not in ("recovery",):
+            completed_at = now_iso()
+            conn.execute(
+                """
+                UPDATE restart_requests
+                SET status='failed',
+                    error_message='mode not supported this round (only recovery)',
+                    completed_at=?
+                WHERE id = ?
+                """,
+                (completed_at, req["id"]),
+            )
+            append_audit_log(
+                conn,
+                team_id=req["team_id"],
+                actor_type="system",
+                actor_id=None,
+                action="restart.failed",
+                target_type="workflow_run",
+                target_id=req["workflow_run_id"],
+                payload={"request_id": req["id"], "reason": f"mode {mode} deferred"},
+            )
+            continue
+
+        # F3-05: recovery anchors on the last failed/retry_wait step's stage
+        # (else the run's current_stage), instead of always re-running from
+        # clean head. Only the failed work is reset, not already-succeeded steps.
+        failed = conn.execute(
             """
-            INSERT INTO workflow_steps(
-              id, team_id, workflow_run_id, step_key, stage, action, payload_json, status
-            ) VALUES (?, ?, ?, ?, 'clean', 'clean.start', ?, 'pending')
-            ON CONFLICT(workflow_run_id, step_key) DO UPDATE
-              SET status='pending',
-                  available_at=?,
-                  updated_at=?
+            SELECT id, stage FROM workflow_steps
+            WHERE workflow_run_id = ? AND status IN ('failed', 'retry_wait')
+            ORDER BY updated_at DESC LIMIT 1
             """,
-            (
-                f"restart_step_{run['id']}",
-                run["team_id"],
-                run["id"],
-                "clean:init",
-                json.dumps({"source_id": run["source_id"], "document_id": run["document_id"]}),
-                updated_at,
-                updated_at,
-            ),
-        )
-        conn.execute(
+            (run["id"],),
+        ).fetchone()
+        anchor_stage = failed["stage"] if failed else (run["current_stage"] or "clean")
+        # F3-04: available_at written via SQL strftime so the reset step is
+        # confirmed ready (same expression as v_ready_steps).
+        reset = conn.execute(
             """
-            UPDATE workflow_runs
-            SET status='pending', current_stage='clean', updated_at=?
-            WHERE id = ?
+            UPDATE workflow_steps
+            SET status='pending',
+                available_at=strftime('%Y-%m-%dT%H:%M:%fZ', 'now'),
+                error_code=NULL,
+                error_message=NULL,
+                updated_at=strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+            WHERE workflow_run_id = ? AND status IN ('failed', 'retry_wait')
             """,
-            (updated_at, run["id"]),
-        )
+            (run["id"],),
+        ).rowcount
+        if reset:
+            conn.execute(
+                """
+                UPDATE workflow_runs
+                SET status='running', current_stage=?,
+                    updated_at=strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+                WHERE id = ?
+                """,
+                (anchor_stage, run["id"]),
+            )
         completed_at = now_iso()
         conn.execute(
             """
@@ -117,23 +150,27 @@ def _process_restart_requests_body(conn: Connection) -> int:
             """,
             (completed_at, req["id"]),
         )
-        step_row = conn.execute(
+        anchor_step_row = conn.execute(
             """
-            SELECT id
-            FROM workflow_steps
-            WHERE workflow_run_id = ? AND step_key = 'clean:init'
-            LIMIT 1
+            SELECT id FROM workflow_steps
+            WHERE workflow_run_id = ? AND stage = ?
+            ORDER BY updated_at DESC LIMIT 1
             """,
-            (run["id"],),
+            (run["id"], anchor_stage),
         ).fetchone()
         append_workflow_event(
             conn,
             team_id=run["team_id"],
             workflow_run_id=run["id"],
-            step_id=step_row["id"] if step_row is not None else None,
+            step_id=anchor_step_row["id"] if anchor_step_row is not None else None,
             event_type="workflow.restarted",
             emitted_by="system",
-            payload={"request_id": req["id"], "mode": req["mode"]},
+            payload={
+                "request_id": req["id"],
+                "mode": mode,
+                "anchor_stage": anchor_stage,
+                "reset_steps": reset,
+            },
         )
         append_audit_log(
             conn,

@@ -53,8 +53,8 @@ def append_audit_log(
         """
         INSERT INTO audit_logs (
           id, team_id, actor_type, actor_id, action, target_type, target_id,
-          payload_json, created_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+          payload_json
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             new_id("audit"),
@@ -65,6 +65,5 @@ def append_audit_log(
             target_type,
             target_id,
             json.dumps(payload or {}),
-            now_iso(),
         ),
     )

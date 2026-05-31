@@ -14,6 +14,7 @@ from workflow_core import (
     heartbeat_claim,
     process_purge_requests,
     process_restart_requests,
+    reap_expired_claims,
     succeed_claim,
 )
 from workflow_rag import process_rag_step
@@ -33,6 +34,11 @@ def run_worker(*, once: bool, poll_interval: float) -> int:
     logger.info("worker poll interval=%.2fs", poll_interval)
 
     def _run_once() -> bool:
+        # F3-01: reap expired claims first so stalled steps return to the ready
+        # set before this worker claims (now hits after F1 fixed time compare).
+        reaped = reap_expired_claims(core_conn)
+        if reaped:
+            logger.info("reaped %d expired claim(s)", reaped)
         process_restart_requests(core_conn)
         process_purge_requests(core_conn, vec_conn)
         claim = scheduler.claim_one()
@@ -44,16 +50,31 @@ def run_worker(*, once: bool, poll_interval: float) -> int:
             (claim["step_id"],),
         ).fetchone()
         try:
+            # F3-02: executors only produce an ExecutorResult (downstream + run
+            # advance) + idempotent data writes; the kernel (succeed_claim) owns
+            # terminal state in one transaction after re-checking the claim.
             if step["stage"].startswith("clean"):
-                process_clean_step(core_conn, step["id"], object_store)
+                result = process_clean_step(core_conn, step["id"], object_store)
             elif step["stage"].startswith("rag:"):
-                process_rag_step(core_conn, vec_conn, settings.app_env, step["id"], object_store)
+                result = process_rag_step(
+                    core_conn, vec_conn, settings.app_env, step["id"], object_store
+                )
             else:
                 raise ValueError(f"unsupported stage: {step['stage']}")
-            succeed_claim(core_conn, claim["claim_token"])
+            # F3-03: check the return value. False => claim was reaped/lost; the
+            # executor's idempotent data writes are harmless, terminal state was
+            # NOT applied (no double execution).
+            ok = succeed_claim(core_conn, claim["claim_token"], result)
+            if not ok:
+                logger.warning(
+                    "claim %s no longer active at succeed; terminal state not applied",
+                    claim["claim_token"],
+                )
         except Exception as exc:  # noqa: BLE001
             logger.exception("worker step failed: %s", exc)
-            fail_claim(core_conn, claim["claim_token"], error_message=str(exc))
+            failed = fail_claim(core_conn, claim["claim_token"], error_message=str(exc))
+            if not failed:
+                logger.warning("claim %s no longer active at fail", claim["claim_token"])
         return True
 
     if once:
