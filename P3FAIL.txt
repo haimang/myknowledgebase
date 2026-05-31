@@ -1,0 +1,2 @@
+ImportError while importing test module '/workspace/repo/smind-family/tests/integration/p3_clean_pipeline/test_clean_pipeline.py'.
+E   ModuleNotFoundError: No module named 'fastapi'

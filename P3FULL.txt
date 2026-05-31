@@ -1,0 +1,17 @@
+ERROR: found no collectors for /workspace/repo/smind-family/tests/integration/p3_clean_pipeline/test_clean_pipeline.py::test_clean_pipeline_executes_real_step
+
+
+==================================== ERRORS ====================================
+_ ERROR collecting tests/integration/p3_clean_pipeline/test_clean_pipeline.py __
+ImportError while importing test module '/workspace/repo/smind-family/tests/integration/p3_clean_pipeline/test_clean_pipeline.py'.
+Hint: make sure your test modules/packages have valid Python names.
+Traceback:
+/usr/lib/python3.12/importlib/__init__.py:90: in import_module
+    return _bootstrap._gcd_import(name[level:], package, level)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+tests/integration/p3_clean_pipeline/test_clean_pipeline.py:7: in <module>
+    from fastapi.testclient import TestClient
+E   ModuleNotFoundError: No module named 'fastapi'
+=========================== short test summary info ============================
+ERROR tests/integration/p3_clean_pipeline/test_clean_pipeline.py
+1 error in 0.01s

@@ -1,0 +1,3 @@
+Traceback (most recent call last):
+  File "<stdin>", line 7, in <module>
+sqlite3.IntegrityError: CHECK constraint failed: status IN ('initiated', 'uploaded', 'confirmed', 'abandoned', 'failed')
