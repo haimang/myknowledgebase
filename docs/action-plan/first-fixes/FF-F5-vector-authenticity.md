@@ -398,3 +398,37 @@ F5 向量真实性与检索
 > 任一退出硬闸测试 `degraded / 未观察` ⇒ **不得标 `executed`**；按 closure 五态（`verified / observed-OK-at-closure / partial / 未观察 / deferred`）如实归类 + handoff。特别地：vec0 本轮 degraded 是**设计定档**（[Q1]），与"测试未观察"区分——前者 closure 标 degraded 是预期态，后者是未达成。F4 rowid 前序未收口前，本 AP 不得标 executed。
 
 ---
+
+---
+
+## 11. 执行日志回填（`executed` — 2026-06-01）
+
+> 文档状态: `draft → executed`。执行人 Opus 4.8（主轨直接执行，未用收尾子代理）。提交 `7a70408`。前序 FF-F4 已收口（rowid 不变量），本 AP 前置满足。全量 `python3 -m pytest tests/` → **137 passed**（exit 0；F5 前 115 → 新增 22 用例）。
+
+### 11.1 环境
+- 系统 python3，缺 numpy/sentence-transformers/sqlite_vec（离线、无外网）。→ [Q2]「本地小模型」忠实落地为**纯 stdlib 确定性 signed feature-hashing 词袋**（非神经模型）；vec0 [Q1] degraded 本就是定档态。
+- 维度强约束=1536 在 Embedder adapter 边界 enforce（embed_text(dims!=1536) raise），免触 vec.sql CHECK / vec0 float[1536]（不动 schema）。
+
+### 11.2 逐工作项
+- **F5-01 Embedder + 本地模型**：`embedder.py` 新增 `Embedder`(Protocol, runtime_checkable) + `LocalEmbedder`(name=`local-bow-hash-v1`, dimension=1536)。切 token = 拉丁词 + 拉丁 3-char-gram + CJK 单字 + CJK 二元组，md5 哈希投影到 1536 维之一带符号累加，L2 归一。`embed_text` 委托 `default_embedder()`（写/查同实例，⛔3）；旧 SHA 链式哈希重命名 `embed_text_fake`（docstring 显式标「仅离线 fixture，非交付向量」）。`workflow_rag/service.py` 写入 embedding_model 由 `'local-sim'` 改 `default_embedder().name`（chunks INSERT 参数化 + upsert_chunk）；`search.py` 写/查共用 `default_embedder()` 且按 model 名过滤。
+- **F5-02 degraded 定档**：`schema.py` except(vec0)分支 `_fallback_vec_sql` 前加 `logger.warning`（reason=`sqlite_vec_unavailable_degraded_to_bruteforce`）。新建 `vector_index.py`：`VectorIndex`(Protocol) + `BruteForceVectorIndex`(backend=`bruteforce-degraded`，支持 cosine/inner_product/l2，未知 metric → degraded 告警回退 cosine)。`store.search` 委托 `BruteForceVectorIndex.query`（相似度计算收敛到接口下，未来 vec0 局部替换）。
+- **F5-03 检索过滤**：`store.search` 增 `namespace_id`/`embedding_model` 可选过滤（WHERE 动态拼，跨 namespace/model 不混算 cosine，G-CR3-10）；新增 `_resolve_metric(namespace_id)` 从 `vector_namespaces.distance_metric` 读取并传给 index（非硬编码 cosine，R10）；缺省（不传 model）维持 team-wide + `logger.debug` degraded 提示（向后兼容）。`search.py` 透传 `embedding_model=embedder.name`。
+
+### 11.3 先红后绿（22 新用例，全 PASS · 四元组证据）
+> **语义排序红基线（[Q7] 关键证据）**：在覆盖 embedder.py 前，用当前 SHA `embed_text` 跑 3 对（tax/dog/code）样本——目标 chunk **全未排第一**，margin 仅 +0.023/+0.016/+0.019（哈希噪声）；接本地模型后全部排第一且 margin ≥0.1。
+
+| Test-ID | 文件::用例 | 红基线 | PASS 证据 |
+|---------|-----------|--------|-----------|
+| FF-F5-T01 | `test_f5_vector_authenticity.py`（相关 query 目标排第一 + 分差 ≥0.1；对照 fake 不全中） | SHA 下 3 对全未排第一（实测） | `7a70408 + test_relevant_chunk_ranks_first_with_margin(+对照) + 2026-06-01 03:38 UTC` |
+| FF-F5-T02 | `test_f5_embedder.py`（维度=1536 / !=1536 raise / 协议 / 确定性 / L2 归一 / 共词语义 / fake 降级，9 用例） | 无 LocalEmbedder/embed_text_fake（import 红） | `7a70408 + test_f5_embedder(9) + 2026-06-01 03:38 UTC` |
+| FF-F5-T03 | `test_f5_vec_degraded.py`（caplog 捕获退化 warning + reason） | 退化静默零日志（红） | `7a70408 + test_fallback_emits_warning_with_reason + 2026-06-01 03:38 UTC` |
+| FF-F5-T04 | `test_f5_vector_index_contract.py`（协议 / cosine 排序 / top_k / inner_product / l2 / 未知 metric 降级告警 / 空候选，7 用例） | 无 VectorIndex（import 红） | `7a70408 + test_f5_vector_index_contract(7) + 2026-06-01 03:38 UTC` |
+| FF-F5-T05 | `test_f5_search_filter.py`（model 过滤不串味 + 向后兼容 team-wide + namespace 过滤 + metric 读配置生效，3 用例） | search 仅 team 过滤、metric 硬编码（红） | `7a70408 + test_f5_search_filter(3) + 2026-06-01 03:38 UTC` |
+
+- 全量回归：`python3 -m pytest tests/` → **137 passed**（exit 0；115 + 22）。p5 search 全链（url→worker→rag construct 写真实向量→search 按 model 过滤）通过，证写/查 model 名一致、过滤接线无回归。
+
+### 11.4 偏差与 handoff
+- **「本地小模型」= 确定性词袋 feature-hashing，非神经模型**（环境无 ML 依赖的忠实落地）：捕捉**词面/字面重叠**的语义相关（共词余弦更高），不捕捉超越词面的同义性（car≈automobile）。真实神经 embedding 记**技术债 handoff**（需 ML 依赖，离线不可得）→ 下一轮生产化 / [Q2] 子选项 C（可配置后端，adapter 已留口）。closure §4 显式记账，不假装是神经模型。
+- **vector/retrieval gate 重新定级 degraded**：vec0 [Q1] degraded（暴力 cosine、性能随数据量线性劣化）是**设计定档**而非未达成；P4/P5 早期若有「vector/retrieval ✅ PASS」假绿，须在 **F7-05 closure 重定级**为 degraded（撤销假绿）。本 AP 已 fail-loud 告警 + VectorIndex 接口就位，未来 vec0 为局部替换。
+- **deferred（A/B/C 见 closure §4）**：真实 sqlite-vec 接入（O1, A）、外部 API embedding（O2, A）、维度≠1536（O3, A）、embedding 重试退避/usage（O4, B）、端到端语义命中 capstone 步 F/G（C→F7）。
+- 下游 **FF-F6b**（rag:vectorize step）直接消费本 AP 的 `default_embedder()` / Embedder adapter；embedding_model 命名 `local-bow-hash-v1` 已落定供过滤。
