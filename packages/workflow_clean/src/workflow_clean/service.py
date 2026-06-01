@@ -1,18 +1,58 @@
 from __future__ import annotations
 
 import json
+import logging
 from sqlite3 import Connection
-from urllib.error import URLError
-from urllib.request import urlopen
 
-from cleaners_universal import clean_payload
-from providers_dedicated import maybe_clean_with_provider
 from storage_objects import FileSystemObjectStore
 from workflow_core.executors import (
     DownstreamStep,
     ExecutorResult,
     deterministic_artifact_id,
 )
+
+from .action_registry import (
+    CleanContext,
+    DegradedActionError,
+    build_default_registry,
+)
+
+logger = logging.getLogger("workflow_clean")
+
+# F6-01: 进程级 action registry (branch→handler)。
+_REGISTRY = build_default_registry()
+
+
+def _resolve_branch(step, source) -> str:  # noqa: ANN001
+    """决定 action branch: 优先 step.payload_json.action_branch, 否则按 source 派生。"""
+    try:
+        payload = json.loads(step["payload_json"] or "{}")
+    except (json.JSONDecodeError, TypeError):
+        payload = {}
+    branch = payload.get("action_branch")
+    if branch:
+        return branch
+    kind = source["source_kind"]
+    uri = source["source_uri"] or ""
+    if kind == "url":
+        if "chinatax.gov.cn" in uri:
+            return "fetch-chinatax-articles"
+        return "htmlCrawl"
+    # file / static / api → 文本 branch。
+    return "text"
+
+
+def _guard_no_scatter(step) -> None:  # noqa: ANN001
+    """F6-08: 多文档源 (child_files>0) 显式 degraded (本轮不支持 scatter)。"""
+    try:
+        payload = json.loads(step["payload_json"] or "{}")
+    except (json.JSONDecodeError, TypeError):
+        return
+    child_files = payload.get("child_files")
+    if isinstance(child_files, list) and len(child_files) > 0:
+        raise DegradedActionError("scatter/multi-document not supported this round")
+    if payload.get("scatter") is True:
+        raise DegradedActionError("scatter/multi-document not supported this round")
 
 
 def _load_raw_payload(
@@ -43,14 +83,9 @@ def _load_raw_payload(
         ).fetchall()
         return "\n\n".join(object_store.get_text(row["object_key"]).strip() for row in rows).strip()
     if source_kind == "url":
-        row = conn.execute("SELECT source_uri FROM sources WHERE id = ?", (source_id,)).fetchone()
-        if row is None or not row["source_uri"]:
-            return ""
-        try:
-            with urlopen(row["source_uri"], timeout=10) as response:  # noqa: S310
-                return response.read().decode("utf-8", errors="ignore")
-        except URLError:
-            return row["source_uri"].strip()
+        # F6-02: url 抓取移入 htmlCrawl handler (按 source_uri 真发请求); 这里不再
+        # 裸 urlopen, 更不回退把 URL 当正文 (⛔3)。raw_text 留空, handler 自行抓取。
+        return ""
     if source_kind == "api":
         row = conn.execute(
             "SELECT metadata_json, source_uri FROM sources WHERE id = ?",
@@ -91,9 +126,19 @@ def process_clean_step(
     if source is None:
         raise ValueError(f"source not found: {run['source_id']}")
 
-    payload = _load_raw_payload(conn, object_store, source["id"], source["source_kind"])
-    provider_cleaned = maybe_clean_with_provider(source["source_uri"] or "", payload)
-    cleaned = provider_cleaned or clean_payload(source["source_kind"], payload)
+    # F6-08: 多文档源 scatter 显式 degraded (本轮不支持)。
+    _guard_no_scatter(step)
+    # F6-01: registry 分派 (取代 provider-or-universal if/else 硬选)。
+    branch = _resolve_branch(step, source)
+    handler = _REGISTRY.get_handler(branch)
+    raw_text = _load_raw_payload(conn, object_store, source["id"], source["source_kind"])
+    cleaned = handler(
+        CleanContext(
+            source_kind=source["source_kind"],
+            source_uri=source["source_uri"] or "",
+            raw_text=raw_text,
+        )
+    )
 
     # F3-03: deterministic artifact id -> idempotent on re-execution.
     artifact_id = deterministic_artifact_id(step_id, "cleaned_text")

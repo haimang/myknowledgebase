@@ -42,7 +42,17 @@ def _drain_worker(rounds: int = 6) -> None:
         run_worker(once=True, poll_interval=0.0)
 
 
-def test_p5_search_and_debug_surface() -> None:
+_FAKE_HTML = (
+    "<html><body><h1>Tax Policy</h1>"
+    "<p>Value added tax policy and filing guide for enterprises and small business.</p>"
+    "<p>Deductions, exemptions and monthly returns are described in detail.</p>"
+    "</body></html>"
+)
+
+
+def test_p5_search_and_debug_surface(monkeypatch) -> None:
+    # F6a: htmlCrawl 真实抓取 — 注入本地 HTML fixture (不打外网, ⛔6)。
+    monkeypatch.setattr("cleaners_universal.service.fetch_url", lambda url, **kw: _FAKE_HTML)
     client = _make_client()
     headers = _register_with_team(
         client,
@@ -69,7 +79,8 @@ def test_p5_search_and_debug_surface() -> None:
     assert "filtered" in debug.json()
 
 
-def test_p5_search_isolated_by_team() -> None:
+def test_p5_search_isolated_by_team(monkeypatch) -> None:
+    monkeypatch.setattr("cleaners_universal.service.fetch_url", lambda url, **kw: _FAKE_HTML)
     client = _make_client()
     headers_a = _register_with_team(
         client,

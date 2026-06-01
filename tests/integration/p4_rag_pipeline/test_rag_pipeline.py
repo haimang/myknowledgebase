@@ -39,7 +39,19 @@ def _setup(client: TestClient) -> tuple[dict, str]:
     return headers, run_id
 
 
-def test_p4_rag_pipeline_reaches_completed_and_vectorized() -> None:
+_FAKE_HTML = (
+    "<html><head><title>t</title><style>.x{}</style></head><body>"
+    "<h1>Tax Policy Guide</h1>"
+    "<p>Value added tax invoice rules for enterprises filing monthly returns.</p>"
+    "<script>var x=1;</script>"
+    "<p>Deductions and exemptions are explained for small businesses.</p>"
+    "</body></html>"
+)
+
+
+def test_p4_rag_pipeline_reaches_completed_and_vectorized(monkeypatch) -> None:
+    # F6a: htmlCrawl 真实抓取 — 注入本地 HTML fixture (不打外网, ⛔6)。
+    monkeypatch.setattr("cleaners_universal.service.fetch_url", lambda url, **kw: _FAKE_HTML)
     client = _make_client()
     _, run_id = _setup(client)
 

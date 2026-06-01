@@ -31,7 +31,23 @@ def _register(client: TestClient) -> str:
     return token
 
 
-def test_p3_clean_step_creates_clean_artifact_and_rag_step() -> None:
+_CHINATAX_JSON = json.dumps(
+    {
+        "items": [
+            {
+                "title": "增值税发票管理办法",
+                "description": "企业按月申报增值税发票的规则与流程说明。",
+                "publisher": "国家税务总局",
+                "publish_date": "2026-01-01",
+            }
+        ]
+    }
+)
+
+
+def test_p3_clean_step_creates_clean_artifact_and_rag_step(monkeypatch) -> None:
+    # F6a: chinatax 真实 ETL — 注入本地 JSON 响应样本 (不打外网, ⛔6)。
+    monkeypatch.setattr("providers_dedicated.service.fetch_api", lambda url, **kw: _CHINATAX_JSON)
     client = _make_client()
     token = _register(client)
     headers = {"Authorization": f"Bearer {token}"}
