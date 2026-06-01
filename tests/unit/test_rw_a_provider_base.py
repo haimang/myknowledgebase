@@ -115,11 +115,15 @@ def test_factory_unknown_provider_fail_loud() -> None:
         make_llm(Settings(llm_provider="nope"))
 
 
-def test_factory_deferred_mlx_not_implemented() -> None:
+def test_factory_mlx_slot_constructs_defers_on_use() -> None:
+    # RWC-01/02: mlx 占位槽构造成功 (路由已接), 推理调用时 fail-loud (延后)。
+    emb = make_embedder(Settings(embedder_provider="mlx"))
+    assert emb.dimension == 1024
     with pytest.raises(NotImplementedError, match="provider charter"):
-        make_embedder(Settings(embedder_provider="mlx"))
+        emb.embed("x")
+    llm = make_llm(Settings(llm_provider="mlx"))
     with pytest.raises(NotImplementedError, match="provider charter"):
-        make_llm(Settings(llm_provider="mlx"))
+        llm.complete("x")
 
 
 # --- RWA-04: 装配注入 — SearchService 接受注入的 embedder ---

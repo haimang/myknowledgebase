@@ -16,10 +16,10 @@ from vector_sqlite_vec import BruteForceVectorIndex
 
 from .mock_llm import MockLLMProvider
 from .protocols import LLMProvider
+from .real_provider import RealMLXEmbedder, RealMLXLLMProvider
 
-# 延后至 provider charter 的真实 provider 枚举 (占位槽; RW-C/后续实装)。
-_DEFERRED_LLM = {"mlx", "openai", "anthropic", "gemini"}
-_DEFERRED_EMBEDDER = {"mlx"}
+# 外部厂商 (非本项目本地 MLX 方向): 构造即 fail-loud (本轮不接外部)。
+_DEFERRED_VENDOR_LLM = {"openai", "anthropic", "gemini"}
 
 
 class UnknownProviderError(ValueError):
@@ -48,7 +48,12 @@ def make_llm(settings: Settings | None = None, **kwargs: Any) -> LLMProvider:
         if "responses_path" not in kwargs and settings.mock_llm_responses_path:
             kwargs["responses_path"] = settings.mock_llm_responses_path
         return MockLLMProvider(**kwargs)
-    if provider in _DEFERRED_LLM:
+    if provider == "mlx":
+        # RWC-01: 本地 MLX 占位槽 — 构造 ok (路由已接), 推理延后 (调用时 fail-loud)。
+        # 密钥构造注入 (非模块级全局, ⛔ gemini.ts:96-132 反例规避)。
+        keys = [settings.llm_api_key] if settings.llm_api_key else None
+        return RealMLXLLMProvider(model=settings.llm_model, api_keys=keys)
+    if provider in _DEFERRED_VENDOR_LLM:
         _deferred("llm", provider)
     raise UnknownProviderError("llm", provider)
 
@@ -59,8 +64,9 @@ def make_embedder(settings: Settings | None = None) -> Embedder:
     provider = settings.embedder_provider
     if provider == "local-hash":
         return LocalEmbedder()
-    if provider in _DEFERRED_EMBEDDER:
-        _deferred("embedder", provider)
+    if provider == "mlx":
+        # RWC-02: 本地 MLX embedding 占位槽 (维度锁 1024); 推理延后, 调用时 fail-loud。
+        return RealMLXEmbedder(model=settings.embedder_model)
     raise UnknownProviderError("embedder", provider)
 
 
