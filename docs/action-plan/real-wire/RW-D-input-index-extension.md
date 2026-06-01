@@ -19,7 +19,7 @@
 > - `eval-reference-anchor 轴 D`（R2 二进制签名思路 + rowid 不变量 + 多级过滤 + vec0 退化表 + 反例）
 > 关联 reference-anchor:
 > - `docs/eval/real-wire/reference-anchor-by-opus.md`（§7.3 指回真源）
-> 文档状态: `draft（deferred — Q-RW-4 本轮不接 PDF、Q-RW-5 延后 vec0；待重评条件触发）`
+> 文档状态: `executed（vec0 scaffolding；2026-06-01, commit ae8d3cf; closure: docs/closure/real-wire/RW-D-closure.md）— vec0 真做(写+skip 测, 真跑 macOS); PDF 仍 deferred(Q-RW-4)`
 
 ---
 
@@ -362,7 +362,20 @@ RW-D 输入面与索引扩展（gated）
 
 ---
 
-## 11. 执行日志回填（仅 `executed` 状态使用）
+## 11. 执行日志回填（executed — vec0 scaffolding；PDF 延后）
 
-- **实际执行摘要**：`（deferred — 待 Q-RW-4/5 重评触发）`
-- **后续 handoff**：`语料含 PDF / 暴力 cosine 撞瓶颈 → 重评启用`
+> 文档状态：`executed（vec0 部分）`（2026-06-01，commit `ae8d3cf`）。owner v1.1 裁决覆盖 Q-RW-5：**vec0 本轮真做**（写+skip 测，真实 KNN 真跑 owner macOS）；**PDF（RWD-01/02/03）仍延后**（Q-RW-4，owner 后续 charter 指定 parser 库）。全量 279 passed + 2 skipped + 1 xfailed；门禁 52 文件 0 弱。
+
+**工作记录（逐项）**
+
+- **RWD-04 `Vec0VectorIndex`**：`vector_sqlite_vec/vector_index.py` — 实现 `VectorIndex` 协议（`backend="vec0"`）；候选式契约下建内存 vec0 虚表（`CREATE VIRTUAL TABLE ... USING vec0(embedding float[dim] distance_metric=...)`）→ 插候选 → `embedding MATCH ? ORDER BY distance LIMIT k` → distance→score 转换（cosine: `1-d`；l2: `-d`）对齐 BruteForce 排序（larger=better）；`inner_product` 非 vec0 原生 → 降级 cosine（warning，与 BruteForce 降级纪律一致）。
+- **`sqlite_vec_available()`**：探测扩展可载性（离线 Linux=False；macOS 装后=True）。扩展不可载时 `Vec0VectorIndex.query` **fail-loud** `RuntimeError(sqlite_vec_unavailable)`——不静默退化（退化由 `schema.py` [Q1] 决定回 BruteForce/TEXT）。
+- **工厂槽**：`make_vector_index("vec0")` → `Vec0VectorIndex`（由 RW-A 的 `_deferred` 占位改为真实返回）。
+- **RWD-05 一致性回归**：`test_vec0_bruteforce_parity_cosine`（20 随机 1024-d 向量，vec0 与 BruteForce cosine top-5 chunk_id 顺序一致）+ 空候选——`@pytest.mark.skipif(not sqlite_vec_available())` gate，离线 skip、**真跑 owner macOS**。
+- **测试**：`tests/unit/test_rw_d_vec0.py` 7 项（协议/工厂槽/分数转换 cosine+l2/metric 降级/不可用 fail-loud = 5 本环境验；parity+空候选 = 2 skip→macOS）。
+
+- **PDF 延后（RWD-01/02/03）**：`ObjectStore.put_bytes`/本地 PDF 解析/PDF capstone **未做**——Q-RW-4 裁决本轮不接，owner 在后续 provider/embedding 实装章节指定 PDF parser 库。
+- **Phase 偏差 / 限制**：`Vec0VectorIndex` 是 `VectorIndex.query` **候选式协议**的合规实现（内存 vec0 索引 over candidates），证明真实 sqlite-vec KNN + 与 BruteForce 一致性。**未做**：把持久 `chunk_embedding_index` 改为 vec0 原生存储（`serialize_float32`）+ `store.search` 直接查持久 vec0 表（替代当前 TEXT-JSON 读路径 + 候选加载）——此「持久 vec0 store 集成」需 store 读写格式重构 + macOS 实跑验证，列 carry-over。
+- **阻塞与处理**：sqlite-vec 扩展离线 Linux 不可载（无 numpy/无扩展二进制）→ 真实 KNN 与 parity 本环境不可跑；按 owner「写+fake/skip 测」裁决，代码写实、parity skip-gate 到 macOS，closure 标 `未观察(本环境不可跑)`，不谎报。
+- **测试发现**：279 passed（+5，从 274 基线）+ 2 skipped（vec0 parity，macOS gate）+ 1 xfailed；无 import 循环。
+- **后续 handoff**：① owner macOS 跑 RWD-05 parity（去 skip）；② 持久 vec0 store 集成（store 读写 vec0 格式 + 直接表 KNN）；③ PDF（provider/embedding charter，owner 指定 parser 库）。
