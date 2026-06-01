@@ -3,7 +3,9 @@
 > 因执行会话 shell/IO 显示层持续不稳定（命令实际执行成功但输出间歇性延迟/串读/显示陈旧），
 > owner 决定重启会话后继续。本文件是重启后的唯一恢复锚点。
 
-## 已完成并提交 (main 分支, 工作树干净, 全量 `python3 -m pytest tests/` 退出码 0 = **203 passed + 1 xfailed**, F1-F7 全部收口)
+## 已完成并提交 (main 分支, 工作树干净, 全量 `python3 -m pytest tests/` 退出码 0 = **234 passed + 1 xfailed**, F1-F7 全收口 + 跨阶段审查修复)
+
+> 收口后 owner 请求跨 F1-F7 审查找隐患 → 全量修复 (M1 检索去重/M2 chunk_count 据实/M3 chinatax fail-loud/L1 workspace_key 一致/L2 API key 吊销/L3 prefix 收窄/L6 SSRF 守卫)。提交 `3ce4e7a`, 详见 `FF-REVIEW-fixes-closure.md`。L4(last_used 写)/L5(purge 跨库) 经评估保留并说明。
 
 | 阶段 | 状态 | 提交 | closure |
 |------|------|------|---------|
