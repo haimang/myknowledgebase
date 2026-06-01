@@ -90,3 +90,16 @@
 > 2. **process_clean_step 包事务（`0d6fdaa`）的诚实更正**：执行中一度据"API run-clean 回归"包裹该函数；事后复核发现**该端点测试（p3）因 fastapi 缺失从未真正运行**，先前的 IntegrityError 来自我临时复现脚本误用非法 `uploads.status='stored'`（schema CHECK 不允许），**并非 autocommit 回归**。该函数的事务包裹本身仍正确（autocommit 下其既有 `conn.commit()` 成 no-op，包 `BEGIN IMMEDIATE` 使多写原子，符合 §7.2 ⛔4），故保留；其 commit message"回归"措辞不准确，已在此据实更正。**未改终态写入归属**（F3-02 范围）。
 > 3. **测试环境**：原未安装 workspace 包（仅残留 egg-info），本阶段以 `pip install -e --no-deps packages/* apps/*` + `pip install pytest` 重建（owner 已授权），未改任何被测源行为。
 > 4. **会话取证**：执行后段 bash stdout / Read 显示层不稳定（命令仍执行、文件写入与 git 提交仍生效）。最终结论以文件重定向 + 退出码 commit-guard + git 持久态取证；下游可用 §2 命令原样复跑确认。
+
+---
+
+## F7-05 据实更正（2026-06-01，first-fixes 收口后回链）
+
+> 由 FF-F7-05 closure 重定级回链更正 FF-F1 的一处**环境误诊**（part-cr-8 R5 同源教训：陈旧/错误结论当证据）。
+
+- **更正：FF-F1 记录的「fastapi/pydantic 缺失致 p2-p7 + api smoke 不可运行」不成立。** 实情是 F1 执行会话误把系统级 dist-packages 的可用性判为缺失（PEP-668 `externally-managed-environment` 被错读为"无 fastapi"）。F2 起复核确认：系统 python3 含 fastapi 0.136.3 / pydantic 2 / starlette / httpx。
+- **证据**：F2–F7 全程实测 `tests/integration/p2..p7` + `tests/smoke/test_api_smoke` **均真实运行并通过**；first-fixes 全量回归 `python3 -m pytest tests/` 现为 **192 passed（exit 0）**，p2-p7 端到端在可运行集内。
+- **影响修正**：
+  - §0 诚实附注 1、§9.1「全量收集限制」行、§4「全量收集限制」行、§5「p2-p7 端到端因 fastapi 缺失未观察」——其中"fastapi 缺失/不可运行/未观察"口径**作废**；p2-p7 现为 **verified（经 F2-F7 实测）**。
+  - §0 诚实附注 2 关于「process_clean_step 包事务」的更正本身仍成立（包事务正确、commit message 措辞已更正），但其中"该端点测试因 fastapi 缺失从未真正运行"一句据本附记作废——p3 端点测试现真实运行（F6a 已 fork 为真实 htmlCrawl/chinatax 链路）。
+- **F1 业务结论不变**：F1-01..05（时间 SSOT + 显式事务）本身的 verified 结论与证据不受影响；本附记仅更正"可运行范围/环境"这一处误诊。
