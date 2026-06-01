@@ -8,7 +8,20 @@
 > - `docs/eval/real-wire/state-analysis-after-FF7-by-opus.md`（mock/live `.tmp`/`.env` 方案 + 对账诚实）
 > - `docs/design/first-fixes/owner-gated-qna.md`（[Q1]vec0 degraded / [Q2]本地 1536 / [Q3]去桩增量 / [Q7]先红后绿——扩展基线，不重开）
 > **下游消费者**：`final-execution-plan-by-opus.md → 4 份 action-plan（RW-A/B/C/D）`
-> **文档状态**：`draft（待业主回填）`
+> **文档状态**：`frozen（业主已回填全部裁决，2026-06-01）`
+
+---
+
+## ⭐ 业主裁决 reframe（2026-06-01，最高口径）
+
+owner 在回填时追加了一条**贯穿性范围约束**，凌驾于各题原始 phasing：
+
+> **本轮 real-wire 的近期范围 = ① mock；② 占位（placeholder）；③ 提供初始接口；④ 预留 / 真接 mock 与 real-wire 两条路由通道；⑤ 对 mock 部分进行测试。**
+> **LLM / embedding 的具体 provider adapter（本地 MLX vs 外部厂商、以及厂商/模型选择）留待后续 charter 更新明确。**
+
+- 含义：本轮**不做真实接线（live）本身**，只把「能被真实接线」的协议接口 + mock 实现 + 路由开关 + 占位备齐并测 mock。
+- 因此 Q-RW-2/6/7 的 provider 具体口径**框架冻结、provider 延后**；Q-RW-1 的维度（1024）与「仅本地」**已硬冻结**，但具体 MLX 模型 adapter 同样延后。
+- 对应 proposed-planning：**RW-A（keystone，mock 基座 + 接口 + 路由，不依赖任何 gate）= 本轮主体**；RW-C（真实 live）整体推到后续 charter。
 
 ---
 
@@ -65,7 +78,11 @@
   | (d) 维持 LocalEmbedder 哈希 | ✅ | ~零 | 否 | 高 | —（已是桩） | 仅 fallback，标 degraded |
 - **Opus 的最终推荐**：路线 **(a) 外部 API 1536**，理由是它是唯一「不动 schema + 不造新桩 + 真语义」的组合；将 (d) 哈希保留为 `SMIND_EMBEDDER=local-hash` 的离线 degraded fallback（fail-loud 标注非交付质量）。若 owner 硬性要求「零外网」，则退 (b) 并把「投影」作为显式 degraded 决策记账。
 - **问题**：是否确认 **embedding 维度锁定 1536（不迁 schema）**，且 **live embedding 走外部 1536 维 API（如 OpenAI text-embedding-3-small）**、本地哈希仅作离线 degraded fallback？**如确认，请同时回答：是否允许该 embedding 调用走外网（这与 Q-RW-6 预算挂钩）？若不允许外网，是否接受本地神经投影到 1536 的语义损失？**
-- **业主回答**：
+- **业主回答**：🔒 **FROZEN（覆盖 Opus 原推荐 + 覆盖 [Q2] 的 1536）**。
+  1. **向量维度全部采用 1024 dim**（所有向量统一 1024）——**取代 [Q2] 冻结的 1536**。
+  2. **embedding 仅使用本地环境**，最终在 **MLX 框架 / macOS（Apple Silicon）** 内执行本 Python 单体应用；**不接任何外部 API、不走外网**（故 Q-RW-6 外网问题对 embedding 不适用）。
+  3. **本轮范围（依 reframe）**：只做 `Embedder` 协议接口 + **1024 维 mock**（复用/改 LocalEmbedder 至 1024）+ 占位 + **预留/真接 mock↔real-wire 路由通道**，并测 mock；**具体哪个 1024 维 MLX 模型 adapter 留待后续 charter**。
+  - **级联（须在 final/RW-A 落实）**：① `vector_sqlite_vec/vec.sql:22,43` 维度 CHECK **1536→1024**；`MIG-RW-4` 由「故意不迁」**翻转为「必迁至 1024」**；② `LocalEmbedder.DIMENSION` 与所有 mock embedding 维度 **1536→1024**；③ TR-2 由「锁 1536 不迁」改写为「**锁 1024、须迁 schema**」；④ 1024 维对本地神经友好（bge-large/e5-large/gte-large 系原生 1024，**零投影**）；⑤ real MLX 仅 macOS（live lane，不进默认离线 Linux CI），mock 1024 维哈希在 CI 跑。
 
 ### Q-RW-2 — live LLM 厂商选型（来源：`proposed §7 G-RW-2(厂商)` / `reference-anchor 轴 A` / `RWC-01`）
 
@@ -88,7 +105,10 @@
   | Gemini | 低 | 支持 | ✅（legacy 同款） | prompt 行为最接近 legacy，但需新 key |
 - **Opus 的最终推荐**：若 Q-RW-1 选 OpenAI embedding，则 **LLM 也用 OpenAI**（单 key、单计费口径、最省接线）；若 owner 想最大程度复刻 legacy 语义行为，则选 **Gemini**。无论哪个，都经 `LLMProvider` 协议接入，单厂商起步。
 - **问题**：live LLM 用哪个厂商（Anthropic / OpenAI / Gemini / 其他）？**如确认，请同时指明：是否接受「单厂商起步、协议隔离、暂不做多 provider 抽象」？**
-- **业主回答**：
+- **业主回答**：🔒 **FROZEN（框架同意；provider 延后）**。
+  - **具体 LLM provider adapter（本地 MLX vs 外部厂商、以及厂商/模型选择）留待后续 charter 更新明确**（owner 2026-06-01 裁示）。
+  - **框架同意**：经 `LLMProvider` 协议隔离（蓝本 `ai_schemas.ts:170-179`）、单实现起步、工厂按 `Settings` 选型、暂不做多 provider 抽象。
+  - **本轮范围（依 reframe）**：只做 `LLMProvider` 协议接口 + `MockLLMProvider`（读固定响应，未命中 fail-loud）+ 占位 + **预留/真接 mock↔real-wire 路由通道**（工厂选 provider，未知 fail-loud），并测 mock 部分。真实 LLM 客户端（RWC-01）整体推到后续 charter。
 
 ---
 
@@ -115,7 +135,12 @@
   | (a)+(b) 重写为主、导出校准 | 中 | 高 | 部分 | ✅ | **最优若 KV 可达** |
 - **Opus 的最终推荐**：**(a) 据 schema/用法重写核心 prompt（structurize/summarize）解锁 RW-B**；若 owner 能访问 KV，则并行 (b) 导出原文作为重写的校准参照，升级为 (a)+(b)。无论哪条，prompt 正文进 repo 并经 `prompt_versions` seed + sha256 digest 校验（RWB-02/03）。
 - **问题**：prompt 正文采用哪条路线——**(a) 据 schema/用法重写核心 prompt** / **(b) 从 Cloudflare KV 导出原文** / **(a)+(b) 重写为主 + KV 导出校准**？**如选含 KV 导出的路线，请确认：你是否仍能访问 legacy 的 Cloudflare KV（`PROMPT_KV`）？**
-- **业主回答**：
+- **业主回答**：🔒 **FROZEN（覆盖 (a)/(b) 二选一框架——采用本地文件 + SQLite-SSOT 架构）**。**Python 单体应用不使用 KV**（owner 既有约束）。prompt 体系如下：
+  1. **本地文件注册 prompt 文本**——所有 prompt 必须存在本地、放本地合适文件夹注册正文（**供 owner 动态调整**的编辑层）；
+  2. **正文经 hash 注入 SQLite 动态存取**——**SQLite 为 prompt 的 SSOT**，即「**用 SQLite 内的 KV 替代 Cloudflare KV**」；
+  3. **本地文件 ↔ SQLite 经 hash 值做 SSOT 对账确认**（本地文件 digest 与 SQLite 内 digest 一致性校验；SQLite 为运行时唯一真相源，本地文件仅便利编辑层）。
+  - **正文来源**：legacy KV 不可达、不导出；正文据**输出 schema + 用法**在本地编写（≈原 (a) 重写），落本地文件 → 注册入 SQLite。
+  - **级联**：直接对接 `RWB-02`（渲染引擎含 sha256 digest 校验）+ `RWB-03`（`prompt_versions` seed = 此 SQLite SSOT；接 `get_active_prompt`(`config_repo.py:31`) 到消费侧，消除 F6c 孤立）；新增「本地文件↔SQLite digest 对账」作为 RWB-02/03 的一致性闸。
 
 ---
 
@@ -141,7 +166,7 @@
   | (c) 本轮全接 PDF | +RWD-01/02/03 | 重（并行窗） | 仅当有硬性 PDF 语料 |
 - **Opus 的最终推荐**：**(a) 本轮不接 PDF**，RW-D 整段延后；除非 owner 的 eval 语料含必须处理的 PDF，则退 (c) 并把 PDF 解析作为 RW-D 并行窗（不抢 RW-B/C 带宽）。
 - **问题**：本轮是否接入 PDF / 二进制输入？**(a) 不接，RW-D 延后** / **(b) 仅接二进制上传 put_bytes** / **(c) 全接含 PDF 解析**？**如选 (a)/(b)，请确认本轮 eval 语料中没有「必须处理的 PDF」。**
-- **业主回答**：
+- **业主回答**：🔒 **FROZEN（同意 Opus 推荐）**。采用 **(a)：本轮不接 PDF/二进制，RW-D 上半段（RWD-01/02/03）延后**；集中把 url/file 文本链路接通。`ObjectStore` 二进制扩展与本地 PDF 解析（pypdf/pdfminer）留待后续轮。
 
 ### Q-RW-5 — 本轮是否接入真实 vec0（sqlite-vec）索引（来源：`proposed §7 G-RW-4` / `RWD-04` / `[Q1]`）
 
@@ -162,7 +187,7 @@
   | (b) 本轮接 vec0 | 更快 | L | 0 | 仅当语料规模已撞瓶颈 |
 - **Opus 的最终推荐**：**(a) 延后**。接口缝已留（[Q1]），待语料规模真的撞到暴力 cosine 瓶颈、或进入生产化轮时再做 RWD-04，并以 RWD-05 一致性回归守住「换索引不串味」。
 - **问题**：本轮是否接入真实 vec0（sqlite-vec）？**(a) 延后，维持暴力 cosine** / **(b) 本轮接入**？
-- **业主回答**：
+- **业主回答**：🔒 **FROZEN（同意 Opus 推荐）**。采用 **(a)：延后，维持暴力 cosine**（[Q1] 接口缝 `vector_index.py:22` 已留）。待语料规模真撞瓶颈或进生产化轮再做 RWD-04，并以 RWD-05 一致性回归守「换索引不串味」。
 
 ---
 
@@ -190,7 +215,10 @@
   | 速率 | owner 给（如 N req/s） | 配退避重试 |
 - **Opus 的最终推荐**：确认「默认 mock + live 独立 owner-triggered lane + 预算/速率双护栏 + 超限 fail-loud」框架；具体数值（单次 smoke 美元上限 / 速率）由 owner 填。
 - **问题**：是否确认上述 live 计费治理框架？**如确认，请给出：① 单次 live smoke 的预算上限（美元）；② 速率上限（每秒或每分钟请求数）；③ 是否需要月度总预算护栏。**
-- **业主回答**：
+- **业主回答**：🔒 **FROZEN（框架同意；数值随 provider 延后）**。
+  - **框架同意**：默认 mock + real-wire 路由默认关 + 未配置/超限 fail-loud。
+  - **数值延后**：因 provider adapter（本地 MLX vs 外部厂商）留待后续 charter，**具体 $ 预算 / 速率数值随之延后**。若后续定为外部厂商 → 补 $ 预算/速率护栏；若定为本地 MLX → 无外部账单，转为**本地算力/并发护栏**。
+  - **本轮范围（依 reframe）**：只需把 mock↔real-wire 路由开关预留好（默认 mock、无外部调用），不落任何真实计费路径。
 
 ### Q-RW-7 — 密钥管理：`.env`（git-ignored）vs 平台 secret（来源：`proposed §7 G-RW-6` / `RWA-03`/`RWC-03` / `F6c ⛔1` / `TR-5`）
 
@@ -213,7 +241,10 @@
   | (c) 环境变量直读（无 `.env`） | 中 | 中 | 一般 | 备选 |
 - **Opus 的最终推荐**：**(a) `.env`（git-ignored）+ 构造注入起步**，提供 `.env.example` 占位模板进仓；生产迁 (b) 平台 secret。密钥永不进仓/日志/夹具（TR-5/F6c⛔1），并写测试断言 key 不出现在日志。
 - **问题**：密钥载体是否确认 **`.env`（git-ignored）+ 构造注入起步、生产迁平台 secret**？**如确认，请指明：本轮是否需要直接对接某个平台 secret manager（如需，请指明平台），还是本轮仅做 `.env` 起步、平台 secret 留作后续？**
-- **业主回答**：
+- **业主回答**：🔒 **FROZEN（框架同意；外部 key 需求随 provider 延后）**。
+  - **框架同意**：`.env`（git-ignored）+ `.env.example` 占位进仓 + **构造注入**（严禁 legacy `gemini.ts:96-132` 的模块级全局 key 轮转）；平台 secret manager 留作后续，本轮仅 `.env` 起步。
+  - **是否需要外部厂商 key 取决于后续 charter 的 provider 决策**：若本地 MLX → 本轮无外部厂商 key；本轮 `.env` 用于本地配置 + **预留密钥注入通道**（构造注入），real-wire key 槽位备而不填。
+  - **不受影响**：app 自身的 API-key 鉴权（[Q5]/F6c 的 `sm_` key）与外部厂商 key 无关，照旧。
 
 ---
 
@@ -222,7 +253,18 @@
 - 业主仅在本文件「业主回答」处填写；一旦填写，即成为 `final-execution-plan` 与 4 份 action-plan 的**唯一口径**。
 - 引用方只看 `Q-RW-N 编号 + 业主回答`，不在其他文档重复抄写 Opus 的分析。
 - 如需推翻某答案，在本文件同一题下**追加修订说明**（带日期），不在别处悄悄改口。
-- **gate→题 闭合检查**：G-RW-1→Q-RW-1；G-RW-2→Q-RW-2(厂商)+Q-RW-3(正文)；G-RW-3→Q-RW-4；G-RW-4→Q-RW-5；G-RW-5→Q-RW-6；G-RW-6→Q-RW-7。**7 题全部回填后，6 个 OPEN gate 即可在 final 关闭。**
+- **gate→题 闭合检查（2026-06-01 冻结后状态）**：
+
+| gate | 题 | 冻结状态 | 备注 |
+|------|----|----------|------|
+| G-RW-1 | Q-RW-1 | 🔒 **CLOSED** | 维度=1024（覆盖 1536）+ embedding 仅本地 MLX；具体 MLX 模型 adapter 延后 |
+| G-RW-2 | Q-RW-2(厂商)+Q-RW-3(正文) | 🟡 **正文 CLOSED / 厂商 framework-closed·provider 延后** | 正文=本地文件+SQLite-SSOT（关闭）；LLM provider adapter 留待后续 charter |
+| G-RW-3 | Q-RW-4 | 🔒 **CLOSED** | 本轮不接 PDF |
+| G-RW-4 | Q-RW-5 | 🔒 **CLOSED** | 延后 vec0 |
+| G-RW-5 | Q-RW-6 | 🟡 **framework-closed·数值延后** | 框架定；$ /速率数值随 provider 延后 |
+| G-RW-6 | Q-RW-7 | 🟡 **framework-closed·外部 key 延后** | `.env`+构造注入定；外部厂商 key 需求随 provider 延后 |
+
+- **结论**：**本轮可立即推进的全部已关闭**——RW-A（mock 基座 + 协议接口 + mock↔real 路由 + 占位 + 测 mock）与 RW-B（prompt 本地文件+SQLite-SSOT 链，mock 下）**无任何待决 gate**。剩余 🟡 项（LLM provider adapter / live 计费数值 / 外部 key）**全部归到后续 charter**，不阻塞本轮。
 
 ---
 
@@ -231,3 +273,4 @@
 | 版本 | 日期 | 作者 | 主要变更 |
 |------|------|------|----------|
 | v0.1 | 2026-06-01 | Opus 4.8 | 初稿（身份反转版，无 GPT 占位）：6 OPEN gate → 7 题（G-RW-2 拆厂商/正文）归 4 簇；每题含 Opus 当前建议 + Reasoning + 问题分解 + 路线权衡 + 最终推荐；业主回答待回填。点名 Q-RW-1 的「本地神经 vs 1536 维」正面冲突与 Q-RW-3 的「prompt 正文在 KV 不在 repo」核心修正 |
+| v1.0 | 2026-06-01 | 业主 + Opus 4.8 | **冻结全部裁决**。追加贯穿性 reframe（本轮=mock+占位+接口+mock↔real 路由+测 mock；provider adapter 延后）。**两项覆盖**：Q-RW-1 维度 **1536→1024 + embedding 仅本地 MLX/macOS**（覆盖 [Q2]；翻转 MIG-RW-4 为「必迁至 1024」、TR-2 为「锁 1024 须迁」）；Q-RW-3 **本地文件 + SQLite-SSOT（hash 对账）替代 Cloudflare KV**。Q-RW-2/6/7 框架冻结、provider 具体口径延后；Q-RW-4/5 同意延后。文档状态 draft→frozen |
