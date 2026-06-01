@@ -412,3 +412,31 @@ F6b · RAG 执行器去桩
 > 任一退出硬闸测试 `degraded / 未观察` ⇒ **不得标 `executed`**；按 closure 五态（`verified / observed-OK-at-closure / partial / 未观察 / deferred`）如实归类 + handoff，不 silent overclaim。F5 未就绪导致 T07 用 mock ⇒ 该项标 `partial`（reason=`f5-embedder-pending`）+ handoff，不当真向量绿。
 
 ---
+
+## 11. 执行日志回填（`executed` — 2026-06-01）
+
+> 文档状态: `draft → executed`。执行人 Opus 4.8（主轨直接执行，未用收尾子代理）。提交 `36af537`。前序 F1-F5（含 F3-02 契约/F4-03 rowid/F5 Embedder）已收口。全量 `python3 -m pytest tests/` → **175 passed**（exit 0；F6b 前 161 → 新增 14 用例）。
+
+### 11.1 环境
+- 系统 python3，无外网。structurize/construct 均**确定性规则化（非 LLM，[Q3]/O2/O3）**：heading 启发式 + 句子边界切分 + 规则摘要。F5 Embedder 已就位，vectorize 调 `default_embedder()`（本地 1536）。
+
+### 11.2 逐工作项
+- **F6-04 structurize schema**：`rag_structurizer/service.py` 重写——`structurize_text` 返回 `{schema_version:"v1", context_meta:{title,source_hint}, sections:[{heading,level,text,order}], section_count, paragraphs(兼容), paragraph_count}`。heading 启发式：markdown `#{1,6}`、数字编号 `\d+[.、)]`、全大写短行（≤60，拉丁）。leading body→默认 section(level 0)。title 取首个 level-1 heading。
+- **F6-05 construct 双通道 + 确定性 chunk_id**：`rag_constructor` 增 `build_section_chunks`(消费 sections，section 边界优先 + 句子边界 max_chars 二次切分，带 section_path) + `build_summary`(规则摘要：section_path + 首句/截断，非 LLM) + `with_context_header`(原文注入 `[title/section_path]` 锚点)；保留 `build_chunks` 兼容。`workflow_rag` construct：每 chunk 产 **original + summary 双通道**，`chunk_id=sha256(document_id:index:channel)`（取代 uuid4，replay 幂等），`content_hash=sha256(channel:text)`（满足 `UNIQUE(document_id,content_hash)`），chunk_index 用全局 row_index（满足 `UNIQUE(document_id,chunk_index)`），双通道各落 chunk_text artifact(object_store) + chunks(pending_vectorize)。upsert rowid 复用由 F4-03 store 按 chunk_id 自动保证。
+- **F6-06 拆独立 rag:vectorize step**：construct **删内联 embed/upsert/vectorized 回写**，仅落 chunk(pending_vectorize) + artifact + constructed_json，经 `ExecutorResult.downstream` 声明 `rag:vectorize` step（内核 succeed_claim 创建）+ run_advance running/rag:vectorize。新增 `rag:vectorize` 分支：查本 run `vec_status='pending_vectorize'` chunk（含双通道）→ 从 content_artifact object_key 取文本 → `default_embedder().embed`（1536）→ `upsert_chunk`（content_hash + F4-03 复用 rowid）→ 回写 vectorized → run_advance completed。五步序（CR-7 R5）：core chunk(pending) 由 construct step 持久 → vectorize upsert vec → 回写 core vectorized；崩溃 replay 依 pending_vectorize 幂等重做。worker `startswith("rag:")` 已覆盖（A-7 确认，无需改派发）。
+
+### 11.3 先红后绿（14 新用例，全 PASS · 四元组证据）
+| Test-ID | 文件::用例 | 红基线 | PASS 证据 |
+|---------|-----------|--------|-----------|
+| FF-F6b-T01 | `test_rag_structurize.py`（schema 非裸 paragraphs/heading 切分/title/默认 section/兼容/空，6 用例） | 旧返回 `{paragraphs}` 无 sections（红） | `36af537 + test_rag_structurize(6) + 2026-06-01 04:01 UTC` |
+| FF-F6b-T03 | `test_rag_construct_channels.py`（section_path/summary 非空用 heading/空摘要/上下文头/二次切分，5 用例） | 无 build_section_chunks/build_summary（import 红） | `36af537 + test_rag_construct_channels(5) + 2026-06-01 04:01 UTC` |
+| FF-F6b-T02/T04/T05/T06/T08 | `test_rag_step_chain.py`（独立 vectorize step 成功 + construct/vectorize 分立 + 双通道 original+summary + 全 vectorized + run completed；重放 0 重复 chunk/vec；契约无自提交，3 用例） | 向量化内联无独立 step + uuid4 replay 重复（红） | `36af537 + test_rag_step_chain(3) + 2026-06-01 04:01 UTC` |
+
+- **FF-F6b-T07（真实 1536 语义命中）**：由 p5 全链（url→clean htmlCrawl→structurize→construct 双通道→独立 vectorize→F5 embed→search 按 model 过滤命中）+ F5 `test_f5_vector_authenticity` 共同覆盖；rag 链现真实喂 F5 embedding。
+- 全量回归：`python3 -m pytest tests/` → **175 passed**（exit 0；161 + 14）。
+
+### 11.4 偏差与 handoff
+- **双通道 chunk_index 编码**：chunks 有 `UNIQUE(document_id, chunk_index)` + `UNIQUE(document_id, content_hash)`；original/summary 用全局递增 row_index 作 chunk_index、channel 入 content_hash，确定性 chunk_id 用 logical index+channel——既满足两个唯一约束又保 replay 幂等。
+- **structurize/construct 为确定性规则化（非 LLM）**：[Q3]/O2/O3 明确不追 legacy 全 AI 策略；summary 是规则摘要（heading+首句），保留通道结构供未来替换真实 AI 摘要。如实记账，不冒充 AI。
+- **deferred（A/B/C）**：layer-json 产物（O1, A→下一轮）、legacy 全 AI 结构化/摘要（O2/O3, A）、真实 vec0/外部 embedding/search 过滤/channel 级 purge（O4, A/C→F5 已部分、其余下一轮）。
+- **handoff**：T07 端到端语义命中的独立 capstone 步交 F7；soak（vectorize replay race 长稳 T08 的 ×N 版）交 F7/退出硬闸（本 AP 已覆盖单次重放幂等）。FF-F6c 共用本 AP 的执行器契约。
