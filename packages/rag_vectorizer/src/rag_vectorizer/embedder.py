@@ -1,9 +1,11 @@
 """F5-01: 真实 (语义相关) embedding 替换 SHA-256 伪向量。
 
-[Q2] 裁决=选项 A: `Embedder` adapter + 本地小模型, 维度强约束 = 1536。
+[Q2]/[Q-RW-1] 裁决=选项 A: `Embedder` adapter + 本地小模型, 维度强约束 = 1024。
+（RW-A/RWA-09: 维度由 [Q2] 的 1536 经 Q-RW-1 覆盖为 1024——embedding 仅本地 MLX/macOS,
+1024 对本地神经友好。真实 MLX embedding 延后至后续 provider charter。）
 本环境离线、无 numpy/sentence-transformers, 故"本地小模型"的忠实落地为
 **纯 stdlib 确定性 signed feature-hashing 词袋**: 把文本切成词/字 token 与
-字符 n-gram, 每个 token 经 md5 哈希投影到 1536 维之一并带符号累加, 最后 L2 归一。
+字符 n-gram, 每个 token 经 md5 哈希投影到 1024 维之一并带符号累加, 最后 L2 归一。
 
 与被替换的 SHA-256 伪向量 (`embed_text_fake`) 的本质区别: 共享 token 的文本
 余弦更高 (语义相关源于词面重叠), 而 SHA 哈希向量与文本语义零关联。真实神经
@@ -18,7 +20,7 @@ import math
 import re
 from typing import Protocol, runtime_checkable
 
-DIMENSION = 1536
+DIMENSION = 1024
 
 # 拉丁词 (含数字) + 单个 CJK 字。CJK 不依赖空格分词, 逐字 + 相邻二元组捕捉局部序。
 _LATIN_RE = re.compile(r"[a-z0-9]+")
@@ -64,7 +66,7 @@ def _hash_dim_sign(token: str) -> tuple[int, float]:
 
 
 class LocalEmbedder:
-    """确定性、离线、零计费的本地 embedding (维度 = 1536)。"""
+    """确定性、离线、零计费的本地 embedding (维度 = 1024)。"""
 
     name = "local-bow-hash-v1"
     dimension = DIMENSION

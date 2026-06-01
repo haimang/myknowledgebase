@@ -9,6 +9,10 @@ from .vector_index import BruteForceVectorIndex
 
 logger = logging.getLogger("vector_sqlite_vec.store")
 
+# RWA-09 (Q-RW-1): 向量维度单点常量 (覆盖原散落字面 1536)。必须与
+# rag_vectorizer.DIMENSION 一致 (跨包不变量, 由 test_rw_a_provider_base 守)。
+EMBEDDING_DIMENSION = 1024
+
 
 class VectorStore:
     def __init__(self, conn: Connection, *, workspace_key: str = "default") -> None:
@@ -28,6 +32,13 @@ class VectorStore:
         content_hash: str | None = None,
         embedding: list[float],
     ) -> None:
+        # RWA-09: 写侧维度守卫 — 维度漂移 fail-loud (TR-2/TR-4, 撞 DB CHECK 前先拦)。
+        dim = len(embedding)
+        if dim != EMBEDDING_DIMENSION:
+            raise ValueError(
+                f"embedding dimension drift on write: {dim} != {EMBEDDING_DIMENSION} "
+                f"(chunk_id={chunk_id}, reason=embedding_dimension_mismatch)"
+            )
         self._ensure_namespace(
             namespace_id=namespace_id,
             team_id=team_id,
@@ -62,7 +73,7 @@ class VectorStore:
                 embedding_rowid, embedding_model, embedding_dimension,
                 content_hash, updated_at, deleted_at
             ) VALUES (
-                ?, ?, ?, ?, ?, ?, ?, 1536, ?, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'), NULL
+                ?, ?, ?, ?, ?, ?, ?, ?, ?, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'), NULL
             )
             """,
             (
@@ -73,6 +84,7 @@ class VectorStore:
                 namespace_id,
                 rowid,
                 embedding_model,
+                dim,
                 digest,
             ),
         )
@@ -196,8 +208,8 @@ class VectorStore:
             INSERT INTO vector_namespaces (
               id, team_id, namespace_key, embedding_model, embedding_dimension,
               distance_metric, status
-            ) VALUES (?, ?, ?, ?, 1536, 'cosine', 'active')
+            ) VALUES (?, ?, ?, ?, ?, 'cosine', 'active')
             """,
-            (namespace_id, team_id, self.workspace_key, embedding_model),
+            (namespace_id, team_id, self.workspace_key, embedding_model, EMBEDDING_DIMENSION),
         )
         self.conn.commit()

@@ -2,7 +2,9 @@ from __future__ import annotations
 
 from sqlite3 import Connection, Row
 
+from provider_runtime import make_embedder
 from rag_vectorizer import SearchService
+from smind_config import load_settings
 from storage_objects import FileSystemObjectStore
 from workflow_core.health import collect_health
 from workflow_core.purge import create_purge_request, process_purge_requests
@@ -86,6 +88,7 @@ class ManagementService:
             self.vec_conn,
             workspace_key=team_id,
             object_store=self.object_store,
+            embedder=make_embedder(load_settings()),
         ).search(
             team_id=team_id,
             query=query,
@@ -100,6 +103,7 @@ class ManagementService:
             self.vec_conn,
             workspace_key=team_id,
             object_store=self.object_store,
+            embedder=make_embedder(load_settings()),
         ).search_debug(team_id=team_id, query=query, limit=limit)
 
     def list_active_claims(self, team_id: str) -> list[Row]:

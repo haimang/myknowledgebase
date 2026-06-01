@@ -4,9 +4,10 @@ import hashlib
 import json
 from sqlite3 import Connection, Row
 
+from provider_runtime import make_embedder
 from rag_constructor import build_section_chunks, build_summary, with_context_header
 from rag_structurizer import structurize_text
-from rag_vectorizer import default_embedder
+from smind_config import load_settings
 from storage_objects import FileSystemObjectStore
 from vector_sqlite_vec import VectorStore
 from workflow_core.executors import (
@@ -183,7 +184,7 @@ def process_rag_step(
                         max(1, len(ctext.split())),
                         len(ctext),
                         json.dumps([ch.section_path] if ch.section_path else []),
-                        default_embedder().name,
+                        make_embedder(load_settings()).name,
                     ),
                 )
                 # M2: 仅在实际插入 (rowcount==1) 时计入 chunk_ids; UNIQUE(document_id,
@@ -234,13 +235,14 @@ def process_rag_step(
 
     if stage == "rag:vectorize":
         # F6-06: 独立向量化 step — 查 pending_vectorize chunk (含 original+summary 双通道),
-        # 调 F5 Embedder (本地 1536) → upsert (F4-03 按 chunk_id 复用 rowid) → 回写 vectorized。
+        # 调 F5 Embedder (本地 1024, RWA-09) → upsert (F4-03 按 chunk_id 复用 rowid) → 回写 vectorized。
         # 五步序 (CR-7 R5): core chunk(pending) 已由 construct step 持久 → 此处 upsert vec →
         # 回写 core vectorized; 崩溃 replay 依 pending_vectorize 幂等重做 (确定性 chunk_id + 复用 rowid)。
         # L1: 写侧 workspace_key 用 run.team_id, 与 search 读侧 (workspace_key=team_id) 一致
         # (取代传入的 app_env, 消除 namespace_key/content_hash 兜底的写读错配潜在地雷)。
         vector_store = VectorStore(vec_conn, workspace_key=run["team_id"])
-        embedder = default_embedder()
+        # RWA-04: 写侧 embedder 经工厂装配 (与查侧同 provider → 同 name, ⛔3 写查一致)。
+        embedder = make_embedder(load_settings())
         rows = conn.execute(
             """
             SELECT c.id, c.content_hash, c.document_id, a.object_key

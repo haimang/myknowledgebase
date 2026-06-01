@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import re
 from importlib import resources
 from pathlib import Path
 from sqlite3 import Connection, OperationalError
@@ -28,21 +29,28 @@ def _ensure_migration_table(conn: Connection) -> None:
     )
 
 
+# RWA-09: 维度无关匹配 (任意 float[N]) — 避免 vec.sql 维度变更时 fallback 静默失配
+# (1536→1024 迁移踩到的坑: 字面匹配在维度改动后不替换, vec0 语句残留致 OperationalError)。
+_VEC0_STMT_RE = re.compile(
+    r"CREATE VIRTUAL TABLE IF NOT EXISTS chunk_embedding_index USING vec0\(\s*"
+    r"embedding float\[\d+\]\s*\);",
+)
+_FALLBACK_TEXT_TABLE = (
+    "CREATE TABLE IF NOT EXISTS chunk_embedding_index (\n"
+    "    rowid INTEGER PRIMARY KEY,\n"
+    "    embedding TEXT NOT NULL\n"
+    ");"
+)
+
+
 def _fallback_vec_sql(sql_text: str) -> str:
-    virtual_stmt = (
-        "CREATE VIRTUAL TABLE IF NOT EXISTS chunk_embedding_index USING vec0(\n"
-        "    embedding float[1536]\n"
-        ");"
-    )
-    return sql_text.replace(
-        virtual_stmt,
-        """
-CREATE TABLE IF NOT EXISTS chunk_embedding_index (
-    rowid INTEGER PRIMARY KEY,
-    embedding TEXT NOT NULL
-);
-""".strip(),
-    )
+    new_text, n = _VEC0_STMT_RE.subn(_FALLBACK_TEXT_TABLE, sql_text)
+    if n == 0:
+        raise ValueError(
+            "fallback failed: vec0 virtual-table statement not found in vec.sql "
+            "(reason=vec0_fallback_pattern_unmatched)"
+        )
+    return new_text
 
 
 def apply_vec_schema(conn: Connection) -> None:

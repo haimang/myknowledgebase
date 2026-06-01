@@ -38,7 +38,7 @@ def test_vec_store_upsert_and_delete() -> None:
         INSERT INTO vector_namespaces (
             id, team_id, namespace_key, embedding_model,
             embedding_dimension, distance_metric, status
-        ) VALUES ('ns_1', 'team_p1', 'default', 'mock-embedding', 1536, 'cosine', 'active')
+        ) VALUES ('ns_1', 'team_p1', 'default', 'mock-embedding', 1024, 'cosine', 'active')
         """
     )
     vec_conn.commit()
@@ -52,7 +52,7 @@ def test_vec_store_upsert_and_delete() -> None:
         embedding_rowid=1,
         embedding_model="mock-embedding",
         content_hash="h1",
-        embedding=[0.0] * 8,
+        embedding=[0.0] * 1024,
     )
     row = vec_conn.execute("SELECT * FROM vector_records WHERE chunk_id='chunk_1'").fetchone()
     assert row is not None

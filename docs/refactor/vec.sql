@@ -10,7 +10,7 @@ BEGIN;
 -- vec.db
 -- SSOT for vector indexing. This database is intentionally loosely coupled to
 -- core.db and uses logical keys only. The deployment assumes one primary
--- embedding dimension per environment. V1 default: 1536.
+-- embedding dimension per environment. V1 default: 1024 (Q-RW-1; was 1536).
 -- -----------------------------------------------------------------------------
 
 CREATE TABLE IF NOT EXISTS vector_namespaces (
@@ -19,7 +19,7 @@ CREATE TABLE IF NOT EXISTS vector_namespaces (
     namespace_key TEXT NOT NULL,
     description TEXT,
     embedding_model TEXT NOT NULL,
-    embedding_dimension INTEGER NOT NULL CHECK (embedding_dimension = 1536),
+    embedding_dimension INTEGER NOT NULL CHECK (embedding_dimension = 1024),
     distance_metric TEXT NOT NULL DEFAULT 'cosine'
         CHECK (distance_metric IN ('cosine', 'l2', 'inner_product')),
     status TEXT NOT NULL DEFAULT 'active'
@@ -40,7 +40,7 @@ CREATE TABLE IF NOT EXISTS vector_records (
     namespace_id TEXT NOT NULL,
     embedding_rowid INTEGER NOT NULL UNIQUE,
     embedding_model TEXT NOT NULL,
-    embedding_dimension INTEGER NOT NULL CHECK (embedding_dimension = 1536),
+    embedding_dimension INTEGER NOT NULL CHECK (embedding_dimension = 1024),
     content_hash TEXT NOT NULL,
     metadata_json TEXT
         CHECK (metadata_json IS NULL OR json_valid(metadata_json)),
@@ -56,7 +56,7 @@ CREATE TABLE IF NOT EXISTS vector_records (
 -- Application writes must keep chunk_embedding_index.rowid =
 -- vector_records.embedding_rowid so post-KNN rowid -> chunk_id mapping remains valid.
 CREATE VIRTUAL TABLE IF NOT EXISTS chunk_embedding_index USING vec0(
-    embedding float[1536]
+    embedding float[1024]
 );
 
 -- -----------------------------------------------------------------------------

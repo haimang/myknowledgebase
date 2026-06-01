@@ -12,7 +12,8 @@
 from tests.fixtures.sqlite_kernel import make_kernel_dbs
 from vector_sqlite_vec import VectorStore
 
-_EMB = [0.1, 0.2, 0.3, 0.4]
+# RWA-09: 写侧维度守卫 + DB CHECK 现要求维度=1024 (真实不变量); 测试向量补齐 1024。
+_EMB = [0.1, 0.2, 0.3, 0.4] + [0.0] * 1020
 
 
 def _index_rowids(vec_conn) -> list[int]:

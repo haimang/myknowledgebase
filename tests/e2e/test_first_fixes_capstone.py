@@ -2,7 +2,7 @@
 
 覆盖 capstone A–J 中本轮可达步骤的**语义/安全/完整性**断言 (degraded 步骤显式 xfail):
 A 多 team 隔离 / B file+url 双源 / C clean htmlCrawl 真清洗 / E rag structurize+construct /
-F 独立 vectorize step + 1536 embedding / G search 语义命中 / H purge 清退对象 / J 路径遍历被拒。
+F 独立 vectorize step + 1024 embedding / G search 语义命中 / H purge 清退对象 / J 路径遍历被拒。
 D reap / I restart recovery 由 p1 kernel 专测覆盖 (此处不重复重型 worker 编排)。
 PDF/浏览器/多 provider 步骤 [Q3] degraded → xfail。
 """

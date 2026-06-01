@@ -70,3 +70,55 @@ def assert_clean_text(text: str) -> None:
     assert "<" not in text and ">" not in text, f"residual tags: {text!r}"
     assert "NO" not in text, "script content leaked"
     assert "&amp;" not in text and "&" in text, "entity not decoded"
+
+
+# -----------------------------------------------------------------------------
+# RW-A / RWA-07: real-wire 使用链断言原语。
+# 防假绿: 断言 provider/embedder **被真实调用** (spy 计数), 而非仅"返回值非空"
+# (mock 可返回 canned 值蒙混 → 必须证明链路真的经过了 provider/embedder)。
+# -----------------------------------------------------------------------------
+
+
+class SpyEmbedder:
+    """包裹一个 Embedder, 记录 embed() 调用 (供 assert_used_real_chain)。"""
+
+    def __init__(self, inner) -> None:  # noqa: ANN001
+        self._inner = inner
+        self.name = inner.name
+        self.dimension = inner.dimension
+        self.calls: list[str] = []
+
+    def embed(self, text: str) -> list[float]:
+        self.calls.append(text)
+        return self._inner.embed(text)
+
+
+class SpyLLMProvider:
+    """包裹一个 LLMProvider, 记录 complete/complete_json 调用。"""
+
+    def __init__(self, inner) -> None:  # noqa: ANN001
+        self._inner = inner
+        self.name = inner.name
+        self.calls: list[tuple[str, str]] = []  # (method, prompt)
+
+    def complete(self, prompt: str, **opts):  # noqa: ANN003, ANN201
+        self.calls.append(("complete", prompt))
+        return self._inner.complete(prompt, **opts)
+
+    def complete_json(self, prompt: str, schema=None, **opts):  # noqa: ANN001, ANN003, ANN201
+        self.calls.append(("complete_json", prompt))
+        return self._inner.complete_json(prompt, schema, **opts)
+
+
+def assert_used_real_chain(*spies, min_calls: int = 1) -> None:
+    """断言每个 spy (SpyEmbedder/SpyLLMProvider) 至少被真实调用 min_calls 次。
+
+    用于 mock capstone: 证明文档真的流经了 prompt→LLM→embed 链路, 而非被 fixture 短路。
+    """
+    assert spies, "assert_used_real_chain called with no spies"
+    for spy in spies:
+        n = len(spy.calls)
+        assert n >= min_calls, (
+            f"{type(spy).__name__}(name={getattr(spy, 'name', '?')}) used {n} times "
+            f"< required {min_calls} — chain did not actually invoke it (假绿风险)"
+        )

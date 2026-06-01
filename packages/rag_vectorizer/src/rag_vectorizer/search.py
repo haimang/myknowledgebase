@@ -6,7 +6,7 @@ from sqlite3 import Connection, Row
 from storage_objects import FileSystemObjectStore
 from vector_sqlite_vec import VectorStore
 
-from .embedder import default_embedder
+from .embedder import Embedder, default_embedder
 
 
 class SearchService:
@@ -16,10 +16,14 @@ class SearchService:
         vec_conn: Connection,
         workspace_key: str,
         object_store: FileSystemObjectStore,
+        embedder: Embedder | None = None,
     ) -> None:
         self.core_conn = core_conn
         self.vec_store = VectorStore(vec_conn, workspace_key=workspace_key)
         self.object_store = object_store
+        # RWA-04: 查侧 embedder 经构造注入 (工厂在调用方装配); 缺省回落 default_embedder
+        # (=工厂 local-hash 默认, 写/查同实现 ⛔3)。本包不导入 provider_runtime 以免循环。
+        self.embedder = embedder or default_embedder()
 
     def search(self, team_id: str, query: str, limit: int = 6) -> list[dict]:
         return self._search_internal(team_id=team_id, query=query, limit=limit)["items"]
@@ -39,7 +43,7 @@ class SearchService:
     def _search_internal(self, *, team_id: str, query: str, limit: int) -> dict:
         # F5-01: 写/查共用同一 Embedder (⛔3); F5-03: 按交付模型名过滤,
         # 跨 embedding_model 向量不混算 cosine (G-CR3-10)。
-        embedder = default_embedder()
+        embedder = self.embedder
         embedding = embedder.embed(query)
         hits = self.vec_store.search(
             embedding=embedding,

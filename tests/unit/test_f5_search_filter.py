@@ -8,7 +8,8 @@
 from tests.fixtures.sqlite_kernel import make_kernel_dbs
 from vector_sqlite_vec import VectorStore
 
-_EMB = [0.1, 0.9, 0.0, 0.0]
+# RWA-09: 维度=1024 (写侧守卫 + DB CHECK); 测试向量补齐。
+_EMB = [0.1, 0.9] + [0.0] * 1022
 
 
 def _seed_ns(vec_conn, ns_id, team_id, model, metric="cosine") -> None:
@@ -17,7 +18,7 @@ def _seed_ns(vec_conn, ns_id, team_id, model, metric="cosine") -> None:
         INSERT INTO vector_namespaces (
           id, team_id, namespace_key, embedding_model, embedding_dimension,
           distance_metric, status
-        ) VALUES (?, ?, ?, ?, 1536, ?, 'active')
+        ) VALUES (?, ?, ?, ?, 1024, ?, 'active')
         """,
         (ns_id, team_id, ns_id, model, metric),
     )
@@ -63,8 +64,8 @@ def test_distance_metric_read_from_namespace_config() -> None:
     assert store._resolve_metric(None) == "cosine"
     # inner_product 下未归一长向量得分更高 (cosine 会归一抹除幅度差)。
     store.upsert_chunk(chunk_id="big", team_id="team_x", namespace_id="ns_ip",
-                       embedding_model="model-a", embedding=[10.0, 0.0, 0.0, 0.0])
+                       embedding_model="model-a", embedding=[10.0] + [0.0] * 1023)
     store.upsert_chunk(chunk_id="small", team_id="team_x", namespace_id="ns_ip",
-                       embedding_model="model-a", embedding=[1.0, 0.0, 0.0, 0.0])
-    hits = store.search(embedding=[1.0, 0.0, 0.0, 0.0], team_id="team_x", namespace_id="ns_ip")
+                       embedding_model="model-a", embedding=[1.0] + [0.0] * 1023)
+    hits = store.search(embedding=[1.0] + [0.0] * 1023, team_id="team_x", namespace_id="ns_ip")
     assert hits[0]["chunk_id"] == "big", hits
