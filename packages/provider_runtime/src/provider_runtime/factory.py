@@ -12,7 +12,7 @@ from typing import Any
 
 from rag_vectorizer import Embedder, LocalEmbedder
 from smind_config import Settings, load_settings
-from vector_sqlite_vec import BruteForceVectorIndex
+from vector_sqlite_vec import BruteForceVectorIndex, Vec0VectorIndex
 
 from .mock_llm import MockLLMProvider
 from .protocols import LLMProvider
@@ -77,6 +77,6 @@ def make_vector_index(settings: Settings | None = None) -> Any:
     if kind == "bruteforce":
         return BruteForceVectorIndex()
     if kind == "vec0":
-        # RW-D 实装 Vec0VectorIndex; 在此前为占位 (sqlite-vec 离线不可用)。
-        _deferred("vector_index", kind)
+        # RWD-04: 真实 sqlite-vec 实现 (扩展不可载时其 query fail-loud; 离线 Linux 真跑在 macOS)。
+        return Vec0VectorIndex()
     raise UnknownProviderError("vector_index", kind)
