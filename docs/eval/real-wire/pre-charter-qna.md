@@ -188,6 +188,7 @@ owner 在回填时追加了一条**贯穿性范围约束**，凌驾于各题原�
 - **Opus 的最终推荐**：**(a) 延后**。接口缝已留（[Q1]），待语料规模真的撞到暴力 cosine 瓶颈、或进入生产化轮时再做 RWD-04，并以 RWD-05 一致性回归守住「换索引不串味」。
 - **问题**：本轮是否接入真实 vec0（sqlite-vec）？**(a) 延后，维持暴力 cosine** / **(b) 本轮接入**？
 - **业主回答**：🔒 **FROZEN（同意 Opus 推荐）**。采用 **(a)：延后，维持暴力 cosine**（[Q1] 接口缝 `vector_index.py:22` 已留）。待语料规模真撞瓶颈或进生产化轮再做 RWD-04，并以 RWD-05 一致性回归守「换索引不串味」。
+  - **🔄 修订（2026-06-01 v1.1，业主覆盖）**：vec0 **从「延后」改为「本轮真做」**（RWD-04/05）。注：`sqlite-vec` 扩展在本离线 Linux 开发环境**装不上**，故本轮**写代码 + fake/skip 测**，真实虚表加载与 KNN **真跑在 owner 的 macOS**；closure 据实标 `未观察(本环境不可跑)`，不谎报。PDF（RWD-01/02/03）**仍延后**至后续 provider/embedding 实装章节（由 owner 指定 PDF parser 库）。
 
 ---
 
@@ -274,3 +275,4 @@ owner 在回填时追加了一条**贯穿性范围约束**，凌驾于各题原�
 |------|------|------|----------|
 | v0.1 | 2026-06-01 | Opus 4.8 | 初稿（身份反转版，无 GPT 占位）：6 OPEN gate → 7 题（G-RW-2 拆厂商/正文）归 4 簇；每题含 Opus 当前建议 + Reasoning + 问题分解 + 路线权衡 + 最终推荐；业主回答待回填。点名 Q-RW-1 的「本地神经 vs 1536 维」正面冲突与 Q-RW-3 的「prompt 正文在 KV 不在 repo」核心修正 |
 | v1.0 | 2026-06-01 | 业主 + Opus 4.8 | **冻结全部裁决**。追加贯穿性 reframe（本轮=mock+占位+接口+mock↔real 路由+测 mock；provider adapter 延后）。**两项覆盖**：Q-RW-1 维度 **1536→1024 + embedding 仅本地 MLX/macOS**（覆盖 [Q2]；翻转 MIG-RW-4 为「必迁至 1024」、TR-2 为「锁 1024 须迁」）；Q-RW-3 **本地文件 + SQLite-SSOT（hash 对账）替代 Cloudflare KV**。Q-RW-2/6/7 框架冻结、provider 具体口径延后；Q-RW-4/5 同意延后。文档状态 draft→frozen |
+| v1.1 | 2026-06-01 | 业主 + Opus 4.8 | **RW A-D 执行前补充裁决**：① Q-RW-5 vec0 **从「延后」→「本轮真做」**（写+fake 测，真跑 macOS）；② 确认 RW-C 本轮范围 = **mock↔real-wiring 路由 + 真实 provider 占位槽**（真实 MLX LLM/embedding 客户端仍延后至后续 provider charter）；③ RW-D 的 PDF **仍延后**（owner 后续指定 parser 库），本轮 RW-D 仅做 vec0。LLM 路线方向确认=本地 MLX（全本地），但具体模型实装延后 |
