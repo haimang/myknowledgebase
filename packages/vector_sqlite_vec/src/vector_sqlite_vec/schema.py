@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+import logging
 from importlib import resources
 from pathlib import Path
 from sqlite3 import Connection, OperationalError
+
+logger = logging.getLogger("vector_sqlite_vec.schema")
 
 
 def _repo_sql_path() -> Path | None:
@@ -64,6 +67,12 @@ def apply_vec_schema(conn: Connection) -> None:
     except OperationalError as exc:
         if "vec0" not in str(exc):
             raise
+        # [Q1] degraded 必须 fail-loud, 禁止静默退化 (G-CR3-02 假绿根因, ⛔1)。
+        logger.warning(
+            "vec0 virtual table unavailable (%s); degrading to brute-force TEXT index. "
+            "reason=sqlite_vec_unavailable_degraded_to_bruteforce",
+            exc,
+        )
         conn.executescript(_fallback_vec_sql(sql_text))
     conn.execute(
         "INSERT INTO vec_schema_migrations (migration_id) VALUES (?)",

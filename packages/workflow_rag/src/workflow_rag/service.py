@@ -6,7 +6,7 @@ from sqlite3 import Connection, Row
 
 from rag_constructor import build_chunks
 from rag_structurizer import structurize_text
-from rag_vectorizer import embed_text
+from rag_vectorizer import default_embedder, embed_text
 from storage_objects import FileSystemObjectStore
 from vector_sqlite_vec import VectorStore
 from workflow_core.executors import (
@@ -144,7 +144,7 @@ def process_rag_step(
                 )
                 VALUES (
                   ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-                  'pending_vectorize', 'local-sim', NULL
+                  'pending_vectorize', ?, NULL
                 )
                 """,
                 (
@@ -159,6 +159,8 @@ def process_rag_step(
                     max(1, len(text.split())),
                     len(text),
                     json.dumps([]),
+                    # F5-01: 真实模型标识 (取代 'local-sim'), 供 F5-03 按 model 过滤。
+                    default_embedder().name,
                 ),
             )
             vector_store.upsert_chunk(
@@ -167,7 +169,7 @@ def process_rag_step(
                 workflow_run_id=run["id"],
                 document_id=run["document_id"],
                 namespace_id=f"ns_{run['team_id']}",
-                embedding_model="local-sim",
+                embedding_model=default_embedder().name,
                 content_hash=content_hash,
                 embedding=embed_text(text),
             )

@@ -1,9 +1,13 @@
 from __future__ import annotations
 
 import json
-import math
+import logging
 from hashlib import sha256
 from sqlite3 import Connection
+
+from .vector_index import BruteForceVectorIndex
+
+logger = logging.getLogger("vector_sqlite_vec.store")
 
 
 class VectorStore:
@@ -103,23 +107,56 @@ class VectorStore:
         )
         self.conn.commit()
 
-    def search(self, *, embedding: list[float], team_id: str, top_k: int = 10) -> list[dict]:
+    def search(
+        self,
+        *,
+        embedding: list[float],
+        team_id: str,
+        top_k: int = 10,
+        namespace_id: str | None = None,
+        embedding_model: str | None = None,
+    ) -> list[dict]:
+        # F5-03: 候选集过滤——除 team 外可按 namespace_id/embedding_model 收窄,
+        # 避免跨命名空间/跨模型向量混算 cosine (G-CR3-10, ⛔2)。
+        where = ["vr.deleted_at IS NULL", "vr.team_id = ?"]
+        params: list[str] = [team_id]
+        if namespace_id is not None:
+            where.append("vr.namespace_id = ?")
+            params.append(namespace_id)
+        if embedding_model is not None:
+            where.append("vr.embedding_model = ?")
+            params.append(embedding_model)
+        else:
+            # 向后兼容缺省 (维持 team 维度); 记 degraded 提示, 不静默。
+            logger.debug(
+                "vector search without embedding_model filter (team=%s ns=%s) "
+                "reason=unscoped_model_degraded_team_wide",
+                team_id,
+                namespace_id,
+            )
         rows = self.conn.execute(
-            """
+            f"""
             SELECT vr.chunk_id, cei.embedding
             FROM vector_records vr
             JOIN chunk_embedding_index cei ON cei.rowid = vr.embedding_rowid
-            WHERE vr.deleted_at IS NULL AND vr.team_id = ?
+            WHERE {' AND '.join(where)}
             """,
-            (team_id,),
+            tuple(params),
         ).fetchall()
-        scored: list[dict] = []
-        for row in rows:
-            candidate = json.loads(row["embedding"])
-            score = _cosine(embedding, candidate)
-            scored.append({"chunk_id": row["chunk_id"], "score": score})
-        scored.sort(key=lambda item: item["score"], reverse=True)
-        return scored[:top_k]
+        candidates = [(row["chunk_id"], json.loads(row["embedding"])) for row in rows]
+        # F5-03: distance_metric 从 namespace 配置读取并生效 (非硬编码 cosine, R10)。
+        index = BruteForceVectorIndex(distance_metric=self._resolve_metric(namespace_id))
+        ranked = index.query(embedding, candidates, top_k)
+        return [{"chunk_id": chunk_id, "score": score} for chunk_id, score in ranked]
+
+    def _resolve_metric(self, namespace_id: str | None) -> str:
+        if namespace_id is None:
+            return "cosine"
+        row = self.conn.execute(
+            "SELECT distance_metric FROM vector_namespaces WHERE id = ?",
+            (namespace_id,),
+        ).fetchone()
+        return row["distance_metric"] if row and row["distance_metric"] else "cosine"
 
     def delete_chunks(self, chunk_ids: list[str]) -> int:
         deleted = 0
@@ -164,15 +201,3 @@ class VectorStore:
             (namespace_id, team_id, self.workspace_key, embedding_model),
         )
         self.conn.commit()
-
-
-def _cosine(a: list[float], b: list[float]) -> float:
-    if not a or not b:
-        return 0.0
-    limit = min(len(a), len(b))
-    dot = sum(a[i] * b[i] for i in range(limit))
-    norm_a = math.sqrt(sum(a[i] * a[i] for i in range(limit)))
-    norm_b = math.sqrt(sum(b[i] * b[i] for i in range(limit)))
-    if norm_a == 0.0 or norm_b == 0.0:
-        return 0.0
-    return dot / (norm_a * norm_b)

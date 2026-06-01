@@ -6,7 +6,7 @@ from sqlite3 import Connection, Row
 from storage_objects import FileSystemObjectStore
 from vector_sqlite_vec import VectorStore
 
-from .embedder import embed_text
+from .embedder import default_embedder
 
 
 class SearchService:
@@ -37,11 +37,15 @@ class SearchService:
         }
 
     def _search_internal(self, *, team_id: str, query: str, limit: int) -> dict:
-        embedding = embed_text(query)
+        # F5-01: 写/查共用同一 Embedder (⛔3); F5-03: 按交付模型名过滤,
+        # 跨 embedding_model 向量不混算 cosine (G-CR3-10)。
+        embedder = default_embedder()
+        embedding = embedder.embed(query)
         hits = self.vec_store.search(
             embedding=embedding,
             team_id=team_id,
             top_k=max(limit * 2, 12),
+            embedding_model=embedder.name,
         )
         if not hits:
             return {"items": [], "candidate_count": 0, "hydrated_count": 0, "filtered": []}
