@@ -19,7 +19,7 @@
 > - `eval-reference-anchor 轴 B` + HEAD 实测（本 AP 期亲验 file:line）
 > 关联 reference-anchor:
 > - `docs/eval/real-wire/reference-anchor-by-opus.md`（§7.3 指回真源）
-> 文档状态: `draft`
+> 文档状态: `executed`（2026-06-01, commit `1dcf5b3`; closure: docs/closure/real-wire/RW-B-closure.md）
 
 ---
 
@@ -421,10 +421,25 @@ RW-B prompt 语义链
 
 ---
 
-## 11. 执行日志回填（仅 `executed` 状态使用）
+## 11. 执行日志回填（executed）
 
-- **实际执行摘要**：`（待执行回填）`
-- **Phase 偏差**：`（待回填）`
-- **阻塞与处理**：`（待回填）`
-- **测试发现**：`（待回填）`
-- **后续 handoff**：`RW-C（真实 provider 替 mock）`
+> 文档状态：`executed`（2026-06-01，commit `1dcf5b3`）。全量 265 passed + 1 xfailed；断言强度门禁 50 文件 0 弱。
+
+**工作记录（逐项）**
+
+- **RWB-01 本地 prompt 正文**：`prompts/{structurize,summarize,clean-understand}.md`（含 `{{input_text}}`/`{{section_path}}`/`{{chunk_text}}`/`{{raw_text}}` 占位；据输出 schema/用法本地编写，legacy KV 不导出）。
+- **RWB-02 渲染引擎 + digest 对账**：`smind_config/prompt_renderer.py` — `render_prompt`（取活跃记录→读 `template_path` 文件→sha256 比对 `template_digest`，**不一致 fail-loud** `prompt_digest_mismatch`→`{{var}}` 注入，缺变量 `prompt_missing_variables` fail-loud）+ `compute_digest`。
+- **RWB-03 seed + 接消费**：`seed_prompt_version`/`sync_prompts_dir`（`prompt_versions` 行级 seed，path+digest+status=active，**无 schema 改**——现有 DDL 已够 SSOT）；`render_prompt` 经 `get_active_prompt`(`config_repo.py:31`) 读 SQLite SSOT，消除 F6c 0-消费方孤立。
+- **RWB-04 structurize 去桩**：`rag_structurizer.structurize_via_llm`（prompt→`complete_json`→解析→`_normalize_structured` 契约规整 + 防御性回填漏返字段；非法 JSON `structurize_llm_invalid_json` fail-loud）。规则化 `structurize_text` 保留为 fallback。
+- **RWB-05 summary 去桩**：`rag_constructor.summarize_via_llm`（prompt→`complete`→截断；空响应回落 `build_summary` 规则摘要）。
+- **RWB-06 clean 去桩**：`build_default_registry(llm, render_clean_prompt)` 注册真实 `geminiUnderstanding`（prompt→provider）；`process_clean_step` **semantic_mode 感知**（llm 时构 real-handler registry，默认 rule 用进程级 degraded registry → 零回归）。
+- **路由（mock↔real-wiring）**：`Settings.semantic_mode`（默认 `rule`）/`prompts_dir`/`mock_llm_responses_path`；`workflow_rag._structurize_dispatch`/`_summarize_dispatch`（rule|llm）；工厂 `make_llm` mock 侧从 `mock_llm_responses_path` 载预置响应。
+- **RWB-07 mock capstone**：`tests/e2e/test_real_wire_mock_capstone.py` — 文档(eval corpus tax-vat + pet-dog 干扰)→render prompt→`MockLLMProvider`→structurize/summarize→embed(1024)→search top 命中目标文；`assert_used_real_chain`(spy provider+embedder, min_calls=2)。
+- **RWB-08 防假绿**：capstone 用 Spy 证真实调用 + 命中目标文(非仅非空)，标 **non-delivery-quality**；断言强度门禁覆盖（50 文件 0 弱）。
+- **治理**：`.gitignore` 增 `.env`/`.tmp/`，新增 `.env.example`（Q-RW-7/TR-5 密钥不进仓）。
+- **测试**：13 unit（`test_rw_b_prompt_ssot.py`：渲染/digest 对账 fail-loud/seed/sync/structurize+summary LLM 模式/clean LLM vs degraded/executor 级 dispatch rule-vs-llm 路由通道）+ 2 capstone = +15；全量 265 passed + 1 xfailed。
+
+- **Phase 偏差**：无功能偏差。1 处增强（计划内的完整化）：RWB-06 不止提供 `geminiUnderstanding` 真实 handler，还将其**live 接入 `process_clean_step`**（semantic_mode 感知），而非仅函数级可用。
+- **阻塞与处理**：`MockLLMProvider.complete_json` 自身先 `json.loads` 抛原始 `JSONDecodeError` → 调整 `structurize_via_llm` 把 provider 调用纳入 try，统一抛 `structurize_llm_invalid_json`（机器可读 reason）。
+- **测试发现**：265 passed（+15，从 250 基线）+ 1 xfailed；无 import 循环（`workflow_clean.service`/`workflow_rag.service`/`management.service`/`provider_runtime`/`smind_config` 同导 OK）；默认 `semantic_mode=rule` → 既有 e2e 全绿（零回归）。
+- **后续 handoff**：RW-C（把 `MockLLMProvider`/`LocalEmbedder` 经工厂换真实 MLX provider；真实质量验证）；clean 的 `clean-understand` prompt 已 seed 流程就绪。真实 provider 延后至 provider charter。
