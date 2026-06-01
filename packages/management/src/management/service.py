@@ -153,7 +153,7 @@ class ManagementService:
             target_kind="document",
             target_id=document_id,
         )
-        process_purge_requests(self.conn, self.vec_conn)
+        process_purge_requests(self.conn, self.vec_conn, self.object_store)
         return request_id
 
     def health(self, team_id: str) -> dict:

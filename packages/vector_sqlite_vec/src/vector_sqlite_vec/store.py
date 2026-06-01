@@ -29,7 +29,22 @@ class VectorStore:
             team_id=team_id,
             embedding_model=embedding_model,
         )
-        rowid = embedding_rowid if embedding_rowid is not None else self._next_embedding_rowid()
+        # F4-03: rowid 分配三态优先级——
+        #   1) 显式传入 embedding_rowid 优先;
+        #   2) 同 chunk_id 已存在 (含软删行) → 复用其 rowid, 消除 R3 孤儿累积;
+        #   3) 否则分配单调不复用的新 rowid (基于含软删行 MAX+1, 消除 R4 重号)。
+        if embedding_rowid is not None:
+            rowid = embedding_rowid
+        else:
+            existing = self.conn.execute(
+                "SELECT embedding_rowid FROM vector_records WHERE chunk_id = ?",
+                (chunk_id,),
+            ).fetchone()
+            rowid = (
+                int(existing["embedding_rowid"])
+                if existing is not None
+                else self._next_embedding_rowid()
+            )
         digest = (
             content_hash
             or sha256(
@@ -73,6 +88,10 @@ class VectorStore:
         ).fetchone()
         if not row:
             return
+        # F4-04 软/硬删统一: 仅软删 vector_records (置 deleted_at), 保留
+        # chunk_embedding_index 行——使 rowid ↔ embedding_rowid 一一对应在含软删行
+        # 的全集上恒成立, 软删审计不被抹除 (R9 不一致 + R3/R4 空洞镜像消除)。
+        # search 已按 vr.deleted_at IS NULL 过滤, 软删 index 行不会被检索命中。
         self.conn.execute(
             """
             UPDATE vector_records
@@ -81,10 +100,6 @@ class VectorStore:
             WHERE chunk_id = ?
             """,
             (chunk_id,),
-        )
-        self.conn.execute(
-            "DELETE FROM chunk_embedding_index WHERE rowid = ?",
-            (row["embedding_rowid"],),
         )
         self.conn.commit()
 
@@ -124,8 +139,11 @@ class VectorStore:
         return deleted
 
     def _next_embedding_rowid(self) -> int:
+        # F4-03: 单调不复用。基于 vector_records 含软删行的 MAX(embedding_rowid)+1
+        # (而非会被硬删的 chunk_embedding_index, 即 R4 根因)。delete_chunk 不再硬删
+        # vector_records 行 (软删保留 embedding_rowid), 故 MAX 始终前进、rowid 永不回收。
         row = self.conn.execute(
-            "SELECT COALESCE(MAX(rowid), 0) + 1 AS next_id FROM chunk_embedding_index"
+            "SELECT COALESCE(MAX(embedding_rowid), 0) + 1 AS next_id FROM vector_records"
         ).fetchone()
         return int(row["next_id"])
 

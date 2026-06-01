@@ -40,7 +40,7 @@ def run_worker(*, once: bool, poll_interval: float) -> int:
         if reaped:
             logger.info("reaped %d expired claim(s)", reaped)
         process_restart_requests(core_conn)
-        process_purge_requests(core_conn, vec_conn)
+        process_purge_requests(core_conn, vec_conn, object_store)
         claim = scheduler.claim_one()
         if claim is None:
             return False

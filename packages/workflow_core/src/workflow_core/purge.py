@@ -1,12 +1,17 @@
 from __future__ import annotations
 
 from sqlite3 import Connection
+from typing import Protocol
 
 from storage_sqlite.repositories.requests import PurgeRequestRepository
 from vector_sqlite_vec import VectorStore
 
 from smind_common.time import utc_now_iso as now_iso
 from .events import append_audit_log, append_workflow_event
+
+
+class _ObjectStore(Protocol):
+    def delete(self, object_key: str) -> None: ...
 
 
 def create_purge_request(
@@ -26,21 +31,62 @@ def create_purge_request(
     )
 
 
-def process_purge_requests(conn: Connection, vec_conn: Connection | None) -> int:
+def process_purge_requests(
+    conn: Connection,
+    vec_conn: Connection | None,
+    object_store: _ObjectStore | None = None,
+) -> int:
     # Whole batch wrapped in one BEGIN IMMEDIATE on the core connection
     # (autocommit; F1-04 batch boundary). NOTE (CR-4 R5/R12): the cross-DB
-    # vec write via ``VectorStore(vec_conn).delete_chunks`` is a SEPARATE
-    # connection and is NOT covered by this core transaction — F1 guarantees
-    # core-side atomicity only; vec reconciliation is out of scope here.
+    # vec write via ``VectorStore(vec_conn).delete_chunks`` AND the object_store
+    # deletes (F4-05) are SEPARATE substrates, NOT covered by this core
+    # transaction — F1 guarantees core-side atomicity only; vec/object
+    # reconciliation is out of scope here.
     conn.execute("BEGIN IMMEDIATE")
     try:
-        return _process_purge_requests_body(conn, vec_conn)
+        return _process_purge_requests_body(conn, vec_conn, object_store)
     except Exception:
         conn.rollback()
         raise
 
 
-def _process_purge_requests_body(conn: Connection, vec_conn: Connection | None) -> int:
+def _collect_object_keys(conn: Connection, *, document_id: str, team_id: str) -> list[str]:
+    """F4-05 合规清退: 收集被 purge 文档名下所有落 object_store 的 object_key。
+
+    覆盖 raw 上传 (uploads, 经 source→document)、静态文件 (static_files) 与
+    chunk 正文等产物 (artifacts, storage_backend='object_store')。AP §4.3 字面
+    枚举 uploads/static_files; 此处据 §0「正文不残留磁盘」目标纳入 artifacts
+    (rag 把 chunk_text 经 put_text 落盘, 见 workflow_rag/service.py:115)。
+    """
+    keys: list[str] = []
+    rows = conn.execute(
+        """
+        SELECT u.object_key AS k
+        FROM uploads u
+        JOIN sources s ON s.upload_id = u.id
+        JOIN documents d ON d.source_id = s.id
+        WHERE d.id = ? AND d.team_id = ?
+        UNION
+        SELECT object_key AS k FROM static_files
+        WHERE document_id = ? AND team_id = ?
+        UNION
+        SELECT object_key AS k FROM artifacts
+        WHERE document_id = ? AND team_id = ?
+          AND storage_backend = 'object_store'
+        """,
+        (document_id, team_id, document_id, team_id, document_id, team_id),
+    ).fetchall()
+    for row in rows:
+        if row["k"]:
+            keys.append(row["k"])
+    return keys
+
+
+def _process_purge_requests_body(
+    conn: Connection,
+    vec_conn: Connection | None,
+    object_store: _ObjectStore | None = None,
+) -> int:
     requests = conn.execute(
         "SELECT * FROM purge_requests WHERE status = 'pending' ORDER BY created_at ASC"
     ).fetchall()
@@ -104,6 +150,15 @@ def _process_purge_requests_body(conn: Connection, vec_conn: Connection | None) 
         if vec_conn is not None and chunk_ids:
             # NOT covered by the core BEGIN IMMEDIATE above (separate vec DB).
             VectorStore(vec_conn, workspace_key=req["team_id"]).delete_chunks(chunk_ids)
+        if object_store is not None:
+            # F4-05 合规清退: 删被 purge 文档名下的 object_store 对象。delete 经
+            # _resolve_safe 校验且缺失幂等; 真实删除失败 fail-loud (异常上抛触发
+            # 整批 rollback, 不静默吞——⛔6)。NOT covered by core tx (FS substrate)。
+            object_keys = _collect_object_keys(
+                conn, document_id=target_document_id, team_id=req["team_id"]
+            )
+            for object_key in object_keys:
+                object_store.delete(object_key)
         purged_at = now_iso()
         conn.execute(
             """

@@ -1,10 +1,22 @@
 from __future__ import annotations
 
 import json
+import os
 from sqlite3 import Connection
 from uuid import uuid4
 
 from storage_objects import FileSystemObjectStore
+
+
+def _safe_filename(filename: str) -> str:
+    """F4-02 纵深防御源头收口: 剥离任何路径分量, 拒绝空 / 含分隔符 / .. 的值。
+
+    控制面为第一道, FileSystemObjectStore._resolve_safe 为最终防线 (part-cr-5 R2)。
+    """
+    base = os.path.basename(filename or "")
+    if not base.strip() or base in (".", "..") or "/" in base or "\\" in base:
+        raise ValueError(f"unsafe filename: {filename!r}")
+    return base
 
 
 class IngestionService:
@@ -13,8 +25,9 @@ class IngestionService:
         self.object_store = object_store
 
     def file_initiate(self, team_id: str, user_id: str, filename: str, mime_type: str) -> dict:
+        safe_name = _safe_filename(filename)
         upload_id = f"upload_{uuid4().hex}"
-        object_key = f"raw/{team_id}/{upload_id}/{filename}"
+        object_key = f"raw/{team_id}/{upload_id}/{safe_name}"
         self.conn.execute(
             """
             INSERT INTO uploads (
@@ -22,7 +35,7 @@ class IngestionService:
                 mime_type, created_by_user_id, status
             ) VALUES (?, ?, 'file', ?, ?, ?, ?, 'initiated')
             """,
-            (upload_id, team_id, object_key, filename, mime_type, user_id),
+            (upload_id, team_id, object_key, safe_name, mime_type, user_id),
         )
         self.conn.commit()
         return {"upload_id": upload_id, "object_key": object_key}
