@@ -20,7 +20,7 @@
 > - `eval-reference-anchor 轴 A`（§7 内置锚区据此摘录）+ HEAD 实测（本 AP 期亲验 file:line）
 > 关联 reference-anchor:
 > - `docs/eval/real-wire/reference-anchor-by-opus.md`（§7.3 指回真源）
-> 文档状态: `draft`
+> 文档状态: `executed`（2026-06-01, commit `4bdc30f`; closure: docs/closure/real-wire/RW-A-closure.md）
 
 ---
 
@@ -421,10 +421,28 @@ RW-A provider 基座
 
 ---
 
-## 11. 执行日志回填（仅 `executed` 状态使用）
+## 11. 执行日志回填（executed）
 
-- **实际执行摘要**：`（待执行回填）`
-- **Phase 偏差**：`（待回填）`
-- **阻塞与处理**：`（待回填）`
-- **测试发现**：`（待回填）`
-- **后续 handoff**：`RW-B`
+> 文档状态：`executed`（2026-06-01，commit `4bdc30f`）。全量 250 passed + 1 xfailed；断言强度门禁 48 文件 0 弱。
+
+**工作记录（逐项）**
+
+- **RWA-09 维度 1536→1024 全库迁移**：
+  - `rag_vectorizer/embedder.py:21` `DIMENSION=1536→1024` + docstring；守卫 `!=DIMENSION` 自动随常量泛化。
+  - `vector_sqlite_vec/vec.sql` + **`docs/refactor/vec.sql`（运行时 SSOT，loader 优先读）** 两处 CHECK + vec0 `float[]` 全改 1024。
+  - `vector_sqlite_vec/store.py`：新增单点常量 `EMBEDDING_DIMENSION=1024`；INSERT 字面 1536 → 参数化 `len(embedding)`/常量；新增**写侧维度守卫**（`dim!=1024` → ValueError fail-loud）。
+  - `vector_sqlite_vec/schema.py`：`_fallback_vec_sql` 由字面匹配改为**维度无关正则** `_VEC0_STMT_RE`（踩坑修复：1024 改动后字面失配致 vec0 语句残留 → `no such module: vec0`；现 0 匹配即 raise，不静默）。
+  - grep 全仓 `1536` 残留=0（仅余迁移历史注释）。
+- **RWA-01 `LLMProvider` 协议**：新包 `provider_runtime/protocols.py` — `LLMProvider` Protocol（`complete`/`complete_json`→`LLMResult{text,usage}`，`@runtime_checkable`），照 HEAD `Embedder`/`VectorIndex` 范式。
+- **RWA-05 MockLLMProvider**：`provider_runtime/mock_llm.py` — 按 prompt 原文/sha256 短 key 查表；未命中 `MockResponseMissing` fail-loud（机器可读 reason）；`complete_json` 校验合法 JSON；mock embedding 复用 `LocalEmbedder`（1024）。
+- **RWA-03 Settings**：`config/settings.py` 增 `llm_provider="mock"`/`embedder_provider="local-hash"`/`vector_index="bruteforce"` + `llm_model/embedder_model/llm_api_key=None`（预留）+ `env_file=".env"`。
+- **RWA-02 工厂**：`provider_runtime/factory.py` — `make_llm/make_embedder/make_vector_index`（按 Settings 选；未知 `UnknownProviderError`；`mlx`/厂商 `NotImplementedError("deferred to provider charter")`）。
+- **RWA-04 装配注入**：`SearchService.__init__` 增 `embedder` 注入参（缺省回落 `default_embedder`，本包不导入 `provider_runtime` 避循环）；`management/service.py` 两处 + `workflow_rag/service.py`（186/243）改走 `make_embedder(load_settings())`（写查同 provider name，⛔3）。
+- **RWA-06 eval corpus**：`tests/fixtures/eval_corpus.py` — 精简可提交集（tax-vat / pet-dog 两文，带 query+expected_fragment）+ `load_eval_corpus`（可选合并 `.tmp/eval-fixtures/*.json`，缺失不 fail）。
+- **RWA-07 测试原语**：`tests/fixtures/primitives.py` 增 `SpyEmbedder`/`SpyLLMProvider`/`assert_used_real_chain`（spy 真实调用计数，防"返回值非空"假绿）。
+- **RWA-08 先红后绿**：`tests/unit/test_rw_a_provider_base.py` 16 项（维度跨包不变量 / 写侧守卫 fail-loud / 协议 / mock 命中+未命中 / Settings 默认 / 工厂各分支+未知+mlx占位 / 注入 / corpus / spy 正负例）。同步迁移 4 个旧测的 1536→1024。
+
+- **Phase 偏差**：无功能偏差。1 处实现增强（计划外、改善鲁棒性）：`_fallback_vec_sql` 由字面匹配升级为正则（因发现 `docs/refactor/vec.sql` 与包内 vec.sql 双副本，字面匹配在维度改动后静默失配）。
+- **阻塞与处理**：① 双 vec.sql 副本致首轮 ~25 测 sqlite 失败 → 定位 loader 优先 `docs/refactor/vec.sql`，同步迁移 + 正则化 fallback 解决。② 离线环境无 `numpy/sqlite_vec`（mock/local 路径不依赖，无碍）。
+- **测试发现**：250 passed（+16 RW-A，从 234 基线）+ 1 xfailed；断言强度门禁通过（48 文件 0 弱断言）；无 import 循环（实测 `management.service`/`workflow_rag.service`/`rag_vectorizer.search`/`provider_runtime` 同时导入 OK）。
+- **后续 handoff**：RW-B（prompt 本地文件+SQLite-SSOT 链，去桩走 `MockLLMProvider`，embed 走 `make_embedder`@1024）。真实 MLX provider 延后至 provider charter（工厂 `mlx` 占位槽已留）。
