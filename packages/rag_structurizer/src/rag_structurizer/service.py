@@ -7,6 +7,7 @@ heading 启发式: markdown `#` / 数字编号 / 全大写短行 → section 边
 
 from __future__ import annotations
 
+import json
 import re
 
 _MD_HEADING = re.compile(r"^(#{1,6})\s+(.*)$")
@@ -69,3 +70,62 @@ def structurize_text(text: str) -> dict:
         "paragraphs": paragraphs,
         "paragraph_count": len(paragraphs),
     }
+
+
+def _normalize_structured(data: dict, *, source_text: str) -> dict:
+    """RWB-04: 把 LLM 返回的结构对象规整到 structurize 契约 (防御性回填漏返字段)。
+
+    借 legacy summarizer.ts:260 的「响应漏返则用输入回填」思路。下游 construct 依赖
+    sections/paragraphs/context_meta 形状, 故缺失字段必须补齐, 而非传播半成品。
+    """
+    sections = data.get("sections")
+    if not isinstance(sections, list) or not sections:
+        # LLM 未给 sections → 回填为单 section (source_text), 不丢内容。
+        sections = [{"heading": "", "level": 0, "text": source_text.strip(), "order": 0}]
+    norm_sections: list[dict] = []
+    for i, sec in enumerate(sections):
+        sec = sec if isinstance(sec, dict) else {}
+        norm_sections.append(
+            {
+                "heading": str(sec.get("heading", "")),
+                "level": int(sec.get("level", 0) or 0),
+                "text": str(sec.get("text", "")),
+                "order": int(sec.get("order", i) if str(sec.get("order", i)).lstrip("-").isdigit() else i),
+            }
+        )
+    paragraphs = data.get("paragraphs")
+    if not isinstance(paragraphs, list) or not paragraphs:
+        paragraphs = []
+        for sec in norm_sections:
+            if sec["heading"]:
+                paragraphs.append(sec["heading"])
+            paragraphs.extend(p.strip() for p in sec["text"].split("\n") if p.strip())
+    cmeta = data.get("context_meta")
+    if not isinstance(cmeta, dict):
+        cmeta = {}
+    title = str(cmeta.get("title") or next((s["heading"] for s in norm_sections if s["level"] == 1), ""))
+    return {
+        "schema_version": str(data.get("schema_version", "v1")),
+        "context_meta": {"title": title, "source_hint": str(cmeta.get("source_hint", ""))},
+        "sections": norm_sections,
+        "section_count": len(norm_sections),
+        "paragraphs": [str(p) for p in paragraphs],
+        "paragraph_count": len(paragraphs),
+        "produced_by": "llm",
+    }
+
+
+def structurize_via_llm(text: str, provider, rendered_prompt: str) -> dict:  # noqa: ANN001
+    """RWB-04 LLM 模式: prompt(已渲染)→provider.complete_json→解析→契约规整。
+
+    非法 JSON / 空响应 → fail-loud (ValueError); 漏返字段经 _normalize_structured 防御性回填。
+    provider 须满足 LLMProvider 协议 (mock 或真实, 本轮走 MockLLMProvider)。
+    """
+    try:
+        result = provider.complete_json(rendered_prompt, schema=None)
+        data = json.loads(result.text)
+    except (json.JSONDecodeError, TypeError) as exc:
+        raise ValueError(f"structurize_llm_invalid_json: {exc}") from exc
+    if not isinstance(data, dict):
+        raise ValueError("structurize_llm_not_object")
+    return _normalize_structured(data, source_text=text)

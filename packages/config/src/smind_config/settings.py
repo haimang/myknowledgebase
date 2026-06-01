@@ -19,6 +19,13 @@ class Settings(BaseSettings):
     embedder_model: str | None = None
     llm_api_key: str | None = None
 
+    # RW-B / RWB-04..06: 语义链模式开关。默认 "rule" (规则化, 零回归);
+    # "llm" → structurize/summary/clean 走 prompt→render→LLM(provider 由 llm_provider 定)。
+    semantic_mode: str = "rule"
+    prompts_dir: str = "prompts"
+    # mock provider 的预置响应文件 (real-wiring 路由 mock 侧用; 真实 provider 时忽略)。
+    mock_llm_responses_path: str | None = None
+
     # RWA-03: 支持从 .env 注入 (git-ignored)。env 前缀 SMIND_; 未知字段忽略。
     model_config = SettingsConfigDict(
         env_prefix="SMIND_", extra="ignore", env_file=".env", env_file_encoding="utf-8"

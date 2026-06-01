@@ -4,6 +4,8 @@ import json
 import logging
 from sqlite3 import Connection
 
+from provider_runtime import make_llm
+from smind_config import load_settings, render_prompt
 from storage_objects import FileSystemObjectStore
 from workflow_core.executors import (
     DownstreamStep,
@@ -130,7 +132,20 @@ def process_clean_step(
     _guard_no_scatter(step)
     # F6-01: registry 分派 (取代 provider-or-universal if/else 硬选)。
     branch = _resolve_branch(step, source)
-    handler = _REGISTRY.get_handler(branch)
+    # RWB-06: semantic_mode=llm 时 geminiUnderstanding 走真实 handler (prompt→provider);
+    # 默认 rule 用进程级 degraded registry (零回归)。
+    settings = load_settings()
+    if settings.semantic_mode == "llm":
+        registry = build_default_registry(
+            llm=make_llm(settings),
+            render_clean_prompt=lambda raw: render_prompt(
+                conn, run["team_id"], "clean-understand", {"raw_text": raw},
+                prompts_dir=settings.prompts_dir,
+            ),
+        )
+    else:
+        registry = _REGISTRY
+    handler = registry.get_handler(branch)
     raw_text = _load_raw_payload(conn, object_store, source["id"], source["source_kind"])
     cleaned = handler(
         CleanContext(

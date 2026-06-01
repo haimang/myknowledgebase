@@ -88,6 +88,19 @@ def build_summary(chunk: Chunk, *, max_chars: int = 160) -> str:
     return summary[:max_chars].strip()
 
 
+def summarize_via_llm(chunk: Chunk, provider, rendered_prompt: str, *, max_chars: int = 160) -> str:  # noqa: ANN001
+    """RWB-05 LLM 模式: prompt(已渲染)→provider.complete→截断。
+
+    空响应回落规则摘要 (build_summary), 不产空串掩盖 (fail-soft 到规则, 非静默成功)。
+    provider 须满足 LLMProvider 协议 (本轮 MockLLMProvider)。
+    """
+    result = provider.complete(rendered_prompt)
+    text = (result.text or "").strip()
+    if not text:
+        return build_summary(chunk, max_chars=max_chars)
+    return text[:max_chars].strip()
+
+
 def with_context_header(chunk: Chunk, *, title: str = "") -> str:
     """original 通道上下文头注入 (语义锚点, 规则化 buildContentFull)。"""
     anchor = " / ".join(p for p in (title, chunk.section_path) if p)

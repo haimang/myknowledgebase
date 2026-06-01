@@ -44,6 +44,9 @@ def make_llm(settings: Settings | None = None, **kwargs: Any) -> LLMProvider:
     settings = settings or load_settings()
     provider = settings.llm_provider
     if provider == "mock":
+        # real-wiring 路由 mock 侧: 预置响应可由 Settings 文件路径注入 (或 kwargs 直传)。
+        if "responses_path" not in kwargs and settings.mock_llm_responses_path:
+            kwargs["responses_path"] = settings.mock_llm_responses_path
         return MockLLMProvider(**kwargs)
     if provider in _DEFERRED_LLM:
         _deferred("llm", provider)

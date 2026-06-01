@@ -4,10 +4,15 @@ import hashlib
 import json
 from sqlite3 import Connection, Row
 
-from provider_runtime import make_embedder
-from rag_constructor import build_section_chunks, build_summary, with_context_header
-from rag_structurizer import structurize_text
-from smind_config import load_settings
+from provider_runtime import make_embedder, make_llm
+from rag_constructor import (
+    build_section_chunks,
+    build_summary,
+    summarize_via_llm,
+    with_context_header,
+)
+from rag_structurizer import structurize_text, structurize_via_llm
+from smind_config import load_settings, render_prompt
 from storage_objects import FileSystemObjectStore
 from vector_sqlite_vec import VectorStore
 from workflow_core.executors import (
@@ -37,6 +42,32 @@ def _artifact_payload(row: Row) -> dict:
     return json.loads(row["metadata_json"] or "{}")
 
 
+def _structurize_dispatch(conn: Connection, team_id: str, text: str, settings=None) -> dict:  # noqa: ANN001
+    """RWB-04 路由: semantic_mode=rule(默认,规则化) | llm(prompt→render→provider)。"""
+    settings = settings or load_settings()
+    if settings.semantic_mode == "llm":
+        prompt = render_prompt(
+            conn, team_id, "structurize", {"input_text": text}, prompts_dir=settings.prompts_dir
+        )
+        return structurize_via_llm(text, make_llm(settings), prompt)
+    return structurize_text(text)
+
+
+def _summarize_dispatch(conn: Connection, team_id: str, chunk, settings=None) -> str:  # noqa: ANN001
+    """RWB-05 路由: semantic_mode=rule(默认) | llm。"""
+    settings = settings or load_settings()
+    if settings.semantic_mode == "llm":
+        prompt = render_prompt(
+            conn,
+            team_id,
+            "summarize",
+            {"section_path": chunk.section_path, "chunk_text": chunk.text},
+            prompts_dir=settings.prompts_dir,
+        )
+        return summarize_via_llm(chunk, make_llm(settings), prompt)
+    return build_summary(chunk)
+
+
 def process_rag_step(
     conn: Connection,
     vec_conn: Connection,
@@ -62,7 +93,7 @@ def process_rag_step(
     if stage == "rag:structurize":
         cleaned_artifact = _latest_artifact(conn, run["id"], "cleaned_text")
         cleaned = _artifact_payload(cleaned_artifact)
-        structured = structurize_text(cleaned.get("text", ""))
+        structured = _structurize_dispatch(conn, run["team_id"], cleaned.get("text", ""))
         structured_artifact_id = deterministic_artifact_id(step_id, "structured_json")
         conn.execute(
             """
@@ -120,7 +151,7 @@ def process_rag_step(
         row_index = 0
         for ch in chunks:
             channels = [("original", with_context_header(ch, title=title))]
-            summary_text = build_summary(ch)
+            summary_text = _summarize_dispatch(conn, run["team_id"], ch)
             if summary_text:
                 channels.append(("summary", summary_text))
             for channel, ctext in channels:

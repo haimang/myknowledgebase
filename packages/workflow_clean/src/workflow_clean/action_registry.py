@@ -69,7 +69,14 @@ class CleanActionRegistry:
         return sorted(self._specs.values(), key=lambda s: s.branch)
 
 
-def build_default_registry() -> CleanActionRegistry:
+def build_default_registry(*, llm=None, render_clean_prompt=None) -> CleanActionRegistry:  # noqa: ANN001
+    """构建 clean action 注册表。
+
+    RWB-06: 当传入 `llm` (LLMProvider) + `render_clean_prompt` (raw_text→已渲染 prompt,
+    由 workflow 层绑定 conn/team_id) 时, `geminiUnderstanding` 注册为**真实 LLM handler**
+    (走 prompt→provider); 否则保持 [Q3] degraded fallback。真实 MLX provider 延后, 本轮
+    经 MockLLMProvider 验链路。handler 仍只产正文 (F3-02 终态单一归属), 不复刻 artifact 写入。
+    """
     reg = CleanActionRegistry()
     # 真实实现 ([Q3] 增量范围)。
     reg.register(
@@ -87,16 +94,26 @@ def build_default_registry() -> CleanActionRegistry:
         lambda ctx: chinatax_etl(ctx.source_uri),
         description="chinatax dedicated ETL",
     )
-    # [Q3] 显式 degraded (浏览器/PDF/LLM + 多 provider)。
+    # [Q3] 显式 degraded (浏览器/PDF/多 provider)。
     for branch, reason in (
         ("browserFetch", "browser rendering not supported this round"),
         ("browserFetch-geminiClean", "browser+LLM clean not supported this round"),
         ("browserPDF", "PDF rendering not supported this round"),
         ("browserPDF-geminiClean", "PDF+LLM clean not supported this round"),
-        ("geminiUnderstanding", "LLM understanding not supported this round"),
         ("domain", "domain provider not supported this round"),
         ("realestate", "realestate provider not supported this round"),
         ("scatter", "scatter/multi-document not supported this round"),
     ):
         reg.register_degraded(branch, reason)
+    # RWB-06: geminiUnderstanding — LLM 模式 (真实/mock provider 注入) 或 degraded fallback。
+    if llm is not None and render_clean_prompt is not None:
+        reg.register(
+            "geminiUnderstanding",
+            lambda ctx: llm.complete(render_clean_prompt(ctx.raw_text)).text,
+            description="LLM understanding clean (prompt→provider)",
+        )
+    else:
+        reg.register_degraded(
+            "geminiUnderstanding", "LLM understanding not supported this round"
+        )
     return reg

@@ -19,6 +19,14 @@ dist/
 .coverage
 htmlcov/
 
+# Secrets / local config (Q-RW-7 / TR-5: 密钥不进仓)
+.env
+.env.*
+!.env.example
+
+# Eval fixtures scratch (RWA-06: 大样本 git-ignored, 精简集在 tests/fixtures)
+.tmp/
+
 # Virtual environments
 .venv/
 venv/
