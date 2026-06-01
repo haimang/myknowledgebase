@@ -15,6 +15,8 @@ import urllib.error
 import urllib.request
 from dataclasses import dataclass
 
+from smind_common.net import UnsafeUrlError, assert_safe_url
+
 logger = logging.getLogger("providers_dedicated")
 
 _USER_AGENT = "SourceMindBot/1.0 (+https://sourcemind.local)"
@@ -33,6 +35,10 @@ class ProviderDegradedError(RuntimeError):
 def fetch_api(url: str, *, timeout: float = 10.0) -> str:
     if not url:
         raise ApiRequestError("empty url")
+    try:
+        assert_safe_url(url)  # L6: SSRF 守卫 (拒非 http/https + 内网/loopback)。
+    except UnsafeUrlError as exc:
+        raise ApiRequestError(f"unsafe url rejected: {exc}") from exc
     request = urllib.request.Request(url, headers={"User-Agent": _USER_AGENT})
     try:
         with urllib.request.urlopen(request, timeout=timeout) as response:  # noqa: S310
@@ -83,8 +89,10 @@ def chinatax_etl(url: str, *, fetch=None) -> str:  # noqa: ANN001
     raw = (fetch or fetch_api)(url)
     items = _parse_chinatax_items(raw)
     if not items:
-        # 对齐 legacy ALERT: 空结果记 warning (不整体崩)。
+        # M3: 空/不可解析结果 fail-loud (与 htmlCrawl 空抽取一致), 杜绝零内容静默 completed。
+        # 对齐 legacy ALERT, 但抛错交内核 fail_claim 而非静默返回空正文。
         logger.warning("chinatax empty result ALERT url=%s reason=no_parsable_items", url)
+        raise ApiRequestError(f"chinatax produced no parsable items for {url}")
     blocks: list[str] = []
     for it in items:
         block = it["title"]

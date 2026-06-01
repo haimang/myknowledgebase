@@ -11,6 +11,7 @@ import urllib.error
 import urllib.request
 
 from browser_runtime import extract_text
+from smind_common.net import UnsafeUrlError, assert_safe_url
 
 _USER_AGENT = "SourceMindBot/1.0 (+https://sourcemind.local)"
 
@@ -22,6 +23,10 @@ class UrlFetchError(RuntimeError):
 def fetch_url(url: str, *, timeout: float = 10.0, user_agent: str = _USER_AGENT) -> str:
     if not url:
         raise UrlFetchError("empty url")
+    try:
+        assert_safe_url(url)  # L6: SSRF 守卫 (拒非 http/https + 内网/loopback)。
+    except UnsafeUrlError as exc:
+        raise UrlFetchError(f"unsafe url rejected: {exc}") from exc
     request = urllib.request.Request(url, headers={"User-Agent": user_agent})
     try:
         with urllib.request.urlopen(request, timeout=timeout) as response:  # noqa: S310

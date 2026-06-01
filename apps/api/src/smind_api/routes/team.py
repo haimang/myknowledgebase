@@ -29,6 +29,10 @@ class ApiKeyBody(BaseModel):
     expires_at: str | None = None
 
 
+class ApiKeyRevokeBody(BaseModel):
+    key_id: str
+
+
 @router.post("/bootstrap")
 def bootstrap_team(
     body: BootstrapBody,
@@ -80,3 +84,18 @@ def create_api_key(
         expires_at=body.expires_at,
     )
     return result
+
+
+@router.post("/api-keys/revoke")
+def revoke_api_key(
+    body: ApiKeyRevokeBody,
+    ctx: AuthContext = Depends(get_auth_context),
+    conn: Connection = Depends(get_core_conn),
+) -> dict:
+    # L2: 仅 team owner 可吊销; 未命中 (非本 team / 已吊销 / 不存在) → 404。
+    team_id = require_team(ctx)
+    if not make_team_service(conn).is_owner(ctx.user_id, team_id):
+        raise HTTPException(status_code=403, detail="owner_role_required")
+    if not AuthService(conn).revoke_api_key(team_id=team_id, key_id=body.key_id):
+        raise HTTPException(status_code=404, detail="api_key_not_found_or_already_revoked")
+    return {"revoked": body.key_id}

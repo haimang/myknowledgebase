@@ -158,7 +158,7 @@ def process_rag_step(
                         ),
                     ),
                 )
-                conn.execute(
+                cur = conn.execute(
                     """
                     INSERT OR IGNORE INTO chunks(
                       id, team_id, workflow_run_id, document_id,
@@ -186,7 +186,11 @@ def process_rag_step(
                         default_embedder().name,
                     ),
                 )
-                chunk_ids.append(chunk_id)
+                # M2: 仅在实际插入 (rowcount==1) 时计入 chunk_ids; UNIQUE(document_id,
+                # content_hash) 命中被 OR IGNORE 跳过的重复内容不计 (修 chunk_count 虚高)。
+                # replay 时同 chunk_id 已存在也会 rowcount==0, 不重复计 —— 仍幂等。
+                if cur.rowcount == 1:
+                    chunk_ids.append(chunk_id)
                 row_index += 1
         constructed_artifact_id = deterministic_artifact_id(step_id, "constructed_json")
         conn.execute(
@@ -233,7 +237,9 @@ def process_rag_step(
         # 调 F5 Embedder (本地 1536) → upsert (F4-03 按 chunk_id 复用 rowid) → 回写 vectorized。
         # 五步序 (CR-7 R5): core chunk(pending) 已由 construct step 持久 → 此处 upsert vec →
         # 回写 core vectorized; 崩溃 replay 依 pending_vectorize 幂等重做 (确定性 chunk_id + 复用 rowid)。
-        vector_store = VectorStore(vec_conn, workspace_key=workspace_key)
+        # L1: 写侧 workspace_key 用 run.team_id, 与 search 读侧 (workspace_key=team_id) 一致
+        # (取代传入的 app_env, 消除 namespace_key/content_hash 兜底的写读错配潜在地雷)。
+        vector_store = VectorStore(vec_conn, workspace_key=run["team_id"])
         embedder = default_embedder()
         rows = conn.execute(
             """

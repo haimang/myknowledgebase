@@ -43,9 +43,10 @@ def test_chinatax_etl_fetch_error_classified() -> None:
         chinatax_etl("https://chinatax.gov.cn/x", fetch=boom)
 
 
-def test_chinatax_etl_empty_result_no_crash() -> None:
-    out = chinatax_etl("https://chinatax.gov.cn/x", fetch=lambda url, **kw: "[]")
-    assert out == ""
+def test_chinatax_etl_empty_result_fail_loud() -> None:
+    # M3: 空/不可解析结果 fail-loud (不再静默返回 "", 杜绝零内容静默 completed)。
+    with pytest.raises(ApiRequestError):
+        chinatax_etl("https://chinatax.gov.cn/x", fetch=lambda url, **kw: "[]")
 
 
 def test_registry_routes_chinatax_and_degraded() -> None:

@@ -75,6 +75,9 @@ class SearchService:
         by_id = {row["chunk_id"]: row for row in rows}
         results: list[dict] = []
         filtered: list[dict] = []
+        # M1: 双通道去重 — original/summary 同属一个逻辑 chunk (document_id, chunk_index)。
+        # hits 已按分降序, 保留首个 (最高分通道), 跳过同逻辑 chunk 的另一通道, 避免近重复结果。
+        seen_logical: set[tuple] = set()
         for hit in hits:
             row: Row | None = by_id.get(hit["chunk_id"])
             if row is None:
@@ -105,6 +108,17 @@ class SearchService:
                     }
                 )
                 continue
+            logical_key = self._logical_key(row)
+            if logical_key in seen_logical:
+                filtered.append(
+                    {
+                        "chunk_id": row["chunk_id"],
+                        "score": float(hit["score"]),
+                        "reason": "duplicate_channel",
+                    }
+                )
+                continue
+            seen_logical.add(logical_key)
             results.append(
                 {
                     "chunk_id": row["chunk_id"],
@@ -123,6 +137,22 @@ class SearchService:
             "hydrated_count": len(rows),
             "filtered": filtered,
         }
+
+    def _logical_key(self, row: Row) -> tuple:
+        """逻辑 chunk 标识 (document_id, chunk_index) — 用于双通道去重 (M1)。
+
+        chunk_index/channel 存于 chunk_text artifact 的 metadata_json; 解析失败时
+        回退 chunk_id (即不去重, 保守不误删)。
+        """
+        meta_raw = row["metadata_json"]
+        if meta_raw:
+            try:
+                meta = json.loads(meta_raw)
+                if isinstance(meta, dict) and "chunk_index" in meta:
+                    return (row["document_id"], meta["chunk_index"])
+            except json.JSONDecodeError:
+                pass
+        return (row["document_id"], row["chunk_id"])
 
     def _load_chunk_text(self, row: Row) -> str:
         object_key = row["object_key"]

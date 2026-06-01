@@ -131,7 +131,8 @@ class AuthService:
         """生成 key, 仅落 sha256 hash + key_prefix; 明文一次性返回 (P2-02/05)。"""
         raw = generate_api_key()
         key_hash = hash_api_key(raw)
-        key_prefix = raw[:12]
+        # L3: key_prefix 仅用于 UI 识别, 取较短前缀减少密文外泄 (sm_ + 5 字符)。
+        key_prefix = raw[:8]
         key_id = f"apikey_{uuid4().hex}"
         self.conn.execute(
             """
@@ -173,3 +174,18 @@ class AuthService:
         )
         self.conn.commit()
         return row
+
+    def revoke_api_key(self, *, team_id: str, key_id: str) -> bool:
+        """L2: 吊销 team 名下的 active key (泄漏 key 可经 API 即时失效)。返回是否命中。"""
+        cur = self.conn.execute(
+            """
+            UPDATE api_keys
+            SET status='revoked',
+                revoked_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now'),
+                updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+            WHERE id = ? AND team_id = ? AND status = 'active'
+            """,
+            (key_id, team_id),
+        )
+        self.conn.commit()
+        return cur.rowcount == 1
