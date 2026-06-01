@@ -4,9 +4,9 @@ import hashlib
 import json
 from sqlite3 import Connection, Row
 
-from rag_constructor import build_chunks
+from rag_constructor import build_section_chunks, build_summary, with_context_header
 from rag_structurizer import structurize_text
-from rag_vectorizer import default_embedder, embed_text
+from rag_vectorizer import default_embedder
 from storage_objects import FileSystemObjectStore
 from vector_sqlite_vec import VectorStore
 from workflow_core.executors import (
@@ -101,89 +101,93 @@ def process_rag_step(
         )
 
     if stage == "rag:construct":
+        # F6-05: 消费 structurize 的 sections, 产 original + summary 双通道, 确定性
+        # chunk_id (channel 维度); F6-06: 仅落 chunk(pending_vectorize) + 文本 artifact,
+        # 不内联 embed/upsert (向量化拆出独立 rag:vectorize step)。
         structured_artifact = _latest_artifact(conn, run["id"], "structured_json")
         structured = _artifact_payload(structured_artifact)
-        chunks = build_chunks(structured.get("paragraphs", []))
-        vector_store = VectorStore(vec_conn, workspace_key=workspace_key)
+        sections = structured.get("sections") or []
+        if not sections:
+            paras = structured.get("paragraphs") or []
+            if paras:
+                sections = [
+                    {"heading": "", "level": 0, "text": "\n".join(paras), "order": 0}
+                ]
+        title = (structured.get("context_meta") or {}).get("title", "")
+        chunks = build_section_chunks(sections)
         chunk_ids: list[str] = []
-        for index, text in enumerate(chunks):
-            # F3-03: deterministic ids -> re-execution rewrites identical rows.
-            chunk_id = f"{run['id']}:{index}"
-            content_hash = hashlib.sha256(text.encode("utf-8")).hexdigest()
-            chunk_text_artifact_id = deterministic_artifact_id(step_id, f"chunk_text:{index}")
-            chunk_text_key = f"chunks/{run['team_id']}/{run['id']}/{index}.txt"
-            object_store.put_text(chunk_text_key, text)
-            conn.execute(
-                """
-                INSERT OR IGNORE INTO artifacts(
-                  id, team_id, workflow_run_id, workflow_step_id, source_id, document_id,
-                  artifact_type, storage_backend, object_key, mime_type, content_hash,
-                  size_bytes, metadata_json
-                ) VALUES (?, ?, ?, ?, ?, ?, 'chunk_text', 'object_store', ?, 'text/plain', ?, ?, ?)
-                """,
-                (
-                    chunk_text_artifact_id,
-                    run["team_id"],
-                    run["id"],
-                    step["id"],
-                    run["source_id"],
-                    run["document_id"],
-                    chunk_text_key,
-                    content_hash,
-                    len(text.encode("utf-8")),
-                    json.dumps({"chunk_index": index}),
-                ),
-            )
-            conn.execute(
-                """
-                INSERT OR IGNORE INTO chunks(
-                  id, team_id, workflow_run_id, document_id,
-                  source_artifact_id, content_artifact_id,
-                  chunk_index, content_hash, token_count, char_count, section_path_json, vec_status,
-                  embedding_model, latest_vectorized_at
+        row_index = 0
+        for ch in chunks:
+            channels = [("original", with_context_header(ch, title=title))]
+            summary_text = build_summary(ch)
+            if summary_text:
+                channels.append(("summary", summary_text))
+            for channel, ctext in channels:
+                # F6-05: 确定性 chunk_id (document_id:logical_index:channel) — replay 幂等。
+                chunk_id = hashlib.sha256(
+                    f"{run['document_id']}:{ch.index}:{channel}".encode("utf-8")
+                ).hexdigest()
+                # channel 入 content_hash → 满足 UNIQUE(document_id, content_hash)。
+                content_hash = hashlib.sha256(f"{channel}:{ctext}".encode("utf-8")).hexdigest()
+                artifact_id = deterministic_artifact_id(
+                    step_id, f"chunk_text:{ch.index}:{channel}"
                 )
-                VALUES (
-                  ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-                  'pending_vectorize', ?, NULL
+                text_key = f"chunks/{run['team_id']}/{run['id']}/{ch.index}_{channel}.txt"
+                object_store.put_text(text_key, ctext)
+                conn.execute(
+                    """
+                    INSERT OR IGNORE INTO artifacts(
+                      id, team_id, workflow_run_id, workflow_step_id, source_id, document_id,
+                      artifact_type, storage_backend, object_key, mime_type, content_hash,
+                      size_bytes, metadata_json
+                    ) VALUES (?, ?, ?, ?, ?, ?, 'chunk_text', 'object_store', ?, 'text/plain', ?, ?, ?)
+                    """,
+                    (
+                        artifact_id,
+                        run["team_id"],
+                        run["id"],
+                        step["id"],
+                        run["source_id"],
+                        run["document_id"],
+                        text_key,
+                        content_hash,
+                        len(ctext.encode("utf-8")),
+                        json.dumps(
+                            {"chunk_index": ch.index, "channel": channel,
+                             "section_path": ch.section_path}
+                        ),
+                    ),
                 )
-                """,
-                (
-                    chunk_id,
-                    run["team_id"],
-                    run["id"],
-                    run["document_id"],
-                    structured_artifact["id"],
-                    chunk_text_artifact_id,
-                    index,
-                    content_hash,
-                    max(1, len(text.split())),
-                    len(text),
-                    json.dumps([]),
-                    # F5-01: 真实模型标识 (取代 'local-sim'), 供 F5-03 按 model 过滤。
-                    default_embedder().name,
-                ),
-            )
-            vector_store.upsert_chunk(
-                chunk_id=chunk_id,
-                team_id=run["team_id"],
-                workflow_run_id=run["id"],
-                document_id=run["document_id"],
-                namespace_id=f"ns_{run['team_id']}",
-                embedding_model=default_embedder().name,
-                content_hash=content_hash,
-                embedding=embed_text(text),
-            )
-            conn.execute(
-                """
-                UPDATE chunks
-                SET vec_status = 'vectorized',
-                    latest_vectorized_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now'),
-                    updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
-                WHERE id = ?
-                """,
-                (chunk_id,),
-            )
-            chunk_ids.append(chunk_id)
+                conn.execute(
+                    """
+                    INSERT OR IGNORE INTO chunks(
+                      id, team_id, workflow_run_id, document_id,
+                      source_artifact_id, content_artifact_id,
+                      chunk_index, content_hash, token_count, char_count, section_path_json,
+                      vec_status, embedding_model, latest_vectorized_at
+                    )
+                    VALUES (
+                      ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+                      'pending_vectorize', ?, NULL
+                    )
+                    """,
+                    (
+                        chunk_id,
+                        run["team_id"],
+                        run["id"],
+                        run["document_id"],
+                        structured_artifact["id"],
+                        artifact_id,
+                        row_index,
+                        content_hash,
+                        max(1, len(ctext.split())),
+                        len(ctext),
+                        json.dumps([ch.section_path] if ch.section_path else []),
+                        default_embedder().name,
+                    ),
+                )
+                chunk_ids.append(chunk_id)
+                row_index += 1
         constructed_artifact_id = deterministic_artifact_id(step_id, "constructed_json")
         conn.execute(
             """
@@ -205,13 +209,72 @@ def process_rag_step(
         conn.execute(
             """
             UPDATE documents
-            SET status = 'active',
-                latest_constructed_artifact_id = ?,
-                latest_vectorized_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now'),
+            SET latest_constructed_artifact_id = ?,
                 updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
             WHERE id = ?
             """,
             (constructed_artifact_id, run["document_id"]),
+        )
+        # F6-06: 向量化拆为独立 step (可 claim/重试/重启); 不在此 embed/upsert。
+        return ExecutorResult(
+            downstream=[
+                DownstreamStep(
+                    step_key=f"rag:vectorize:{step_id}",
+                    stage="rag:vectorize",
+                    action="rag.vectorize",
+                    payload={"run_id": run["id"]},
+                )
+            ],
+            run_advance={"status": "running", "current_stage": "rag:vectorize"},
+        )
+
+    if stage == "rag:vectorize":
+        # F6-06: 独立向量化 step — 查 pending_vectorize chunk (含 original+summary 双通道),
+        # 调 F5 Embedder (本地 1536) → upsert (F4-03 按 chunk_id 复用 rowid) → 回写 vectorized。
+        # 五步序 (CR-7 R5): core chunk(pending) 已由 construct step 持久 → 此处 upsert vec →
+        # 回写 core vectorized; 崩溃 replay 依 pending_vectorize 幂等重做 (确定性 chunk_id + 复用 rowid)。
+        vector_store = VectorStore(vec_conn, workspace_key=workspace_key)
+        embedder = default_embedder()
+        rows = conn.execute(
+            """
+            SELECT c.id, c.content_hash, c.document_id, a.object_key
+            FROM chunks c
+            JOIN artifacts a ON a.id = c.content_artifact_id
+            WHERE c.workflow_run_id = ? AND c.vec_status = 'pending_vectorize'
+            """,
+            (run["id"],),
+        ).fetchall()
+        for row in rows:
+            text = object_store.get_text(row["object_key"])
+            vector_store.upsert_chunk(
+                chunk_id=row["id"],
+                team_id=run["team_id"],
+                workflow_run_id=run["id"],
+                document_id=row["document_id"],
+                namespace_id=f"ns_{run['team_id']}",
+                embedding_model=embedder.name,
+                content_hash=row["content_hash"],
+                embedding=embedder.embed(text),
+            )
+            conn.execute(
+                """
+                UPDATE chunks
+                SET vec_status = 'vectorized',
+                    latest_vectorized_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now'),
+                    updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+                WHERE id = ?
+                """,
+                (row["id"],),
+            )
+        conn.execute(
+            """
+            UPDATE documents
+            SET status = 'active',
+                latest_vectorized_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now'),
+                updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+            WHERE id = ?
+            """,
+            (run["document_id"],),
         )
         # Terminal rag stage: kernel advances the run to completed.
         return ExecutorResult(run_advance={"status": "completed", "current_stage": "completed"})
