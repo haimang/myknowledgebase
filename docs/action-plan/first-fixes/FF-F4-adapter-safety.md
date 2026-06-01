@@ -449,3 +449,43 @@ FF-F4 适配层安全与数据完整性
 - 若 `FF-F4-T01/T02` 任一攻击向量用例未在当前 HEAD 复现为红（即修复前未先红），视为测试无效，不得据其判 PASS。
 - 若 `FF-F4-T03/T04` 未复现主审实测的孤儿 `[1,2]` / `b survived? 0`，同上无效。
 - 真实 vec0 KNN 下的孤儿污染、purge 重入（R12）属 `deferred`（交 F5/F3），如实记账不假装覆盖。
+
+---
+
+## 11. 执行日志回填（`executed` — 2026-06-01）
+
+> 文档状态: `draft → executed`。执行人 Opus 4.8（主轨直接执行，未用收尾子代理）。提交 `1a568d3`。全量 `python3 -m pytest tests/` → **115 passed**（exit 0；F4 前 65 → 新增 50 用例）。
+
+### 11.1 环境
+- 系统 python3 含 fastapi/pydantic/starlette/httpx；缺 numpy/uvicorn/bs4/lxml/requests/sentence_transformers/sqlite_vec（F4 不依赖）。
+- Python 3.12 → `Path.is_relative_to` 可用（§9.1 风险解除，无需降级到 commonpath）。
+- 退化模式：`chunk_embedding_index` 为普通表 `(rowid INTEGER PRIMARY KEY, embedding TEXT)`（`_fallback_vec_sql`）；`vector_records.embedding_rowid` 有 UNIQUE 约束、`chunk_id` 为 PK——正是 R4「INSERT OR REPLACE 撞 embedding_rowid UNIQUE 静默删审计行」的机理。
+
+### 11.2 逐工作项
+- **F4-01 ObjectStore 边界校验**：`filesystem_store._resolve_safe(key)`——拒空/blank、绝对路径（`startswith('/')` 或 `Path(key).is_absolute()`）、含 `..` 段、反斜杠（防 `..\\` 绕过）；再 `(root/key).resolve()` 断言 `is_relative_to(root.resolve())` 兜底符号链接/归一化逃逸。put/get/exists/delete 四处统一走它（消除裸 `self.root / object_key`）。
+- **F4-02 ingestion basename 收口**：新增 `_safe_filename(filename)`——`os.path.basename` 剥离路径分量后拒空/`.`/`..`/含 `/`/`\\`。`file_initiate` 调用它，`static_initiate` 经 `file_initiate` 复用；`original_filename` 也存清洗后值。basename-strip 契约：`../../../etc/passwd`→`passwd`、`foo/bar.txt`→`bar.txt`（被接受，非拒绝），与控制面/最终防线双层纵深防御协同。
+- **F4-03 rowid 单调不复用 + upsert 复用**：`_next_embedding_rowid` 改 `MAX(embedding_rowid)+1 FROM vector_records`（含软删行，非会被硬删的 index——R4 根因消除）。`upsert_chunk` rowid 分配三态：显式传入 > 同 chunk_id 现有行（含软删）复用 > 分配新值（消 R3 孤儿）。
+- **F4-04 软/硬删统一**：`delete_chunk` 移除 `DELETE FROM chunk_embedding_index`，仅软删 `vector_records`（置 deleted_at），保留 index 行——一一对应在含软删全集恒成立、审计不被抹除（R9）。`search` 已按 `vr.deleted_at IS NULL` 过滤，软删 index 行不被检索命中。
+- **F4-05 ObjectStore.delete + purge 接线**：`filesystem_store.delete(key)` 经 `_resolve_safe` 后 `unlink(missing_ok=True)`。`purge.process_purge_requests(conn, vec_conn, object_store=None)`（默认 None 向后兼容现有调用与 T07 回滚测试）；新增 `_collect_object_keys` 查 uploads（经 source→document）/static_files/artifacts（`storage_backend='object_store'`）的 object_key 逐个删。worker:43 与 management:156 调用点传入 object_store。
+- **F4-06 原子写 + 错误处理**：`put_text` 同目录 `tempfile.mkstemp` 落盘后 `os.replace` 原子 rename，失败清理 temp 不留残留；`get_text` 缺失 key 抛受控 `KeyError`（非裸 `FileNotFoundError`）。
+
+### 11.3 先红后绿（50 新用例，全 PASS · 四元组证据）
+> 红基线：在 pre-F4 HEAD 跑新测 → **38 failed**（含全部安全/rowid blocker 红），证明先红成立；修复后全绿。
+
+| Test-ID | 文件::用例 | 红基线 | PASS 证据 |
+|---------|-----------|--------|-----------|
+| FF-F4-T01 | `test_filesystem_store_paths.py`（put/get/exists/delete × 7 攻击向量 + 合法/dot 段） | `../escaped.txt` 逃逸成功写 root 外（实测红） | `1a568d3 + test_filesystem_store_paths(30) PASS + 2026-06-01 03:26 UTC` |
+| FF-F4-T02 | `test_ingestion_filename.py`（traversal→basename + 拒绝 6 向量 + static + subpath） | filename 原样污染 object_key（红） | `1a568d3 + test_ingestion_filename(10) PASS + 2026-06-01 03:26 UTC` |
+| FF-F4-T03 | `test_vector_store_rowid.py::test_upsert_no_orphan` | 同 chunk_id ×3 → 孤儿 `[1,2]`（红） | `1a568d3 + test_upsert_no_orphan PASS + 2026-06-01 03:26 UTC` |
+| FF-F4-T04 | `test_vector_store_rowid.py::test_soft_delete_audit_survives` + `test_resurrect_same_chunk_reuses_rowid` | 软删 b 后 upsert c → `b survived?=0`（红） | `1a568d3 + test_soft_delete_audit_survives PASS + 2026-06-01 03:26 UTC` |
+| FF-F4-T05 | `test_purge_object_delete.py`（raw 对象 + chunk_text artifact + 向后兼容） | purge 不删对象, 正文残留（红） | `1a568d3 + test_purge_object_delete(3) PASS + 2026-06-01 03:26 UTC` |
+| FF-F4-T06 | `test_filesystem_store_io.py`（原子写无残留 + 覆盖 + 缺失受控异常） | get_text 裸 FileNotFoundError（红） | `1a568d3 + test_filesystem_store_io(4) PASS + 2026-06-01 03:26 UTC` |
+
+- 全量回归：`python3 -m pytest tests/` → **115 passed**（exit 0；65 + 50）。
+- 两处**测试自身缺陷**自查修正（非掩盖 blocker）：① 路径测 `root.parent` 原指向共享 tmp 基目录，被红基线逃逸残留污染 → 改 root 为独立 base 子目录；② ingestion 拒绝列表误含 `foo/bar`（basename→`bar` 按 AP 契约应被接受）→ 移出并新增 `test_file_initiate_strips_subpath_to_basename` 锁定 basename-strip 语义。
+
+### 11.4 偏差与 handoff
+- **rowid 单调来源选 `vector_records` MAX 而非独立序列表**（AP §4.2 给了两个选项）：因 `delete_chunk` 改为不硬删 vr 行，软删行保留 embedding_rowid → MAX 始终前进、永不回收，无需新表（满足 §9.3「不动 vec.sql / 无 schema 改动」）。若未来出现 vr 硬删路径，需改独立序列表——记为前提。
+- **purge 删对象超出 AP §4.3 字面枚举（uploads/static_files）纳入 artifacts**：因 §0 目标「正文不残留磁盘」+ rag 把 chunk_text 经 `put_text` 落盘（`workflow_rag/service.py:115`），忠实兑现合规目标；已加 `test_purge_deletes_chunk_text_artifact_object` 真测该分支。
+- **deferred（如实记账，不假装覆盖）**：真实 vec0 KNN 孤儿污染（[Q1] degraded → F5）、purge processing 重入 R12（一致性同 F3 主题）、embedding_dimension 真校验 R7（→ F5）、二进制 put_bytes R8（[Q3] → F6）。
+- 跨库 vec 写 + object_store 删均非 core BEGIN IMMEDIATE 覆盖（注释标明，与既有 vec 行为一致）；object 删在 vec 删同处、非事务，purge 重试可重入（delete missing_ok 幂等）。
