@@ -436,6 +436,34 @@ FF-F6a · Clean 执行器去桩
 
 ---
 
-## 11. 执行日志回填（仅 `executed` 状态使用）
+## 11. 执行日志回填（`executed` — 2026-06-01）
 
-> 文档状态非 `executed` 时本节省略（本 AP 为 `draft`）。
+> 文档状态: `draft → executed`。执行人 Opus 4.8（主轨直接执行，未用收尾子代理）。提交 `2dbceab`。前序 F1-F5 已收口。全量 `python3 -m pytest tests/` → **161 passed**（exit 0；F6a 前 137 → 新增 24 用例）。
+
+### 11.1 环境
+- 系统 python3，无外网。HTML 解析用 stdlib `html.parser`（不引入 bs4/lxml 重依赖，⛔5/本地化约束）。真实抓取/请求用 `urllib`；测试一律 monkeypatch 模块级 `fetch_url`/`fetch_api` 注入本地样本（不打外网，⛔6）。
+- **F6-01b 复核**：F3 已把 `process_clean_step` 迁至 ExecutorResult 契约（返回结果、确定性 artifact id、无自提交/commit）。本 AP 复核确认（grep gate test 守护），故 F6-01b 主体由 F3 交付，本 AP 只新增 registry 分派 + degraded + 重放安全测试。
+
+### 11.2 逐工作项
+- **F6-01 action registry + 分派**：新建 `workflow_clean/action_registry.py`——`CleanActionRegistry`（register/get_handler/has/list_actions）+ `ActionSpec`(branch,degraded,description) + `UnknownActionError` + `DegradedActionError`(带 reason) + `CleanContext`。handler 为内容层 `(ctx)->cleaned 文本`（ExecutorResult 终态/下游/run 仍在 process_clean_step 组装一次，遵守 F3-02 终态单一归属——见 §11.4 偏差）。`build_default_registry` 注册 text/htmlCrawl/fetch-chinatax-articles 真实 + 8 个 degraded（browser*/gemini/domain/realestate/scatter）。`service.py` 去 `provider or universal` if/else（grep gate 0 命中），改 `_resolve_branch(step,source)`→`registry.get_handler(branch)(ctx)`。创建侧 `ingestion/service.py._create_workflow_run` 增 source_kind/source_uri 参数 + `_resolve_action_branch` 写 `action_branch` 入 step payload_json（file/api→text、url→htmlCrawl、chinatax host→fetch-chinatax-articles）。
+- **F6-02 htmlCrawl 真抓取清洗**：`browser_runtime/extract.py` 用 `html.parser._TextExtractor` 重建——丢 script/style/head/title、块级标签切段落、`convert_charrefs=True` 解码实体、保段落结构（替 3 正则桩压单行）。`cleaners_universal/service.py`：`fetch_url`（UA `SourceMindBot/1.0`/超时 10s/状态码 2xx 校验/`UrlFetchError` 分类，模块级可注入）+ `html_crawl`（抓取→extract，空结果抛错）。`workflow_clean/service.py._load_raw_payload` url 分支删裸 urlopen + 删 `except URLError: return source_uri` 兜底（⛔3）；url 抓取移入 htmlCrawl handler（按 source_uri）。
+- **F6-03 chinatax 真 ETL**：`providers_dedicated/service.py` 重建——`fetch_api`（可注入）+ `chinatax_etl`（真发请求→`_parse_chinatax_items` 解析 JSON items: title/description/publisher/publish_date，逐条失败跳过+warning，空结果 ALERT warning→合并单 artifact 正文）+ `ApiRequestError` + `ProviderRegistry`(host→handler，chinatax 注册、domain/realestate degraded) + `ProviderDegradedError`。删 `[provider:chinatax]` 字符串前缀桩。`maybe_clean_with_provider` 改为走 registry 真 ETL（向后兼容入口保留但 workflow_clean 不再引用）。
+- **F6-08 / F6a-DG degraded**：`_guard_no_scatter(step)` 在 process_clean_step 开头检查 payload `child_files>0`/`scatter=True` → 抛 `DegradedActionError`（单文档源正常）。registry 中 browser*/gemini/domain/realestate/scatter 注册 degraded handler（调用抛带 reason 的 DegradedActionError）；list_actions 标 degraded=True。
+
+### 11.3 先红后绿（24 新用例，全 PASS · 四元组证据）
+| Test-ID | 文件::用例 | 红基线 | PASS 证据 |
+|---------|-----------|--------|-----------|
+| FF-F6a-T01/T02/T10 | `test_clean_action_registry.py`（注册/分派/未知抛错/默认真实 branch/degraded 抛 reason/list_actions 标记，5 用例） | 无 action_registry 模块（import 红） | `2dbceab + test_clean_action_registry(5) + 2026-06-01 03:52 UTC` |
+| FF-F6a-T04 | `test_html_crawl_extract.py`（无残留标签/丢 script-style/解码实体/保段落/空输入，5 用例） | 3 正则桩压单行+不解码实体（保段落&实体断言红） | `2dbceab + test_html_crawl_extract(5) + 2026-06-01 03:52 UTC` |
+| FF-F6a-T05 | `test_html_crawl_fetch.py`（注入抓取/抓取错误传播/不回退 URL 当正文/空抽取抛错，4 用例） | url 抓取裸 urlopen+失败 return source_uri（红） | `2dbceab + test_html_crawl_fetch(4) + 2026-06-01 03:52 UTC` |
+| FF-F6a-T07/T08 | `test_provider_registry.py`（chinatax 解析结构化/错误分类/空结果/registry 路由+degraded/向后兼容入口，5 用例） | 字符串前缀桩、不发请求（红） | `2dbceab + test_provider_registry(5) + 2026-06-01 03:52 UTC` |
+| FF-F6a-T03/T09 | `test_clean_contract_and_dispatch.py`（无硬选 gate/无自提交 gate/返 ExecutorResult/重放安全 1 artifact/scatter degraded，5 用例） | if/else 硬选（gate 红） | `2dbceab + test_clean_contract_and_dispatch(5) + 2026-06-01 03:52 UTC` |
+
+- **桩时代集成测试 fork**（AP §8.2）：`test_p3_clean_step...`（chinatax url）、`test_p4_rag_pipeline...`、`test_p5_search...`（example.com url）原依赖"离线 fetch 失败回退把 URL 当正文"的桩兜底；删兜底后真实 htmlCrawl/chinatax 离线 fail-loud（404 实测）→ 这 3 个测试 fork 为 monkeypatch 注入本地 HTML/JSON 的真实链路测试（更强：实测真抓取+真解析+真清洗）。
+- 全量回归：`python3 -m pytest tests/` → **161 passed**（exit 0；137 + 24）。
+
+### 11.4 偏差与 handoff
+- **handler 内容层 vs AP「handle→ExecutorResult」**：F3 已让 `process_clean_step` 拥有 ExecutorResult 组装 + 确定性 artifact 写入（终态单一归属）。本 AP 把 registry handler 定为**内容层**（`(ctx)->cleaned 文本`），ExecutorResult 在 process_clean_step 组装一次——避免每个 handler 复刻 artifact 写入逻辑、保持终态单一归属。这是对既有 F3 契约的**忠实适配**（比 AP 设想的"每 handler 返 ExecutorResult"改动面更小、职责更聚），满足红线"终态单一归属"。
+- **degraded 测试用断言抛错而非 xfail 占位**：AP §8.5 建议 degraded 项 xfail/skip；本 AP 改为**正向断言** degraded handler 抛 `DegradedActionError(reason)`（强于 xfail——xfail 只标记预期失败，断言抛错验证了 degraded 契约真实生效），更诚实。
+- **deferred（A/B/C）**：browser/PDF/LLM（O1, A）、domain/realestate 多 provider（O2, A）、scatter/child_files 多文档源（O3, A→需散射时）、cleaned_text 落 ObjectStore（O4, B→F4 协调后续）。
+- **handoff 债**：① htmlCrawl **SSRF 面**（url 可指向内网）本轮未防护 → 记 follow-up 交 FF-F6c/下一轮安全（§7.3）。② 端到端 clean→rag→search 语义命中交 F7 capstone B/C 步。③ FF-F6b 共用本 AP 的 action registry 模式与 F3-02 契约。
