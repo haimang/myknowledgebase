@@ -431,6 +431,32 @@ FF-F6c 认证与配置
 
 ---
 
-## 11. 执行日志回填（仅 `executed` 状态使用）
+## 11. 执行日志回填（`executed` — 2026-06-01）
 
-> 文档状态为 `draft`，本节省略（待 `executed` 时按 `respond-execution-log` append 厚版回填）。
+> 文档状态: `draft → executed`。执行人 Opus 4.8（主轨直接执行，未用收尾子代理）。提交 `697dcb0`。前序 F1 时间 SSOT 已就位。全量 `python3 -m pytest tests/` → **192 passed**（exit 0；F6c 前 175 → 新增 17 用例）。
+
+### 11.1 环境
+- 系统 python3。api_keys/prompt_versions/provider_configs DDL 已在 core.sql 并经 migrations 应用。时间比较全走 SQL `strftime`（对齐 F1 SSOT）。
+
+### 11.2 逐工作项
+- **P1-01/02 配置载体读路径**：新建 `smind_config/config_repo.py`——`get_active_prompt(conn,team_id,prompt_key)->PromptVersion|None`、`get_active_provider(conn,team_id,provider_key)->ProviderConfig|None`；`_select_active` team 级优先、回退全局 `team_id IS NULL`，多版本 `ORDER BY activated_at DESC, version DESC LIMIT 1`，status='active'。settings_json/metadata_json 解析为 dict。`__init__` 导出。
+- **P2-01/02 api_keys 读写 + 生成/hash**：`auth/service.py` 新增模块函数 `generate_api_key()`（`sm_`+`base64url(token_bytes(32))` 去 `=`）、`hash_api_key(raw)`（sha256，与会话 token 同策略）；`AuthService.create_api_key(team_id,name,created_by_user_id,scopes_json,expires_at)` INSERT api_keys（id=`apikey_<uuid>`、status='active'、时间 DDL DEFAULT），**仅落 key_hash + key_prefix(raw[:12])**，明文 key 仅返回一次（⛔1）。
+- **P2-03/04 validate + team 归属**：`AuthService.validate_api_key(raw)`——前缀 `sm_` 校验→`hash_api_key`→`SELECT ... WHERE key_hash=? AND status='active' AND (expires_at IS NULL OR expires_at > now)`→命中更新 last_used_at→返回行（含 team_id/created_by_user_id）；失败统一 None。`deps.get_auth_context` 增 `x_api_key` header 参数 + `Authorization: ApiKey ` 分支（**Bearer 优先**，存量 session 路径不变）；命中构造 `AuthContext(team_id=api_keys.team_id, is_api_key=True)`，team 归属唯一取 api_keys.team_id（⛔3）。AuthContext.user_id/session_id 改 Optional（机器身份 session_id=None）。
+- **P2-05 create 端点**：`POST /team/api-keys`（body name/expires_at）`Depends(get_auth_context)`+`require_team`；`team.is_owner(user_id,team_id)`（role='owner' 校验）否则 403；调 `create_api_key` 返回明文一次。`team/service.py` 增 `is_owner`。
+- **P3-01/02 统一 PBKDF2**：删 `_hash_legacy_password`（裸 sha256，与 legacy `hmac-sha512:salt:hash` 不符的误导死代码）；`_verify_password` 非 PBKDF2 分支改 `return False`；`login` 删 legacy rehash 分支。auth 收敛 PBKDF2 单路径。
+
+### 11.3 先红后绿（17 新用例，全 PASS · 四元组证据）
+| Test-ID | 文件::用例 | 红基线 | PASS 证据 |
+|---------|-----------|--------|-----------|
+| FF-F6c-T01/T02 | `test_config_repo.py`（prompt active/多版本最新/team 回退全局/provider settings 解析，4 用例） | 两表零访问、无 config_repo（import 红） | `697dcb0 + test_config_repo(4) + 2026-06-01 04:10 UTC` |
+| FF-F6c-T03/T04 | `test_api_key.py`（生成前缀/hash 确定不可逆/库内仅 hash 无明文/validate 往返/伪造-revoked-expired 拒，5 用例） | api_keys 零访问、无 generate/validate（import 红） | `697dcb0 + test_api_key(5) + 2026-06-01 04:10 UTC` |
+| FF-F6c-T05/T06/T07/T08 | `test_api_key_auth.py`（owner 创建+key 鉴权(X-Api-Key/ApiKey)/伪造-缺失 401/revoked 401/非 owner 403，4 用例） | 无 create 端点、无 api_key 校验（红） | `697dcb0 + test_api_key_auth(4) + 2026-06-01 04:10 UTC` |
+| FF-F6c-T09 | `test_auth_pbkdf2.py`（无 _hash_legacy_password 符号/非 PBKDF2 拒/PBKDF2 注册登录/错密码拒，4 用例） | legacy sha256 hash 仍被 _verify_password 接受（红） | `697dcb0 + test_auth_pbkdf2(4) + 2026-06-01 04:10 UTC` |
+
+- 全量回归：`python3 -m pytest tests/` → **192 passed**（exit 0；175 + 17）。既有 Bearer session 路径（p2/p3/p5 等）无回归——api_key 为并存新分支。
+
+### 11.4 偏差与 handoff
+- **deps.get_auth_context 双 header 优先级**：Bearer session **优先**（存量端点鉴权路径零改动，⛔6），仅无 Bearer 时走 X-Api-Key / `Authorization: ApiKey`。AuthContext.user_id/session_id 改 Optional 以承载机器身份。
+- **配置载体仅读路径**：写入/激活端点 OOS（[O3]）；F6a/F6b 当前用内置 registry 默认（chinatax host 硬匹配 / structurize 内置规则），**未接 config_repo 读取**——配置驱动 provider/prompt 选择留待 F6a/F6b 需运行期改配置时接线（本 AP 已交付可读载体，下游消费侧接线为 follow-up）。
+- **deferred（A/B/C）**：api_key scope 级授权（O1, A→产品需限权时）、prompt/provider 写入激活端点（O3, B→运行期改配置时）、其余缺失 legacy RPC（O2, A）、workflow_step_links（O4→FF-F3）。
+- **handoff**：SSRF（F6a htmlCrawl）安全项本轮仍未处置 → 记入下一轮安全；端到端 api_key 投递 ingestion 的 mega 交 F7 capstone 多 team 隔离步。

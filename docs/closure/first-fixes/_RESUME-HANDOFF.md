@@ -3,7 +3,7 @@
 > 因执行会话 shell/IO 显示层持续不稳定（命令实际执行成功但输出间歇性延迟/串读/显示陈旧），
 > owner 决定重启会话后继续。本文件是重启后的唯一恢复锚点。
 
-## 已完成并提交 (main 分支, 工作树干净, 全量 `python3 -m pytest tests/` 退出码 0 = **175 passed**, F1-F6b)
+## 已完成并提交 (main 分支, 工作树干净, 全量 `python3 -m pytest tests/` 退出码 0 = **192 passed**, F1-F6c)
 
 | 阶段 | 状态 | 提交 | closure |
 |------|------|------|---------|
@@ -14,6 +14,7 @@
 | F5 向量真实性与检索 | ✅ 收口 | `7a70408`(代码+22测试) + docs | `FF-F5-closure.md` |
 | F6a Clean 执行器去桩 | ✅ 收口 | `2dbceab`(代码+24测试) + docs | `FF-F6a-closure.md` |
 | F6b RAG 执行器去桩 | ✅ 收口 | `36af537`(代码+14测试) + docs | `FF-F6b-closure.md` |
+| F6c 认证与配置 | ✅ 收口 | `697dcb0`(代码+17测试) + docs | `FF-F6c-closure.md` |
 
 > 重启时以 `git log --oneline` 实际 HEAD 为准（交接提交后 HEAD 在 `e9a1c70` 之后的 handoff 提交上）。
 > 验证命令：`cd /workspace/repo/smind-family && python3 -m pytest tests/ -q` 应 **65 passed**（`--co` 实测 65 个用例、无 skip/xfail）。早前文档/提交信息中的"66 passed"为虚高记账，已据实更正为 65。
@@ -35,7 +36,7 @@
 - 严守 owner 流程：每阶段 STEP1 重拉上下文(action-plan + owner-gated-qna + 对应 part-cr) → STEP3 完整开发 → STEP4 先红后绿测试↔修复 → STEP5 回填 AP §11 + 写 closure(模板 docs/templates/closure.md 子阶段档 §0-5) + 提交。
 - commit 尾行：`Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>`。
 
-## 剩余工作 (todo #15-#19)
+## 剩余工作 (todo #17-#19)
 - **F4 适配层安全** ✅ 已收口 (`1a568d3`): _resolve_safe 双层路径封堵 / rowid 单调不复用+复用 / 软删统一 / purge 删对象(uploads+static_files+artifacts) / 原子写+受控异常。50 新测先红后绿, 全量 115 passed。详见 `FF-F4-closure.md`。
   - F4 给 F5 留的前序: rowid 单调来源 = vector_records 含软删 MAX+1 (前提 delete 不硬删 vr 行)；search 仍缺 namespace/model 过滤(R10→F5-03)；embedding_dimension 写死 1536、cosine 截断 min(len)(R7→F5)。
 - **F5 向量真实性** ✅ 已收口 (`7a70408`): LocalEmbedder 词袋 feature-hashing(1536维,共词余弦更高) 替 SHA; embed_text 委托之、写/查同实例; embed_text_fake 降级; vec0 degraded fail-loud + VectorIndex 接口(BruteForceVectorIndex); search 增 namespace/model 过滤 + distance_metric 读配置。详见 `FF-F5-closure.md`。
@@ -44,7 +45,8 @@
   - F6a 给下游留: F6b 共用 action registry 模式 + F3-02 契约; htmlCrawl SSRF 防护 follow-up(→F6c/安全); p3/p4/p5 已 fork 为 monkeypatch 注入 `cleaners_universal.service.fetch_url`/`providers_dedicated.service.fetch_api` 的真实链路测试。
 - **F6b RAG 执行器** ✅ 已收口 (`36af537`): structurize schema(sections); construct original+summary 双通道+确定性 chunk_id(doc:index:channel); 独立 rag:vectorize step(F5 embed+五步序+replay 幂等)。详见 `FF-F6b-closure.md`。
   - F6b 给下游留: F6c 共用执行器契约; layer-json/AI 结构化摘要 deferred; T07/soak 端到端语义+race 交 F7。pipeline 现为 clean→rag:structurize→rag:construct→rag:vectorize (4 step)。
-- **F6c 认证配置** (#15-16): AP=FF-F6c。团队 API key 认证(中间件+create_api_key+team归属, api_keys 表已存在); 删 legacy 密码兼容声明统一 PBKDF2([Q6]); prompt_versions/provider_configs 接线。
+- **F6c 认证配置** ✅ 已收口 (`697dcb0`): config_repo(prompt_versions/provider_configs 读路径); API key 认证(generate sm_/hash 存储/validate 中间件/team 归属/POST /team/api-keys owner-only/deps Bearer 优先并存 X-Api-Key); 统一 PBKDF2(删 _hash_legacy_password)。详见 `FF-F6c-closure.md`。
+  - F6c 给下游留: config_repo 载体已可读但 F6a/F6b 消费侧未接线(follow-up); api_key scope 授权/SSRF deferred; api_key 投递 ingestion mega 交 F7。
 - **F7 测试整合** (#17-18): AP=FF-F7。测试原语(冻结时钟/并发/恶意路径/向量真实性 fixtures); 去夹具掩盖; capstone A-J(tests/e2e); 断言强度门禁; closure 重定级(含更正 F1 fastapi 记录)。
 - **#19 跨 F1-F7 全面审查+测试**, 对照 owner QnA 裁决, 向 owner 报告。
 
