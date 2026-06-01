@@ -20,7 +20,7 @@
 > - `eval-reference-anchor 轴 C`（退避/错误分类算法 + 维度守卫 + 反例）
 > 关联 reference-anchor:
 > - `docs/eval/real-wire/reference-anchor-by-opus.md`（§7.3 指回真源）
-> 文档状态: `draft（blocked — 待后续 provider charter 关闭 Q-RW-2/6/7 的 provider 具体口径）`
+> 文档状态: `executed（scaffolding；2026-06-01, commit fec0bb3; closure: docs/closure/real-wire/RW-C-closure.md）— 脚手架 verified；真实 MLX 推理 + live smoke 仍 deferred 至 provider charter`
 
 ---
 
@@ -368,7 +368,20 @@ RW-C live 接线（gated）
 
 ---
 
-## 11. 执行日志回填（仅 `executed` 状态使用）
+## 11. 执行日志回填（executed — scaffolding）
 
-- **实际执行摘要**：`（blocked — 待 provider charter）`
-- **后续 handoff**：`provider charter 关 Q-RW-2/6/7 → 解锁本 AP`
+> 文档状态：`executed（scaffolding）`（2026-06-01，commit `fec0bb3`）。按 owner reframe，本轮交付**可被真实接线的脚手架 + 路由 + 占位槽**；真实 MLX 推理与 live smoke **延后至 provider charter**（且本离线 Linux 环境不可跑）。全量 274 passed + 1 xfailed；门禁 51 文件 0 弱。
+
+**工作记录（逐项）**
+
+- **RWC-01 退避/重试 + 错误分类**：`provider_runtime/retry.py` — `retry_with_backoff`（指数退避 MAX_RETRIES=3/INITIAL_DELAY=1s/BACKOFF=2，借 `embedder.ts:40-164`；`sleep` 可注入测试零等待）+ `is_retryable_error`（借 `:73`，429/5xx/timeout/connection 重试；401/403/422 不重试；**默认保守不重试**）。
+- **RWC-01/02 真实 provider 占位槽**：`provider_runtime/real_provider.py` — `RealMLXLLMProvider`/`RealMLXEmbedder`（构造**成功**→工厂路由已接；`complete`/`embed` 抛 `ProviderDeferredError`（reason=`provider_adapter_deferred_Q-RW-2`）fail-loud）；embedder 维度锁 1024。
+- **RWC-03 密钥管理**：构造注入 `api_keys`（实例内持有，**非**模块级全局轮转——规避 `gemini.ts:96-132` ⛔ 反例）；`redact_secret` + `__repr__` 脱敏（原始 key 不入 repr/日志，Q-RW-7/TR-5）。工厂 `mlx` 槽经 `Settings.llm_api_key/llm_model` 构造注入。
+- **RWC-04 mock↔live 路由一致性**：`_FakeLiveProvider` 替身（真实 MLX 离线不可跑）证 `structurize_via_llm` 在 mock 与 live-替身下**结构/契约一致**（键集 + section 形状），文本质量不比较。
+- **工厂 mlx 槽**：`make_llm/make_embedder` 的 `mlx` 分支由「构造即 raise」改为「构造返回占位（路由通）+ 调用时 fail-loud」；外部厂商（openai/anthropic/gemini）仍构造即 deferred（非本地 MLX 方向）。
+- **测试**：`tests/unit/test_rw_c_live_wiring.py` 9 项（分类/退避恢复/不可重试立即抛/耗尽抛/占位 defer/维度 1024/key 脱敏/工厂注入不泄漏/mock↔live 结构一致）。同步把 RW-A 的 mlx 测改为「构造 ok + 调用 defer」。
+
+- **Phase 偏差 / scope 调整**：按 owner reframe，RW-C 本轮范围由「真实 live 客户端」收窄为「**脚手架 + 占位槽 + 路由**」。RWC-05（live smoke owner-triggered lane）/ RWC-06（live 接入手册 + live closure）/ 真实 MLX `complete`/`embed` 推理 —— **deferred 至 provider charter**，且本离线 Linux 环境无 MLX、不可跑。
+- **阻塞与处理**：真实 MLX 推理在本环境不可验（无 MLX/Apple Silicon）→ 占位 fail-loud + closure 据实标 `未观察(本环境不可跑)`，不谎报 verified。
+- **测试发现**：274 passed（+9，从 265 基线）+ 1 xfailed；无 import 循环；占位 provider 满足 `LLMProvider` 协议（isinstance）。
+- **后续 handoff**：provider charter — 实装 `RealMLXLLMProvider.complete`/`RealMLXEmbedder.embed`（真实 MLX 推理）→ 占位 fail-loud 即转真实；retry/分类/key 注入/路由脚手架已就绪可直接复用；live smoke 在 owner macOS 跑。
