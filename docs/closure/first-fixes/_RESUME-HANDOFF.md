@@ -3,7 +3,7 @@
 > 因执行会话 shell/IO 显示层持续不稳定（命令实际执行成功但输出间歇性延迟/串读/显示陈旧），
 > owner 决定重启会话后继续。本文件是重启后的唯一恢复锚点。
 
-## 已完成并提交 (main 分支, 工作树干净, 全量 `python3 -m pytest tests/` 退出码 0 = **192 passed**, F1-F6c)
+## 已完成并提交 (main 分支, 工作树干净, 全量 `python3 -m pytest tests/` 退出码 0 = **203 passed + 1 xfailed**, F1-F7 全部收口)
 
 | 阶段 | 状态 | 提交 | closure |
 |------|------|------|---------|
@@ -15,6 +15,7 @@
 | F6a Clean 执行器去桩 | ✅ 收口 | `2dbceab`(代码+24测试) + docs | `FF-F6a-closure.md` |
 | F6b RAG 执行器去桩 | ✅ 收口 | `36af537`(代码+14测试) + docs | `FF-F6b-closure.md` |
 | F6c 认证与配置 | ✅ 收口 | `697dcb0`(代码+17测试) + docs | `FF-F6c-closure.md` |
+| F7 测试整合与 closure 重定级 | ✅ 收口 | `f878165`(代码+11测试+capstone) + docs | `FF-F7-closure.md` |
 
 > 重启时以 `git log --oneline` 实际 HEAD 为准（交接提交后 HEAD 在 `e9a1c70` 之后的 handoff 提交上）。
 > 验证命令：`cd /workspace/repo/smind-family && python3 -m pytest tests/ -q` 应 **65 passed**（`--co` 实测 65 个用例、无 skip/xfail）。早前文档/提交信息中的"66 passed"为虚高记账，已据实更正为 65。

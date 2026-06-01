@@ -461,3 +461,37 @@ F7 测试有效性重建与 closure 重定级
 ---
 </content>
 </invoke>
+
+## 11. 执行日志回填（`executed` — 2026-06-01）
+
+> 文档状态: `draft → executed`。执行人 Opus 4.8（主轨直接执行，未用收尾子代理）。提交 `f878165`。前序 F1-F6c 全部收口。全量 `python3 -m pytest tests/` → **203 passed + 1 xfailed**（exit 0；F7 前 192 → 新增 11 用例 + capstone）。
+
+### 11.1 环境与执行背景
+- F7 的多数工作项**在 F4-F6c 执行中已实质交付**：① tests/unit 已充分填充（path/rowid/embedder/registry/api_key/structurize/construct 等真实断言，非空）；② p3/p4/p5 桩固化等值断言已在 F6a fork 为真实 htmlCrawl/chinatax 链路（F7-03 提前完成）；③ 向量真实性 spike（F5 test_f5_vector_authenticity）已建。故本阶段聚焦 F7 尚缺的：去夹具掩盖、原语整合、capstone、closure 重定级、断言门禁。
+- 关于 fastapi：F7 AP 假设"环境无 fastapi、p2-p7 不可运行"——**该假设不成立**（系统 dist-packages 含 fastapi，p2-p7 全程运行）。F7-05 已据实更正 FF-F1 closure 的同一误诊。
+
+### 11.2 逐工作项
+- **F7-01 测试原语**：`tests/fixtures/primitives.py`——`MALICIOUS_PATHS`（F4 路径遍历向量）、`assert_vector_authentic`（F5 相关 chunk 排第一+分差，degraded 下成立）、`assert_clean_text`+`HTML_SAMPLE`（F6 去标签保正文）、`expire_lease_real_path`（F3，经真实 SSOT `add_seconds_iso(-1)` 写过期 lease，**原语层杜绝手写 SQL**）、`iso_format_ok`（F1 SSOT 格式）。`test_f7_primitives.py` 5 条 self-test（每条喂应成功/应失败双向）防原语假绿。
+- **F7-02 去夹具掩盖**：`test_kernel_flow.py::test_expired_claim_can_be_reclaimed` 删 `UPDATE task_claims SET lease_expires_at = strftime(...)` 手写覆盖块（part-cr-8 R2 最强假绿证据），改 `add_seconds_iso(-1)` 真实 SSOT 路径 + ISO 格式断言。`grep "strftime.*lease_expires_at" tests/` = **0 命中**。
+- **F7-03 去桩固化**：已在 F6a 完成（p3-1/p4/p5 fork 为真实链路语义断言）；本阶段复核确认无 `text==原始输入` 等值桩断言残留。
+- **F7-04a unit 填充**：tests/unit 已非空且含真实正确性断言（F4-F6c 累积 + F7 新增 primitives/gate self-test）。
+- **F7-04b e2e capstone**：`tests/e2e/test_first_fixes_capstone.py`——A 多 team 隔离 / B file+url 双源 / C htmlCrawl 真清洗 / E structurize+construct / F 独立 rag:vectorize step 成功 / G search 语义命中（非空+正确 chunk）/ H purge 清退对象（断言对象不残留）/ J 路径遍历 basename 收口（object_key 无 `..`）。D reap/I restart 由 p1 专测覆盖（不重复重型编排）。PDF/浏览器 [Q3] degraded → `xfail(strict=True)`（degraded handler 抛 DegradedActionError）。
+- **F7-05 closure 重定级**：① 更正 FF-F1 "fastapi 缺失致 p2-p7 不可运行" 误诊（追加 F7-05 附记，p2-p7 现 verified）；② 5 份 initial-refactor closure（P3-P7）陈旧 `14 passed` 计数标注作废 + 追加重定级附记（clean→verified[F6a]、retrieval→degraded[Q1 vec0]、cutover→verified；向量真实性由 F5 spike + capstone G 证明）。
+- **F7-06 断言强度门禁**：`tools/scripts/check_assert_strength.py`——AST 扫描每个 `def test_*`，弱断言集 = {`==200/201/204`、`is not None`、`!=""`、`len()>=N`、裸 truthiness}；**`is None`/`==""`/精确值/in/raises 判为强**（行为/拒绝/边界断言）；仅弱断言（weak>0 且 strong==0）则报 file:line 退出 1。smoke 目录（刻意浅 boot 检查）排除。`test_assert_strength_gate.py` self-test（弱-only 必报 / 弱前置+强 必过 / is None 与 ==""不误报 / 全套件过关 44 文件 0 命中）。
+
+### 11.3 先红后绿（11 新用例 + capstone，全 PASS/xfail · 四元组证据）
+| Test-ID | 文件::用例 | 红基线 | PASS 证据 |
+|---------|-----------|--------|-----------|
+| FF-F7-T01a..e | `test_f7_primitives.py`（5 原语 self-test） | 无 primitives 模块（import 红） | `f878165 + test_f7_primitives(5) + 2026-06-01 04:20 UTC` |
+| FF-F7-T02 | `test_kernel_flow.py::test_expired_claim_can_be_reclaimed`（去掩盖走真实 SSOT） | 含 strftime 手写覆盖（part-cr-8 R2 红） | `f878165 + test_expired_claim_can_be_reclaimed + grep 0 命中 + 2026-06-01 04:20 UTC` |
+| FF-F7-T04b | `test_first_fixes_capstone.py`（A–J 语义+完整性 / degraded xfail） | tests/e2e 空（无 capstone） | `f878165 + test_capstone_semantic_and_integrity PASS + degraded xfail + 2026-06-01 04:20 UTC` |
+| FF-F7-T05 | 5 closure 重定级 + FF-F1 fastapi 更正 | 陈旧 14 passed 当证据（part-cr-8 R5 红） | `f878165 + 重定级附记 + 2026-06-01 04:20 UTC` |
+| FF-F7-T06 | `test_assert_strength_gate.py`（门禁 self-test + 全套件过关） | 无门禁脚本 | `f878165 + check_assert_strength self-test PASS + 44 文件 0 命中 + 2026-06-01 04:20 UTC` |
+
+- 全量回归：`python3 -m pytest tests/` → **203 passed + 1 xfailed**（exit 0；192 + 11）。断言强度门禁 0 命中；夹具掩盖 grep 0 命中。
+
+### 11.4 偏差与 handoff
+- **F7 多项提前在 F4-F6c 完成**：F7-03（桩固化重写）随 F6a 完成、F7-04a（unit 填充）随 F4-F6c 累积、向量真实性原语随 F5——本阶段如实复核确认而非重做，符合 F7"贯穿簇"定位。
+- **capstone D/I 不在 e2e 重复**：reap（D）/ restart recovery（I）由 `test_kernel_flow`/`test_kernel_recovery` 专测覆盖；capstone 聚焦端到端语义+完整性可达步骤，避免重型 worker 编排重复（如实标注覆盖路径）。
+- **门禁 self-test 而非接 CI**：本环境无 CI runner，门禁脚本 + self-test + 全套件过关已落地；接入 CI 配置为 follow-up（脚本可直接 `python3 tools/scripts/check_assert_strength.py tests/` 作 pre-commit/CI step）。
+- **deferred（A/B/C）**：真实 vec0/外部 embedding 向量真实性（O1, A→生产化）、PDF/浏览器/多 provider 真实样本（O2, A→capstone xfail）、soak 长稳竞态 ×N（O3, B→后继质量门禁）、P0/P1/P2 gate 结论重定级（O4，仅纠计数）。
