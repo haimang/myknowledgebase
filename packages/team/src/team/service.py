@@ -49,6 +49,18 @@ class TeamService:
         ).fetchone()
         return row is not None
 
+    def is_owner(self, user_id: str, team_id: str) -> bool:
+        # F6-07 P2-05: create_api_key owner 角色校验 (对齐 legacy team.ts)。
+        row = self.conn.execute(
+            """
+            SELECT 1
+            FROM team_members
+            WHERE team_id = ? AND user_id = ? AND status = 'active' AND role = 'owner'
+            """,
+            (team_id, user_id),
+        ).fetchone()
+        return row is not None
+
     def select_team(self, session_id: str, team_id: str) -> None:
         self.conn.execute("UPDATE sessions SET team_id = ? WHERE id = ?", (team_id, session_id))
         self.conn.commit()

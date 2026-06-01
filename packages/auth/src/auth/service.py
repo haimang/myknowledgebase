@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 import hashlib
 import hmac
 import secrets
@@ -8,14 +9,22 @@ from uuid import uuid4
 
 _PBKDF2_PREFIX = "pbkdf2_sha256"
 _PBKDF2_ITERATIONS = 120_000
+_API_KEY_PREFIX = "sm_"
 
 
 def _hash_token(v: str) -> str:
     return hashlib.sha256(v.encode("utf-8")).hexdigest()
 
 
-def _hash_legacy_password(password: str) -> str:
-    return hashlib.sha256(password.encode("utf-8")).hexdigest()
+def generate_api_key() -> str:
+    """F6-07: 生成 `sm_<base64url(32B)>` 明文 (对齐 legacy generateApiKey)。"""
+    body = base64.urlsafe_b64encode(secrets.token_bytes(32)).decode("ascii").rstrip("=")
+    return f"{_API_KEY_PREFIX}{body}"
+
+
+def hash_api_key(raw: str) -> str:
+    """F6-07: api key 仅以 sha256 hash 存储 (与会话 token 同策略, ⛔1 明文绝不入库)。"""
+    return hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
 
 def _hash_password(password: str, *, iterations: int = _PBKDF2_ITERATIONS) -> str:
@@ -25,8 +34,9 @@ def _hash_password(password: str, *, iterations: int = _PBKDF2_ITERATIONS) -> st
 
 
 def _verify_password(password: str, stored_hash: str) -> bool:
+    # F6-11 ([Q6]): 统一 PBKDF2 单路径; 非 PBKDF2 hash 一律不通过 (删 legacy 兼容死代码)。
     if not stored_hash.startswith(f"{_PBKDF2_PREFIX}$"):
-        return hmac.compare_digest(_hash_legacy_password(password), stored_hash)
+        return False
     parts = stored_hash.split("$", 3)
     if len(parts) != 4:
         return False
@@ -64,11 +74,7 @@ class AuthService:
         ).fetchone()
         if not row or not _verify_password(password, row["password_hash"]):
             raise ValueError("invalid credentials")
-        if not row["password_hash"].startswith(f"{_PBKDF2_PREFIX}$"):
-            self.conn.execute(
-                "UPDATE users SET password_hash = ? WHERE id = ?",
-                (_hash_password(password), row["id"]),
-            )
+        # F6-11: 统一 PBKDF2 单路径 — 删 legacy rehash 分支 (非 PBKDF2 已在 _verify 拒绝)。
         token = f"sess_{uuid4().hex}"
         session_id = f"session_{uuid4().hex}"
         self.conn.execute(
@@ -110,3 +116,60 @@ class AuthService:
         )
         self.conn.commit()
         return None
+
+    # --- F6-07: 团队 API key 认证 -------------------------------------------
+
+    def create_api_key(
+        self,
+        *,
+        team_id: str,
+        name: str,
+        created_by_user_id: str | None = None,
+        scopes_json: str | None = None,
+        expires_at: str | None = None,
+    ) -> dict:
+        """生成 key, 仅落 sha256 hash + key_prefix; 明文一次性返回 (P2-02/05)。"""
+        raw = generate_api_key()
+        key_hash = hash_api_key(raw)
+        key_prefix = raw[:12]
+        key_id = f"apikey_{uuid4().hex}"
+        self.conn.execute(
+            """
+            INSERT INTO api_keys (
+                id, team_id, name, key_prefix, key_hash, scopes_json,
+                status, created_by_user_id, expires_at
+            ) VALUES (?, ?, ?, ?, ?, ?, 'active', ?, ?)
+            """,
+            (key_id, team_id, name, key_prefix, key_hash, scopes_json,
+             created_by_user_id, expires_at),
+        )
+        self.conn.commit()
+        # 明文 key 仅此一次返回; 库内只存 hash (⛔1)。
+        return {"id": key_id, "api_key": raw, "key_prefix": key_prefix}
+
+    def validate_api_key(self, raw: str) -> Row | None:
+        """校验 api key: 前缀 → sha256 → active 查表 → expires_at → team 归属 (P2-03/04)。
+
+        失败 (无前缀/无匹配/revoked/expired) 统一返回 None (调用侧 401, 不泄漏细节 ⛔4)。
+        """
+        if not raw or not raw.startswith(_API_KEY_PREFIX):
+            return None
+        key_hash = hash_api_key(raw)
+        row = self.conn.execute(
+            """
+            SELECT id, team_id, created_by_user_id, status, expires_at
+            FROM api_keys
+            WHERE key_hash = ?
+              AND status = 'active'
+              AND (expires_at IS NULL OR expires_at > strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+            """,
+            (key_hash,),
+        ).fetchone()
+        if row is None:
+            return None
+        self.conn.execute(
+            "UPDATE api_keys SET last_used_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = ?",
+            (row["id"],),
+        )
+        self.conn.commit()
+        return row

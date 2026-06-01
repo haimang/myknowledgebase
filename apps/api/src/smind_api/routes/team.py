@@ -1,9 +1,16 @@
 from sqlite3 import Connection
 
+from auth import AuthService
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
-from smind_api.deps import AuthContext, get_auth_context, get_core_conn, make_team_service
+from smind_api.deps import (
+    AuthContext,
+    get_auth_context,
+    get_core_conn,
+    make_team_service,
+    require_team,
+)
 
 router = APIRouter(prefix="/team", tags=["team"])
 
@@ -15,6 +22,11 @@ class BootstrapBody(BaseModel):
 
 class SelectBody(BaseModel):
     team_id: str
+
+
+class ApiKeyBody(BaseModel):
+    name: str
+    expires_at: str | None = None
 
 
 @router.post("/bootstrap")
@@ -49,3 +61,22 @@ def select_team(
         raise HTTPException(status_code=403, detail="team_membership_required")
     service.select_team(ctx.session_id, body.team_id)
     return {"team_id": body.team_id}
+
+
+@router.post("/api-keys")
+def create_api_key(
+    body: ApiKeyBody,
+    ctx: AuthContext = Depends(get_auth_context),
+    conn: Connection = Depends(get_core_conn),
+) -> dict:
+    # F6-07 P2-05: 仅 team owner 可创建; 明文 key 仅一次性返回。
+    team_id = require_team(ctx)
+    if not make_team_service(conn).is_owner(ctx.user_id, team_id):
+        raise HTTPException(status_code=403, detail="owner_role_required")
+    result = AuthService(conn).create_api_key(
+        team_id=team_id,
+        name=body.name,
+        created_by_user_id=ctx.user_id,
+        expires_at=body.expires_at,
+    )
+    return result

@@ -60,28 +60,49 @@ def get_vec_conn() -> Iterator[Connection]:
 
 @dataclass
 class AuthContext:
-    user_id: str
-    session_id: str
+    user_id: str | None
+    session_id: str | None
     team_id: str | None
     email: str
+    is_api_key: bool = False
 
 
 def get_auth_context(
     authorization: str = Header(default=""),
+    x_api_key: str = Header(default=""),
     conn: Connection = Depends(get_core_conn),
 ) -> AuthContext:
-    if not authorization.startswith("Bearer "):
-        raise HTTPException(status_code=401, detail="missing bearer token")
-    token = authorization.replace("Bearer ", "", 1).strip()
-    row = AuthService(conn).validate_session(token)
-    if not row:
-        raise HTTPException(status_code=401, detail="invalid session")
-    return AuthContext(
-        user_id=row["user_id"],
-        session_id=row["id"],
-        team_id=row["team_id"],
-        email=row["email"],
-    )
+    # F6-07: Bearer session 优先 (存量路径不变); 否则走 API key 分支 (ApiKey/X-Api-Key)。
+    if authorization.startswith("Bearer "):
+        token = authorization.replace("Bearer ", "", 1).strip()
+        row = AuthService(conn).validate_session(token)
+        if not row:
+            raise HTTPException(status_code=401, detail="invalid session")
+        return AuthContext(
+            user_id=row["user_id"],
+            session_id=row["id"],
+            team_id=row["team_id"],
+            email=row["email"],
+        )
+
+    raw_key = x_api_key.strip()
+    if not raw_key and authorization.startswith("ApiKey "):
+        raw_key = authorization.replace("ApiKey ", "", 1).strip()
+    if raw_key:
+        # F6-07 P2-03/04: team 归属唯一取 api_keys.team_id (不信请求侧, ⛔3);
+        # 伪造/无效/revoked/expired 统一 401 (不泄漏细节, ⛔4)。
+        key_row = AuthService(conn).validate_api_key(raw_key)
+        if not key_row:
+            raise HTTPException(status_code=401, detail="invalid api key")
+        return AuthContext(
+            user_id=key_row["created_by_user_id"],
+            session_id=None,
+            team_id=key_row["team_id"],
+            email="",
+            is_api_key=True,
+        )
+
+    raise HTTPException(status_code=401, detail="missing bearer token")
 
 
 def require_team(ctx: AuthContext) -> str:
