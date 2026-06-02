@@ -80,3 +80,89 @@ def test_vec0_bruteforce_parity_cosine() -> None:
 @pytest.mark.skipif(not _VEC0, reason="sqlite-vec 扩展不可载 (离线 Linux); 在 owner macOS 跑")
 def test_vec0_empty_candidates() -> None:
     assert Vec0VectorIndex().query([0.1] * 1024, [], top_k=5) == []
+
+
+# -----------------------------------------------------------------------------
+# 复审回应 R1 / R2: VectorStore 接 Settings.vector_index + 持久 vec0 错配地雷守卫。
+# -----------------------------------------------------------------------------
+
+from vector_sqlite_vec import VectorStore  # noqa: E402
+
+from tests.fixtures.sqlite_kernel import make_kernel_dbs  # noqa: E402
+
+
+def _upsert(store: VectorStore, chunk_id: str, vec: list[float]) -> None:
+    store.upsert_chunk(
+        chunk_id=chunk_id,
+        team_id="team_x",
+        document_id="doc_x",
+        namespace_id="ns_team_x",
+        embedding_model="local-bow-hash-v1",
+        embedding=vec,
+    )
+
+
+def test_store_default_bruteforce_search_works() -> None:
+    """R1 回归: 默认 vector_index=bruteforce, 写查路径不变 (零回归)。"""
+    _core, vec = make_kernel_dbs()
+    store = VectorStore(vec, workspace_key="team_x")  # 默认 bruteforce
+    _upsert(store, "a", [1.0] + [0.0] * 1023)
+    _upsert(store, "b", [0.0, 1.0] + [0.0] * 1022)
+    hits = store.search(
+        embedding=[1.0] + [0.0] * 1023,
+        team_id="team_x",
+        namespace_id="ns_team_x",
+        embedding_model="local-bow-hash-v1",
+        top_k=2,
+    )
+    assert hits and hits[0]["chunk_id"] == "a"
+
+
+def test_store_honors_vector_index_vec0_setting() -> None:
+    """R1 核心: Settings.vector_index='vec0' 现在**真的生效**于 store.search。
+
+    离线 Linux (无扩展): 选 vec0 → 候选式 Vec0VectorIndex.query → fail-loud
+    (sqlite_vec_unavailable), 而非旧行为『静默用 BruteForce』(死配置)。
+    macOS (有扩展): 真实 KNN, 返回命中。
+    """
+    _core, vec = make_kernel_dbs()
+    store = VectorStore(vec, workspace_key="team_x", vector_index="vec0")
+    _upsert(store, "a", [1.0] + [0.0] * 1023)
+    if _VEC0:
+        hits = store.search(
+            embedding=[1.0] + [0.0] * 1023,
+            team_id="team_x",
+            namespace_id="ns_team_x",
+            embedding_model="local-bow-hash-v1",
+            top_k=1,
+        )
+        assert hits and hits[0]["chunk_id"] == "a"
+    else:
+        with pytest.raises(RuntimeError, match="sqlite_vec_unavailable"):
+            store.search(
+                embedding=[1.0] + [0.0] * 1023,
+                team_id="team_x",
+                namespace_id="ns_team_x",
+                embedding_model="local-bow-hash-v1",
+                top_k=1,
+            )
+
+
+def test_store_fail_loud_when_index_is_native_vec0_table() -> None:
+    """R2 核心: 持久 chunk_embedding_index 若为真实 vec0 虚表, JSON 读写与之不兼容,
+
+    须 fail-loud (不静默写坏/读崩)。本环境无扩展不能真建 vec0 虚表, 故用一张
+    sqlite_master.sql 含 'vec0' 字面的表模拟探测命中 (等价于扩展被载入后的错配态)。
+    """
+    _core, vec = make_kernel_dbs()
+    store = VectorStore(vec, workspace_key="team_x")
+    vec.execute("DROP TABLE chunk_embedding_index")
+    # 模拟真实 vec0 虚表的 sqlite_master.sql 特征 (含 'vec0'); 不需真扩展即可触发探测。
+    vec.execute(
+        "CREATE TABLE chunk_embedding_index "
+        "(rowid INTEGER PRIMARY KEY, embedding BLOB, _marker TEXT DEFAULT 'using vec0')"
+    )
+    vec.commit()
+    assert store._embedding_index_is_native_vec0() is True
+    with pytest.raises(RuntimeError, match="vec0_native_store_unimplemented"):
+        _upsert(store, "a", [0.1] * 1024)

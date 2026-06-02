@@ -109,7 +109,7 @@
 
 | 不变量 | 状态 | 证据 |
 |--------|------|------|
-| SQLite = prompt SSOT（替代 Cloudflare KV，无 KV） | ✅ 保持 | `render_prompt` 经 `get_active_prompt` 读 SQLite；正文文件经 digest 受 SSOT 校验 |
+| prompt 权威源（替代 Cloudflare KV，无 KV） | ✅ 保持 | **措辞校正（复审 R4）**：运行时**正文实读自本地文件**（`render_prompt`→`path.read_text`），SQLite（`prompt_versions`）仅持 `template_path + template_digest`、不持正文。故 **SQLite = 「权威版本选择 + 防篡改 digest 守卫」的 SSOT；本地文件 = 正文内容 SSOT**——与 KV（KV 本身持正文）不同，不能只备份 SQLite 而丢 `prompts/`。`prompt_renderer.py` 模块 docstring 表述准确，qna Q-RW-3 的「SQLite 为运行时唯一真相源」应据此读为「版本/digest 唯一真相源」 |
 | 文件↔SQLite digest 一致性（防篡改静默生效） | ✅ 保持 | digest 不一致 fail-loud |
 | 默认 mock/rule 不打外网（TR-5） | ✅ 保持 | `semantic_mode=rule` + `llm_provider=mock` 默认 |
 | 去桩保留规则化 fallback（TR-4/[Q3]） | ✅ 保持 | structurize_text/build_summary/degraded registry 均留 |

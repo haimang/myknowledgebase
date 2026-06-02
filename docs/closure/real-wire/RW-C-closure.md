@@ -27,7 +27,7 @@
 
 | Item | 状态 | 证据（commit + test + run-time） |
 |------|------|----------------------------------------|
-| RWC-01 退避/重试 + 错误分类 | ✅ | commit `fec0bb3` + `test_rw_c_live_wiring.py::test_is_retryable_classification`/`_retry_recovers_after_transient`/`_non_retryable_immediate_raise`/`_exhausts_and_raises` PASS |
+| RWC-01 退避/重试 + 错误分类 | ✅（算法 verified · **未接线**）| commit `fec0bb3` + `test_rw_c_live_wiring.py::test_is_retryable_classification`/`_retry_recovers_after_transient`/`_non_retryable_immediate_raise`/`_exhausts_and_raises` PASS。**复审 R5 校正**：`retry_with_backoff` 算法 + 分类自测绿，但当前**业务码 0 调用方**（占位 `RealMLX*.complete` 直接 raise `ProviderDeferredError`，无处可包）——是「就绪未接线的脚手架」，非「已生效的重试」。provider charter 实装 `RealMLX*` 时由其包裹 `retry_with_backoff` |
 | RWC-02 真实 provider 占位槽 + 维度守卫 | ✅（scaffolding）| `…::test_real_mlx_llm_constructs_defers_on_call`/`_real_mlx_embedder_dimension_locked_1024` PASS（构造 ok / 推理 defer） |
 | RWC-03 密钥构造注入 + 脱敏 | ✅ | `…::test_key_redacted_in_repr`/`_factory_injects_key_via_constructor_not_global` PASS（key 不入 repr） |
 | RWC-04 mock↔live 路由一致性 | ✅（替身）| `…::test_mock_live_structural_parity` PASS（FakeLive 替身证契约） |

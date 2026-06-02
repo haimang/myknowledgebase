@@ -5,7 +5,7 @@ import logging
 from hashlib import sha256
 from sqlite3 import Connection
 
-from .vector_index import BruteForceVectorIndex
+from .vector_index import BruteForceVectorIndex, Vec0VectorIndex
 
 logger = logging.getLogger("vector_sqlite_vec.store")
 
@@ -15,9 +15,50 @@ EMBEDDING_DIMENSION = 1024
 
 
 class VectorStore:
-    def __init__(self, conn: Connection, *, workspace_key: str = "default") -> None:
+    def __init__(
+        self,
+        conn: Connection,
+        *,
+        workspace_key: str = "default",
+        vector_index: str = "bruteforce",
+    ) -> None:
         self.conn = conn
         self.workspace_key = workspace_key
+        # RW-D / R1 fix: 候选式排序索引选型经此参数贯穿 (上层把 Settings.vector_index 注入),
+        # 取代原先 search 硬编码 BruteForceVectorIndex (使 Settings.vector_index 成死配置)。
+        # 默认 bruteforce (零回归); "vec0" → Vec0VectorIndex (扩展不可载即 fail-loud, 不静默退化)。
+        self.vector_index = vector_index
+
+    def _embedding_index_is_native_vec0(self) -> bool:
+        """探测持久 chunk_embedding_index 是否为真实 vec0 虚表 (而非降级 TEXT 表)。
+
+        R2 fix: VectorStore 以 JSON 文本读写 chunk_embedding_index, 仅在 schema 降级为
+        TEXT 表时自洽。若有人把 sqlite-vec 扩展载入本连接, vec.sql 会建出真实 vec0 虚表
+        (float[N]), 此时 JSON 读写与之**不兼容** (须 serialize_float32)。本探测供写/查侧
+        在该错配态 fail-loud, 杜绝静默写坏 / 读崩 (owner 关注的『数据库读写错乱』地雷)。
+        """
+        row = self.conn.execute(
+            "SELECT sql FROM sqlite_master WHERE name = 'chunk_embedding_index'"
+        ).fetchone()
+        sql = (row["sql"] if row else "") or ""
+        return "vec0" in sql.lower()
+
+    def _guard_json_store_compatible(self) -> None:
+        if self._embedding_index_is_native_vec0():
+            raise RuntimeError(
+                "chunk_embedding_index is a native vec0 virtual table, but VectorStore "
+                "persists embeddings as JSON text (reason=vec0_native_store_unimplemented). "
+                "Do NOT load the sqlite-vec extension into the core/vec store connection "
+                "until the serialize_float32 read/write migration lands (RW-D carry-over: "
+                "持久 vec0 store 集成). Vec0VectorIndex ranking works on JSON-loaded "
+                "candidates without a native persistent table."
+            )
+
+    def _make_query_index(self, metric: str):  # noqa: ANN202
+        """按 self.vector_index 构建候选式排序索引 (R1: honor Settings.vector_index)。"""
+        if self.vector_index == "vec0":
+            return Vec0VectorIndex(metric)
+        return BruteForceVectorIndex(distance_metric=metric)
 
     def upsert_chunk(
         self,
@@ -32,6 +73,8 @@ class VectorStore:
         content_hash: str | None = None,
         embedding: list[float],
     ) -> None:
+        # R2: 写前确认持久索引非真实 vec0 虚表 (JSON 写入与 vec0 float 列不兼容)。
+        self._guard_json_store_compatible()
         # RWA-09: 写侧维度守卫 — 维度漂移 fail-loud (TR-2/TR-4, 撞 DB CHECK 前先拦)。
         dim = len(embedding)
         if dim != EMBEDDING_DIMENSION:
@@ -146,6 +189,8 @@ class VectorStore:
                 team_id,
                 namespace_id,
             )
+        # R2: 读前确认持久索引非真实 vec0 虚表 (否则 cei.embedding 是 blob, json.loads 崩)。
+        self._guard_json_store_compatible()
         rows = self.conn.execute(
             f"""
             SELECT vr.chunk_id, cei.embedding
@@ -157,7 +202,8 @@ class VectorStore:
         ).fetchall()
         candidates = [(row["chunk_id"], json.loads(row["embedding"])) for row in rows]
         # F5-03: distance_metric 从 namespace 配置读取并生效 (非硬编码 cosine, R10)。
-        index = BruteForceVectorIndex(distance_metric=self._resolve_metric(namespace_id))
+        # R1: 索引实现按 self.vector_index 选 (BruteForce 默认 / Vec0VectorIndex), 不再硬编码。
+        index = self._make_query_index(self._resolve_metric(namespace_id))
         ranked = index.query(embedding, candidates, top_k)
         return [{"chunk_id": chunk_id, "score": score} for chunk_id, score in ranked]
 

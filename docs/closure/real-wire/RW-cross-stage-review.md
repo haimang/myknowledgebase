@@ -63,7 +63,7 @@
 
 | # | 发现 | 级别 | 处置 |
 |---|------|------|------|
-| X1 | **`Settings.vector_index="vec0"` 未接 store.search**：工厂 `make_vector_index('vec0')` 返 `Vec0VectorIndex`，但 `store.search` 仍硬建 `BruteForceVectorIndex` → 设 vec0 不生效（静默用 BruteForce） | 🟡 footgun | 登记 carry-over（持久 vec0 store 集成）；RW-D closure §4 已记；macOS 集成时一并接 store |
+| X1 | **`Settings.vector_index="vec0"` 未接 store.search**：工厂 `make_vector_index('vec0')` 返 `Vec0VectorIndex`，但 `store.search` 仍硬建 `BruteForceVectorIndex` → 设 vec0 不生效（静默用 BruteForce） | ~~🟡 footgun~~ → **✅ 复审已修（2026-06-02，R1/R2）** | `VectorStore` 加 `vector_index` 参数贯穿 `SearchService`/`management.search`，setting 现真生效（vec0 离线 fail-loud）；另加 `_guard_json_store_compatible` 防「持久表为 vec0 虚表 + JSON 读写」错配。详见 `docs/code-review/real-wire/RW-full-reviewed-by-opus.md` §6。持久原生 vec0 表 + serialize_float32 重构仍为 carry-over（macOS）|
 | X2 | 真实 MLX 推理 + 真实 vec0 KNN 本环境未观察 | 🟡 未观察 | 占位/skipif fail-loud；owner macOS 验（RW-C/RW-D closure handoff） |
 | X3 | executor-级 semantic_mode=llm 需 prompt 已 seed + mock responses_path（否则 fail-loud） | 🟢 by-design | render/Mock 未命中 fail-loud（[Q7] 不静默）；capstone 演示 seed 流程 |
 | X4 | PDF 输入面未做 | 🟢 deferred | Q-RW-4 裁决；provider/embedding charter |

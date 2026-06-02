@@ -17,9 +17,14 @@ class SearchService:
         workspace_key: str,
         object_store: FileSystemObjectStore,
         embedder: Embedder | None = None,
+        vector_index: str = "bruteforce",
     ) -> None:
         self.core_conn = core_conn
-        self.vec_store = VectorStore(vec_conn, workspace_key=workspace_key)
+        # R1: 把 Settings.vector_index 注入 store (调用方装配), 使 vec0 选型在查询路径生效;
+        # 本包不导入 provider_runtime 以免循环, 故收 kind 字符串而非工厂结果。
+        self.vec_store = VectorStore(
+            vec_conn, workspace_key=workspace_key, vector_index=vector_index
+        )
         self.object_store = object_store
         # RWA-04: 查侧 embedder 经构造注入 (工厂在调用方装配); 缺省回落 default_embedder
         # (=工厂 local-hash 默认, 写/查同实现 ⛔3)。本包不导入 provider_runtime 以免循环。

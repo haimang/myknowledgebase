@@ -89,6 +89,7 @@ class ManagementService:
             workspace_key=team_id,
             object_store=self.object_store,
             embedder=make_embedder(load_settings()),
+            vector_index=load_settings().vector_index,
         ).search(
             team_id=team_id,
             query=query,
@@ -104,6 +105,7 @@ class ManagementService:
             workspace_key=team_id,
             object_store=self.object_store,
             embedder=make_embedder(load_settings()),
+            vector_index=load_settings().vector_index,
         ).search_debug(team_id=team_id, query=query, limit=limit)
 
     def list_active_claims(self, team_id: str) -> list[Row]:

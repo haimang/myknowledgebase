@@ -19,8 +19,12 @@
 
 > **本阶段最关键的 known gap（对下游影响）**：
 > 1. 真实 vec0 KNN + parity **未在本环境验证**（无 sqlite-vec 扩展）——macOS 跑 skip 测。
-> 2. **持久 vec0 store 集成未做**：`store.search` 仍走 TEXT-JSON 候选加载 + BruteForce；持久 `chunk_embedding_index` 改 vec0 原生存储 + 直接表 KNN 是 carry-over。
+> 2. **持久 vec0 store 集成未做**：`store.search` 候选仍走 TEXT-JSON 加载（候选式索引可选 Vec0VectorIndex 排序）；持久 `chunk_embedding_index` 改 vec0 原生存储 + 直接表 KNN 是 carry-over。
 > 3. PDF/二进制输入未做（Q-RW-4 延后）。
+>
+> **🔧 复审修复（2026-06-02，见 `docs/code-review/real-wire/RW-full-reviewed-by-opus.md` §6）**：
+> - **R1**：`VectorStore` 新增 `vector_index` 参数并贯穿 `SearchService`/`management.search`，`store.search` 不再硬编码 BruteForce → `Settings.vector_index="vec0"` 现**真生效**（离线无扩展即候选式 `Vec0VectorIndex.query` fail-loud `sqlite_vec_unavailable`，不再静默退化为死配置）。注：候选式 vec0 排序**无需**持久原生表即可在 macOS 工作。
+> - **R2**：`store.upsert_chunk`/`search` 加 `_guard_json_store_compatible`——若持久 `chunk_embedding_index` 被探测为真实 vec0 虚表（而 store 仍 JSON 读写），**fail-loud** `vec0_native_store_unimplemented`，杜绝「装扩展即写坏/读崩」的数据库读写错配地雷。**handoff 护栏**：完成 serialize_float32 持久重构前，**禁止**把 sqlite-vec 扩展载入 core/vec store 连接。
 
 ---
 
