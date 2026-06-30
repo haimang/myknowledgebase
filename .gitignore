@@ -26,6 +26,9 @@ htmlcov/
 
 # Eval fixtures scratch (RWA-06: 大样本 git-ignored, 精简集在 tests/fixtures)
 .tmp/
+.context/
+.claude/
+
 
 # Virtual environments
 .venv/
