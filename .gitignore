@@ -1,4 +1,5 @@
 legacy-family/
+legacy-python/
 
 # Python build artifacts
 *.egg-info/
@@ -28,7 +29,7 @@ htmlcov/
 .tmp/
 .context/
 .claude/
-
+.adocs/
 
 # Virtual environments
 .venv/
