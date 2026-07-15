@@ -3,18 +3,20 @@
 > **项目**：`myknowledgebase`（MKB）
 > **Domain / 子系统**：跨 `D2 / S02-S03` 的任务与执行基础模型
 > **文档性质**：`specification / domain-truth / cross-domain decision`
-> **文档状态**：`accepted architecture direction / S02-calibrated`（三层切分由 owner 主动提出；Task lifecycle/API 已由 S02 接续冻结，Execution/Process exact state 与 DDL 仍由下游 spec 完成）
-> **Truth 版本**：`D01-v1.1`
+> **文档状态**：`accepted architecture direction / S02+S04-calibrated`（三层切分由 owner 主动提出；Task lifecycle/API 已由 S02 冻结，长期摄入资产语义已由 S04 校准）
+> **Truth 版本**：`D01-v1.2`
 > **日期**：`2026-07-15`
 > **作者归属**：`MKB owner` 主动提出切分；`Codex` 负责代码复核、规范化表达与 architecture verdict
-> **权威输入**：Owner 对 `task_uuid / execution_uuid / process_uuid` 的直接裁决、`S01-v1.0`、`legacy-family/` 的 SMCP / dispatcher / process tracking 生产事实
+> **权威输入**：Owner 对 `task_uuid / execution_uuid / process_uuid` 的直接裁决、`S01-v1.3`、`S02-v1.1`、`S04-v1.0`、`legacy-family/` 的 reference-anchor 生产事实
 > **上游索引**：`docs/baseline/spec-index.md`
 > **上游真相**：`docs/baseline/domain-truth/S01-skill-worker-integration.md`
-> **下游消费者**：`S02` Task API、`S03` Workflow Engine、`S04-S05` Document/Scatter、`S08-S09` Vector、`S12` Persistence、`S15` Observability、跨系统拓扑 `17`
+> **下游消费者**：`S02` Task API、`S03` Workflow Engine、`S04-S05` Intake/Scatter、`S08-S09` Vector、`S12` Persistence、`S15` Observability、跨系统拓扑 `17`
 
 > **Origin 声明**：`Task / Execution / Process` 三层切分不是 Codex 从 legacy-family 推导出的命名，也不是对 legacy `job/process` 表的改名复制。它是 **MKB owner 在 S02 讨论中主动提出的重构方案**。本文只负责把 owner 原始裁决整理为可实现、可验收、可回填的 Domain Truth，并以 legacy 的生产代码验证该方案是否覆盖真实故障面。
 
 > **S02 回流声明**：`S02-v1.0` 没有改变 Task/Execution/Process 三层运行身份或三张核心运行状态表；它按 owner 裁决增加了独立 `task_restarts` 因果/admission 表。四张原有 Task/运行真相表继续成立，启用外部人工重启后的最小 durable 业务真相集合更新为五张。
+
+> **S04 回流声明**：`S04-v1.0` 没有增加第四层运行身份。D01 原先宽泛的 `Source/Document/DocumentVersion/manifest` 资源口径现校准为 `IntakeSource/IntakeSnapshot/IntakeItem/IntakeRevision/IntakeSnapshotMembership`；`Artifact` 在 Intake 语境中必须写为 `IntakeArtifact`。Execution tree 与 Intake identity graph 仍是两个独立事实面。
 
 > **约束级别**：本文中的“必须 / 禁止 / 仅允许”是后续设计与实现的强制约束；“应当”是 D01 verdict 的默认约束，若要偏离必须 reopen D01；“建议 / 可以”不冻结具体实现。本文明确标为“交由 S02/S03 冻结”的状态名、字段名或算法，不得被误读为已定 DDL。
 
@@ -36,7 +38,7 @@ MKB 需要同时面对三种生命周期，但此前的讨论反复把它们压�
 - 散射任务无法用一个“当前 job”指针准确表达；
 - retry 到底是重试整个请求、某次执行还是某个工序无法判断；
 - 短期 process 记录被清理后，Task 失去 durable 结果；
-- 一次 API 获取散射出 N 个 Document 时，外部请求与 N 个执行相互覆盖。
+- 一次 API 获取散射出 N 个 IntakeItem 时，外部请求与 N 个执行相互覆盖。
 
 Owner 因此主动将运行模型切分为：
 
@@ -70,7 +72,7 @@ Task  (team_uuid, task_uuid)
   ▼
 Root Execution  (execution_uuid, durable)
   │
-  ├── 单一文件入口
+  ├── single Intake 入口
   │     ├── Process: clean / normalize
   │     ├── Process: lsrag.structurize
   │     ├── Process: lsrag.construct
@@ -80,10 +82,10 @@ Root Execution  (execution_uuid, durable)
   └── API 散射入口
         ├── Process: intake.api_fetch
         ├── Process: clean.api_scatter
-        ├── Process: scatter.persist_manifest
-        ├── Child Execution A (Document A)
+        ├── Process: intake.accept_snapshot
+        ├── Child Execution A (IntakeItem A)
         │     └── Processes: clean? → structurize → construct → vectorize → validate
-        ├── Child Execution B (Document B)
+        ├── Child Execution B (IntakeItem B)
         │     └── Processes: clean? → structurize → construct → vectorize → validate
         └── ... Child Execution N
 
@@ -96,9 +98,9 @@ Root Execution  (execution_uuid, durable)
 
 | 平面 | Task | Execution | Process |
 |---|---|---|---|
-| 文件/资源属性平面 | 只保存请求目标与聚合结果引用；不保存散射明细 | 持有一个具体 source/document/version target；父子 Execution 表达本次运行树 | 通过受控 input/output reference 读取或产生 Artifact；不拥有 Document 身份 |
+| Intake/资源属性平面 | 只保存请求目标与聚合结果引用；不保存散射明细 | 持有一个具体 IntakeSource/Snapshot/Item/Revision target；父子 Execution 只表达本次运行树 | 通过受控 input/output reference 读取或产生 IntakeArtifact/派生资产；不拥有 Intake 身份 |
 | 观测平面 | 对外总状态、进度、错误/结果摘要、revision | durable 阶段、当前 process 指针、fan-out/fan-in 计数、最终证明摘要 | 精确状态、attempt/retry、claim/lease、耗时、结构化错误与验证结果 |
-| I/O 平面 | 不传递主机绝对路径 | 固定本次运行的 artifact namespace/manifest 与最终结果引用 | 只消费/产生逻辑 I/O slot；首版 locator 由本地 filesystem adapter 解析 |
+| I/O 平面 | 不传递主机绝对路径 | 固定本次运行的 IntakeArtifact namespace/Snapshot/ChangeSet 与最终结果引用 | 只消费/产生逻辑 I/O slot；首版 locator 由本地 filesystem adapter 解析 |
 | 编排/控制平面 | 接收 cancel/retry 等外部 intent；不直接改内部步骤 | 解释 workflow definition，负责分支、fan-out/fan-in、取消传播与总体失败归约 | 负责可 claim 工作、worker 执行、自动 retry、max_retries 与 type-specific completion guard |
 
 ### 1.5 Scope fence
@@ -107,7 +109,7 @@ Root Execution  (execution_uuid, durable)
 
 - 三个运行身份的语义、责任和基数；
 - Task 与 Workflow 生命周期分离；
-- 单一文件与 API 散射入口的 Execution 拓扑；
+- single Intake 与 API scatter 入口的 Execution 拓扑；
 - retry、cancel、状态归约和 Process 清理的层级边界；
 - D01 直接需要的业务状态表数量与表间关系；
 - 对 legacy 生产经验的保留、改写与删除 verdict；
@@ -117,8 +119,8 @@ Root Execution  (execution_uuid, durable)
 
 - Task 对外精确 status enum、URI、HTTP error envelope、分页与 retention（`S02`）；
 - Workflow Definition schema、Process 精确状态 enum、claim/lease、backoff 与 reconciliation 算法（`S03`）；
-- Source/Document/Version/parent-child manifest 的资源 DDL（`S04-S05`）；
-- Artifact schema 与本地路径布局（`S13`）；
+- IntakeSource/Snapshot/Item/Revision/Membership 的 exact DDL 与 S05 adapter contract（`S04-S05`）；
+- IntakeArtifact bytes/backend 与本地路径布局（`S13`）；
 - Vector record、filter metadata 和 publication proof 的完整 schema（`S08-S09/S12`）；
 - append-only event/log envelope 与保留周期（`S15`）。
 
@@ -157,7 +159,7 @@ D01 在实现层完成，至少要求：
 |---|---|---|---|
 | `D01-T001` | `Task / Execution / Process` 三层切分由 MKB owner 主动提出，不是 assistant 自行创造的新 task 词汇，也不是 legacy 表结构翻译。 | `OWNER-ORIGINATED` | 后续文档必须保留 origin 声明，禁止把该方案归因为 legacy 或 Codex。 |
 | `D01-T002` | Task lifecycle 与 Workflow lifecycle 必须分开；Task 从具体 RAG pipeline 抽离，作为 ACK、CRUD、外部总状态与命令边界。 | `OWNER-ORIGINATED` | `S02` 只拥有外部 Task contract，不定义 clean/structurize/construct/vectorize 的内部工序状态。 |
-| `D01-T003` | `task_uuid` 面向外部 API；无论单一文件还是散射入口，都以 Task 作为唯一请求起点。 | `OWNER-ORIGINATED` | 上游不得创建 `execution_uuid` 或 `process_uuid` 来绕过 Task ingress。 |
+| `D01-T003` | `task_uuid` 面向外部 API；无论 single Intake 还是 scatter 入口，都以 Task 作为唯一请求起点。 | `OWNER-ORIGINATED + S04-CALIBRATION` | 上游不得创建 `execution_uuid` 或 `process_uuid` 来绕过 Task ingress。 |
 | `D01-T004` | `execution_uuid` 只在 MKB 内部产生和流转，必须 durable；它是执行阶段唯一稳定的内部查询 UUID。 | `OWNER-ORIGINATED` | 进程重启、队列 redelivery、工序 retry 不得替换当前 Execution 身份。 |
 | `D01-T005` | 散射 Task 可以产生多个 `execution_uuid`；每个 Execution 持有具体执行状态与业务流转总体控制。 | `OWNER-ORIGINATED` | Task:Execution 是 1:N，禁止 schema 假设“一 Task 永远只有一个 Execution”。 |
 | `D01-T006` | `process_uuid` 承载具体业务项下某个工序实例的状态细节；Process 不是外部资源，允许在满足 retention/compaction 条件后定期清理。 | `OWNER-ORIGINATED` | `S03/S12/S15` 必须先把 durable 摘要上卷到 Execution，再允许清理。 |
@@ -171,16 +173,16 @@ D01 在实现层完成，至少要求：
 | `D01-T009` | Task 必须保存 `current_root_execution_uuid` 或语义等价的当前 root 指针；不得保存一个声称代表整个散射任务的 singular `current_process_uuid`。 | `D01-VERDICT` | 单一 current process 指针只属于某个 Execution；Task 用 root + 聚合计数表达 1:N。 |
 | `D01-T010` | 每个 Execution 必须属于一个 Task；每个 Task 可保留多个历史 root Executions，但任一时刻最多只能有一个 current/active root。 | `D01-VERDICT` | retry 不覆盖历史执行；数据库需要 current pointer/CAS 或等价唯一约束。 |
 | `D01-T011` | 每个 Execution 必须记录 `root_execution_uuid`；root 的该字段等于自身，child 同时记录 `parent_execution_uuid`。 | `D01-VERDICT` | 不需要额外 Task-Execution join 表或 scatter-execution relation 表即可表达树与高效查询。 |
-| `D01-T012` | 散射 child 的 `parent_execution_uuid` 指向本次 fan-out 的 root；Document 的 parent/child 资源血缘属于 S04/S05，不能用 Execution 血缘替代。 | `D01-VERDICT` | 运行树与资源树是两个事实面，允许关联但禁止共用一张 relation 表。 |
+| `D01-T012` | scatter child 的 `parent_execution_uuid` 指向本次 fan-out root；长期集合与资产血缘由 IntakeSource/Snapshot/Membership/Item/Revision 表达，不能用 Execution 血缘替代。 | `D01-VERDICT + S04-T001..T008` | Execution tree 与 Intake identity graph 是两个事实面，允许显式关联但禁止共用 relation row。 |
 | `D01-T013` | `process_uuid` 是工序**实例身份**，不是工序分类；必须另设 `process_type/process_key`，并记录 workflow rank/action branch 或等价定义快照。 | `D01-VERDICT + CODE-FACT` | 不能出现 `process_uuid='structurize'` 或仅凭 UUID 猜步骤类型。 |
 | `D01-T014` | 一个 Process 必须且只能属于一个 Execution；Execution 可以拥有顺序、分支或并发的多个 Processes。 | `D01-VERDICT` | Process FK 直接指向 execution；跨 Execution 复用 process row 被禁止。 |
-| `D01-T015` | MKB 内生的 `execution_uuid` 与 `process_uuid` 使用 UUIDv7；它们与 Task、Trace、Document、Artifact、Vector identity 相互独立。 | `S01-T008/T009 + D01-VERDICT` | 任一 identity 都不能因“方便关联”复用另一个 identity。 |
+| `D01-T015` | MKB 内生的 `execution_uuid` 与 `process_uuid` 使用 UUIDv7；它们与 Task、Trace、五类 Intake UUID、Vector identity 相互独立。 | `S01-T008/T009 + D01-VERDICT + S04-T001` | 任一 identity 都不能因“方便关联”复用另一个 identity。 |
 
 ### 2.4 三层责任与状态所有权真相
 
 | Truth ID | 冻结真相 | 来源 | 下游约束 |
 |---|---|---|---|
-| `D01-T016` | Task 只拥有外部 intent、ACK/CRUD、aggregate status、current root 指针、result/error summary、revision 与命令接收状态。 | `OWNER-ORIGINATED + D01-VERDICT` | Task 不拥有 workflow step、claim、lease、step retry 或中间 Artifact 的权威状态。 |
+| `D01-T016` | Task 只拥有外部 intent、ACK/CRUD、aggregate status、current root 指针、result/error summary、revision 与命令接收状态。 | `OWNER-ORIGINATED + D01-VERDICT` | Task 不拥有 workflow step、claim、lease、step retry、Intake lifecycle或中间资产的权威状态。 |
 | `D01-T017` | Execution 拥有一次具体目标执行的 durable 总体控制：target、workflow/version、mode、tree lineage、phase、当前 process、fan-out/fan-in、取消传播、最终结果/错误/证明摘要。 | `OWNER-ORIGINATED + D01-VERDICT` | Process 清理后 Execution 仍必须独立解释这次执行发生了什么。 |
 | `D01-T018` | Process 拥有工序运行真相：type/key、input/output refs、queue/claim/lease、status、retry/max_retries、时间、结构化 error 与 type-specific validation。 | `OWNER-ORIGINATED + CODE-FACT + D01-VERDICT` | 所有 worker 执行和自动恢复必须通过统一 Process transition path。 |
 | `D01-T019` | 状态只允许自下而上归约：`Process/child Execution → Execution → Task`；上层不得直接伪造下层成功。 | `D01-VERDICT` | Task `succeeded` 不能绕过 Execution proof；Execution `succeeded` 不能绕过 required Process guards。 |
@@ -191,11 +193,11 @@ D01 在实现层完成，至少要求：
 
 | Truth ID | 冻结真相 | 来源 | 下游约束 |
 |---|---|---|---|
-| `D01-T022` | 标准 LS-RAG 的业务工序至少要能表达 clean、structurize、construct、vectorize/index；具体是否跳过 clean 由 source 与 versioned workflow 决定。 | `CODE-FACT + OWNER direction` | `S03/S05-S09` 必须用 RAG-specific process keys，而不是 generic `process_data`。 |
+| `D01-T022` | 标准 LS-RAG 的业务工序至少要能表达 intake resolve/fetch/accept、clean、structurize、construct、vectorize/index与publication validate；具体是否跳过clean由IntakeSource capability与versioned Workflow决定。 | `CODE-FACT + OWNER direction + S04` | `S03/S05-S09` 必须用RAG-specific process keys，而不是generic `process_data`。 |
 | `D01-T023` | 推荐的 canonical process key 为 `clean.*`、`lsrag.structurize`、`lsrag.construct`、`lsrag.vectorize_index`、`index.validate_publication`；它们是版本化 workflow 中的工序类型，不是 Task type。 | `D01-VERDICT` | exact branch/model 可版本化，但不得丢失上述业务边界。 |
 | `D01-T024` | Process 成功必须由 type-specific completion guard 判定；仅收到 callback、队列为空或 `pending_count=0` 都不等于成功。 | `OWNER direction + CODE-FACT + D01-VERDICT` | 每个 Process type 需要明确 output schema、validation proof 与失败语义。 |
-| `D01-T025` | 单文档 Execution 的业务成功终点是预期向量及 filter metadata 写入 Turso vector store 并校验通过；publication proof 必须持久化到 Execution summary。 | `OWNER-ORIGINATED` | Process 被清理后仍能审计成功依据。 |
-| `D01-T026` | 散射 root Execution 的成功还要求稳定 manifest 已提交，且本次 manifest 中所有 required child Executions 已满足各自成功 guard。 | `D01-VERDICT` | fan-in 以持久 expected set 为准，不能以“当前查到多少 child”猜测完成。 |
+| `D01-T025` | 单个IntakeItem Execution的业务成功终点是预期向量及filter metadata写入目标vector store并校验通过；proof必须绑定exact IntakeRevision并持久化到Execution summary。 | `OWNER-ORIGINATED + S04-T015/T016` | Process清理后仍能审计成功依据；latest不能冒充serving。 |
+| `D01-T026` | scatter root Execution的成功还要求accepted IntakeSnapshot/ChangeSet required set已提交，且其中所有required child Executions满足各自成功guard。 | `D01-VERDICT + S04-T024..T029` | fan-in以持久membership/required set为准，不能以当前child count猜分母。 |
 
 ### 2.6 Retry、取消与保留真相
 
@@ -213,10 +215,11 @@ D01 在实现层完成，至少要求：
 | Truth ID | 冻结真相 | 来源 | 下游约束 |
 |---|---|---|---|
 | `D01-T033` | MKB 保留 legacy 的身份分面、步骤状态、输入输出、结构化错误、retry/max_retries、fan-out/fan-in 和日志证据原则。 | `OWNER direction + CODE-FACT` | 这些能力必须在本地单体中完整实现。 |
-| `D01-T034` | MKB 不复制 legacy 的 clean_job/rag_job 身份断裂；一次具体 Document 的 clean → RAG 由同一 Execution 贯穿，工序边界由 Process 表达。 | `D01-VERDICT` | 不因 action_domain 切换而无理由生成新 Execution。 |
+| `D01-T034` | MKB 不复制 legacy 的 clean_job/rag_job 身份断裂；一次具体 IntakeItem/Revision 的 clean → RAG 由同一 Execution 贯穿，工序边界由 Process 表达。 | `D01-VERDICT + S04-CALIBRATION` | 不因 action_domain 切换而无理由生成新 Execution。 |
 | `D01-T035` | MKB 不复制 `smind_clean_process / smind_rag_process / smind_vec_process` 三张历史业务表；统一 Process 控制模型，Vector record 归向量资产域。 | `D01-VERDICT` | `S08/S09` 自己持有 vector asset，不把每个 vec unit 冒充 Process。 |
 | `D01-T036` | 本地轻量队列是 transport/scheduling mechanism，不是状态 SSOT；可 claim 工作必须来自已提交的 Process/scheduling record。 | `OWNER direction + D01-VERDICT` | 日志“已发送”或内存 queue item 不能代替 durable Process。 |
-| `D01-T037` | Artifact 首版使用本地 I/O adapter；Task/Execution/Process 只保存逻辑 reference/relative locator/hash，不保存 R2 binding，也不把绝对主机路径当 API identity。 | `OWNER-ORIGINATED` | `S13` 可替换 backend 而不改变三层身份。 |
+| `D01-T037` | IntakeArtifact与派生资产首版使用本地I/O adapter；Task/Execution/Process只保存logical reference/relative locator/digest，不保存R2 binding，也不把绝对路径当API identity。 | `OWNER-ORIGINATED + S04-T006` | `S13`可替换backend而不改变runtime或Intake identity。 |
+| `D01-T039` | S04五类Intake identity是长期业务真相，不是第四层runtime identity；Task/Execution/Process retention不得级联删除其IntakeRevision/IntakeArtifact或tombstone/audit skeleton。 | `S04-v1.0 / T-O-30..48` | D01三层状态表数量不变；长期资产与运行投影分别治理。 |
 | `D01-T038` | S02 增加 `task_restarts` 作为外部人工重启的 durable causation/admission SSOT；它不是第四层运行身份，也不复制 Task status。 | `S02-v1.0 / OWNER-QNA` | 四张核心 Task/运行表保持，外部重启启用后的最小 durable 业务真相集合为五张。 |
 
 ---
@@ -236,7 +239,7 @@ D01 在实现层完成，至少要求：
 | Command boundary | 接收 cancel/retry 等命令 intent，并用 revision/CAS 处理并发 |
 | Aggregate projection | 汇总 current root 及 required child Executions 的状态、进度、错误和结果 |
 | Execution pointer | 保存 `current_root_execution_uuid`；历史 Executions 通过 task FK 查询 |
-| Stable result | 保存最终 document/result/publication 引用的摘要，使 Process 清理后仍可 polling |
+| Stable result | 保存最终 IntakeItem/Revision/result/publication proof引用摘要，使 Process 清理后仍可 polling |
 
 #### 3.1.2 Task 明确不承担
 
@@ -269,9 +272,9 @@ Task status 是投影而非第二套执行真相。Task 表可以缓存 counters
 | 责任 | 具体含义 |
 |---|---|
 | Internal durable identity | `execution_uuid` 跨进程重启、队列 redelivery 和 Process retry 保持不变 |
-| Concrete target | 明确本次运行针对 source、root document、child document、document version 或受控 index scope |
+| Concrete target | 明确本次运行针对 IntakeSource、Snapshot、Item、Revision 或受控 index/cleanup scope |
 | Workflow snapshot | 记录 workflow key、definition UUID/version、config/model/prompt version 或可复验 digest |
-| Execution role | 区分 root controller、single-document root、scatter child 等角色 |
+| Execution role | 区分 root controller、single-Intake root、scatter child 等角色 |
 | Lineage | 记录 task、root、parent、retry-of；能复原执行树和 retry 历史 |
 | Overall control | 按定义创建 Process、推进阶段、分支、fan-out、fan-in、传播 cancel |
 | Durable phase | 保存当前业务阶段与 `current_process_uuid`，供内部稳定查询 |
@@ -281,9 +284,9 @@ Task status 是投影而非第二套执行真相。Task 表可以缓存 counters
 #### 3.2.2 Execution 明确不承担
 
 - 不成为外部 caller 创建的 API resource；
-- 不替代 Document/Version 的业务身份；
+- 不替代 IntakeItem/IntakeRevision 的业务身份；
 - 不把每一次自动 Process retry 变成新的 Execution；
-- 不用 parent_execution_uuid 代替 Document parent-child relation；
+- 不用 parent_execution_uuid 代替 IntakeSnapshotMembership 或 Intake provenance；
 - 不把所有中间 output 大对象复制进自身 row；只保存受控摘要与 reference；
 - 不在 clean → RAG 的领域交接处像 legacy 一样无条件更换 job identity。
 
@@ -313,7 +316,7 @@ source_acquisition
 |---|---|
 | Instance identity | 每次由 Workflow Definition 实例化工序时生成新的 `process_uuid` |
 | Business classification | 保存 `process_type/process_key`、rank、action branch 与 definition snapshot/ref |
-| I/O contract | 保存严格 input/output schema version、Artifact refs、hash 与 validation result |
+| I/O contract | 保存严格input/output schema version、IntakeArtifact/derived asset refs、digest与validation result |
 | Scheduling | 保存 queue/scheduling state、available_at、priority 或等价 claim 条件 |
 | Concurrency control | 保存 claim token、lease owner、lease expiry、fencing generation |
 | Runtime status | 记录 pending/claimed/running/retry-wait/succeeded/failed/cancelled 等语义 |
@@ -331,12 +334,12 @@ source_acquisition
 | `intake.api_fetch` | 对 API 单点请求取回原始响应 | 响应被完整接收、schema/version 可判定 |
 | `clean.universal_extract` | 将异构输入清洗为 canonical text | canonical text artifact 存在且内容校验通过 |
 | `clean.api_scatter` | 将一次 API 响应解析为 N 个稳定 child candidates | 每个 child 有稳定 key、content/meta hash 与严格 schema |
-| `scatter.persist_manifest` | 原子持久化 expected child set 与变更决策 | manifest revision/expected count 已提交，可重放 |
+| `intake.accept_snapshot` | 接受sealed CandidateSet并原子提交Snapshot/Membership/ChangeSet与child intent | accepted Snapshot/required set已提交，可重放 |
 | `lsrag.structurize` | 生成目录/逻辑分块/structured representation | structured schema、块坐标与 source coverage 校验通过 |
 | `lsrag.construct` | 生成 layered 内容、summary/original 双通道与 vector-ready units | layered/vector-ready schema、引用和 channel 完整性通过 |
 | `lsrag.vectorize_index` | embedding 并写入 Turso vector/index 数据 | 预期 vector records 写入，维度/model/filter 字段合法 |
 | `index.validate_publication` | 独立验证本次发布集合 | expected/actual 集合、filter metadata、可检索性证明一致 |
-| `knowledge.purge` | 更新/删除前受控清理旧派生数据 | scope 内旧记录清理或 tombstone proof 完成 |
+| `intake.physical_purge` | delete/retention后受控清理eligible派生数据 | scope内required substrate cleanup proofs完成 |
 
 `process_uuid` 永远是上述类型的一次运行实例。相同 `process_key` 可在不同 Execution 中出现，也可以因整次 Execution retry 产生新的 Process UUID。
 
@@ -385,7 +388,7 @@ Process 状态与消息意图不能混为一个字段。`STEP_START/STEP_RESTART
 ```text
 Task T
   └── Root Execution E1
-        target = Document/DocumentVersion D1
+        target = IntakeItem/IntakeRevision I1
         root_execution_uuid = E1
         parent_execution_uuid = null
         ├── Process P1: intake.resolve_source / clean.universal_extract
@@ -395,7 +398,7 @@ Task T
         └── Process P5: index.validate_publication
 ```
 
-这是 `1 Task : 1 current root Execution : N Processes`。若 source 已经是通过严格 schema 验证的 canonical text，versioned workflow 可以省略/替换 clean 工序；不能因此省略 Execution。
+这是 `1 Task : 1 current root Execution : N Processes`。若IntakeSource输入已经是严格schema验证的canonical text，versioned Workflow可以省略/替换clean工序；不能因此省略Execution。
 
 #### 4.1.2 建议提交顺序
 
@@ -424,7 +427,7 @@ Task T
 
 #### 4.2.1 为什么不能让 Task 直接指向一个“当前 Process”
 
-一次 API 请求可能并发产生多个 Document。散射后，A 可能在 structurize、B 在 vectorize、C 正在 retry，不存在一个能代表整体真实进度的 singular process 指针。
+一次API观察可能并发产生多个IntakeItem。scatter后，A可能在structurize、B在vectorize、C正在retry，不存在一个能代表整体真实进度的singular process指针。
 
 因此：
 
@@ -438,16 +441,16 @@ Task T
 ```text
 Task T
   └── Root Execution E-root
-        target = API Source S1
+        target = IntakeSource S1
         ├── Process P-fetch: intake.api_fetch
         ├── Process P-scatter: clean.api_scatter
-        ├── Process P-manifest: scatter.persist_manifest
-        ├── Child Execution E-A → target Document A → RAG Processes...
-        ├── Child Execution E-B → target Document B → RAG Processes...
-        └── Child Execution E-N → target Document N → RAG Processes...
+        ├── Process P-accept: intake.accept_snapshot
+        ├── Child Execution E-A → target IntakeItem/Revision A → RAG Processes...
+        ├── Child Execution E-B → target IntakeItem/Revision B → RAG Processes...
+        └── Child Execution E-N → target IntakeItem/Revision N → RAG Processes...
 ```
 
-Root Execution 是本次 API fetch/scatter/fan-in 的 durable controller。每个 child Execution 是一个具体 Document 的完整执行单元。并发发生在 child Execution 之间，也可以发生在某些允许并行的 Processes 之间。
+Root Execution是本次API fetch/scatter/fan-in的durable controller。每个child Execution针对一个exact IntakeItem/Revision。并发发生在child Executions之间，也可以发生在允许并行的Processes之间。
 
 #### 4.2.3 散射执行顺序
 
@@ -455,11 +458,11 @@ Root Execution 是本次 API fetch/scatter/fan-in 的 durable controller。每�
 1. Task ingress 原子提交
 2. 创建 E-root，执行 intake.api_fetch
 3. clean.api_scatter 输出 canonical child candidates
-4. 以稳定 source key/atomic key 计算 child identity 与 content/meta hash
-5. 单事务提交 manifest revision、expected child set、diff 决策与 fan-out scheduling intents
+4. 以source-scoped ExternalKey解析/复用IntakeItem，并计算versioned semantic values/fingerprint
+5. 单事务提交accepted IntakeSnapshot、Membership、Revision decision、ChangeSet与fan-out scheduling intents
 6. 为本次需要处理的每个 child 创建一个 durable child Execution
 7. 轻量队列并发运行 child Executions 的 RAG Processes
-8. E-root 按 manifest 的 required set 做 fan-in，不按临时查询结果猜数量
+8. E-root按Snapshot/ChangeSet的required set做fan-in，不按临时查询结果猜数量
 9. 全部 required children 成功且各自 publication proof 有效 → E-root succeeded
 10. Task 从 E-root 归约 succeeded；任一 required child 最终失败 → 默认 Task/Root failed
 ```
@@ -468,25 +471,25 @@ Root Execution 是本次 API fetch/scatter/fan-in 的 durable controller。每�
 
 #### 4.2.4 增量散射
 
-API source 的后续同步可能得到新增、正文变化、metadata 变化、无变化或删除的 children：
+IntakeSource的后续Snapshot可能得到新增、semantic变化、无变化或authoritative absence：
 
-- manifest/diff 属于 Source/Document 生命周期真相，由 S04/S05 建模；
-- 本次没有变化的 child 可以不创建新 Execution，但必须在 manifest decision 中有证据；
+- Snapshot/Membership/Revision decision属于S04长期真相，S05只生成CandidateSet；
+- 本次no-change的member可以不创建新Execution，但必须在Membership/ChangeSet中有证据；
 - 需要 rebuild/update/purge 的 child 创建新的 child Execution；
 - “本次不需要执行”与“执行成功”是两个不同事实；
-- root fan-in 的 expected set 是本次 required executions，不是 source 历史上所有 children。
+- root fan-in的expected set是本次accepted IntakeChangeSet required executions，不是IntakeSource历史上所有IntakeItems。
 
 ### 4.3 单文件与散射对照
 
 | 维度 | 单一文件 | API 散射 |
 |---|---|---|
 | Task 数 | 1 | 1 |
-| Root Execution | 1，兼作 document execution | 1，作为 source fetch/scatter/fan-in controller |
+| Root Execution | 1，兼作single IntakeItem execution | 1，作为IntakeSource fetch/scatter/fan-in controller |
 | Child Execution | 0 | 0..N，按本次 required child set 创建 |
 | 当前工序表达 | root.current_process_uuid | 每个 child 各自 current_process；root 保存 fan-in phase/counters |
 | 并发位置 | workflow 允许的 Process 并发 | child Executions 并发 + 各自内部 Process 调度 |
-| 成功 guard | 单目标 publication proof | manifest commit + 所有 required child proofs |
-| 结果形状 | 单 document/result summary | root manifest summary + child result summaries |
+| 成功 guard | exact IntakeRevision publication proof | Snapshot/ChangeSet commit + 所有required child proofs |
+| 结果形状 | 单Item/Revision result summary | root Snapshot/ChangeSet summary + child result summaries |
 | retry | 新 root Execution | 自动 step retry 原地；整 Task retry 新 root tree；内部 child step retry不换 child Execution |
 
 ---
@@ -518,8 +521,8 @@ tasks + task_audits + task_restarts + executions + processes
 | Team Registry | 是，S01 已冻结 | 接入投影，不是一次任务执行状态 |
 | Task Audit | 是，`task_audits` | immutable 上游业务审查，不是运行状态 |
 | Task Restart | 是，`task_restarts`，S02 已冻结 | 外部人工重启的 immutable 因果/admission 账本，不是运行状态；status 从 Task join |
-| Source/Document/Version/Relation | 是，由 S04/S05 冻结 | 资源与文件血缘，不是 Execution tree |
-| Artifact manifest | 可能，由 S13 冻结 | I/O 资产生命周期，不是 Process row |
+| IntakeSource/Snapshot/Item/Revision/Membership | 是，由S04冻结 | 摄入资产与集合血缘，不是Execution tree |
+| IntakeArtifact/derived asset inventory | 是/可能，由S04/S13冻结 | 资产I/O生命周期，不是Process row |
 | Vector records/filter metadata | 是，由 S08/S09/S12 冻结 | 最终知识资产；不能塞进 processes 作为唯一真相 |
 | Domain events/logs | 是，由 S15 冻结 | append-only 证据；不替代 current projection |
 | Queue/outbox records | 视本地队列实现，由 S03/S12 冻结 | transport/reliability mechanism；不能成为第四个执行身份 |
@@ -557,7 +560,7 @@ tasks + task_audits + task_restarts + executions + processes
 | Workflow | workflow key/definition UUID/version/digest、execution mode/case mode |
 | Control state | status、phase、cancel intent/propagation state、revision/fencing generation |
 | Current pointer | `current_process_uuid` nullable；终态后可转为 `final_process_uuid`/summary |
-| Fan-out/fan-in | manifest/version ref、expected/active/succeeded/failed child counts |
+| Fan-out/fan-in | IntakeSnapshot/ChangeSet ref、expected/active/succeeded/failed child counts |
 | Durable summary | process counts、retry totals、last/final error、artifact refs、vector publication proof |
 | Lifecycle | created/started/updated/completed timestamps |
 | Extension | `payload_extra` non-null JSON object |
@@ -614,7 +617,7 @@ Process 表保存**工序控制状态**，不保存每一个 vector unit 作为 
 |---|---|---|
 | `task_executions` join table | 禁止首版创建 | Execution 已有 `(team_uuid, task_uuid)` FK；关系是 1:N，不是 M:N |
 | `execution_relations` | 禁止首版创建 | root/parent/retry 三个自引用足以表达当前树；真正 DAG 需求出现前不预建 |
-| `scatter_executions` | 禁止 | scatter 是 Execution role + parent/root lineage；资源 manifest 归 S04/S05 |
+| `scatter_executions` | 禁止 | scatter是Execution role + parent/root lineage；集合truth归S04 Snapshot/Membership/ChangeSet |
 | `attempts` | 禁止与 executions 并存 | `execution_uuid` 已承接完整执行尝试；双身份会产生歧义 |
 | `clean_processes/rag_processes` | 禁止 | process type/workflow version 已表达业务分类；分表会重建 legacy 漂移 |
 | `vec_processes` | 禁止作为运行控制表 | vector unit 是向量资产/批处理数据，不是三层中的 Process identity |
@@ -648,11 +651,11 @@ Process runner + local queue adapter
 
 ### 6.3 `D01-E03` — 建立 durable Execution tree
 
-- 单文件 root 同时是 document execution；
-- 散射 root 是 source controller，child 是 document execution；
+- single root同时是IntakeItem/Revision execution；
+- scatter root是IntakeSource/Snapshot controller，child是Item/Revision execution；
 - 所有 children 在创建时固定 task/root/parent/target/workflow version；
-- fan-out scheduling 与 manifest expected set 必须来自同一已提交事实边界；
-- root 的 child counters 是 projection，必须能从 execution rows + manifest 对账；
+- fan-out scheduling与Snapshot/ChangeSet required set必须来自同一已提交acceptance边界；
+- root child counters是projection，必须能从Execution rows + SnapshotMembership/ChangeSet对账；
 - manual full retry 新建 root tree，不重写旧 tree。
 
 ### 6.4 `D01-E04` — 建立统一 Process transition path
@@ -682,11 +685,11 @@ Process runner + local queue adapter
 ### 6.6 `D01-E06` — 实施散射 fan-out/fan-in fence
 
 - child candidate 必须先经过 schema、stable key 与 hash 校验；
-- manifest revision 必须明确本次 expected/required/skipped/deactivated 集合；
+- accepted Snapshot/ChangeSet必须明确本次expected/required/skipped/absence集合；
 - 每个 required child 至多创建一个本 generation 的 active Execution；
-- fan-in 查询必须带 root_execution_uuid + manifest revision；
+- fan-in查询必须带root_execution_uuid + intake_snapshot_uuid/change_set_digest；
 - root 进入成功前重新验证 required count、terminal states 和 publication proofs；
-- crash 发生在 manifest commit 后、queue wake-up 前时，reconciler 必须可补发；
+- crash发生在Snapshot/ChangeSet/outbox commit后、queue wake-up前时，recovery必须可补发；
 - crash 发生在部分 child 创建后时，幂等 uniqueness 必须补齐而非重复创建。
 
 ### 6.7 `D01-E07` — 实施 Process compaction/cleanup fence
@@ -710,7 +713,7 @@ Execution durable summary 至少包含：
 - total retry count 与 exhausted process key；
 - final process/phase；
 - final error code/message/details reference；
-- input/output Artifact references and hashes；
+- input/output IntakeArtifact/derived asset references and digests；
 - vector/filter publication proof reference；
 - started/completed time 与主要 latency metrics。
 
@@ -722,7 +725,7 @@ D01 不在本文中静默修改已 accepted 的 S01；但后续 truth freeze 必
 |---|---|---|
 | `S01-T014` | retry 产生新 `attempt_uuid` | 用新 `execution_uuid` 承接整次执行 retry；删除重叠 Attempt identity |
 | `S01-T023/T024/T026` | 外部字段/集合名为 `task_type` | wire compatibility 可暂留字段名，但语义应改称 `request_intent`；它不定义 RAG 工序 |
-| `S01-T027` | Task/Document/Trace/Attempt 分离 | 改为 Task/Document/Trace/Execution/Process 分离 |
+| `S01-T027` | Task/IntakeItem/Trace/Attempt 分离 | 改为 Task/Intake identities/Trace/Execution/Process 分离 |
 | `S01-E02/E07` | `task_attempts` / retry command 生成 Attempt | 改为 executions 与 retry lineage |
 | `spec-index S02/S03` | Task API 与 Workflow Engine 顺序依赖 | D01 作为两者共同前置；S02 拥有 Task，S03 拥有 Execution/Process |
 
@@ -744,7 +747,7 @@ D01 不在本文中静默修改已 accepted 的 S01；但后续 truth freeze 必
 | `D01-C06` | “Process 可定期清理，所以它不是状态真相。” | 活跃期 Process 是精确控制真相；只有在 Execution durable compact 且 reconciliation fence 关闭后才可清理。 |
 | `D01-C07` | “pending_count=0 或收到成功 callback 就能完成 Task。” | legacy 此检查存在盲区；MKB 必须验证 expected vector set、failed/in-progress、filter metadata 与 publication proof。 |
 | `D01-C08` | “本地 queue item 就是 task/process。” | Queue 是 transport；durable Process 才是 claim、retry 和恢复 SSOT。 |
-| `D01-C09` | “Execution parent-child 可以替代文件关系表。” | Execution tree 描述一次运行；Document relation 描述资源血缘与长期 identity，生命周期不同。 |
+| `D01-C09` | “Execution parent-child 可以替代Intake集合/资产关系。” | Execution tree描述一次运行；SnapshotMembership与Item/Revision描述长期集合和资产血缘，生命周期不同。 |
 | `D01-C10` | “为了查询方便，Task 应直接保存 current_process_uuid。” | 散射并发时有多个 current processes；Task 只能保存 current root 和 aggregate，current process 属于每个 Execution。 |
 
 ### 7.2 风险台账
@@ -753,7 +756,7 @@ D01 不在本文中静默修改已 accepted 的 S01；但后续 truth freeze 必
 |---|---|---:|---|
 | `D01-R01` | `attempt_uuid` 与 `execution_uuid` 并存导致 retry 双真相 | P0 | reopen S01；只保留 Execution durable identity |
 | `D01-R02` | Task status 与 Execution 集合漂移 | P0 | transition service + reconciliation + projection rebuild test |
-| `D01-R03` | scatter manifest 与 child scheduling 非原子，漏任务或重复任务 | P0 | transactional manifest/outbox + generation uniqueness |
+| `D01-R03` | Snapshot/ChangeSet与child scheduling非原子，漏任务或重复任务 | P0 | S04 canonical acceptance transaction + outbox/fence |
 | `D01-R04` | Process 清理留下 dangling current pointer | P0 | cleanup FK/precondition + compact transaction |
 | `D01-R05` | 只聚合已创建 child，漏掉应创建但未创建的 child | P0 | fan-in 对照 persisted expected set，不以 count query 猜测 |
 | `D01-R06` | 旧 lease holder 在恢复后继续写，产生双执行 | P0 | fencing generation/token，所有完成提交校验 token |
@@ -762,7 +765,7 @@ D01 不在本文中静默修改已 accepted 的 S01；但后续 truth freeze 必
 | `D01-R09` | Task 对外暴露内部 UUID 后，上游开始编排 Process | P1 | execution/process 仅 internal read/diagnostic；外部命令仍以 Task 为边界 |
 | `D01-R10` | single 与 scatter 使用两套 engine，行为漂移 | P1 | 同一 Execution/Process engine；差异只在 root role 和 child fan-out |
 | `D01-R11` | all-required fan-in 遇到部分失败后永久卡 running | P0 | terminal aggregation policy + retry exhaustion + reconciliation timeout |
-| `D01-R12` | local filesystem locator 泄漏绝对路径进 API/DB identity | P1 | logical Artifact ref + relative locator + storage adapter |
+| `D01-R12` | local filesystem locator泄漏绝对路径进API/DB identity | P1 | logical Intake/derived asset ref + relative locator + storage adapter |
 
 ### 7.3 明确禁止的实现方向
 
@@ -775,7 +778,7 @@ D01 不在本文中静默修改已 accepted 的 S01；但后续 truth freeze 必
 7. 禁止让 queue ack、HTTP callback 或日志文本直接决定业务成功。
 8. 禁止在 publication proof 前把 Execution/Task 标为成功。
 9. 禁止在 Execution 终态摘要完成前清理 Processes。
-10. 禁止用 Execution parent/child 取代 Document/Source resource relations。
+10. 禁止用Execution parent/child取代IntakeSnapshotMembership或Item/Revision provenance。
 11. 禁止把 R2 key、Cloudflare binding 或 Durable Object ID 写成 MKB 核心身份。
 12. 禁止把 `payload_extra` 用来隐藏 process type、status、retry budget 或 publication proof。
 
@@ -789,10 +792,10 @@ D01 不在本文中静默修改已 accepted 的 S01；但后续 truth freeze 必
 |---|---|---|---|
 | `D01-A01` | Contract | 外部 Task Create 携带 execution_uuid/process_uuid/status | strict reject；无业务行 |
 | `D01-A02` | Identity | 创建 Task 后内部生成 Execution/Process | 三类 UUID 全部不同；内部均 UUIDv7；task 仍按 team 复合寻址 |
-| `D01-A03` | Single flow | 单文件完整运行 | 1 Task、1 current root、0 child、N Processes；最终 proof 上卷 |
+| `D01-A03` | Single flow | 单IntakeItem/Revision完整运行 | 1 Task、1 current root、0 child、N Processes；最终proof上卷 |
 | `D01-A04` | Scatter | API 产生 N 个 required children | 1 Task、1 root、N child Executions；每 child 有独立 current Process |
-| `D01-A05` | Scatter zero | API 合法返回 0 children | manifest expected=0；按 S04 policy 明确成功/失败，不得永远 running |
-| `D01-A06` | Fan-out crash | manifest commit 后、部分 child 创建时 crash | reconciler 补齐到恰好 N；不重复 child Execution |
+| `D01-A05` | Scatter zero | API合法产生0 memberships | accepted Snapshot required=0；按S04/Workflow policy明确终态，不得永远running |
+| `D01-A06` | Fan-out crash | Snapshot/ChangeSet commit后、部分child创建时crash | recovery补齐到恰好N；不重复child Execution |
 | `D01-A07` | Fan-in | 一个 required child 仍 running，其余成功 | root/Task 不得成功 |
 | `D01-A08` | Fan-in proof | children 状态均 success，但一个 publication proof 缺失/无效 | root/Task 不得成功；对账报错 |
 | `D01-A09` | Auto retry | Process 可重试失败后再次执行 | process_uuid/execution_uuid/task 不变；retry_count 增加 |
@@ -805,7 +808,7 @@ D01 不在本文中静默修改已 accepted 的 S01；但后续 truth freeze 必
 | `D01-A16` | Process cleanup | terminal Execution 过 retention | 先 compact；无 dangling current_process FK；Task/Execution 仍可完整查询摘要 |
 | `D01-A17` | Event retention | Process projection 被清理 | 按 S15 策略保留的 event/log 不被隐式级联删除 |
 | `D01-A18` | Projection repair | 故意篡改 Task counters 后运行 reconciliation | 从 Executions 重建正确 projection，并留下修复事件 |
-| `D01-A19` | Resource/runtime split | 同一 Document 多次重建 | Document identity 不变；每次 full run 有新 Execution lineage |
+| `D01-A19` | Resource/runtime split | 同一IntakeItem/Revision多次rebuild | Intake identity不变且不新增Revision；每次full run有新Execution lineage |
 | `D01-A20` | Table architecture | D01 schema review | 核心状态恰为 tasks/executions/processes；无 clean/rag 分表、无 relation/join 冗余表 |
 | `D01-A21` | RAG specificity | Process registry/schema scan | 存在 clean/structurize/construct/vectorize/validate 业务类型和各自 guard |
 | `D01-A22` | Vector separation | 一个 vectorize Process 产生 M 个 vectors | Process row 不膨胀为 M 个假 Process；M 个向量由向量资产域承接 |
@@ -837,11 +840,11 @@ D01 不在本文中静默修改已 accepted 的 S01；但后续 truth freeze 必
 | `D01-RA03` | `legacy-family/smind-contexter/core/schemas_smcp.ts:282-359` | Clean workflow 把异构输入变为纯文本，并通过 config 链接 RAG workflow。 | 保留 clean → RAG 工序链；同一目标由一个 Execution 贯穿。 |
 | `D01-RA04` | `legacy-family/smind-contexter/core/schemas_smcp.ts:444-470` | legacy Clean 完成后创建新的 RAG job_uuid，体现跨 dispatcher 的历史身份断裂。 | 删除 job 重生；MKB 用 Process phase 切换，必要 retry 才新建 Execution。 |
 | `D01-RA05` | `legacy-family/smind-contexter/core/schemas_smcp.ts:565-676` | 权威 LS-RAG workflow 是 Structurizer → Constructor → Vectorizer/Index，并通过 rank/input/output 串接。 | 保留为 RAG-specific Process types 与 versioned Workflow Definition。 |
-| `D01-RA06` | `legacy-family/smind-contexter/core/schemas_smcp.ts:692-768` | 每步 output 成为下一步 input，constructor 一进多出 layered 与 vector-ready artifacts。 | 保留声明式 I/O 与 outcome；本地 Artifact refs 替代 R2 keys。 |
+| `D01-RA06` | `legacy-family/smind-contexter/core/schemas_smcp.ts:692-768` | 每步output成为下一步input，constructor一进多出layered与vector-ready artifacts。 | 保留声明式I/O与outcome；本地logical asset refs替代R2 keys。 |
 | `D01-RA07` | `legacy-family/smind-console/db/06-process-tracking.sql:21-80` | clean process 保存 job/file/workflow/step、输入输出、状态、retry、时间与结构化错误。 | 保留列族原则；统一进入 processes。 |
 | `D01-RA08` | `legacy-family/smind-console/db/06-process-tracking.sql:110-170` | rag process 结构对齐 clean，并后补 is_child_file/parent_file_uuid。 | 保留 child 生产需求；运行血缘改为 Execution tree，资源血缘交 S04。 |
 | `D01-RA09` | `legacy-family/smind-console/db/06-process-tracking.sql:192-258` | vec process 同时是 vector unit 数据、队列状态和 filter metadata 载体。 | 拆分：Process 记录 vectorize 工序控制，Vector domain 保存 unit/embedding/filter 资产。 |
-| `D01-RA10` | `legacy-family/smind-clean-dispatcher/flows/finalizer.ts:96-165` | Clean finalizer 识别 scatter、计算 diff，并持久化 parent/child relations。 | 保留 manifest/diff/fan-out 原理；删除后补双文件表形态。 |
+| `D01-RA10` | `legacy-family/smind-clean-dispatcher/flows/finalizer.ts:96-165` | Clean finalizer识别scatter、计算diff并持久化parent/child relations。 | 将集合/diff/fan-out原理升级为S04 Snapshot/Membership/ChangeSet；删除后补双文件表形态。 |
 | `D01-RA11` | `legacy-family/smind-clean-dispatcher/flows/finalizer.ts:195-269` | scatter targets 通过 Promise.all 并发，每 child 新建 RAG job_uuid 并携带 parent/hydration/control。 | 保留并发 child execution；每 child 新 Execution，root 统一 fan-in。 |
 | `D01-RA12` | `legacy-family/smind-rag-dispatcher/flows/orchestrator.ts:96-156` | dispatcher 在发送前先创建 pending RAG process step，记录 child/parent、input、retry 与 error 列。 | 保留 durable-before-dispatch 原则；改写为统一 Process transition/outbox。 |
 | `D01-RA13` | `legacy-family/smind-rag-dispatcher/flows/orchestrator.ts:268-304` | callback 完成时更新当前 step，并按 workflow definition 找下一步；失败写结构化错误。 | 保留 outcome 驱动编排；本地 runner/outcome 取代跨 Worker callback。 |
@@ -880,12 +883,12 @@ nl -ba legacy-family/smind-skill-rag-structurizer/flows/processor.ts | sed -n '4
 | 本地化适配 | `PASS` | 三层模型与 Cloudflare topology 无关，可由 Turso + local filesystem + lightweight queue 实现。 |
 | 数据表复杂度 | `PASS` | 三张核心状态表足够；既避免单表多态，也避免 legacy 按领域分表漂移。 |
 | 与 S01 一致性 | `REOPEN REQUIRED` | S01 的 Attempt identity 与 D01 Execution 重叠；task_type 必须降格/重解释为 external request intent。 |
-| 实施风险 | `MANAGEABLE / P0 fences required` | 主要风险集中在 scatter manifest 原子性、lease fencing、投影对账、publication proof 与 Process cleanup。 |
+| 实施风险 | `MANAGEABLE / P0 fences required` | 主要风险集中在Snapshot acceptance原子性、lease fencing、投影对账、publication proof与Process cleanup。 |
 
 ### 10.2 Verdict 的关键理由
 
 1. **它承认外部请求与内部执行不是同一件事。** 外部 Task 可以稳定轮询，而内部 RAG 流程可以演进、分支、重试。
-2. **它给散射提供了正确的基数。** 一次 API 请求仍是一个 Task，但每个实际 child Document 有自己的 durable Execution。
+2. **它给散射提供了正确的基数。** 一次API请求仍是一个Task，但每个required IntakeItem/Revision有自己的durable Execution，分母来自accepted Snapshot/ChangeSet。
 3. **它让 retry 有明确层级。** Process retry 解决短暂工序失败；Execution retry 解决一次完整运行失败；新 Task 代表新的外部业务请求。
 4. **它保留了 legacy 的生产经验，而没有继承平台负债。** 状态、I/O、控制、错误、retry、max_retries、fan-out/fan-in 都被保留；Worker callback、D1/R2/DO 与 clean/rag job 断裂被删除。
 5. **它允许 Process 清理但不牺牲审计。** 精细运行明细可按策略 compact，Execution 仍是 durable 内部执行账本，Task 仍是稳定外部账本。
@@ -898,7 +901,7 @@ nl -ba legacy-family/smind-skill-rag-structurizer/flows/processor.ts | sed -n '4
 1. 先 reopen S01 的 `attempt_uuid` 与 task type 口径，禁止双模型并存；
 2. S02 只冻结 Task API/lifecycle/aggregate，不再次吞入 Process 状态；
 3. S03 必须明确 Execution tree、Process registry、state machines、claim/lease/fencing/retry/reconciliation；
-4. S04/S05 必须提供 durable scatter manifest 和资源 parent-child truth；
+4. S04必须提供durable IntakeSnapshot/Membership/ChangeSet acceptance truth，S05提供validated CandidateSet；
 5. S08/S09/S12 必须定义可机器验证的 vector + filter metadata publication proof；
 6. S15 必须定义 Process projection 与 Event/Log 的不同 retention；
 7. 任何 Process 物理清理实现都必须先通过 `D01-A16/A17`；
@@ -914,13 +917,13 @@ nl -ba legacy-family/smind-skill-rag-structurizer/flows/processor.ts | sed -n '4
 - Process compact 与 archive/delete 的具体时间；
 - Workflow Definition 是否固定 pipeline、受限 DAG 或版本化配置；
 - local queue 具体选型及其是否需要 MKB-owned outbox 表；
-- Artifact、Document、Vector 与 Event/Log 的独立 DDL。
+- Intake资产、Vector与Event/Log的独立DDL（S04十张canonical表已冻结，exact SQL仍归S12）。
 
 这些事项必须由对应 S03-S15 spec 冻结，但不得推翻 D01 已确定的三层身份、责任归属、1:N 散射、状态归约方向和三张核心状态表，也不得删除 S02 冻结的 restart causal truth。
 
 ### 10.5 一句话结论
 
-> **Task 是上游看见的请求账本，Execution 是 MKB 内部 durable 的一次业务运行账本，Process 是可执行、可重试、可清理的工序账本；单文件是一棵单根执行，API 散射是一棵 root + N children 的执行树。**
+> **Task是上游看见的请求账本，Execution是MKB内部durable的一次业务运行账本，Process是可执行、可重试、可清理的工序账本；single Intake是一棵单根执行，API scatter是一棵root + N children执行树，而长期集合与资产真相由S04 Intake graph独立持有。**
 
 ---
 
@@ -930,3 +933,4 @@ nl -ba legacy-family/smind-skill-rag-structurizer/flows/processor.ts | sed -n '4
 |---|---|---|---|---|
 | `D01-v1.0` | `2026-07-15` | `MKB owner + Codex` | `accepted architecture direction` | 固化 owner 主动提出的 Task/Execution/Process 三层切分；完成 single/scatter、retry/cleanup、三表架构、legacy evidence 与 GO verdict。 |
 | `D01-v1.1` | `2026-07-15` | `MKB owner + Codex` | `accepted / S02-calibrated` | 接收 S02-v1.0 回流：三张核心运行表不变；新增 `task_restarts` 因果/admission truth，将 Task ingress/runtime/restart 最小 durable 业务真相集合由四张校准为五张。 |
+| `D01-v1.2` | `2026-07-15` | `MKB owner + Codex` | `accepted / S02+S04-calibrated` | 接收S04-v1.0：将Source/Document/Version/manifest资源口径校准为IntakeSource/Snapshot/Item/Revision/Membership；确认Intake不是第四层runtime identity，single/scatter fan-in改以accepted Snapshot/ChangeSet为分母，rebuild不创建Revision。 |

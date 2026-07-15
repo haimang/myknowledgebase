@@ -12,9 +12,9 @@
 >
 > **文档状态**：`accepted`（S02 域内已接受；全系统 truth layer 尚未 frozen）
 >
-> **Truth 版本**：`S02-v1.0`
+> **Truth 版本**：`S02-v1.1`
 >
-> **上游权威输入**：QNA 初始基线 `D01-v1.0 / S01-v1.1`、冻结的 `qna-truth/S02.md v1.3`；正式回流版本 `D01-v1.1 / S01-v1.2`
+> **上游权威输入**：QNA初始基线`D01-v1.0 / S01-v1.1`、冻结的`qna-truth/S02.md v1.3`；正式回流版本`D01-v1.2 / S01-v1.3 / S04-v1.0`
 >
 > **事实证据**：`legacy-family/` 中 API 发起、Dedicated API scatter、SMCP、Clean/RAG Dispatcher、Console 原子查询与重启实现
 >
@@ -23,6 +23,8 @@
 > **Owner-originated 约束**：Task、Execution、Process 的三层切分来自 owner 主动提出的 D01。S02 不重新设计这三层身份，只完成 Task 的外部 API、聚合生命周期、scatter 投影、人工重启因果与治理查询。
 
 > **校准声明**：D01/S01 冻结的 `tasks + task_audits + executions + processes` 四张核心 Task/运行真相表继续成立。S02 依据 owner 在 Q5/Q6 的补充裁决，新增独立 `task_restarts` 因果账本；因此启用外部人工重启后的最小 durable 业务真相集合为五张。`task_restarts` 不复制或推进 Task status。
+
+> **S04校准声明**：S02原先使用的`Source/Document/DocumentVersion/manifest`是S04冻结前的资源占位词。本版将MKB公共契约校准为`IntakeSource/IntakeSnapshot/IntakeItem/IntakeRevision/IntakeSnapshotMembership/IntakeChangeSet`；`document.*` intents和`document_uuid`不作为兼容别名保留。
 
 ---
 
@@ -36,7 +38,7 @@ S02 解决四个核心问题：
 
 1. 一个 Task 在并发、崩溃、重放和人工命令下只有一个可解释的聚合状态；
 2. API scatter 不再依赖后加补丁，而从第一天拥有 expected set、collect-all、分页原子结果和 durable fan-in 语义；
-3. full Task retry 与 atomic Document rebuild 使用不同身份规则，但进入同一可审计因果账本；
+3. full Task retry与atomic IntakeItem rebuild使用不同身份规则，但进入同一可审计因果账本；
 4. Task soft-delete、Process 清理和日志 retention 不会切断历史、重启或结果追溯。
 
 ### 1.2 Scope fence
@@ -47,7 +49,7 @@ S02 负责：
 - Task result、generation history 与 Task-scoped scatter items 的 polling read model；
 - 六态 Task aggregate state machine；
 - cancel 与 full retry command 的 admission、CAS、幂等和响应语义；
-- atomic Document rebuild 的 Task/因果接入要求；
+- atomic IntakeItem rebuild的Task/因果接入要求；
 - scatter collect-all、child early publication 和 cancel forward-stop 的 Task 级语义；
 - `task_restarts` 的因果/admission 真相、全局 restart list 与 causal lineage query；
 - priority、deadline、revision、cursor、filter 和稳定错误码；
@@ -58,9 +60,9 @@ S02 不负责：
 | 排除项 | 权威归属 | S02 边界 |
 |---|---|---|
 | Execution tree、Process registry、workflow phase、lease/fencing、自动 retry | `D01/S03` | 只发 command、消费 aggregate/proof |
-| Source/Document/Version/Relation/manifest 的完整 schema | `S04-S05` | 只定义 Task-scoped 投影与 canonical link |
+| IntakeSource/Snapshot/Item/Revision/Membership/ChangeSet exact schema | `S04-S05` | 只定义Task-scoped投影与canonical Intake link |
 | 向量与 filter metadata publication proof 算法 | `S08-S09/S12` | proof 是成功 guard，不在 S02 计算 |
-| Artifact locator/backend | `S13` | 只返回受控 logical reference |
+| IntakeArtifact/derived asset locator/backend | `S13` | 只返回受控logical reference |
 | queue/outbox/reconciler 的具体实现 | `S03/S12` | 要求 durable state-before-wakeup 和可重建 |
 | 日志、trace、event envelope 与具体 retention 时长 | `S15` | 规定不得以其替代 Task/restart truth |
 | token 保存、轮换、网络暴露与限流 | `S16` | 继承简单内部 token 与 team-scoped query |
@@ -81,7 +83,7 @@ MKB 内部
         └── process_uuid             RAG-specific 工序实例
 
 长期知识资源
-  └── source/document/version UUID   S04 的 canonical resource truth
+  └── IntakeSource/Snapshot/Item/Revision UUID   S04 canonical asset truth
 ```
 
 普通调用者永远不需要以 `execution_uuid` 或 `process_uuid` 才能知道 Task 的状态、结果、原子 child 或重启因果，也不能用这两个内部 UUID 发命令。
@@ -95,7 +97,7 @@ S02 在实现层完成必须同时满足：
 3. single/scatter、collect-all、cancel/success race、generation retry 和 early publication 通过集成测试；
 4. Get Task、items、result、generations、restart list 与 lineage 在 Process 清理后仍可正确返回；
 5. 所有 team-scoped route、复合身份、cursor 和幂等路径通过隔离/重放测试；
-6. Task status、restart causation、Document truth 和 Execution/Process truth 没有双写所有权；
+6. Task status、restart causation、Intake truth和Execution/Process truth没有双写所有权；
 7. §6 的强制验收项全部通过。
 
 ---
@@ -133,7 +135,7 @@ Legacy 只能证明真实需求、失败模式和已有围栏，不能把 Cloudf
 | `S02-T008` | Task v1 status 只有 `queued/running/cancelling/succeeded/failed/cancelled`。 | `T-O-1` | 禁止 `accepted/retrying/partially_succeeded/deleted` 和 RAG phase。 |
 | `S02-T009` | 基础边只有 queued → running/cancelling、running → succeeded/failed/cancelling、cancelling → cancelled。 | `T-O-1` | 所有转移必须经统一 transition service 与 revision CAS。 |
 | `S02-T010` | full retry 是唯一额外回边：只允许显式 command 使 failed/cancelled → queued；active states 拒绝，`succeeded` 必须创建新 rebuild Task。 | `T-O-8` | 普通状态归约不得走回边。 |
-| `S02-T011` | `succeeded` 必须消费 current root 的 type-specific durable proof；LS-RAG build/rebuild 至少证明预期向量及 filter metadata 已发布并校验。 | `D01/S01-T056` | queue empty、单个 callback 或日志不能使 Task 成功。 |
+| `S02-T011` | `succeeded`必须消费current root的type-specific durable proof；LS-RAG build/rebuild proof必须绑定exact IntakeRevision并证明预期vector/filter metadata已发布校验。 | `D01/S01-T056 + S04-T015/T016` | queue empty、单callback、日志或latest Revision不能使Task成功。 |
 | `S02-T012` | `failed` 只表示当前 generation 已耗尽内部自动恢复并按 aggregation policy 终结；临时 Process 失败不直接写 Task failed。 | `T-O-1` | 错误从 Process/Execution 自下而上归约。 |
 | `S02-T013` | `cancelled` 只有在 cancel intent 已传播且所有 active descendants 已 fenced/terminal、无 late business commit 可能时成立。 | `T-O-1/T-O-10` | 接收 cancel 不等于 cancelled。 |
 | `S02-T014` | cancel 与 success 并发以 Task lifecycle CAS 的 durable first-commit-wins 为唯一线性化点；失败竞争者不得反转赢家。 | `T-O-3` | HTTP 到达、callback 或进程内 flag 均无裁决权。 |
@@ -144,21 +146,21 @@ Legacy 只能证明真实需求、失败模式和已有围栏，不能把 Cloudf
 | Truth ID | 冻结真相 | 来源 | 下游约束 |
 |---|---|---|---|
 | `S02-T016` | single 是一个 root Execution；scatter 是一个 root controller 加 0..N child Executions，仍只创建一个外部 Task。 | `D01/S01-T050` | 禁止 child Task 和 Task.current_process_uuid。 |
-| `S02-T017` | scatter 必须先提交稳定 manifest revision/expected required set，再产生并行 child scheduling intent。 | `LEGACY-FACT + D01` | 不能从临时 execution count 猜 fan-in 分母。 |
+| `S02-T017` | scatter必须先原子提交accepted IntakeSnapshot/Membership/ChangeSet required set，再产生并行child scheduling intent。 | `LEGACY-FACT + D01 + S04-T024..T029` | 不能从临时Execution count猜fan-in分母。 |
 | `S02-T018` | scatter 采用 collect-all：required child 终态失败不取消健康 siblings；仍有 active child 时 Task 保持 running；全部 required terminal 后任一 required failure 使 Task failed。 | `T-O-2` | 不提供 partial-success Task status。 |
-| `S02-T019` | 公共读面固定为 bounded Get Task + Task-scoped paginated items + canonical Document link。 | `T-O-5` | Get Task 不内嵌无界 child 数组；Document 仍由 S04 持有。 |
-| `S02-T020` | Task item 是某 Document 在特定 Task generation/manifest revision 下的结果投影，不是第二个 Document SSOT。 | `T-O-5` | items 必须能由 manifest + durable Execution summary 重建。 |
+| `S02-T019` | 公共读面固定为bounded Get Task + Task-scoped paginated items + canonical IntakeItem/Revision link。 | `T-O-5 + S04-CALIBRATION` | Get Task不内嵌无界child数组；Intake truth仍由S04持有。 |
+| `S02-T020` | TaskItem是某IntakeItem/Revision在特定Task generation和IntakeSnapshot/ChangeSet下的结果投影，不是第二个Intake SSOT。 | `T-O-5 + S04-CALIBRATION` | items必须能由Membership/ChangeSet + durable Execution summary重建。 |
 | `S02-T021` | child 一旦取得完整 publication proof 即可独立 ready、读取和检索，不等待 root terminal；parent failed 不回滚成功 child。 | `T-O-9` | Task status 与 ready child 可以同时呈现 mixed outcome。 |
-| `S02-T022` | scatter cancel 是 forward-stop/no implicit rollback：停止未完成工作，保留已 proof-valid child；撤销知识必须创建 deactivate/delete Task。 | `T-O-10` | cancel 不能偷偷 purge Document/Vector。 |
-| `S02-T023` | counts 至少区分 `total/required/active/succeeded/failed/cancelled/skipped`，并与本 generation manifest/item membership 对账。 | `T-O-2/T-O-5/T-O-10` | counts 不是可由外部 PATCH 的字段。 |
+| `S02-T022` | scatter cancel是forward-stop/no implicit rollback：停止未完成工作，保留已proof-valid child；撤销IntakeItem必须创建`intake.deactivate/delete` Task。 | `T-O-10 + S04-T021` | cancel不能偷偷purge Intake/Vector。 |
+| `S02-T023` | counts至少区分`total/required/active/succeeded/failed/cancelled/skipped`，并与本generation的SnapshotMembership/ChangeSet对账。 | `T-O-2/T-O-5/T-O-10 + S04` | counts不是外部PATCH字段。 |
 
 ### 2.5 Retry、rebuild 与因果账本真相
 
 | Truth ID | 冻结真相 | 来源 | 下游约束 |
 |---|---|---|---|
-| `S02-T024` | atomic child 外部人工重启必须为稳定 `document_uuid` 创建新的 `document.rebuild` Task；旧 scatter Task/tree 不复活、不改写。 | `T-O-6` | 新 Task 有新 ACK、Audit、root Execution、status 与 result。 |
+| `S02-T024` | atomic child外部人工重启必须为稳定`intake_item_uuid`创建新的`intake.rebuild` Task；可绑定expected`intake_revision_uuid`，但不创建新IntakeRevision。旧scatter Task/tree不复活、不改写。 | `T-O-6 + S04-T010/T033` | 新Task有新ACK、Audit、root Execution、status与result。 |
 | `S02-T025` | full Task retry 保持原 Task identity，但增加 `current_generation`、创建新 root tree；旧 tree terminal immutable。 | `T-O-8` | 默认读 current，history 按 generation 可查。 |
-| `S02-T026` | `task_restarts` 是所有外部人工重启的 durable causation/admission SSOT，scope 固定为 `atomic_document/full_task`。 | `T-O-7/T-O-8` | 自动 Process retry、queue redelivery、lease recovery 不写该表。 |
+| `S02-T026` | `task_restarts`是所有外部人工重启的durable causation/admission SSOT，scope固定为`atomic_intake_item/full_task`。 | `T-O-7/T-O-8 + S04-CALIBRATION` | 自动Process retry、queue redelivery、lease recovery不写该表。 |
 | `S02-T027` | `task_restarts` 不保存可独立推进的 Task status；restart 当前状态必须 LEFT JOIN 目标 Task 获取。 | `T-O-7/T-O-11` | 禁止 restart/status 双真相。 |
 | `S02-T028` | atomic rebuild accepted 时，restart row、新 Task、Task Audit 与 durable scheduling intent 同事务提交；任一失败全部回滚。 | `T-O-7` | 未认证或 strict schema 无效请求不写业务真相。 |
 | `S02-T029` | full retry accepted 时，restart row、generation/CAS、current root scheduling intent 和 Task `→queued` 必须处于同一原子或由 S12 证明等价的提交边界。 | `T-O-8 + ACCEPTED-VERDICT` | queue wake-up 只能发生在提交后。 |
@@ -169,11 +171,11 @@ Legacy 只能证明真实需求、失败模式和已有围栏，不能把 Cloudf
 
 | Truth ID | 冻结真相 | 来源 | 下游约束 |
 |---|---|---|---|
-| `S02-T032` | 所有 Task、items、restart 和 lineage 查询强制 team-scoped；不得按裸 task/document UUID 跨 team 查询。 | `S01 + T-O-11` | 即使 token 具全局能力，team_uuid 仍是数据隔离键。 |
+| `S02-T032` | 所有Task、items、restart和lineage查询强制team-scoped；不得按裸task/Intake UUID跨team查询。 | `S01 + T-O-11 + S04` | 即使token具全局能力，team_uuid仍是数据隔离键。 |
 | `S02-T033` | list/items/restarts/lineage 使用 opaque stable cursor；排序包含唯一 tie-breaker，翻页不得依赖可变 offset。 | `T-O-5/T-O-11` | 精确编码由 OpenAPI/实现统一，不允许 route 各自发明。 |
-| `S02-T034` | 提供 team-scoped global restart list 和 causal lineage query；可从 restart/task/document 入口追溯 source → restart → target Task → generation summaries。 | `T-O-11` | 普通返回只包含稳定 Task/Document identity 与 durable summary。 |
+| `S02-T034` | 提供team-scoped global restart list和causal lineage query；可从restart/task/IntakeItem入口追溯source Task/Item→restart→target Task→generation summaries。 | `T-O-11 + S04-CALIBRATION` | 普通返回只包含稳定Task/Intake identity与durable summary。 |
 | `S02-T035` | Process cleanup、日志 retention 和 Task soft-delete 不得断开 Audit、restart causation、generation terminal summary 或 lineage。 | `T-O-7/T-O-11` | lineage 对软删除 Task 返回 tombstone identity 与最后 summary。 |
-| `S02-T036` | Task delete 只是受控 soft-delete/可见性操作，不是执行状态，也不物理级联删除资源或证据。 | `S01 + T-O-11` | active Task 必须先 cancel/terminal；删除不等于 Document delete。 |
+| `S02-T036` | Task delete只是受控soft-delete/可见性操作，不是执行状态，也不物理级联删除资源或证据。 | `S01 + T-O-11` | active Task必须先cancel/terminal；Task delete不等于IntakeItem delete。 |
 | `S02-T037` | Task result endpoint 必须明确区分 `not_ready`、terminal failure/cancel 与 ready success；不能用 404 混淆未完成。 | `S01-E07 + ACCEPTED-VERDICT` | polling caller 不依赖日志解释结果。 |
 | `S02-T038` | 外部错误使用稳定 machine code；内部 stack、绝对路径、token、Process payload 和驱动错误不得泄漏。 | `S01/S16 boundary` | 诊断详情进入受控内部 observability。 |
 
@@ -192,24 +194,24 @@ tasks
 
 - 四张原有核心表的职责和所有权不变；
 - `task_restarts` 是第五张因果/admission 表，不是第四层执行身份；
-- Task-scoped items 是 manifest + durable Execution summary 的 read model，不新增 scatter patch 表；
+- Task-scoped items是SnapshotMembership/ChangeSet + durable Execution summary的read model，不新增scatter patch表；
 - generation 是 Task/Execution/restart lineage 的字段，不新增 `task_generations` 双真相表；
-- Source/Document/Version、events/logs、outbox/queue、Artifact 和 Vector 表归各自 Domain，不计入上述五张最小集合。
+- S04十张Intake canonical tables与supporting ledgers、events/logs、outbox/queue、derived asset和Vector表归各自Domain，不计入上述五张runtime/restart最小集合。
 
 ---
 
 ## 3. 总体方案陈述
 
-1. **以 Task 做唯一外部聚合根**：所有持久异步 request intent 都先创建 Task + Audit；上游只操作 Task 或长期 Document，不操作运行内部身份。
+1. **以Task做唯一外部聚合根**：所有持久异步request intent都先创建Task + Audit；上游只操作Task或稳定IntakeItem，不操作运行内部身份。
 2. **以六态状态机做 polling SSOT**：Task status 只描述 current generation 的等待、执行、取消收敛与终局，不复制 RAG 阶段。
 3. **以 lifecycle CAS 统一线性化**：cancel、success、failure、full retry 和 soft-delete admission 共享 revision/guard；不存在 worker 直写终态的旁路。
 4. **以 generation 保存 full retry 历史**：full retry 保持 Task ACK，创建新 root generation；旧 Execution tree 与 result/proof 保持 immutable。
-5. **以新 Task 表达 atomic rebuild**：单个 child 重启是新的外部工作请求，拥有自己的 Task/Audit；来源 scatter 只作为 immutable cause。
+5. **以新Task表达atomic rebuild**：单个IntakeItem重建是新的外部工作请求，拥有自己的Task/Audit；来源scatter只作为immutable cause，rebuild不创建IntakeRevision。
 6. **以 `task_restarts` 统一人工重启因果**：full/atomic 两类 scope 共用 durable ledger，但运行状态只从 Task join。
-7. **从第一天原生支持 scatter**：manifest expected set、durable scheduling intent、collect-all、counts、items、fan-in 和 reconciliation 是主路径，不是旁路补丁。
+7. **从第一天原生支持scatter**：accepted Snapshot/Membership/ChangeSet required set、durable scheduling intent、collect-all、counts、items、fan-in和recovery是主路径。
 8. **以 child publication proof 做可见性围栏**：健康 child 可早发布；parent failed/cancelled 不自动回滚已验证知识。
-9. **以 forward-stop 区分取消与删除**：cancel 停止未来工作；deactivate/delete 才撤销资源，两者各有 Task/Audit/因果。
-10. **以三段式读面控制边界**：Get Task 有界、items 可分页、Document 长期 canonical；内部诊断与业务 API 分层。
+9. **以forward-stop区分取消与删除**：cancel停止未来工作；`intake.deactivate/delete`才改变Intake lifecycle，两者各有Task/Audit/因果。
+10. **以三段式读面控制边界**：Get Task有界、items可分页、IntakeItem/Revision长期canonical；内部诊断与业务API分层。
 11. **以 durable summary 支撑治理**：Process 可在围栏后清理，但 Task polling、generation history、restart list 和 lineage 仍完整。
 12. **以本地事务状态先于队列唤醒**：吸收 legacy 的可靠性经验，删除 `waitUntil`、callback 和跨 Worker RPC 成为真相的拓扑。
 
@@ -242,7 +244,7 @@ succeeded ───── no retry back-edge；new rebuild Task only
 
 | Method / Route | 语义 | 成功响应 |
 |---|---|---|
-| `POST /v1/teams/{team_uuid}/tasks` | 原子创建 Task + Audit；atomic rebuild causation 随严格 `document.rebuild` payload 进入 | `201`；同 fingerprint 重放 `200` |
+| `POST /v1/teams/{team_uuid}/tasks` | 原子创建Task + Audit；atomic rebuild causation随严格`intake.rebuild` payload进入 | `201`；同fingerprint重放`200` |
 | `GET /v1/teams/{team_uuid}/tasks/{task_uuid}` | 读取 bounded current aggregate | `200` |
 | `GET /v1/teams/{team_uuid}/tasks` | team-scoped cursor list | `200` |
 | `PATCH /v1/teams/{team_uuid}/tasks/{task_uuid}` | 白名单字段 + `expected_revision` | `200` |
@@ -254,7 +256,7 @@ succeeded ───── no retry back-edge；new rebuild Task only
 | `GET /v1/teams/{team_uuid}/tasks/{task_uuid}/generations` | durable generation summaries | `200` cursor page |
 | `GET /v1/teams/{team_uuid}/task-restarts` | global restart list/filter | `200` cursor page |
 | `GET /v1/teams/{team_uuid}/task-restarts/{restart_uuid}` | 单条 restart + joined Task summary | `200` |
-| `GET /v1/teams/{team_uuid}/task-lineage` | 以一个 restart/task/document seed 查询因果图 | `200` bounded/cursor page |
+| `GET /v1/teams/{team_uuid}/task-lineage` | 以一个restart/task/intake-item seed查询因果图 | `200` bounded/cursor page |
 
 Get Task 最小稳定响应族：
 
@@ -263,14 +265,14 @@ Get Task 最小稳定响应族：
 | Identity | `team_uuid/task_uuid/trace_uuid/schema_version/request_intent` |
 | Description | `title/description/payload_extra/priority/deadline_at` |
 | Lifecycle | `status/revision/current_generation/received_at/started_at/completed_at/deleted_at` |
-| Aggregate | progress summary、scatter counts、manifest revision、result/error summary |
-| Links | self、result、items、generations、restart lineage；适用时 canonical Source/Document |
+| Aggregate | progress summary、scatter counts、IntakeSnapshot/ChangeSet ref、result/error summary |
+| Links | self、result、items、generations、restart lineage；适用时canonical IntakeSource/Item/Revision |
 
 Task list 至少支持 `status/request_intent/priority/created_at range/updated_at range/include_deleted` 过滤，默认按 `created_at desc, task_uuid desc` 或等价唯一顺序。`priority` 只接受 `low/normal/high/urgent`，省略为 `normal`；`deadline_at` 若提供必须为严格 RFC 3339 UTC 时间且晚于接收时刻。
 
-普通响应不得返回 root/child `execution_uuid`、`process_uuid`、lease token、内部 stage 或绝对 Artifact path。内部运维诊断可在独立受控 surface 使用这些身份，但不属于 S02 public contract。
+普通响应不得返回root/child`execution_uuid`、`process_uuid`、lease token、内部stage或绝对storage path。内部运维诊断可在独立受控surface使用这些身份，但不属于S02 public contract。
 
-**小结**：公共 API 围绕 Task、Document 与 Restart 三类稳定身份组织，不围绕内部 worker/step 组织。
+**小结**：公共API围绕Task、canonical Intake identity与Restart组织，不围绕内部worker/step组织。
 
 ### 4.2 `S02-E02` — 实施 Task projection 与 lifecycle CAS
 
@@ -308,27 +310,27 @@ CAS 失败必须返回 current safe summary 和 current revision。Transition se
 - `failed/cancelled` 返回 HTTP `200` 的 terminal envelope，分别使用 `terminal_failed/terminal_cancelled`，不得伪造 success result；
 - DELETE 只接受 terminal Task 和 expected revision；active Task 返回 `409 task-active` 并要求先 cancel；
 - soft-deleted Task 从默认 list 隐藏；精确 Get 返回 `410 task-deleted` 的安全 tombstone；lineage/restart query 仍返回 identity、last terminal summary 与 deleted_at；
-- soft-delete 不删除 Audit、restart row、Execution terminal summary、Document/Version 或向量资产。
+- soft-delete不删除Audit、restart row、Execution terminal summary、IntakeItem/Revision或向量资产。
 
 **小结**：执行终局、结果 readiness 和资源可见性是三个正交事实。
 
 ### 4.4 `S02-E04` — 实施 scatter Task-scoped items 与 collect-all aggregate
 
-**说明**：散射 child 必须可原子检索，但 Task 不复制 Document truth。
+**说明**：scatter child必须可原子检索，但Task不复制IntakeItem/Revision truth。
 
 **真相层对应编号**：`S02-T016`–`S02-T023`
 
 **执行台账**：
 
-1. committed manifest 冻结 `(team_uuid, task_uuid, generation, manifest_revision)` 的 membership 与 required/skipped 决策；
-2. items cursor 必须绑定上述快照与稳定排序键；manifest revision 变化不得让同一 cursor 漂移；
-3. item 至少返回 `document_uuid`、安全的 source/atomic key 投影、`required`、`outcome=active|succeeded|failed|cancelled|skipped`、`publication_ready`、result/error summary 和 canonical links；
+1. accepted IntakeSnapshot/ChangeSet冻结`(team_uuid, task_uuid, generation, intake_snapshot_uuid, change_set_digest)`的membership与required/skipped决策；
+2. items cursor必须绑定上述snapshot与稳定排序键；generation/ChangeSet变化不得让同一cursor漂移；
+3. item至少返回`intake_item_uuid`、`intake_revision_uuid?`、安全的ExternalKey projection、`required`、`outcome=active|succeeded|failed|cancelled|skipped`、`publication_ready`、result/error summary和canonical links；
 4. `publication_ready=true` 只由完整 child proof 产生，可在 parent running/failed/cancelled 时保持；
-5. aggregate counts 由 manifest + durable child summaries计算/缓存，可重建；不允许外部 PATCH；
+5. aggregate counts由SnapshotMembership/ChangeSet + durable child summaries计算/缓存，可重建；不允许外部PATCH；
 6. 只要 required child 仍 active，且 cancel 未赢，Task 保持 running；全部 required terminal 后：全成功才 succeeded，任一 failed/非取消型缺失则 failed；cancel 赢则等 fencing 后 cancelled；
 7. projection 漂移由 reconciler 重建并写事件，不能通过插入 patch child 或手工改 count 修复。
 
-**小结**：Task aggregate 解释“这一批请求怎样了”，Document 解释“这一份知识是什么”。
+**小结**：Task aggregate解释“这一批请求怎样了”，IntakeItem/Revision解释“摄入业务项及其当前语义事实是什么”；是否成为Knowledge不属于S02/S04 v1。
 
 ### 4.5 `S02-E05` — 实施 cancel 的 forward-stop/no-rollback
 
@@ -353,7 +355,7 @@ cancel request + expected_revision
 - cancel 先提交：后到 success commit 被 CAS/guard 拒绝；
 - queued cancel 也先进入 cancelling，再确认没有 claim 后 cancelled；
 - 已 proof-valid child 保持 ready；未开始 child 可记 `skipped`，active child 收敛为 cancelled/failed；
-- 撤销 ready child 必须另建 `document.deactivate` 或 `document.delete` Task。
+- 撤销ready child必须另建`intake.deactivate`或`intake.delete` Task。
 
 **小结**：运行控制与知识生命周期不共享一个危险的“取消即删除”按钮。
 
@@ -375,7 +377,7 @@ cancel request + expected_revision
 
 **小结**：retry 复用的是外部 ACK，不复活旧执行事实。
 
-### 4.7 `S02-E07` — 实施 atomic Document rebuild 与因果原子提交
+### 4.7 `S02-E07` — 实施 atomic IntakeItem rebuild 与因果原子提交
 
 **说明**：原子 child 重启是新外部请求，不是在旧 scatter tree 中做 stage/step recovery。
 
@@ -384,12 +386,12 @@ cancel request + expected_revision
 **执行台账**：
 
 ```text
-POST new Task(request_intent=document.rebuild)
+POST new Task(request_intent=intake.rebuild)
   → validate active team/token/strict payload
-  → validate document_uuid + source task/item causation
+  → validate intake_item_uuid + optional expected intake_revision_uuid + source task/item causation
   → resolve target Task creation fingerprint
   → begin transaction
-      insert task_restarts(scope=atomic_document, accepted)
+      insert task_restarts(scope=atomic_intake_item, accepted)
       insert new Task queued
       insert immutable Task Audit
       insert durable scheduling intent
@@ -398,10 +400,10 @@ POST new Task(request_intent=document.rebuild)
 ```
 
 - 新 Task 使用 caller-supplied 新 `task_uuid/trace_uuid`，MKB 不替 caller 生成 Task identity；
-- 旧 scatter Task、source child Execution、manifest/item 与终态只读；
-- 新 Task 自己创建 root Execution/Processes；是否复用 Artifact/DocumentVersion 由 S03-S05 决定；
+- 旧scatter Task、source child Execution、Snapshot/ChangeSet item与终态只读；
+- 新Task自己创建root Execution/Processes；target IntakeItem/Revision保持不变，是否复用IntakeArtifact/派生generation由S03-S09决定；
 - public payload 不接受 `stage/process_uuid/force-step`；内部 step recovery 不写 `task_restarts`；
-- 因果链至少能从新 Task 反查 source Task + Document，也能从 source Task/Document 枚举后续 rebuild Tasks。
+- 因果链至少能从新Task反查source Task + IntakeItem/Revision，也能从source Task/IntakeItem枚举后续rebuild Tasks。
 
 **小结**：atomic rebuild 的独立 Task/Audit 让每次人工动作都可单独轮询、授权、追责和重放。
 
@@ -421,7 +423,7 @@ POST new Task(request_intent=document.rebuild)
 | Immutable input | strict payload、Task Audit 复合引用、create-time deadline |
 | Mutable description | title、description、payload_extra、priority |
 | Lifecycle | status、revision、current_generation、current root internal pointer、cancel intent |
-| Scatter projection | manifest revision、total/required/active/succeeded/failed/cancelled/skipped counts |
+| Scatter projection | IntakeSnapshot/ChangeSet ref、total/required/active/succeeded/failed/cancelled/skipped counts |
 | Durable summary | current progress、result/error/proof refs；generation history由 Execution/restart durable truth支持 |
 | Time/visibility | received/started/completed/updated/deleted timestamps、deleted actor/reason |
 
@@ -429,8 +431,8 @@ POST new Task(request_intent=document.rebuild)
 
 | 列族 | 最小字段语义 |
 |---|---|
-| Identity | `restart_uuid` UUIDv7、`team_uuid`、restart scope = atomic_document/full_task |
-| Cause | `source_task_uuid`、source generation/root/child refs、`document_uuid`/version ref、causation trace |
+| Identity | `restart_uuid` UUIDv7、`team_uuid`、restart scope = atomic_intake_item/full_task |
+| Cause | `source_task_uuid`、source generation/root/child refs、`intake_item_uuid`/`intake_revision_uuid?`、causation trace |
 | Target | `restart_task_uuid`；target generation/root ref；atomic 时为新 Task，full 时与 source Task 相同 |
 | Admission | request/command fingerprint、reason、requested_at、accepted/rejected、稳定 decision/error code |
 | Governance | created/decided timestamps、payload_extra；causal/admission fields 提交后 immutable |
@@ -441,11 +443,11 @@ POST new Task(request_intent=document.rebuild)
 PK (restart_uuid)
 INDEX (team_uuid, source_task_uuid, requested_at, restart_uuid)
 INDEX (team_uuid, restart_task_uuid, requested_at, restart_uuid)
-INDEX (team_uuid, document_uuid, requested_at, restart_uuid)
+INDEX (team_uuid, intake_item_uuid, requested_at, restart_uuid)
 INDEX (team_uuid, restart_scope, admission_outcome, requested_at, restart_uuid)
 INDEX (causation_trace_uuid)
 
-atomic_document accepted:
+atomic_intake_item accepted:
   UNIQUE (team_uuid, restart_task_uuid, restart_scope)
 
 full_task accepted:
@@ -465,10 +467,10 @@ Rejected row 的 target Task/root 可以为空；accepted atomic row 必须能 F
 
 **执行台账**：
 
-- restart list 支持 `restart_uuid/source_task_uuid/restart_task_uuid/document_uuid/restart_scope/admission_outcome/current_task_status/time range`；
+- restart list支持`restart_uuid/source_task_uuid/restart_task_uuid/intake_item_uuid/restart_scope/admission_outcome/current_task_status/time range`；
 - `current_task_status/result/error` 从 LEFT JOIN Task 获得；软删除时返回 tombstone + last summary；rejected row 无 Task 时返回 admission result；
-- lineage query 必须且只能提供一个 seed：`restart_uuid`、`task_uuid` 或 `document_uuid`；
-- 返回 `nodes + directed edges`，至少覆盖 source Task/Document → restart record → restart Task → generation summaries；
+- lineage query必须且只能提供一个seed：`restart_uuid`、`task_uuid`或`intake_item_uuid`；
+- 返回`nodes + directed edges`，至少覆盖source Task/IntakeItem→restart record→restart Task→generation summaries；
 - 普通 node 不暴露 Execution/Process UUID；generation 只返回 stable number、status、counts、result/error/proof summary 和时间；
 - cursor 固定 `requested_at/restart_uuid` 或等价唯一顺序；所有 join 都带 team_uuid；
 - Process compaction 后由 Execution terminal summary支撑 generation node，不能退化为“详情已删除”。
@@ -492,7 +494,7 @@ Rejected row 的 target Task/root 可以为空；accepted atomic row 必须能 F
 | `409` | `revision-conflict` | expected revision 不匹配，返回安全 current summary |
 | `409` | `task-active` | active Task 不允许 retry/delete |
 | `409` | `retry-not-allowed` | succeeded 或其他非允许来源状态发 full retry |
-| `409` | `restart-causation-conflict` | source Task/Document/generation 与事实不匹配 |
+| `409` | `restart-causation-conflict` | source Task/IntakeItem/Revision/generation与事实不匹配 |
 | `410` | `task-deleted` | 精确读取 soft-deleted Task 的 tombstone |
 | `422` | `task-schema-invalid` | strict envelope/payload 无效 |
 | `422` | `task-transition-invalid` | 合法身份上的非法 lifecycle command |
@@ -510,11 +512,11 @@ Rejected row 的 target Task/root 可以为空；accepted atomic row 必须能 F
 
 **执行台账**：
 
-- reconciler 对账 Task current generation/root、manifest membership、counts、terminal proof、restart target generation 和 scheduling intent；
+- recovery对账Task current generation/root、SnapshotMembership/ChangeSet、counts、terminal proof、restart target generation和scheduling intent；
 - 任一 mismatch 先写 domain event/告警，再以受控 repair transition 重建 projection；不得 worker 直接 UPDATE Task；
 - 指标至少覆盖各 Task status、status age、cancel convergence、scatter active/failed counts、generation retries、restart admission、projection mismatch 和 lineage query failure；
 - Task/Audit/restart/generation terminal summary 的最低 retention 不短于其任何可查询因果链；确切时长由 S12/S15 冻结；
-- Process 只有在 Execution summary 已包含 workflow/config/model、counts、retry、final error、Artifact/proof refs 和时间后才能清理；
+- Process只有在Execution summary已包含workflow/config/model、counts、retry、final error、Intake/derived asset/proof refs和时间后才能清理；
 - queue wake-up 丢失、重复或延迟不得改变已提交工作事实，reconciler 必须可补发。
 
 **小结**：运行可清理，但外部承诺、终局证据和因果链不可随短期控制行一起消失。
@@ -528,29 +530,29 @@ Rejected row 的 target Task/root 可以为空；accepted atomic row 必须能 F
 | Evidence | 已验证事实 | MKB verdict |
 |---|---|---|
 | Admin API ingestion | 单一 API 请求先注册父/root，再触发 clean | 保留单 Task/root 与提交后调度；删除平台 plan/R2/Worker |
-| Dedicated API processor | array scatter、atomic key、content/meta 双 hash、并行 candidate | 保留稳定 key/hash/schema；Document UUID 在持久事务分配/复用 |
-| SMCP reporter/schema | 完整 child_files 与结构化 callback；另有 first-child atomic_hint 补丁 | 保留完整 manifest/错误/correlation；删除首 child hint 与消息态真相 |
+| Dedicated API processor | array scatter、atomic key、content/meta双hash、并行candidate | 保留stable key/digest/schema原理；IntakeItem UUID在S04 acceptance transaction分配/复用 |
+| SMCP reporter/schema | 完整child_files与结构化callback；另有first-child atomic_hint补丁 | 将集合证据升级为Snapshot/Membership/ChangeSet；删除首child hint与消息态真相 |
 | Clean Dispatcher | 先建 process 再唤醒；diff/register 后并行 fan-out | 保留 durable state-before-wakeup；统一 Process 表和本地 queue adapter |
 | RAG finalizer | child ready/rag_failed 独立更新，父状态不动 | 保留 child 独立结果；新增 expected-set collect-all fan-in |
-| Console list/artifact/timeline | child 可稳定寻址、独立查询 | 重建为 Task items + canonical Document + 内部 diagnostics |
-| Console/Restarter | child 可按 stage/process 恢复，带 retry guard | public 改为新 document.rebuild Task；内部 recovery 归 S03 |
+| Console list/artifact/timeline | child可稳定寻址、独立查询 | 重建为TaskItems + canonical IntakeItem/Revision + 内部diagnostics |
+| Console/Restarter | child可按stage/process恢复，带retry guard | public改为新`intake.rebuild` Task；内部recovery归S03 |
 
 ### 5.2 事实反例
 
 | Counterexample ID | 错误做法 | S02 订正 |
 |---|---|---|
 | `S02-C01` | Task status 使用 clean/structurize/vectorize/retrying | 这些属于 Execution/Process；Task 只有六态。 |
-| `S02-C02` | scatter 每个 child 创建 Task | 一个入口一个 Task；child 是 Document + child Execution + Task item。 |
+| `S02-C02` | scatter每个child创建Task | 一个入口一个Task；child是IntakeItem/Revision + child Execution + TaskItem。 |
 | `S02-C03` | Get Task 内嵌所有 children | 主资源必须有界；children 使用 cursor items。 |
 | `S02-C04` | 一个 child 失败就立即 failed 并停止 siblings | collect-all；仍有 required active 时 Task running。 |
 | `S02-C05` | parent failed/cancelled 就回滚已发布 child | child proof 决定可见性；撤销需要显式资源 Task。 |
 | `S02-C06` | cancel receipt 直接写 cancelled | 先 cancelling，直到 descendants fenced/terminal。 |
-| `S02-C07` | 原子重启复活旧 scatter Task 或允许 caller 选 stage/process | 创建新 document.rebuild Task；内部 recovery 不进 public API。 |
+| `S02-C07` | 原子重启复活旧scatter Task或允许caller选stage/process | 创建新`intake.rebuild` Task；内部recovery不进public API。 |
 | `S02-C08` | full retry 覆盖旧 result/tree | 创建新 generation，旧 tree terminal immutable。 |
 | `S02-C09` | restart row 独立维护 queued/running/status | Task 是状态 SSOT；restart 只存因果/admission。 |
-| `S02-C10` | queue send/Promise.all/callback 成功就是 durable fan-out/completion | committed scheduling intent、manifest 和 proof 才是事实。 |
+| `S02-C10` | queue send/Promise.all/callback成功就是durable fan-out/completion | committed Snapshot/ChangeSet/scheduling intent和proof才是事实。 |
 | `S02-C11` | Process 清理后 lineage 可以断链 | Execution summary、Audit、Task/restart 必须长期支撑查询。 |
-| `S02-C12` | 用裸 task_uuid/document_uuid 全局检索 | 所有业务查询必须 team-scoped。 |
+| `S02-C12` | 用裸task_uuid/intake_item_uuid全局检索 | 所有业务查询必须team-scoped。 |
 
 ### 5.3 风险台账
 
@@ -558,16 +560,16 @@ Rejected row 的 target Task/root 可以为空；accepted atomic row 必须能 F
 |---|---|---:|---|
 | `S02-R01` | Task 与 root/children 状态漂移 | P0 | 单 transition service、event、reconciler、projection rebuild test |
 | `S02-R02` | cancel/success 双终局 | P0 | revision CAS + cancel intent guard + fault/race test |
-| `S02-R03` | manifest 已提交但 child 漏投递/重复投递 | P0 | transactional scheduling intent + generation uniqueness + reconciler |
+| `S02-R03` | Snapshot/ChangeSet已提交但child漏投递/重复投递 | P0 | transactional outbox + intent uniqueness + deterministic recovery |
 | `S02-R04` | full retry 网络重放创建双 generation | P0 | source generation/fingerprint unique + expected revision CAS |
 | `S02-R05` | atomic rebuild 新 Task 存在但 causal row/Audit 缺失 | P0 | 四项同事务提交，故障注入逐点验证 |
 | `S02-R06` | restart 表复制 status 后与 Task 漂移 | P0 | schema 不设 writable current status；查询强制 join Task |
 | `S02-R07` | early publication 后 parent cancel 误删知识 | P0 | cancel/deactivate/delete command 分离与权限测试 |
-| `S02-R08` | Get Task 无界或 cursor 漂移 | P1 | bounded envelope、manifest-bound cursor、唯一 tie-breaker |
+| `S02-R08` | Get Task无界或cursor漂移 | P1 | bounded envelope、Snapshot/ChangeSet-bound cursor、唯一tie-breaker |
 | `S02-R09` | soft-delete/Process cleanup 断开审计链 | P0 | tombstone + FK/逻辑 retention fence + lineage acceptance test |
 | `S02-R10` | 内部 UUID/路径/错误泄漏 | P1 | response allowlist、error sanitizer、security contract test |
-| `S02-R11` | counts 只数已创建 child，遗漏 expected child | P0 | counts/fan-in 对照 committed manifest required set |
-| `S02-R12` | ready child 被 Task failed 状态从检索层错误过滤 | P0 | retrieval visibility 依据 DocumentVersion proof，不依据 parent Task terminal status |
+| `S02-R11` | counts只数已创建child，遗漏expected child | P0 | counts/fan-in对照accepted Snapshot/ChangeSet required set |
+| `S02-R12` | ready child被Task failed从检索层错误过滤 | P0 | retrieval visibility依据IntakeItem lifecycle + exact ServingRevision proof，不依据parent Task terminal status |
 
 ### 5.4 禁止方向
 
@@ -577,7 +579,7 @@ Rejected row 的 target Task/root 可以为空；accepted atomic row 必须能 F
 - 禁止 public `stage/process_uuid/force-step` 重启；
 - 禁止 Task status 使用 RAG phase 或 partial success；
 - 禁止 callback/queue/log 充当 Task 或 restart SSOT；
-- 禁止 cancel 隐式执行 Document/Vector purge；
+- 禁止cancel隐式执行IntakeItem/Vector purge；
 - 禁止 physical delete Audit/restart/generation terminal evidence；
 - 禁止复制 Worker/D1/R2/SMCP/Dispatcher 部署拓扑。
 
@@ -603,12 +605,12 @@ Rejected row 的 target Task/root 可以为空；accepted atomic row 必须能 F
 | `S02-A12` | cancel 后 late worker commit | 被 generation/fencing/CAS 拒绝 |
 | `S02-A13` | scatter 一个 child 失败、siblings active | Task running 且 failed_count 正确 |
 | `S02-A14` | scatter required 全终态含失败 | Task failed；成功 child 保持 ready |
-| `S02-A15` | scatter required 全部 proof-valid | root/Task succeeded，counts 与 manifest 一致 |
-| `S02-A16` | child proof 早于 root terminal | child 可按 Document 读取/检索，Task 仍 running |
+| `S02-A15` | scatter required全部proof-valid | root/Task succeeded，counts与Snapshot/ChangeSet一致 |
+| `S02-A16` | child proof早于root terminal | child可按IntakeItem/ServingRevision读取/检索，Task仍running |
 | `S02-A17` | parent failed 后 ready child | ready/检索可见性不被回滚 |
 | `S02-A18` | scatter cancel 含已发布 child | Task cancelled；ready child 保留；未完成工作停止 |
 | `S02-A19` | items 大集合分页 | Get Task 有界；items 无重复/遗漏；cursor 稳定 |
-| `S02-A20` | counts projection 被故障注入破坏 | reconciler 从 manifest/summary 重建并告警 |
+| `S02-A20` | counts projection被故障注入破坏 | recovery从SnapshotMembership/ChangeSet/summary重建并告警 |
 | `S02-A21` | failed Task full retry | 同 Task 新 generation queued，旧 generation immutable |
 | `S02-A22` | cancelled Task full retry | 同 Task 新 generation queued，cancel summary 保留 |
 | `S02-A23` | active/succeeded full retry | 分别返回 active/retry-not-allowed，不建 generation |
@@ -618,12 +620,12 @@ Rejected row 的 target Task/root 可以为空；accepted atomic row 必须能 F
 | `S02-A27` | restart admission rejected | 可有 immutable rejected row；无 Task/Execution |
 | `S02-A28` | restart status 拉取 | status/result 来自 Task join，无第二 writer |
 | `S02-A29` | restart list 全过滤组合 | team 隔离、稳定 cursor、正确 current status |
-| `S02-A30` | task/document/restart 三种 lineage seed | 返回同一因果图语义且无内部 UUID 泄漏 |
+| `S02-A30` | task/intake-item/restart三种lineage seed | 返回同一因果图语义且无内部UUID泄漏 |
 | `S02-A31` | Task soft-delete 后 lineage | 返回 tombstone + last summary，因果不断链 |
 | `S02-A32` | Process compaction 后查询 | Task/items/generations/restart/lineage 结果仍完整 |
 | `S02-A33` | queue wake-up 丢失/重复 | reconciler 补发；只产生一份业务执行事实 |
 | `S02-A34` | response/error 泄漏扫描 | 无 token、stack、SQL、绝对路径、Process payload |
-| `S02-A35` | Document deactivate/delete | 独立新 Task/Audit；不伪装为 parent cancel |
+| `S02-A35` | IntakeItem deactivate/delete | 独立新Task/Audit；logical-first且不伪装为parent cancel |
 
 ### 6.2 必须留存的验收证据
 
@@ -631,7 +633,7 @@ Rejected row 的 target Task/root 可以为空；accepted atomic row 必须能 F
 2. Task transition matrix 与 property-based transition report；
 3. Turso/SQLite transaction、unique constraint 与 crash fault-injection report；
 4. cancel/success、retry replay、fan-out recovery 并发测试报告；
-5. scatter golden manifest/counts/items/result fixtures；
+5. scatter golden Snapshot/Membership/ChangeSet/counts/items/result fixtures；
 6. Process compaction/soft-delete 前后 lineage 等价报告；
 7. tenant isolation 与 response data-leak scan；
 8. legacy 对照场景：发起 → scatter → register → parallel wake-up → child proof → collect-all → atomic rebuild。
@@ -674,7 +676,7 @@ Rejected row 的 target Task/root 可以为空；accepted atomic row 必须能 F
 ### 7.3 证据使用判定
 
 - **保留原理**：稳定原子 key、双 hash、完整 child set、先注册后投递、siblings 并行、结构化 error、原子查询和人工重启需求；
-- **重写机制**：SMCP callback → 本地 durable transition/event，D1 → Turso-compatible relational truth，R2 → logical local Artifact ref，Dispatcher queue → local queue/outbox/reconciler；
+- **重写机制**：SMCP callback→本地durable transition/event，D1→Turso-compatible relational truth，R2→logical local asset ref，Dispatcher queue→local queue/outbox/recovery；
 - **删除拓扑**：Cloudflare Worker/Durable Object/RPC、platform auth/plan/phone、跨 Worker job/file identity、first-child hint、parent-untouched completion 和 stage/process public restart。
 
 ---
@@ -699,7 +701,7 @@ Rejected row 的 target Task/root 可以为空；accepted atomic row 必须能 F
 | 下游 | 必须承接，但不由 S02 冒充冻结的内容 |
 |---|---|
 | `S03` | Execution/Process exact state、workflow definition、claim/lease/fencing、automatic retry、cancel propagation 与 reconciler |
-| `S04-S05` | Source/Document/Version/manifest exact schema、stable atomic key、rebuild/deactivate/delete resource semantics |
+| `S04-S05` | IntakeSource/Snapshot/Item/Revision/Membership/ChangeSet exact schema、source-scoped ExternalKey、rebuild/deactivate/delete semantics |
 | `S08-S10` | publication proof、ready visibility、retrieval filter 与 version replacement |
 | `S12` | Turso exact DDL、partial unique/transaction 能力、outbox 和 migration |
 | `S15` | event/log/trace、retention 数值、告警与 projection repair 运行手册 |
@@ -718,3 +720,4 @@ S02 将 Task 固定为可轮询、可线性化、可散射聚合且可完整追�
 | 版本 | 日期 | 作者 | 状态 | 主要变更 |
 |---|---|---|---|---|
 | `S02-v1.0` | `2026-07-15` | `MKB owner + Codex` | `accepted` | 吸收冻结 Q1–Q9 与 `T-O-1..11`；正式冻结 Task 六态/CAS、scatter collect-all/items/early publication/cancel、full retry generation、atomic rebuild 新 Task、`task_restarts`、global restart/lineage、HTTP/error surface、验收与 legacy 证据台账；S02 QNA campaign 关闭。 |
+| `S02-v1.1` | `2026-07-15` | `MKB owner + Codex` | `accepted / S04-calibrated` | 接收S04-v1.0：TaskItems与fan-in绑定SnapshotMembership/ChangeSet；canonical link改为IntakeItem/Revision；atomic scope改为`atomic_intake_item`与`intake.rebuild`；cancel/deactivate/delete、serving proof与lineage词汇对齐。 |
