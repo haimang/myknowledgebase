@@ -3,17 +3,19 @@
 > **项目**：`myknowledgebase`（MKB）
 > **Domain / 子系统**：`D1 / S01` 上游集成
 > **文档性质**：`specification / domain-truth`
-> **文档状态**：`accepted / D01-calibrated`（S01 域内真相已获 owner 接受，并已按 owner-originated D01 三层模型完成校准；全系统 truth layer 尚未冻结）
-> **Truth 版本**：`S01-v1.1`
+> **文档状态**：`accepted / D01+S02-calibrated`（S01 域内真相已获 owner 接受，并已按 owner-originated D01 三层模型与 S02 Task lifecycle 完成校准；全系统 truth layer 尚未冻结）
+> **Truth 版本**：`S01-v1.2`
 > **日期**：`2026-07-15`
 > **权威输入**：Owner-gated Q1–Q26 的全部裁决、owner 主动提出并冻结的 `D01 Task / Execution / Process Flow`、`03-nano/workers/skill-core` 代码事实、`legacy-family/` 任务入口事实
 > **上游索引**：`docs/baseline/spec-index.md`
-> **上游架构真相**：`docs/baseline/domain-truth/D01-task-execution-process-flow.md`（`D01-v1.0`）
+> **上游架构真相**：`docs/baseline/domain-truth/D01-task-execution-process-flow.md`（`D01-v1.1`）
 > **下游消费者**：`S02` Task API、`S03` Workflow、`S04` Knowledge Lifecycle、`S12` Persistence、`S15` Observability、`S16` Security、跨系统拓扑 `17`
 
 > **约束级别**：本文中的“必须 / 禁止 / 仅允许”是后续设计与实现的强制约束；“应当”是默认约束，若要偏离必须 reopen S01；“可以 / 建议”不是冻结的不变量。
 
 > **v1.1 校准声明**：D01 已由 owner 冻结为 Task / Execution / Process 的上游架构真相。本版正式 reopen 并取代 v1.0 中的 `attempt_uuid / task_attempts` 口径；同时把外部字段 `task_type` 校准为 `request_intent`。旧词不再是兼容别名，也不得与新模型并存。历史判断保留在修订记录中，不再具有规范性。
+
+> **v1.2 校准声明**：S02-v1.0 已接受并冻结 Task 六态、scatter 聚合、full retry generation、atomic rebuild 新 Task 与独立 `task_restarts`。本版只回填该下游真相：原四张核心 Task/运行表不变，启用外部人工重启后的最小 durable 业务真相集合更新为五张；Task 仍是运行状态 SSOT。
 
 ---
 
@@ -109,7 +111,7 @@ S01 只有在下列条件全部成立时才算在实现层完成：
 
 后续 spec 和实现不得把 `CODE-FACT` 中的旧行为直接当作新系统要求；只有下表明确冻结的目标真相才具有规范性。若实现需要偏离任一 `S01-Txxx`，必须提出 change request、列出受影响 spec，并重新取得 owner 裁决。
 
-`S01-v1.1` 已正式 reopen `S01-T014`、`S01-T023`、`S01-T024`、`S01-T026`–`S01-T029` 及其全部派生段落。v1.0 的 Attempt identity 与 `task_type` 字段名被本版取代；实现不得以“向后兼容”为理由同时接受两套核心 contract。
+`S01-v1.1` 已正式 reopen `S01-T014`、`S01-T023`、`S01-T024`、`S01-T026`–`S01-T029` 及其全部派生段落。v1.0 的 Attempt identity 与 `task_type` 字段名被本版取代；实现不得以“向后兼容”为理由同时接受两套核心 contract。`S01-v1.2` 进一步接收 S02 的 restart causal truth，不恢复任何已废止身份。
 
 ### 2.2 定位、拓扑与协议真相
 
@@ -173,9 +175,10 @@ S01 只有在下列条件全部成立时才算在实现层完成：
 | `S01-T051` | `process_uuid` 是工序实例 UUID，不是工序分类；Process 必须另有 RAG-specific `process_type/process_key`，至少能表达 clean、structurize、construct、vectorize/index 与 publication validation。 | `D01-T013/T022/T023` | 禁止 generic 内部 task type 取代 RAG process registry；exact workflow/process schema 由 S03/S05-S09 冻结。 |
 | `S01-T052` | 运行状态只允许自下而上归约：`Process/child Execution → Execution → Task`；control intent 自上而下传播：`Task command → root/child Execution → active Process`。 | `D01-T019/T020/T030` | worker/queue 不得直接写 Task 成功；收到 cancel command 不等于 active Process 已停止。 |
 | `S01-T053` | Process 是活跃期精确运行真相，可在所属 Execution 终结、retry/reconciliation 窗口关闭、durable summary 上卷且无 dangling pointer 后清理；Execution 必须比 Process 更 durable。 | `D01-T017/T031/T032` | Process retention 与 Event/Log retention 分离；Task polling 不得因 Process cleanup 失真。 |
-| `S01-T054` | D01 运行状态只使用 `tasks`、`executions`、`processes` 三张核心业务表；加上 S01 的独立 `task_audits`，从 Task ingress 到 runtime 的最小业务真相集合为四张。 | `D01 §5 / D01-T035` | 禁止 `task_attempts`、clean/rag process 分表、Task-Execution join 表和 scatter execution 补丁表；其他资源/事件/队列表按各自 Domain 管理。 |
+| `S01-T054` | D01 运行状态只使用 `tasks`、`executions`、`processes` 三张核心业务表；加上独立 `task_audits` 与 S02 的 `task_restarts` 因果/admission 表，启用外部人工重启后的最小 durable 业务真相集合为五张。 | `D01-v1.1 / S02-v1.0` | `task_restarts` 不构成第四层运行身份、不复制 Task status；继续禁止 Attempt、领域分表、join/scatter 补丁表。 |
 | `S01-T055` | 本地轻量 queue 只是 scheduling/transport mechanism，不是状态 SSOT；只有已提交的 Execution/Process 或 durable scheduling record 才能变成可 claim 工作。 | `D01-T018/T036` | Task/Audit 提交前不可见；queue ack、callback 或日志文本不能决定业务成功。 |
 | `S01-T056` | Task 成功必须消费 current root Execution 的 durable success proof。对 LS-RAG build/rebuild，proof 至少证明预期向量及 filter metadata 已写入 Turso 并校验通过；其他 request intent 必须使用各自 type-specific completion proof。 | `D01-T024/T025/T026` | S02 只聚合 proof；S03/S08/S09/S12 定义和验证 proof，禁止以 `pending_count=0` 或单次 callback 代替。 |
+| `S01-T057` | 外部人工重启分为两类：full retry 保持 Task identity 并创建新 generation；atomic Document rebuild 创建新 Task。两类均写独立 `task_restarts` 因果/admission truth，状态只从 Task 获取。 | `S02-T024-T031` | 上游不得把 stage/process recovery 作为公共命令，也不得用 restart row 维护第二套 Task status。 |
 
 ### 2.7 Audit 真相
 
@@ -516,11 +519,11 @@ Audit status 仅作为被保存的上游事实。即使值为 `rejected`，MKB �
 
 **小结**：上游无需被动接收回调，也无需 MKB 感知 user Durable Object；稳定资源查询即是首版集成协议。
 
-### 4.8 `S01-E08` — 区分 Task、Execution、Process、Audit、Event、Log 与 Trace
+### 4.8 `S01-E08` — 区分 Task、Execution、Process、Audit、Restart、Event、Log 与 Trace
 
-**说明**：七种记录服务不同目的，必须从 schema、写权限、retention 和查询面上分开。D01 的运行投影不得被 Audit/Log/Event 替代。
+**说明**：八种记录服务不同目的，必须从 schema、写权限、retention 和查询面上分开。D01 的运行投影不得被 Audit/Restart/Log/Event 替代。
 
-**真相层对应编号**：`S01-T013`–`S01-T014`、`S01-T032`–`S01-T038`、`S01-T047`–`S01-T056`
+**真相层对应编号**：`S01-T013`–`S01-T014`、`S01-T032`–`S01-T038`、`S01-T047`–`S01-T057`
 
 **执行台账**：
 
@@ -528,6 +531,7 @@ Audit status 仅作为被保存的上游事实。即使值为 `rejected`，MKB �
 |---|---|---|---|---|
 | Task Audit | 上游提供、MKB 原子保存 | immutable | 业务审查快照 | `(team_uuid, task_uuid)` |
 | Task | 上游创建、MKB 状态机推进 | revisioned | 工作意图和聚合状态 | `(team_uuid, task_uuid)` |
+| Task Restart | 上游人工命令触发、MKB 原子保存 | causal/admission immutable | full/atomic 人工重启因果、admission 与全局追溯 | `restart_uuid` + team/task/document causation |
 | Execution | MKB | durable、terminal immutable | 一次具体 target 的完整 workflow run、tree/retry 血缘与最终 proof summary | `execution_uuid` + task identity |
 | Process | MKB workflow engine | revisioned；满足 compaction fence 后可清理 | 一个 RAG-specific 工序的 claim/retry/I/O/error 状态 | `process_uuid` + execution identity |
 | Domain Event | MKB | append-only | 可恢复状态转移、对账 | `event_uuid` + task/execution/process correlation |
@@ -696,7 +700,7 @@ S01 实现验收包至少包含：
 4. API integration tests；
 5. idempotency 和 revision race tests；
 6. dependency/import architecture test；
-7. DDL inspection，证明复合 PK、Audit FK、`tasks/executions/processes` 三层核心表、无 Attempt identity，以及业务表 `payload_extra`；
+7. DDL inspection，证明复合 PK、Audit FK、`tasks/executions/processes` 三层核心表、独立 `task_restarts` 因果表、无 Attempt identity，以及业务表 `payload_extra`；
 8. failure injection evidence；
 9. standalone single journey：register team → create task+audit → root Execution → RAG Processes → proof → poll terminal/result；
 10. standalone scatter journey：one Task → root controller → N child Executions → fan-in → aggregate polling；
@@ -706,12 +710,12 @@ S01 实现验收包至少包含：
 
 | 下游 Spec | 必须继承/进一步冻结的内容 |
 |---|---|
-| `S02` | Task v1 聚合状态机、request_intent、priority enum、URI/response/error、soft-delete、cancel/retry 竞态；不得吸收内部 Process 状态或改变 identity/audit/patch 权限 |
+| `S02` | **已由 S02-v1.0 冻结**：Task 六态、request_intent、priority enum、URI/response/error、soft-delete、cancel/retry、scatter items、generation 与 restart lineage；不得吸收内部 Process 状态或改变 identity/audit/patch 权限 |
 | `S03` | commit 后可 claim；Execution tree、current root、Process registry、UUIDv7、root trace、retry-of、claim/lease/fencing/reconciliation；禁止 Attempt identity |
 | `S04` | ingest 分配 document UUIDv7、external_resource_uuid、team partition、delete/deactivate 差异；资源 parent-child 不得与 Execution tree 混用 |
 | `S05` | document.ingest strict payload、source provenance、single/scatter 判定与 manifest 输入；caller 不提交 Execution topology |
 | `S08/S09` | index.rebuild strict scope、vector/filter publication proof；同步 retrieval 不落 Task/Execution/Process |
-| `S12` | Team/Task/Audit/Execution/Process DDL、三层 FK/self-FK、事务、fingerprint、revision、payload_extra schema gate；禁止 task_attempts 与 clean/rag process 分表 |
+| `S12` | Team/Task/Audit/TaskRestart/Execution/Process DDL、三层 FK/self-FK、restart causation、事务、fingerprint、revision、payload_extra schema gate；禁止 task_attempts 与 clean/rag process 分表 |
 | `S15` | Audit 与 Event/Log 分离；team/task/trace/execution/process correlation；Process cleanup 与 Event/Log retention 分开；reject event 不创建业务行 |
 | `S16` | simple token 实现、network boundary、rotation、limits；不得引入 team RBAC |
 | `17` | standalone topology + optional future adapter，不把 03-nano 作为 core runtime dependency |
@@ -789,12 +793,13 @@ S01 已冻结以下承重结论：
 13. 单文件使用一个 root Execution，API 散射使用一个 root controller + N child Executions；
 14. `task_type` 已更名并收敛为外部 `request_intent`，不得承担 RAG process 分类；
 15. Task 成功必须来自 current root 的 durable completion proof，LS-RAG build/rebuild 必须验证向量与 filter metadata publication。
+16. Task 六态、scatter collect-all、cancel CAS、full retry generation 与 atomic rebuild 新 Task 已由 S02 冻结；所有人工重启因果进入 `task_restarts`，状态仍归 Task。
 
 ### 8.2 当前仍未被 S01 声称为已解决的事项
 
 S01 的 contract 已接受，但实现尚未开始；下列事项仍需对应 spec 冻结：
 
-- Task 聚合状态机、priority enum、cancel/retry/delete 竞态与完整 HTTP error envelope（S02）；
+- Task/restart 的具体 retention 时长（聚合状态机、priority、cancel/retry/delete、HTTP error 与 lineage 已由 S02-v1.0 冻结）；
 - Execution/Process 精确状态机、workflow definition、queue/outbox/claim/lease/fencing 与 crash recovery（S03/S12）；
 - 各 request intent 的完整 payload，以及 single/scatter source 判定与 manifest（S04/S05/S09）；
 - vector/filter publication proof 的 exact schema 和验证算法（S08/S09/S12）；
@@ -817,3 +822,4 @@ S01 的 contract 已接受，但实现尚未开始；下列事项仍需对应 sp
 | `S01-v0.1` | `2026-07-15` | `MKB owner + Codex` | `owner-gate` | 汇总 03-nano 与 legacy-family 事实，提出 Q1–Q26。 |
 | `S01-v1.0` | `2026-07-15` | `MKB owner + Codex` | `accepted` | Owner 接受全部判断；冻结 standalone boundary、UUID law、Team Registry、Task/Audit 原子契约、polling、token 与 future adapter 边界。 |
 | `S01-v1.1` | `2026-07-15` | `MKB owner + Codex` | `accepted / D01-calibrated` | 按 owner-originated D01 全面校准：废止 Attempt，采用 Task/Execution/Process；`task_type` 改为 `request_intent`；补入 single/scatter、三表状态架构、retry、proof、权限与验收约束。 |
+| `S01-v1.2` | `2026-07-15` | `MKB owner + Codex` | `accepted / D01+S02-calibrated` | 接收 S02-v1.0：回填六态/散射/retry generation/atomic rebuild 边界；新增独立 `task_restarts` 因果/admission truth，将最小 durable 业务真相集合校准为五张。 |

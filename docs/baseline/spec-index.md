@@ -155,9 +155,9 @@ pending → designing → owner-gate → accepted → frozen
 
 | 顺序 | ID | 子系统 | 优先级 | 状态 | 详细 Spec | 关键依赖 | 回填摘要 |
 |------|----|--------|--------|------|-----------|----------|----------|
-| `01` | `S01` | Skill-Worker Integration | `P0` | `accepted` | `domain-truth/S01-skill-worker-integration.md` | `00, D01` | `S01-v1.1`：standalone Contract；`request_intent`；Task/Audit 原子接收；Task/Execution/Process 权限边界；single/scatter；polling；future adapter |
-| `02` | `S02` | Task API & Lifecycle | `P0` | `owner-gate` | `qna-truth/S02.md` → `domain-truth/S02-task-api.md` | `00, D01, S01` | 3+2+4 progressive；Q1–Q5 已冻结；三段式 atomic read、新 rebuild Task、独立 `task_restarts` causal truth；Round 3 Q6–Q9 进行中 |
-| `03` | `S03` | Workflow Engine | `P0` | `pending` | `domain-truth/S03-workflow-engine.md` | `D01, S02` | 待设计；承接 Execution/Process lifecycle |
+| `01` | `S01` | Skill-Worker Integration | `P0` | `accepted` | `domain-truth/S01-skill-worker-integration.md` | `00, D01` | `S01-v1.2`：standalone Contract；Task/Audit 原子接收；Task/Execution/Process 权限边界；接收 S02 restart causal truth；polling；future adapter |
+| `02` | `S02` | Task API & Lifecycle | `P0` | `accepted` | `domain-truth/S02-task-api.md` | `00, D01, S01` | `S02-v1.0`：六态/CAS；scatter collect-all/items/early publication/cancel；full retry generation；atomic rebuild 新 Task；`task_restarts` 与 global lineage；QNA Q1–Q9 全部冻结并关闭 |
+| `03` | `S03` | Workflow Engine | `P0` | `owner-gate` | `qna-truth/S03.md` → `domain-truth/S03-workflow-engine.md` | `D01-v1.1, S02-v1.0` | `3+3+3 progressive` 已启动；Round 1 Q1–Q3 聚焦 Workflow Definition 表达边界、binding authority 与 execution-plan/process materialization |
 | `04` | `S04` | Knowledge Lifecycle | `P0` | `pending` | `domain-truth/S04-knowledge-lifecycle.md` | `00, S02` | 待设计 |
 | `05` | `S05` | Intake & Cleaning | `P1` | `pending` | `domain-truth/S05-intake-cleaning.md` | `S02-S04, S13` | 待设计 |
 | `06` | `S06` | LS-RAG Structurizer | `P0` | `pending` | `domain-truth/S06-lsrag-structurizer.md` | `S04, S11, S13-S14` | 待设计 |
@@ -177,7 +177,7 @@ pending → designing → owner-gate → accepted → frozen
 | ID | 文档 | 状态 | 用途 |
 |----|------|------|------|
 | `00` | `specs/00-scope-glossary.md` | `pending` | 冻结产品范围、术语、统一 ID 和通用状态词汇 |
-| `D01` | `domain-truth/D01-task-execution-process-flow.md` | `accepted architecture direction` | Owner 主动提出并冻结 Task/Execution/Process、single/scatter、retry、三表运行状态与状态归约方向 |
+| `D01` | `domain-truth/D01-task-execution-process-flow.md` | `accepted / S02-calibrated` | `D01-v1.1`：Owner 主动提出 Task/Execution/Process；三表运行状态不变；接收第五张 `task_restarts` 因果表 |
 | `17` | `specs/17-system-topology.md` | `pending` | 汇总 16 个子系统的运行拓扑、进程、资源和调用关系 |
 | `18` | `specs/18-acceptance-truth-freeze.md` | `pending` | 汇总不变量、验收矩阵、owner-gate closure 和冻结签署 |
 
@@ -249,7 +249,7 @@ pending → designing → owner-gate → accepted → frozen
 
 ### 3.1 `S01` Skill-Worker Integration
 
-- **状态**：`accepted / D01-calibrated`；域内 truth = `S01-v1.1`；全系统尚未 frozen。
+- **状态**：`accepted / D01+S02-calibrated`；域内 truth = `S01-v1.2`；全系统尚未 frozen。
 - **权威 Spec**：`docs/baseline/domain-truth/S01-skill-worker-integration.md`。
 - **冻结范围**：MKB 先作为 standalone leaf-worker；MKB Contract 是权威接入协议；03-nano 或其他上游自行适配。
 - **冻结身份**：边界 UUIDv4/v7、MKB 内生 UUIDv7；Task 权威键为 `(team_uuid, task_uuid)`；task/trace 由上游提供；Execution/Process 仅由 MKB 创建；Attempt identity 已废止。
@@ -261,21 +261,27 @@ pending → designing → owner-gate → accepted → frozen
 
 ### 3.2 `S02` Task API & Lifecycle
 
-- **状态**：`owner-gate / Round 1–2 frozen / Round 3 Q6–Q9 in progress`；当前权威问答为 `docs/baseline/qna-truth/S02.md`。
+- **状态**：`accepted`；域内 truth = `S02-v1.0`；QNA Q1–Q9 全部冻结，Round 4 已由 owner 关闭；全系统尚未 frozen。
+- **权威 Spec**：`docs/baseline/domain-truth/S02-task-api.md`；问答证据保留于 `docs/baseline/qna-truth/S02.md v1.3`。
 - **范围**：Task create/get/list/result/cancel/retry/delete、幂等、aggregate 状态机、scatter item projection、restart causation/global query、优先级、deadline、错误和 retention。
-- **已冻结**：`T-O-1` Task 六态；`T-O-2` scatter collect-all；`T-O-3` cancel/success CAS；`T-O-4` atomic CRUD 方向；`T-O-5` bounded aggregate + paginated items + canonical Document；`T-O-6` atomic restart 创建新 `document.rebuild` Task；`T-O-7` 独立 `task_restarts` causal/admission truth，accepted path 与 Task/Audit 原子提交，Task status 不重复。
+- **已冻结**：Task 六态与 lifecycle CAS；scatter collect-all、bounded aggregate + paginated items + canonical Document、proof-gated early publication、forward-stop/no-rollback cancel；full retry 同 Task 新 generation；atomic restart 创建新 `document.rebuild` Task；独立 `task_restarts` 保存 full/atomic causal/admission truth且状态只 join Task；team-scoped global restart/lineage。
 - **Legacy 核查**：已复验 API 发起 → Dedicated Cleaner 散射 → SMCP callback → Clean Dispatcher diff/register → child 并行 RAG 投递 → relation child completion，以及原子 list/artifact/timeline/restart；MKB 明确修复 identity UPSERT、非事务 wakeup、无 parent fan-in 与 route 散射债务。
-- **当前 owner-gate**：Q6 full Task retry generation/状态回边；Q7 successful child early publication；Q8 cancel 对已发布 child 的影响；Q9 全局 restart lineage/status 查询。Round 4 是否需要由 owner 在 Q6–Q9 后通知。
+- **Owner-gate closure**：Q1–Q9 与 `T-O-1..11` 全部获得 owner 确认；S02 不再增加 QNA，无域内开放 gate。
 - **关键不变量**：上游不能创建或写 Execution/Process；相同 `task_uuid + payload digest` 必须幂等收敛；Task 不承载 RAG 工序状态；原子 CRUD 不得泄漏内部 stage/process identity。
-- **待回填影响**：D01/S01 的四张核心 Task/运行真相表继续成立，但 owner 已新增第五张最小业务真相表 `task_restarts`；S02 accepted 时必须显式校准 D01/S01/S12，不能把 restart causation 降级为 tasks JSON。
-- **完成回填**：冻结 Task Contract v1、状态图、HTTP/RPC surface 和错误码命名空间。
+- **已回填影响**：D01-v1.1/S01-v1.2 已明确四张核心 Task/运行表继续成立，并增加第五张 `task_restarts` 因果表；S12 必须交付 exact DDL/transaction，不能把因果降级为 tasks JSON。
+- **完成回填**：已冻结 Task Contract v1、状态图、HTTP surface、错误码、强制验收与 legacy reference-anchor。
 
 ### 3.3 `S03` Workflow Engine
 
-- **范围**：Execution tree、Process registry/state、workflow definition、dependency、claim/lease/heartbeat/fencing、retry、timeout、priority、cancel、purge、fan-out/fan-in、replay、reconciliation 和执行 lane。
-- **必须回答**：固定 pipeline 还是声明式 DAG；CPU/I/O/GPU 并发；丢租约、进程崩溃和部分副作用如何收敛。
-- **关键不变量**：Process/child Execution → Execution → Task 自下而上归约；完整 retry 新建 Execution，自动 retry 保持 Process；不得重新引入 Attempt。
-- **完成回填**：冻结 Execution/Process 状态机、process key/guard、claim 算法、single/scatter 并发模型和恢复协议。
+- **状态**：`owner-gate / 3+3+3 progressive Round 1 Q1–Q3 in progress`；当前权威问答为 `docs/baseline/qna-truth/S03.md`。
+- **定位**：S03 是 MKB 单体内部唯一 durable Workflow Engine。它承接已提交 Task scheduling intent，把 MKB-owned、版本化的 LS-RAG workflow 实例化为 Execution tree 与 RAG-specific Processes，并将 outcome/proof 自下而上归约；它不是外部 Task API、通用工作流平台或 queue wrapper。
+- **范围**：Workflow Definition contract、选择与 immutable binding；Execution control state/phase/tree/generation；Process registry、I/O/outcome guard、dependency 与 materialization；durable transition/scheduling intent；claim/lease/heartbeat/fencing；automatic retry/backoff/timeout；priority/deadline 映射；cancel propagation；scatter fan-out/fan-in；execution lanes、replay、reconciliation 与 Process compaction fence。
+- **继承的冻结真相**：Task/Execution/Process 三层身份及三张核心运行表；single=root Execution、scatter=root controller + 0..N child Executions；状态自下而上、control intent 自上而下；Process/Execution 未提交 proof 前 Task 不成功；queue 不是 SSOT且只能在 durable state 提交后 wake-up；full retry 新 root generation、automatic Process retry 不换 Process；collect-all、child proof-gated early publication 与 forward-stop/no-rollback cancel。
+- **明确不负责**：Task HTTP/六态/CAS/restart ledger（S02）；Source/Document/Version/manifest 资源真相（S04-S05）；具体 LS-RAG schema/model/prompt 内容与 publication proof 算法（S06-S11/S14）；Turso exact DDL/driver 与 queue 选型（S12）；Artifact backend（S13）；完整 event/log/trace 与 retention 数值（S15）。
+- **Round 1 foundational gates**：Q1 冻结 Workflow Definition 的表达能力边界；Q2 冻结 workflow selection/binding authority；Q3 冻结 immutable execution plan 与 Process row 的实例化边界。Round 1 不提前裁决 exact state enum、lease、retry/backoff 或并发 lane。
+- **后续 execution 方向**：Round 1 真相冻结后，Round 2 才生成 Execution/Process state 与 claim/retry 题；Round 3 再处理 crash reconciliation、scatter/cancel 收敛、compaction 与运行治理，且每题必须由已登记 T-O 驱动。
+- **关键不变量**：不得重新引入 Attempt、clean/rag process 分表、跨 Worker callback SSOT、caller-defined workflow graph、Task current_process 指针或 queue-send-as-success；single/scatter 必须共用一套 engine 与 transition discipline。
+- **完成回填**：冻结 Workflow Contract、binding/snapshot、Execution/Process 状态机、process key/guard、materialization、claim/fencing、retry/cancel、single/scatter fan-out/fan-in、reconciliation/compaction 和强制验收矩阵。
 
 ### 3.4 `S04` Knowledge Lifecycle
 
@@ -376,17 +382,19 @@ pending → designing → owner-gate → accepted → frozen
 
 | Gate ID | 决策点 | 影响范围 | 候选方向 | 状态 | 裁决/落点 |
 |---------|--------|----------|----------|------|-----------|
-| `G-01` | Skill-worker 发现与注册方式 | `S01, 17` | 主动注册 / 上游静态配置 / 混合 | `deferred` | `S01-v1.1`：首版 standalone，不注册；未来只通过防腐 adapter reopen |
-| `G-02` | Task 结果交付方式 | `S01-S03, S15-S16` | 上游轮询 / callback / 双支持 | `closed` | `S01-v1.1`：首版 polling；无 webhook/callback；内部 Execution/Process 不扩大外部写面 |
-| `G-03` | Workflow 表达能力 | `S03, S14` | 版本化固定 pipeline / 受限 DAG / 动态定义 | `open` | 待 `S03` |
+| `G-01` | Skill-worker 发现与注册方式 | `S01, 17` | 主动注册 / 上游静态配置 / 混合 | `deferred` | `S01-v1.2`：首版 standalone，不注册；未来只通过防腐 adapter reopen |
+| `G-02` | Task 结果交付方式 | `S01-S03, S15-S16` | 上游轮询 / callback / 双支持 | `closed` | `S01-v1.2`：首版 polling；无 webhook/callback；内部 Execution/Process 不扩大外部写面 |
+| `G-03` | Workflow 表达能力 | `S03, S14` | 版本化固定 pipeline / 受限 RAG DAG / 任意动态定义 | `owner-gate` | `S03 Round 1 / Q1`：冻结 topology expressive boundary |
 | `G-04` | 首版 Intake 范围 | `S04-S05, S13` | text/object only / URL / PDF/browser | `open` | 待 `S05` |
-| `G-05` | parent-child/scatter 首版范围 | `D01, S03-S07` | 首版支持 / schema 预留后延 | `closed` | `D01-v1.0`：scatter 是首版一等能力；Task → root controller → 0..N child Executions；资源 manifest 细节待 S04-S05 |
+| `G-05` | parent-child/scatter 首版范围 | `D01, S03-S07` | 首版支持 / schema 预留后延 | `closed` | `D01-v1.1`：scatter 是首版一等能力；Task → root controller → 0..N child Executions；资源 manifest 细节待 S04-S05 |
 | `G-06` | LS-RAG Schema 与 legacy 兼容策略 | `S06-S10` | 新 v1 / legacy v2 兼容 / 双读迁移 | `open` | 待 `S06` |
 | `G-07` | Retrieval 是否承担 answer generation | `S01-S02, S10-S11` | 只返回 context / 可选生成任务 | `open` | 待 `S10` |
 | `G-08` | Turso 运行和进程模型 | `S03, S09, S12, 17` | 单进程 embedded / 多进程 / remote-sync | `open` | 待 `S12` spike |
 | `G-09` | 首版向量索引 | `S08-S10, S12` | Turso exact / 独立 ANN / 分阶段 | `open` | 待 `S09` benchmark |
 | `G-10` | 模型 fallback 语义 | `S06-S08, S10-S11, S14` | 禁止自动 fallback / 受控 fallback | `open` | 待 `S11` |
 | `G-11` | Artifact 首版 backend | `S05-S07, S12-S13, 17` | 本地 filesystem / S3-compatible | `open` | 待 `S13` |
+| `G-12` | Workflow 选择与版本绑定权 | `S03, S14` | caller 选择 / MKB resolver / allowlisted hybrid | `owner-gate` | `S03 Round 1 / Q2`：冻结 selection authority 与 immutable binding |
+| `G-13` | Execution plan 与 Process 实例化边界 | `S03, S12, S15` | 全量预建 / 完全逐步生成 / immutable plan + eligible Process materialization | `owner-gate` | `S03 Round 1 / Q3`：冻结 runtime materialization model |
 
 ---
 
@@ -425,9 +433,10 @@ pending → designing → owner-gate → accepted → frozen
 |------------|------|----------|
 | MKB leaf-worker 产品定位 | 业主裁决 | 沿用，不再讨论平台化回退 |
 | `03-nano/orchestrator-core` 为上游 | 业主裁决 | 所有接口设计以此为调用方 |
-| `team_uuid` 为审计/分区/追踪 ID，并需本地预注册 | 业主裁决 + `S01-v1.1` | 允许最小 Team Registry；不得重新引入 membership/ownership/billing |
-| Task/Audit 接入基线 | `S01-v1.1` | `(team_uuid, task_uuid)`、root trace、`request_intent`、immutable Audit、原子创建、polling 必须被下游继承 |
-| Task/Execution/Process Flow | `D01-v1.0 + S01-v1.1` | Owner-originated 三层切分；Attempt 已废止；single/scatter、retry、状态归约与三表架构不得重问 |
+| `team_uuid` 为审计/分区/追踪 ID，并需本地预注册 | 业主裁决 + `S01-v1.2` | 允许最小 Team Registry；不得重新引入 membership/ownership/billing |
+| Task/Audit 接入基线 | `S01-v1.2` | `(team_uuid, task_uuid)`、root trace、`request_intent`、immutable Audit、原子创建、polling 必须被下游继承 |
+| Task/Execution/Process Flow | `D01-v1.1 + S01-v1.2` | Owner-originated 三层切分；Attempt 已废止；single/scatter、retry、状态归约与三表运行架构不得重问 |
+| Task API / Aggregate Lifecycle | `S02-v1.0` | 六态/CAS、collect-all/items、early publication、cancel、generation、atomic rebuild、restart causal truth 与 lineage 不得重问 |
 | 无 UI、无复杂平台鉴权 | 业主裁决 | `S16` 只设计内部最小安全边界 |
 | Python 单体、废弃过细 packages | 业主裁决 | 内部模块化，但不建立多个 distribution |
 | CUDA/vLLM + 外部服务 adapter | 业主裁决 | `S11` 设计能力接口，不再回到 MLX 叙事 |
@@ -507,7 +516,7 @@ implementation finding
 | 检查项 | 状态 | 证据/备注 |
 |--------|------|-----------|
 | `00` Scope & Glossary accepted | `pending` | |
-| `D01` Task/Execution/Process Flow accepted | `accepted architecture direction` | Owner-originated；S01-v1.1 已完成校准 |
+| `D01` Task/Execution/Process Flow accepted | `accepted / S02-calibrated` | Owner-originated；D01-v1.1/S01-v1.2 已接收 S02 restart truth |
 | `S01-S16` 全部 accepted | `pending` | |
 | `17` System Topology accepted | `pending` | |
 | `18` Acceptance Matrix accepted | `pending` | |
@@ -532,3 +541,5 @@ implementation finding
 | `v0.4` | `2026-07-15` | `MKB owner + Codex` | 删除并重建 S02 Q&A；登记 3+3 progressive Round 1 owner-gate，S02 scope 收敛为 Task API/aggregate lifecycle。 |
 | `v0.5` | `2026-07-15` | `MKB owner + Codex` | 登记 S02 Round 1 Q1–Q3 全部冻结与 `T-O-1..4`；复验 legacy scatter 发起、注册、并行投递、完成、原子查询/重启及实现债务；进入 Round 2 Q4–Q5。 |
 | `v0.6` | `2026-07-15` | `MKB owner + Codex` | 冻结 S02 Q4–Q5 与 `T-O-5..7`；新增独立 `task_restarts` durable causal/admission truth及 D01/S01 待回填影响；QNA 调整为 3+2+4，进入 Round 3 Q6–Q9。 |
+| `v0.7` | `2026-07-15` | `MKB owner + Codex` | Owner 接受 S02 Q6–Q9 并关闭后续 QNA；发布 `S02-v1.0` 正式 spec；S02 进入 accepted；D01-v1.1/S01-v1.2 回填第五张 `task_restarts` 因果表与 retry 口径。 |
+| `v0.8` | `2026-07-15` | `MKB owner + Codex` | 按 D01-v1.1/S02-v1.0 重新校准 S03 为单体内部 durable LS-RAG Workflow Engine；启动 3+3+3 progressive QNA；登记 Round 1 foundational gates G-03/G-12/G-13。 |

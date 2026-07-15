@@ -3,8 +3,8 @@
 > **项目**：`myknowledgebase`（MKB）
 > **Domain / 子系统**：跨 `D2 / S02-S03` 的任务与执行基础模型
 > **文档性质**：`specification / domain-truth / cross-domain decision`
-> **文档状态**：`accepted architecture direction`（三层切分由 owner 主动提出；精确状态 enum、API DTO 与 DDL 由下游 spec 继续冻结）
-> **Truth 版本**：`D01-v1.0`
+> **文档状态**：`accepted architecture direction / S02-calibrated`（三层切分由 owner 主动提出；Task lifecycle/API 已由 S02 接续冻结，Execution/Process exact state 与 DDL 仍由下游 spec 完成）
+> **Truth 版本**：`D01-v1.1`
 > **日期**：`2026-07-15`
 > **作者归属**：`MKB owner` 主动提出切分；`Codex` 负责代码复核、规范化表达与 architecture verdict
 > **权威输入**：Owner 对 `task_uuid / execution_uuid / process_uuid` 的直接裁决、`S01-v1.0`、`legacy-family/` 的 SMCP / dispatcher / process tracking 生产事实
@@ -13,6 +13,8 @@
 > **下游消费者**：`S02` Task API、`S03` Workflow Engine、`S04-S05` Document/Scatter、`S08-S09` Vector、`S12` Persistence、`S15` Observability、跨系统拓扑 `17`
 
 > **Origin 声明**：`Task / Execution / Process` 三层切分不是 Codex 从 legacy-family 推导出的命名，也不是对 legacy `job/process` 表的改名复制。它是 **MKB owner 在 S02 讨论中主动提出的重构方案**。本文只负责把 owner 原始裁决整理为可实现、可验收、可回填的 Domain Truth，并以 legacy 的生产代码验证该方案是否覆盖真实故障面。
+
+> **S02 回流声明**：`S02-v1.0` 没有改变 Task/Execution/Process 三层运行身份或三张核心运行状态表；它按 owner 裁决增加了独立 `task_restarts` 因果/admission 表。四张原有 Task/运行真相表继续成立，启用外部人工重启后的最小 durable 业务真相集合更新为五张。
 
 > **约束级别**：本文中的“必须 / 禁止 / 仅允许”是后续设计与实现的强制约束；“应当”是 D01 verdict 的默认约束，若要偏离必须 reopen D01；“建议 / 可以”不冻结具体实现。本文明确标为“交由 S02/S03 冻结”的状态名、字段名或算法，不得被误读为已定 DDL。
 
@@ -215,6 +217,7 @@ D01 在实现层完成，至少要求：
 | `D01-T035` | MKB 不复制 `smind_clean_process / smind_rag_process / smind_vec_process` 三张历史业务表；统一 Process 控制模型，Vector record 归向量资产域。 | `D01-VERDICT` | `S08/S09` 自己持有 vector asset，不把每个 vec unit 冒充 Process。 |
 | `D01-T036` | 本地轻量队列是 transport/scheduling mechanism，不是状态 SSOT；可 claim 工作必须来自已提交的 Process/scheduling record。 | `OWNER direction + D01-VERDICT` | 日志“已发送”或内存 queue item 不能代替 durable Process。 |
 | `D01-T037` | Artifact 首版使用本地 I/O adapter；Task/Execution/Process 只保存逻辑 reference/relative locator/hash，不保存 R2 binding，也不把绝对主机路径当 API identity。 | `OWNER-ORIGINATED` | `S13` 可替换 backend 而不改变三层身份。 |
+| `D01-T038` | S02 增加 `task_restarts` 作为外部人工重启的 durable causation/admission SSOT；它不是第四层运行身份，也不复制 Task status。 | `S02-v1.0 / OWNER-QNA` | 四张核心 Task/运行表保持，外部重启启用后的最小 durable 业务真相集合为五张。 |
 
 ---
 
@@ -500,13 +503,13 @@ API source 的后续同步可能得到新增、正文变化、metadata 变化、
 
 这三张表是三层运行身份的一对一映射。不得再创建 `clean_tasks`、`rag_tasks`、`clean_executions`、`rag_executions`、`smind_clean_process`、`smind_rag_process` 等按领域复制的平行状态表。
 
-S01 已另外冻结独立的 `task_audits`。因此若统计“从外部 Task ingress 到内部执行”的**业务真相表总数**，当前最小集合是四张：
+S01 已另外冻结独立的 `task_audits`；S02 又按 owner 裁决冻结独立的 `task_restarts`。因此若统计“从外部 Task ingress 到内部执行与人工重启治理”的**业务真相表总数**，当前最小集合是五张：
 
 ```text
-tasks + task_audits + executions + processes
+tasks + task_audits + task_restarts + executions + processes
 ```
 
-其中 `task_audits` 不属于三层运行状态表，也不能合并回 `tasks`。
+其中 `task_audits` 不属于三层运行状态表，也不能合并回 `tasks`；`task_restarts` 只保存人工重启因果/admission，不是 Execution/Process 替代物，也不独立推进 Task status。
 
 ### 5.2 不计入三张核心表的其他数据
 
@@ -514,6 +517,7 @@ tasks + task_audits + executions + processes
 |---|---:|---|
 | Team Registry | 是，S01 已冻结 | 接入投影，不是一次任务执行状态 |
 | Task Audit | 是，`task_audits` | immutable 上游业务审查，不是运行状态 |
+| Task Restart | 是，`task_restarts`，S02 已冻结 | 外部人工重启的 immutable 因果/admission 账本，不是运行状态；status 从 Task join |
 | Source/Document/Version/Relation | 是，由 S04/S05 冻结 | 资源与文件血缘，不是 Execution tree |
 | Artifact manifest | 可能，由 S13 冻结 | I/O 资产生命周期，不是 Process row |
 | Vector records/filter metadata | 是，由 S08/S09/S12 冻结 | 最终知识资产；不能塞进 processes 作为唯一真相 |
@@ -528,7 +532,7 @@ tasks + task_audits + executions + processes
 | 列族 | 最小内容 |
 |---|---|
 | Identity | `team_uuid`, `task_uuid`, `trace_uuid`；复合 PK `(team_uuid, task_uuid)` |
-| Intent | schema version、外部 request intent（S01 当前命名为 `task_type`）、strict payload/fingerprint |
+| Intent | schema version、外部 `request_intent`、strict payload/fingerprint |
 | API projection | aggregate status、progress summary、result/error summary |
 | Execution pointer | `current_root_execution_uuid` nullable；不得设 singular current process |
 | Scatter counters | expected/running/succeeded/failed/cancelled execution counts 或可等价重建的摘要 |
@@ -614,6 +618,7 @@ Process 表保存**工序控制状态**，不保存每一个 vector unit 作为 
 | `attempts` | 禁止与 executions 并存 | `execution_uuid` 已承接完整执行尝试；双身份会产生歧义 |
 | `clean_processes/rag_processes` | 禁止 | process type/workflow version 已表达业务分类；分表会重建 legacy 漂移 |
 | `vec_processes` | 禁止作为运行控制表 | vector unit 是向量资产/批处理数据，不是三层中的 Process identity |
+| `task_restarts` | **允许且必需** | S02-v1.0 经 owner 确认的人工重启 causation/admission SSOT；不构成新运行身份，不复制 Task status |
 
 ---
 
@@ -901,7 +906,7 @@ nl -ba legacy-family/smind-skill-rag-structurizer/flows/processor.ts | sed -n '4
 
 ### 10.4 当前仍未被 D01 声称为已解决的事项
 
-- Task 精确对外 status enum、priority、deadline、cancel race、retry command response 与 soft-delete retention；
+- Task retention 的精确时长（六态、priority/deadline contract、cancel race、retry response 与 soft-delete API 语义已由 `S02-v1.0` 冻结）；
 - Execution/Process 精确状态词汇与所有合法转移；
 - 每个 process type 的 retryable error matrix、默认 max_retries 和 backoff；
 - root/child Execution 的 exact DDL、partial unique index 与事务边界；
@@ -911,7 +916,7 @@ nl -ba legacy-family/smind-skill-rag-structurizer/flows/processor.ts | sed -n '4
 - local queue 具体选型及其是否需要 MKB-owned outbox 表；
 - Artifact、Document、Vector 与 Event/Log 的独立 DDL。
 
-这些事项必须由对应 S02-S15 spec 冻结，但不得推翻 D01 已确定的三层身份、责任归属、1:N 散射、状态归约方向和三张核心状态表。
+这些事项必须由对应 S03-S15 spec 冻结，但不得推翻 D01 已确定的三层身份、责任归属、1:N 散射、状态归约方向和三张核心状态表，也不得删除 S02 冻结的 restart causal truth。
 
 ### 10.5 一句话结论
 
@@ -924,3 +929,4 @@ nl -ba legacy-family/smind-skill-rag-structurizer/flows/processor.ts | sed -n '4
 | 版本 | 日期 | 作者 | 状态 | 主要变更 |
 |---|---|---|---|---|
 | `D01-v1.0` | `2026-07-15` | `MKB owner + Codex` | `accepted architecture direction` | 固化 owner 主动提出的 Task/Execution/Process 三层切分；完成 single/scatter、retry/cleanup、三表架构、legacy evidence 与 GO verdict。 |
+| `D01-v1.1` | `2026-07-15` | `MKB owner + Codex` | `accepted / S02-calibrated` | 接收 S02-v1.0 回流：三张核心运行表不变；新增 `task_restarts` 因果/admission truth，将 Task ingress/runtime/restart 最小 durable 业务真相集合由四张校准为五张。 |
