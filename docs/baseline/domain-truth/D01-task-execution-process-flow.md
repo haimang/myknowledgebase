@@ -3,11 +3,11 @@
 > **项目**：`myknowledgebase`（MKB）
 > **Domain / 子系统**：跨 `D2 / S02-S03` 的任务与执行基础模型
 > **文档性质**：`specification / domain-truth / cross-domain decision`
-> **文档状态**：`accepted architecture direction / S02+S04-calibrated`（三层切分由 owner 主动提出；Task lifecycle/API 已由 S02 冻结，长期摄入资产语义已由 S04 校准）
-> **Truth 版本**：`D01-v1.2`
-> **日期**：`2026-07-15`
+> **文档状态**：`accepted architecture direction / S02+S04+S05-calibrated`（三层切分由 owner 主动提出；Task lifecycle/API、Intake truth与clean/preflight/HITL执行边界已回流）
+> **Truth 版本**：`D01-v1.3`
+> **日期**：`2026-07-16`
 > **作者归属**：`MKB owner` 主动提出切分；`Codex` 负责代码复核、规范化表达与 architecture verdict
-> **权威输入**：Owner 对 `task_uuid / execution_uuid / process_uuid` 的直接裁决、`S01-v1.3`、`S02-v1.1`、`S04-v1.0`、`legacy-family/` 的 reference-anchor 生产事实
+> **权威输入**：Owner 对 `task_uuid / execution_uuid / process_uuid` 的直接裁决、`S01-v1.3`、`S02-v1.1`、`S03-v1.1`、`S04-v1.0`、`S05-v1.0`、`legacy-family/` 的 reference-anchor 生产事实
 > **上游索引**：`docs/baseline/spec-index.md`
 > **上游真相**：`docs/baseline/domain-truth/S01-skill-worker-integration.md`
 > **下游消费者**：`S02` Task API、`S03` Workflow Engine、`S04-S05` Intake/Scatter、`S08-S09` Vector、`S12` Persistence、`S15` Observability、跨系统拓扑 `17`
@@ -17,6 +17,8 @@
 > **S02 回流声明**：`S02-v1.0` 没有改变 Task/Execution/Process 三层运行身份或三张核心运行状态表；它按 owner 裁决增加了独立 `task_restarts` 因果/admission 表。四张原有 Task/运行真相表继续成立，启用外部人工重启后的最小 durable 业务真相集合更新为五张。
 
 > **S04 回流声明**：`S04-v1.0` 没有增加第四层运行身份。D01 原先宽泛的 `Source/Document/DocumentVersion/manifest` 资源口径现校准为 `IntakeSource/IntakeSnapshot/IntakeItem/IntakeRevision/IntakeSnapshotMembership`；`Artifact` 在 Intake 语境中必须写为 `IntakeArtifact`。Execution tree 与 Intake identity graph 仍是两个独立事实面。
+
+> **S05 回流声明**：`S05-v1.0`没有增加preflight/review运行身份或第二套状态机。Preflight是S03 Process capability；human review是clean后、RAG前的Execution `waiting` durable gate，Process先terminal且不持lease。Execution锁定exact S05 binding，retry/recovery/resume不得热切；gate/outcome/decision只是supporting truth，不改变D01三张核心运行状态表。
 
 > **约束级别**：本文中的“必须 / 禁止 / 仅允许”是后续设计与实现的强制约束；“应当”是 D01 verdict 的默认约束，若要偏离必须 reopen D01；“建议 / 可以”不冻结具体实现。本文明确标为“交由 S02/S03 冻结”的状态名、字段名或算法，不得被误读为已定 DDL。
 
@@ -221,6 +223,10 @@ D01 在实现层完成，至少要求：
 | `D01-T037` | IntakeArtifact与派生资产首版使用本地I/O adapter；Task/Execution/Process只保存logical reference/relative locator/digest，不保存R2 binding，也不把绝对路径当API identity。 | `OWNER-ORIGINATED + S04-T006` | `S13`可替换backend而不改变runtime或Intake identity。 |
 | `D01-T039` | S04五类Intake identity是长期业务真相，不是第四层runtime identity；Task/Execution/Process retention不得级联删除其IntakeRevision/IntakeArtifact或tombstone/audit skeleton。 | `S04-v1.0 / T-O-30..48` | D01三层状态表数量不变；长期资产与运行投影分别治理。 |
 | `D01-T038` | S02 增加 `task_restarts` 作为外部人工重启的 durable causation/admission SSOT；它不是第四层运行身份，也不复制 Task status。 | `S02-v1.0 / OWNER-QNA` | 四张核心 Task/运行表保持，外部重启启用后的最小 durable 业务真相集合为五张。 |
+| `D01-T040` | PreflightValidator是S03统一Process状态机下的RAG-specific leaf capability，只读本Execution冻结的S05 evidence并返回typed Outcome。 | `S05-v1.0 / T-O-70..71` | 不新增preflight job identity/table/state machine；runtime错误走同一Process retry/failed。 |
+| `D01-T041` | Human review是Execution-owned durable gate：Process先terminal，Execution以typed gate ref进入`waiting`，decision后恢复同一execution_uuid。 | `S05-v1.0 / T-O-54..58/T-O-75` | Gate/Target/Decision不是第四层runtime identity，Intake不保存review state。 |
+| `D01-T042` | Execution必须锁定actual source/acquisition/clean/preflight refs与`s05_binding_digest`；retry/recovery/human resume不得热切active版本。 | `S05-v1.0 / T-O-73` | 已有Task升级只能走S02 causal restart/new Execution generation。 |
+| `D01-T043` | `passed+allowlisted`不创建gate；只有确实等待人工时建立四态gate。Outcome→transition、gate→waiting、decision→outbox与late/stale恢复复用S03/S12。 | `S05-v1.0 / T-O-71/T-O-75..76` | 不建设S05 Reconciler、自动approve或固定九表拓扑。 |
 
 ---
 
@@ -292,13 +298,15 @@ Task status 是投影而非第二套执行真相。Task 表可以缓存 counters
 
 #### 3.2.3 Execution 状态与 phase 必须分开
 
-Execution 的**控制状态**应保持少量、可恢复，例如 created/ready/running/waiting/retrying/succeeded/failed/cancelling/cancelled 的语义集合；精确词汇由 S03 冻结。
+Execution 的**控制状态**已由S03冻结为`created/ready/running/waiting/succeeded/failed/cancelling/cancelled`。Execution没有`retrying`状态；automatic retry由同一Process的`retry_wait`与计数表达。
 
 Execution 的**业务 phase**必须是 RAG-specific，并来自当前 Process/Workflow Definition，例如：
 
 ```text
 source_acquisition
   → cleaning_or_scattering
+  → preflight_admission
+  → awaiting_human_review (conditional; control status=waiting)
   → structurizing
   → constructing
   → vectorizing_and_indexing
@@ -333,7 +341,8 @@ source_acquisition
 | `intake.resolve_source` | 解析单文件/本地 source 并建立受控输入引用 | source 可读、hash/size/mime 通过输入约束 |
 | `intake.api_fetch` | 对 API 单点请求取回原始响应 | 响应被完整接收、schema/version 可判定 |
 | `clean.universal_extract` | 将异构输入清洗为 canonical text | canonical text artifact 存在且内容校验通过 |
-| `clean.api_scatter` | 将一次 API 响应解析为 N 个稳定 child candidates | 每个 child 有稳定 key、content/meta hash 与严格 schema |
+| `clean.api_scatter` | 将一次 API 响应解析为 N 个稳定 typed child candidates | 每个 child 有normalized ExternalKey、versioned semantic tuples、Artifact/validation evidence与稳定member digest |
+| `intake.preflight_validate` | 以exact code-owned validator只读校验frozen acquisition/collection/clean evidence | typed`passed|blocked` Outcome与ordered check evidence已提交；runtime错误走Process retry/failed |
 | `intake.accept_snapshot` | 接受sealed CandidateSet并原子提交Snapshot/Membership/ChangeSet与child intent | accepted Snapshot/required set已提交，可重放 |
 | `lsrag.structurize` | 生成目录/逻辑分块/structured representation | structured schema、块坐标与 source coverage 校验通过 |
 | `lsrag.construct` | 生成 layered 内容、summary/original 双通道与 vector-ready units | layered/vector-ready schema、引用和 channel 完整性通过 |
@@ -392,10 +401,12 @@ Task T
         root_execution_uuid = E1
         parent_execution_uuid = null
         ├── Process P1: intake.resolve_source / clean.universal_extract
-        ├── Process P2: lsrag.structurize
-        ├── Process P3: lsrag.construct
-        ├── Process P4: lsrag.vectorize_index
-        └── Process P5: index.validate_publication
+        ├── Process P2: intake.preflight_validate
+        ├── ExecutionGate G1 (conditional; no Process lease)
+        ├── Process P3: lsrag.structurize
+        ├── Process P4: lsrag.construct
+        ├── Process P5: lsrag.vectorize_index
+        └── Process P6: index.validate_publication
 ```
 
 这是 `1 Task : 1 current root Execution : N Processes`。若IntakeSource输入已经是严格schema验证的canonical text，versioned Workflow可以省略/替换clean工序；不能因此省略Execution。
@@ -408,10 +419,11 @@ Task T
 3. commit 后创建/激活 Root Execution，并 CAS 写 Task.current_root_execution_uuid
 4. 按 workflow version 创建第一个 Process
 5. Process 通过本地轻量 queue 被 claim；执行、校验、写 outcome/event
-6. Orchestrator 根据成功 outcome 创建/激活下一个 Process
-7. vectorize/index 与 publication validation 均通过
-8. Execution 写 durable proof/summary → succeeded
-9. Task 从 Execution 归约 aggregate result → succeeded
+6. Orchestrator 根据成功 outcome 创建/激活下一个 Process；clean后运行mandatory preflight
+7. allowlisted+passed直接推进；需要人工时Process先terminal、Execution以exact gate ref进入waiting，decision后恢复同一Execution
+8. vectorize/index 与 publication validation 均通过
+9. Execution 写 durable proof/summary → succeeded
+10. Task 从 Execution 归约 aggregate result → succeeded
 ```
 
 第 3–4 步的精确事务边界由 S03/S12 冻结，但必须满足：Task 已提交前不可执行；Execution/Process 已 durable 前不可让 queue 成为唯一工作证据。
@@ -444,6 +456,7 @@ Task T
         target = IntakeSource S1
         ├── Process P-fetch: intake.api_fetch
         ├── Process P-scatter: clean.api_scatter
+        ├── Process P-preflight: intake.preflight_validate
         ├── Process P-accept: intake.accept_snapshot
         ├── Child Execution E-A → target IntakeItem/Revision A → RAG Processes...
         ├── Child Execution E-B → target IntakeItem/Revision B → RAG Processes...
@@ -457,14 +470,14 @@ Root Execution是本次API fetch/scatter/fan-in的durable controller。每个chi
 ```text
 1. Task ingress 原子提交
 2. 创建 E-root，执行 intake.api_fetch
-3. clean.api_scatter 输出 canonical child candidates
-4. 以source-scoped ExternalKey解析/复用IntakeItem，并计算versioned semantic values/fingerprint
-5. 单事务提交accepted IntakeSnapshot、Membership、Revision decision、ChangeSet与fan-out scheduling intents
-6. 为本次需要处理的每个 child 创建一个 durable child Execution
-7. 轻量队列并发运行 child Executions 的 RAG Processes
-8. E-root按Snapshot/ChangeSet的required set做fan-in，不按临时查询结果猜数量
-9. 全部 required children 成功且各自 publication proof 有效 → E-root succeeded
-10. Task 从 E-root 归约 succeeded；任一 required child 最终失败 → 默认 Task/Root failed
+3. clean.api_scatter 输出stable ordered CandidateSet pages、typed rejection/gap evidence与clean Artifact candidates
+4. mandatory root preflight只读frozen acquisition/collection/clean evidence；required异常产生blocked Outcome：不可保存/不可审核者fail，可信candidate可按contract seal并由S04接受后进入受控human path
+5. seal验证page/root digest、count/bytes、ExternalKey、Artifact与source-exhaustion proof
+6. S04以source-scoped ExternalKey解析/复用IntakeItem、计算versioned semantics，并单事务提交accepted Snapshot、Membership、Revision decision、ChangeSet与fan-out intents
+7. 若root需要人工审核，先以exact ReviewTarget gate等待；release后才为required set创建durable child Executions
+8. 轻量队列并发运行child的clean/preflight/RAG Processes；真正需要人工判断的child使用各自ExecutionGate
+9. E-root按Snapshot/ChangeSet的required set与durable gate/child outcome做fan-in，不按临时查询结果猜数量
+10. 全部 required children 成功且各自 publication proof 有效 → E-root succeeded；任一 required child最终失败则默认Task/Root failed
 ```
 
 “默认 all-required”是 D01 verdict。若未来业务需要允许 partial success，S02/S03/S04 必须共同 reopen：明确 required/optional child、对外状态、结果 envelope、检索可见性和 retry 语义；不得只新增一个 `partially_succeeded` 字符串。
@@ -473,7 +486,7 @@ Root Execution是本次API fetch/scatter/fan-in的durable controller。每个chi
 
 IntakeSource的后续Snapshot可能得到新增、semantic变化、无变化或authoritative absence：
 
-- Snapshot/Membership/Revision decision属于S04长期真相，S05只生成CandidateSet；
+- Snapshot/Membership/Revision decision属于S04长期真相；S05只生成typed CandidateSet、PreflightOutcome与Execution-owned gate/decision supporting truth；
 - 本次no-change的member可以不创建新Execution，但必须在Membership/ChangeSet中有证据；
 - 需要 rebuild/update/purge 的 child 创建新的 child Execution；
 - “本次不需要执行”与“执行成功”是两个不同事实；
@@ -898,10 +911,10 @@ nl -ba legacy-family/smind-skill-rag-structurizer/flows/processor.ts | sed -n '4
 
 本 Verdict 的 `GO` 不是无条件通过。实现前必须满足：
 
-1. 先 reopen S01 的 `attempt_uuid` 与 task type 口径，禁止双模型并存；
+1. S01已废止`attempt_uuid/task_type`双义；实现gate必须持续禁止Attempt身份与旧alias回流；
 2. S02 只冻结 Task API/lifecycle/aggregate，不再次吞入 Process 状态；
-3. S03 必须明确 Execution tree、Process registry、state machines、claim/lease/fencing/retry/reconciliation；
-4. S04必须提供durable IntakeSnapshot/Membership/ChangeSet acceptance truth，S05提供validated CandidateSet；
+3. S03 必须明确 Execution tree、Process registry、state machines、claim/lease/fencing/retry/recovery；
+4. S04必须提供durable IntakeSnapshot/Membership/ChangeSet acceptance truth；S05提供typed CandidateSet、mandatory preflight、ExecutionGate与exact binding；
 5. S08/S09/S12 必须定义可机器验证的 vector + filter metadata publication proof；
 6. S15 必须定义 Process projection 与 Event/Log 的不同 retention；
 7. 任何 Process 物理清理实现都必须先通过 `D01-A16/A17`；
@@ -909,17 +922,18 @@ nl -ba legacy-family/smind-skill-rag-structurizer/flows/processor.ts | sed -n '4
 
 ### 10.4 当前仍未被 D01 声称为已解决的事项
 
-- Task retention 的精确时长（六态、priority/deadline contract、cancel race、retry response 与 soft-delete API 语义已由 `S02-v1.0` 冻结）；
-- Execution/Process 精确状态词汇与所有合法转移；
-- 每个 process type 的 retryable error matrix、默认 max_retries 和 backoff；
-- root/child Execution 的 exact DDL、partial unique index 与事务边界；
-- scatter partial success 是否未来开放；首版 verdict 为 all-required；
-- Process compact 与 archive/delete 的具体时间；
-- Workflow Definition 是否固定 pipeline、受限 DAG 或版本化配置；
-- local queue 具体选型及其是否需要 MKB-owned outbox 表；
-- Intake资产、Vector与Event/Log的独立DDL（S04十张canonical表已冻结，exact SQL仍归S12）。
+S02-S05已经关闭Task、Workflow、Intake与clean/preflight/HITL语义；仍由后续Spec冻结的是：
 
-这些事项必须由对应 S03-S15 spec 冻结，但不得推翻 D01 已确定的三层身份、责任归属、1:N 散射、状态归约方向和三张核心状态表，也不得删除 S02 冻结的 restart causal truth。
+- 每个S06-S09 process capability的exact input/output/proof与retryable error matrix；
+- root/child Execution、S05四组durable职责、CandidateSet与outbox的exact Turso DDL/index/transaction（S12）；
+- local queue具体选型、wake driver与capacity benchmark（S12/17）；
+- logical handle、atomic write、staging/orphan/reference-protected GC（S13）；
+- model/prompt/provider exact registry与fallback（S11/S14）；
+- Process/Event/Log/gate evidence retention数值、waiting SLA/timeout/alerts/runbook（S15）；
+- secret/egress/allowlist/review decision authority（S16）；
+- scatter partial-success未来是否开放；v1继续all-required且无Task partial-success状态。
+
+这些事项不得推翻D01三层身份、责任归属、1:N散射、状态归约方向和三张核心运行状态表，也不得删除S02 restart causal truth或把S05 gate改为第四层runtime identity。
 
 ### 10.5 一句话结论
 
@@ -934,3 +948,4 @@ nl -ba legacy-family/smind-skill-rag-structurizer/flows/processor.ts | sed -n '4
 | `D01-v1.0` | `2026-07-15` | `MKB owner + Codex` | `accepted architecture direction` | 固化 owner 主动提出的 Task/Execution/Process 三层切分；完成 single/scatter、retry/cleanup、三表架构、legacy evidence 与 GO verdict。 |
 | `D01-v1.1` | `2026-07-15` | `MKB owner + Codex` | `accepted / S02-calibrated` | 接收 S02-v1.0 回流：三张核心运行表不变；新增 `task_restarts` 因果/admission truth，将 Task ingress/runtime/restart 最小 durable 业务真相集合由四张校准为五张。 |
 | `D01-v1.2` | `2026-07-15` | `MKB owner + Codex` | `accepted / S02+S04-calibrated` | 接收S04-v1.0：将Source/Document/Version/manifest资源口径校准为IntakeSource/Snapshot/Item/Revision/Membership；确认Intake不是第四层runtime identity，single/scatter fan-in改以accepted Snapshot/ChangeSet为分母，rebuild不创建Revision。 |
+| `D01-v1.3` | `2026-07-16` | `MKB owner + Codex` | `accepted / S02+S04+S05-calibrated` | 接收S05-v1.0：Preflight归统一Process capability；human review归Execution waiting gate且不新增runtime identity；Execution锁定S05 binding；single/scatter加入preflight、gate和same-Execution resume；修正Execution无retrying状态并更新未决下游边界。 |

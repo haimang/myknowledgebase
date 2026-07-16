@@ -4,7 +4,7 @@
 >
 > **Domain / 子系统**：`D2 任务执行 / S02 Task API & Aggregate Lifecycle`
 >
-> **日期**：`2026-07-15`
+> **日期**：`2026-07-16`
 >
 > **作者 / 裁决者**：`MKB owner + Codex`
 >
@@ -12,9 +12,9 @@
 >
 > **文档状态**：`accepted`（S02 域内已接受；全系统 truth layer 尚未 frozen）
 >
-> **Truth 版本**：`S02-v1.1`
+> **Truth 版本**：`S02-v1.2`
 >
-> **上游权威输入**：QNA初始基线`D01-v1.0 / S01-v1.1`、冻结的`qna-truth/S02.md v1.3`；正式回流版本`D01-v1.2 / S01-v1.3 / S04-v1.0`
+> **上游权威输入**：QNA初始基线`D01-v1.0 / S01-v1.1`、冻结的`qna-truth/S02.md v1.3`；正式回流版本`D01-v1.3 / S01-v1.4 / S03-v1.2 / S04-v1.1 / S05-v1.0`
 >
 > **事实证据**：`legacy-family/` 中 API 发起、Dedicated API scatter、SMCP、Clean/RAG Dispatcher、Console 原子查询与重启实现
 >
@@ -25,6 +25,8 @@
 > **校准声明**：D01/S01 冻结的 `tasks + task_audits + executions + processes` 四张核心 Task/运行真相表继续成立。S02 依据 owner 在 Q5/Q6 的补充裁决，新增独立 `task_restarts` 因果账本；因此启用外部人工重启后的最小 durable 业务真相集合为五张。`task_restarts` 不复制或推进 Task status。
 
 > **S04校准声明**：S02原先使用的`Source/Document/DocumentVersion/manifest`是S04冻结前的资源占位词。本版将MKB公共契约校准为`IntakeSource/IntakeSnapshot/IntakeItem/IntakeRevision/IntakeSnapshotMembership/IntakeChangeSet`；`document.*` intents和`document_uuid`不作为兼容别名保留。
+
+> **S05校准声明**：S05-v1.0不增加Task状态。Execution因human gate进入`waiting`时，Task继续投影为`running`并提供bounded`action_required`；gate read/decision以Task-scoped受控subresource表达，不暴露或允许直接修改Execution/Process。Required gate rejection按既有single/scatter all-required规则归约，不增加`reviewing/partially_succeeded`状态。
 
 ---
 
@@ -178,6 +180,10 @@ Legacy 只能证明真实需求、失败模式和已有围栏，不能把 Cloudf
 | `S02-T036` | Task delete只是受控soft-delete/可见性操作，不是执行状态，也不物理级联删除资源或证据。 | `S01 + T-O-11` | active Task必须先cancel/terminal；Task delete不等于IntakeItem delete。 |
 | `S02-T037` | Task result endpoint 必须明确区分 `not_ready`、terminal failure/cancel 与 ready success；不能用 404 混淆未完成。 | `S01-E07 + ACCEPTED-VERDICT` | polling caller 不依赖日志解释结果。 |
 | `S02-T038` | 外部错误使用稳定 machine code；内部 stack、绝对路径、token、Process payload 和驱动错误不得泄漏。 | `S01/S16 boundary` | 诊断详情进入受控内部 observability。 |
+| `S02-T039` | Execution有open human gate时Task仍为`running`；aggregate另有bounded`action_required`投影，至少含gate count/kind、安全summary与Task-scoped links。 | `S05-T020..24 + S01-T059..60` | 不增加Task状态，不把durable waiting伪装为无进展。 |
+| `S02-T040` | Gate read/decision是Task-scoped control subresource，不是Execution/Process public CRUD；普通Task响应不得泄漏内部execution/process/fence。 | `S01-T061 + S05-T021..24` | 服务端以exact ReviewTarget/generation/fence校验，caller只持安全gate ref/revision/target digest。 |
+| `S02-T041` | Gate decision必须携带expected gate revision、target digest、action、idempotency与actor evidence；append decision、CAS gate/Execution和outbox成功后才返回committed result。 | `S05-T023..24` | stale/conflict返回409；HTTP接收、UI点击或queue send不能提前release。 |
+| `S02-T042` | single required gate rejected最终使当前Execution/Task failed；scatter required child rejection参与collect-all，健康siblings继续，全部required terminal后root/Task failed。 | `S02-T018 + S05-T022..24` | 不增加partial-success terminal；已proof-valid sibling不回滚。 |
 
 ### 2.7 最小业务真相表结论
 
@@ -254,6 +260,9 @@ succeeded ───── no retry back-edge；new rebuild Task only
 | `GET /v1/teams/{team_uuid}/tasks/{task_uuid}/result` | polling result readiness | `202` not_ready；终态 `200` |
 | `GET /v1/teams/{team_uuid}/tasks/{task_uuid}/items` | 当前或指定 generation 的 scatter item projection | `200` cursor page |
 | `GET /v1/teams/{team_uuid}/tasks/{task_uuid}/generations` | durable generation summaries | `200` cursor page |
+| `GET /v1/teams/{team_uuid}/tasks/{task_uuid}/gates` | 当前/历史gate的bounded cursor projection；默认open | `200` cursor page |
+| `GET /v1/teams/{team_uuid}/tasks/{task_uuid}/gates/{gate_uuid}` | 安全ReviewTarget、evidence/artifact摘要与allowed actions | `200`；stale/terminal仍返回当前truth |
+| `POST /v1/teams/{team_uuid}/tasks/{task_uuid}/gates/{gate_uuid}:decide` | exact revision/target digest的approve/reject/reclean decision | `200` committed/idempotent；`409` stale/conflict |
 | `GET /v1/teams/{team_uuid}/task-restarts` | global restart list/filter | `200` cursor page |
 | `GET /v1/teams/{team_uuid}/task-restarts/{restart_uuid}` | 单条 restart + joined Task summary | `200` |
 | `GET /v1/teams/{team_uuid}/task-lineage` | 以一个restart/task/intake-item seed查询因果图 | `200` bounded/cursor page |
@@ -265,12 +274,12 @@ Get Task 最小稳定响应族：
 | Identity | `team_uuid/task_uuid/trace_uuid/schema_version/request_intent` |
 | Description | `title/description/payload_extra/priority/deadline_at` |
 | Lifecycle | `status/revision/current_generation/received_at/started_at/completed_at/deleted_at` |
-| Aggregate | progress summary、scatter counts、IntakeSnapshot/ChangeSet ref、result/error summary |
-| Links | self、result、items、generations、restart lineage；适用时canonical IntakeSource/Item/Revision |
+| Aggregate | progress summary、scatter counts、IntakeSnapshot/ChangeSet ref、result/error summary；open gate时`action_required` bounded summary |
+| Links | self、result、items、generations、restart lineage、conditional gates；适用时canonical IntakeSource/Item/Revision |
 
 Task list 至少支持 `status/request_intent/priority/created_at range/updated_at range/include_deleted` 过滤，默认按 `created_at desc, task_uuid desc` 或等价唯一顺序。`priority` 只接受 `low/normal/high/urgent`，省略为 `normal`；`deadline_at` 若提供必须为严格 RFC 3339 UTC 时间且晚于接收时刻。
 
-普通响应不得返回root/child`execution_uuid`、`process_uuid`、lease token、内部stage或绝对storage path。内部运维诊断可在独立受控surface使用这些身份，但不属于S02 public contract。
+普通响应和gate surface不得返回root/child`execution_uuid`、`process_uuid`、fencing/lease token、内部stage、secret或绝对storage path。Gate以opaque `gate_uuid`、revision、target digest及安全evidence projection工作；服务端内部再校验exact Execution/ReviewTarget。内部运维诊断可在独立受控surface使用内部身份，但不属于S02 public contract。
 
 **小结**：公共API围绕Task、canonical Intake identity与Restart组织，不围绕内部worker/step组织。
 
@@ -579,6 +588,8 @@ Rejected row 的 target Task/root 可以为空；accepted atomic row 必须能 F
 - 禁止 public `stage/process_uuid/force-step` 重启；
 - 禁止 Task status 使用 RAG phase 或 partial success；
 - 禁止 callback/queue/log 充当 Task 或 restart SSOT；
+- 禁止为human review新增Task状态、child Task或直接Execution/Process写API；
+- 禁止Task polling隐藏open gate，或仅靠UI/HTTP响应宣告release；
 - 禁止cancel隐式执行IntakeItem/Vector purge；
 - 禁止 physical delete Audit/restart/generation terminal evidence；
 - 禁止复制 Worker/D1/R2/SMCP/Dispatcher 部署拓扑。
@@ -626,6 +637,11 @@ Rejected row 的 target Task/root 可以为空；accepted atomic row 必须能 F
 | `S02-A33` | queue wake-up 丢失/重复 | reconciler 补发；只产生一份业务执行事实 |
 | `S02-A34` | response/error 泄漏扫描 | 无 token、stack、SQL、绝对路径、Process payload |
 | `S02-A35` | IntakeItem deactivate/delete | 独立新Task/Audit；logical-first且不伪装为parent cancel |
+| `S02-A36` | single Execution open gate | Task保持running；Get Task有bounded action_required，result仍not_ready |
+| `S02-A37` | gate detail安全读取 | 返回gate kind/revision/target digest/evidence摘要；不泄漏Execution/Process/fence/secret/path |
+| `S02-A38` | exact approve decision | append+CAS+outbox提交后same Execution恢复；重放幂等 |
+| `S02-A39` | stale/double/conflicting decision | `409`且current gate/Task/Execution不被反转 |
+| `S02-A40` | required child gate rejected | siblings继续；collect-all后root/Task failed，ready siblings不回滚 |
 
 ### 6.2 必须留存的验收证据
 
@@ -636,7 +652,8 @@ Rejected row 的 target Task/root 可以为空；accepted atomic row 必须能 F
 5. scatter golden Snapshot/Membership/ChangeSet/counts/items/result fixtures；
 6. Process compaction/soft-delete 前后 lineage 等价报告；
 7. tenant isolation 与 response data-leak scan；
-8. legacy 对照场景：发起 → scatter → register → parallel wake-up → child proof → collect-all → atomic rebuild。
+8. human gate OpenAPI、target/fence、idempotency与decision crash report；
+9. legacy 对照场景：发起 → scatter → register → parallel wake-up → child proof → collect-all → atomic rebuild。
 
 ---
 
@@ -695,17 +712,19 @@ Rejected row 的 target Task/root 可以为空；accepted atomic row 必须能 F
 4. full retry 与 atomic rebuild 不得合并：前者同 Task 新 generation，后者新 Task；
 5. Task failed/cancelled 与 ready child 可以同时成立，监控、查询与检索不得用 Task 单一 status 推导 child 可见性；
 6. Task soft-delete、Process cleanup 和日志 retention 不得破坏 Audit、generation、restart 或 lineage。
+7. Human review不增加Task状态：open gate时Task保持running并显式投影action_required；decision只能通过Task-scoped gate command提交。
 
 ### 8.3 下游必须继续冻结的边界
 
 | 下游 | 必须承接，但不由 S02 冒充冻结的内容 |
 |---|---|
-| `S03` | Execution/Process exact state、workflow definition、claim/lease/fencing、automatic retry、cancel propagation 与 reconciler |
-| `S04-S05` | IntakeSource/Snapshot/Item/Revision/Membership/ChangeSet exact schema、source-scoped ExternalKey、rebuild/deactivate/delete semantics |
+| `S03` | Execution/Process exact state、workflow definition、claim/lease/fencing、automatic retry、cancel propagation、human_review wait reason与semantic repair |
+| `S04` | IntakeSource/Snapshot/Item/Revision/Membership/ChangeSet exact schema、rebuild/deactivate/delete semantics |
+| `S05` | 已冻结source-scoped ExternalKey、PreflightOutcome、ExecutionGate/ReviewTarget/Decision与same-Execution resume；S02只投影并接收受控decision |
 | `S08-S10` | publication proof、ready visibility、retrieval filter 与 version replacement |
 | `S12` | Turso exact DDL、partial unique/transaction 能力、outbox 和 migration |
 | `S15` | event/log/trace、retention 数值、告警与 projection repair 运行手册 |
-| `S16` | token storage/rotation、network exposure、rate limit 和内部诊断授权 |
+| `S16` | token storage/rotation、network exposure、rate limit、review actor evidence/authority和内部诊断授权 |
 
 上述未决实现细节不是 S02 owner-gate；任何下游方案若改变本文件 Truth ID 的产品语义，必须显式 reopen S02。
 
@@ -721,3 +740,4 @@ S02 将 Task 固定为可轮询、可线性化、可散射聚合且可完整追�
 |---|---|---|---|---|
 | `S02-v1.0` | `2026-07-15` | `MKB owner + Codex` | `accepted` | 吸收冻结 Q1–Q9 与 `T-O-1..11`；正式冻结 Task 六态/CAS、scatter collect-all/items/early publication/cancel、full retry generation、atomic rebuild 新 Task、`task_restarts`、global restart/lineage、HTTP/error surface、验收与 legacy 证据台账；S02 QNA campaign 关闭。 |
 | `S02-v1.1` | `2026-07-15` | `MKB owner + Codex` | `accepted / S04-calibrated` | 接收S04-v1.0：TaskItems与fan-in绑定SnapshotMembership/ChangeSet；canonical link改为IntakeItem/Revision；atomic scope改为`atomic_intake_item`与`intake.rebuild`；cancel/deactivate/delete、serving proof与lineage词汇对齐。 |
+| `S02-v1.2` | `2026-07-16` | `MKB owner + Codex` | `accepted / S05-calibrated` | 接收S05-v1.0：Task六态不变；Execution waiting投影为running+action_required；新增Task-scoped gate list/get/decide语义、safe ReviewTarget projection、stale/idempotency边界与required rejection collect-all归约。 |

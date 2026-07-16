@@ -4,7 +4,7 @@
 >
 > **Domain / 子系统**：`D3 摄入资产 / S04 Intake Asset Lifecycle`
 >
-> **日期**：`2026-07-15`
+> **日期**：`2026-07-16`
 >
 > **作者 / 裁决者**：`MKB owner + Codex`
 >
@@ -12,9 +12,9 @@
 >
 > **文档状态**：`accepted`（S04 域内已接受；全系统 truth layer 尚未 frozen）
 >
-> **Truth 版本**：`S04-v1.0`
+> **Truth 版本**：`S04-v1.1`
 >
-> **上游权威输入**：形成QNA时的`D01-v1.1/S01-v1.2/S02-v1.0/S03-v1.0`，冻结的`qna-truth/S04.md v1.1`（Q1–Q9 / `T-O-30..48`）；发布后对齐版本为`D01-v1.2/S01-v1.3/S02-v1.1/S03-v1.1`
+> **上游权威输入**：形成QNA时的`D01-v1.1/S01-v1.2/S02-v1.0/S03-v1.0`，冻结的`qna-truth/S04.md v1.1`（Q1–Q9 / `T-O-30..48`）；发布后对齐版本为`D01-v1.3/S01-v1.4/S02-v1.2/S03-v1.2/S05-v1.0`
 >
 > **词汇权威**：`docs/baseline/spec-glossary.md`
 >
@@ -26,7 +26,7 @@
 
 > **应用边界**：MKB 是完全独立的 greenfield application。`legacy-family` 不构成代码、数据、协议、schema、UUID/status、storage、bootstrap、运行或验收兼容关系，只允许作为 ReferenceAnchor。
 
-> **跨文档审计声明**：S04已与D01/S01-S03的Task/Execution/Process、single/scatter、retry/rebuild、proof、cancel、Workflow routing和cleanup边界完成逻辑对账。D01-v1.2/S01-v1.3/S02-v1.1/S03-v1.1已完成Intake vocabulary校准，不改变三层runtime identity。
+> **跨文档审计声明**：S04已与D01/S01-S03/S05的Task/Execution/Process、single/scatter、retry/rebuild、candidate/preflight/HITL、proof、cancel、routing和cleanup完成逻辑对账。S05精化CandidateSet producer contract、ExternalKey/digest与准入顺序，但不改变五类Intake identity、十张canonical truth tables或三层runtime identity。
 
 ---
 
@@ -55,8 +55,8 @@ S01/S02 Task Contract
 S03 Workflow Engine
   │ ProcessCommand / ProcessOutcome / PublicationProof
   ▼
-S05 source adapters + validation + canonicalization
-  │ validated IntakeCandidateSet
+S05 source/acquisition/canonicalization/clean
+  │ typed evidence + CandidateSet pages + mandatory PreflightOutcome + seal
   ▼
 S04 Intake Asset Lifecycle
   ├── five canonical identities
@@ -68,7 +68,7 @@ S04 Intake Asset Lifecycle
   ├── bounded recovery + cleanup proof contract
   └── deterministic bootstrap/readiness
          │
-         ├── typed route facts → S03
+         ├── typed route/admission facts → S03/S05 ExecutionGate
          ├── exact Revision lineage → S06-S09
          ├── retrieval eligibility fence → S09-S10
          ├── transaction/outbox/policy persistence → S12
@@ -178,7 +178,7 @@ ReferenceAnchor 无权定义 MKB runtime/schema/API/acceptance；若证据叙事
 | Truth ID | 冻结真相 | 来源 | 下游约束 |
 |---|---|---|---|
 | `S04-T010` | 只有 canonical business semantics 变化才追加 IntakeRevision；no-change、rebuild、Workflow/model/embed/index升级不创建 Revision。 | `T-O-32` | business revision 与 runtime/build/index generation 分账。 |
-| `S04-T011` | 内建最小 semantic dimensions 为 source representation、canonical content、context metadata、filter metadata。 | `T-O-33/T-O-47` | exact digest算法/canonicalizer由S05版本化。 |
+| `S04-T011` | 内建最小 semantic dimensions 为 source representation、canonical content、context metadata、filter metadata。 | `T-O-33/T-O-47` | exact digest/canonicalizer已由S05-v1.0以versioned definition冻结。 |
 | `S04-T012` | SemanticDefinition 以 `(semantic_key, definition_version)` 内部注册、immutable；声明value/schema kind、fingerprint participation与typed route signal。 | `T-O-33/T-O-36` | 无外部CRUD；追加维度不改历史定义。 |
 | `S04-T013` | RevisionSemantic 绑定 exact definition version；RevisionFingerprint由参与fingerprint的有序definition/value tuples确定性计算。 | `T-O-33/T-O-36/T-O-38` | 读取历史不得join当前最新版后重解释。 |
 | `S04-T014` | `payload_extra` 默认不参与identity、observation fence、fingerprint、diff、route、proof或filter。 | `T-O-37/T-O-39` | 进入关键语义前必须晋升正式列或versioned definition。 |
@@ -233,6 +233,15 @@ ReferenceAnchor 无权定义 MKB runtime/schema/API/acceptance；若证据叙事
 | `S04-T043` | 启动只读验证schema/registry/workflow refs/约束/未完成migration；漂移拒绝readiness，不猜测修复业务truth。 | `T-O-48` | readiness不是自动migration成功的假设。 |
 | `S04-T044` | acceptance覆盖fresh install至零legacy dependency的完整矩阵。 | `T-O-48` | 测试断言MKB Contract，不复刻legacy wire/schema/status。 |
 
+### 2.8 S05 contract 回流真相
+
+| Truth ID | 冻结真相 | 来源 | 下游约束 |
+|---|---|---|---|
+| `S04-T045` | IntakeSource绑定S05 exact `IntakeSourceKindDefinition`与strict descriptor/config refs；v1 kind为inline/local/HTTP/registered API，single/scatter是cardinality。 | `S05-T002/T004..7` | S04不复制connector schema或把browser/PDF/OCR/Vision变成资产identity。 |
+| `S04-T046` | CandidateSet acceptance输入必须使用S05 typed AcquisitionEvidence、CandidateMember、CleanArtifactCandidate、page/root digest、rejection/gap、exhaustion与S05 binding。 | `S05-T008..13` | 禁止opaque child_files、random key、unknown digest或storage/log合成candidate。 |
+| `S04-T047` | S05 mandatory preflight在seal前绑定frozen candidate/evidence；S04 acceptance校验Outcome与相同team/source/Execution fence/root/binding一致，但不重新运行validator或决定auto/human route。 | `S05-T014..19` | blocked candidate可按contract保存可信partial Intake事实；能否进RAG由S03/S05 admission决定。 |
+| `S04-T048` | Human review gate属于Execution，发生在clean后/RAG前；S04不在Source/Snapshot/Item/Revision/Artifact上保存review state。Open gate仅作为Artifact/evidence retention reference。 | `S05-T020..24/T030` | gate release/reject不修改Intake lifecycle或Revision；S13/S15承接引用保护/retention。 |
+
 ### 2.8 Universal `payload_extra` 真相
 
 | 规则面 | 强制约束 |
@@ -258,8 +267,8 @@ ReferenceAnchor 无权定义 MKB runtime/schema/API/acceptance；若证据叙事
 
 | 表 | 必需列族 | 主约束 / 不变量 |
 |---|---|---|
-| `intake_sources` | `team_uuid, intake_source_uuid, source_kind, source_descriptor_ref, connector_config_ref, secret_ref, accepts_new_snapshots, row_revision, created_at, payload_extra` | PK/team fence；secret不得明文；descriptor/config使用logical ref；source admission mutation需CAS+audit。 |
-| `intake_snapshots` | `team_uuid, intake_snapshot_uuid, intake_source_uuid, observation_key, observation_fingerprint, candidate_root_digest, completeness, authoritative_scope_ref, validator_kind/value, observed_at, accepted_at, producer_execution_uuid, raw_artifact_uuid?, payload_extra` | immutable；source内observation fence唯一；`completeness∈{complete,partial}`；failure不是row。 |
+| `intake_sources` | `team_uuid, intake_source_uuid, source_kind, source_kind_definition_version/digest, source_descriptor_ref/digest, connector_config_ref, secret_ref, accepts_new_snapshots, row_revision, created_at, payload_extra` | PK/team fence；secret不得明文；descriptor/config使用logical ref；S05 exact definition锁定；source admission mutation需CAS+audit。 |
+| `intake_snapshots` | `team_uuid, intake_snapshot_uuid, intake_source_uuid, observation_key, observation_fingerprint, candidate_root_digest, completeness, authoritative_scope_ref, source_validator_evidence_ref, preflight_outcome_ref/digest, s05_binding_digest, observed_at, accepted_at, producer_execution_uuid, raw_artifact_uuid?, payload_extra` | immutable；source内observation fence唯一；`completeness∈{complete,partial}`；failure不是row；preflight/candidate fence一致。 |
 | `intake_items` | `team_uuid, intake_item_uuid, intake_source_uuid, normalized_external_key, lifecycle_state, latest_revision_uuid?, serving_revision_uuid?, row_revision, created_at, deactivated_at?, deleted_at?, payload_extra` | `(team,source,normalized_external_key)`唯一；三态CHECK；deactivated/deleted时serving null；pointer必须同team/item。 |
 | `intake_revisions` | `team_uuid, intake_revision_uuid, intake_item_uuid, revision_ordinal, predecessor_revision_uuid?, revision_fingerprint, creation_action_key/version, source_snapshot_uuid, created_at, payload_extra` | immutable；`(team,item,ordinal)`与`(team,item,fingerprint)`唯一；predecessor同item且ordinal连续。 |
 | `intake_artifacts` | `team_uuid, intake_artifact_uuid, owner_snapshot_uuid?, owner_revision_uuid?, artifact_role, media_type, digest_algorithm, content_digest, size_bytes, logical_locator, producer_execution/process refs?, retention_class_ref, created_at, payload_extra` | owner XOR；immutable；`logical_locator`非绝对路径；digest/size必填。 |
@@ -277,8 +286,8 @@ ReferenceAnchor 无权定义 MKB runtime/schema/API/acceptance；若证据叙事
 
 | 逻辑职责 | 推荐表 | 必需语义 |
 |---|---|---|
-| IntakeCandidateSet head | `intake_candidate_sets` | candidate UUID、team/source、producer Execution fence、definition-set digest、observation identity、expected pages/members/bytes、root digest、staging state、seal/expiry、payload_extra |
-| Candidate pages | `intake_candidate_pages` | candidate UUID、page ordinal、member count、page digest、IntakeArtifact/value refs、immutable sealed payload reference、payload_extra |
+| IntakeCandidateSet head | `intake_candidate_sets` | candidate UUID、team/source、producer Execution fence、source/capability/S05 binding digests、observation identity、scope/completeness、expected/observed/accepted/rejected/duplicate counts、expected pages/members/bytes、root digest、PreflightOutcome ref、staging state、seal/expiry、payload_extra |
+| Candidate pages | `intake_candidate_pages` | candidate UUID、page ordinal/member range、ordered member digests、page digest、staged Artifact/value/validation/rejection refs、immutable sealed payload reference、payload_extra |
 | IntakeChangeSet / facts | `intake_change_sets` + physical fact rows/view | snapshot/ref/digest、typed item/revision/semantic/absence facts、definition bindings；不得存Process名 |
 | Scheduling outbox | `intake_scheduling_outbox` | causation、WorkflowRevision、Snapshot/Item/Revision refs、IntakeChangeSet digest、idempotency fence、delivery projection、payload_extra |
 | Repair intent | `intake_repair_intents` | invariant kind、target refs、observed fence、allowed repair kind、causation、resolved evidence、payload_extra；runtime retry归S03 |
@@ -314,7 +323,7 @@ ReferenceAnchor 无权定义 MKB runtime/schema/API/acceptance；若证据叙事
 #### IntakeCandidateSet staging
 
 ```text
-open ──all pages + validation──> sealed ──canonical transaction──> accepted
+open ──all pages + preflight + validation──> sealed ──canonical transaction──> accepted
   └──────── timeout/invalid/size fence ─────────────────────────> abandoned
 
 sealed + retry → same acceptance transaction
@@ -333,13 +342,16 @@ staging state不替代Process status；它只表示候选集合是否具备进�
 ```text
 Task(intake.ingest)
   → root Execution targets IntakeSource binding/new-source intent
-  → S05 fetch/upload/clean produces one-member IntakeCandidateSet
-  → seal + acceptance transaction
+  → S05 acquire/decode/canonicalize/clean produces typed evidence + one-member CandidateSet
+  → mandatory preflight + deterministic seal
+  → acceptance transaction
        create accepted IntakeSnapshot
        resolve/create stable IntakeItem
        append or reuse IntakeRevision
        append IntakeSnapshotMembership + IntakeChangeSet + outbox
-  → S03 evaluates typed facts
+  → S03 evaluates accepted facts + PreflightOutcome
+       allowlisted+passed → continue（no gate）
+       review needed → ExecutionGate waiting → exact decision resumes same Execution
   → build/validate derived assets
   → PublicationProof
   → Item CAS sets serving revision
@@ -353,15 +365,17 @@ Task(intake.ingest)
 ```text
 one Task(intake.ingest)
   → root controller Execution targets IntakeSource
-  → S05 paged IntakeCandidateSet(0..N)
-  → all pages verified + sealed
+  → S05 typed AcquisitionEvidence/CandidateMembers/CleanArtifactCandidates + pages(0..N)
+  → root mandatory preflight + all pages/rejection/exhaustion/root digest verified + sealed
   → one canonical acceptance transaction
        Snapshot + N Memberships
        Item/Revision/no-change/absence decisions
        IntakeChangeSet + child scheduling intents
   → commit
+  → admission route；optional root ExecutionGate must release before child wake-up
   → queue wake-up
   → 0..N child Executions target exact IntakeItem/Revision
+  → child clean/preflight；only review-needed child creates its own gate
   → proof-valid children may publish independently
   → root collect-all over committed required membership set
 ```
@@ -370,7 +384,7 @@ root child count是projection；fan-in分母来自accepted IntakeSnapshot/Intake
 
 ### 4.3 Acceptance transaction
 
-1. 校验IntakeCandidateSet为sealed、team/IntakeSource/producer Execution fence/current definitions一致；
+1. 校验IntakeCandidateSet为sealed，team/IntakeSource/producer Execution fence、source/capability/S05 binding、PreflightOutcome、page/root digest与current accepted definitions一致；
 2. 对observation identity + root digest执行幂等/冲突检查；
 3. 插入immutable IntakeSnapshot；
 4. 按IntakeSource-scoped normalized ExternalKey resolve/create IntakeItem；
@@ -511,6 +525,8 @@ adapters
 | purge成功后reset Task pending或恢复serving | 禁止；四类intent职责分离。 |
 | bootstrap直接seed一批serving Item | 禁止；内容必须走正常Task/Intake Contract。 |
 | 以legacy schema/status作为兼容或验收目标 | 禁止；legacy只作ReferenceAnchor。 |
+| 把PreflightOutcome或ExecutionGate状态写进IntakeItem/Revision | 禁止；Outcome/gate属于S05/Execution control，S04只保存必要acceptance/retention引用。 |
+| CandidateSet缺S05 binding、rejection/exhaustion或preflight fence仍accept | 禁止；typed evidence与相同root/fence是acceptance guard。 |
 
 ---
 
@@ -556,6 +572,10 @@ adapters
 | `S04-A34` | payload_extra round-trip | 所有适用表存在；核心logic不读取未晋升key |
 | `S04-A35` | schema/registry/workflow ref drift | startup readiness false，不自动猜修 |
 | `S04-A36` | legacy dependency scan | runtime/config/DDL/API/event/startup零依赖 |
+| `S04-A37` | CandidateSet缺S05 binding/PreflightOutcome或root digest不一致 | acceptance拒绝，无Snapshot/Revision/membership |
+| `S04-A38` | blocked但可保存的partial observation | 按contract接受可信Intake事实，但无RAG准入；Item无review state |
+| `S04-A39` | open gate release/reject | IntakeItem lifecycle、Revision与Snapshot不变；只影响Execution route |
+| `S04-A40` | open gate引用Artifact进入GC候选 | retention/reference fence阻止删除直至gate终结 |
 
 ### 6.2 必须留存的验收证据
 
@@ -639,16 +659,16 @@ adapters
 8. deactivate/delete/rebuild-reindex/physical-purge严格分账；
 9. cleanup按substrate proof收敛，v1长期保留tombstone/audit skeleton且不开放deleted restore；
 10. MKB空库确定性bootstrap并仅演进自身schema，legacy-family永久reference-only。
+11. S05 typed evidence/preflight是acceptance输入而非Intake lifecycle；human gate release/reject不修改任何Intake状态。
 
 ### 8.3 下游必须继续冻结的边界
 
 | 下游 | 必须承接、但不由S04冒充冻结的内容 |
 |---|---|
-| `S05` | IntakeSource kind/descriptor、ExternalKey normalization、fetch/clean/canonicalization、IntakeCandidateSet exact contract与digest算法 |
 | `S06-S08` | Block/Construction/Embedding exact schema、generation与proof生产 |
 | `S09-S10` | IndexGeneration schema、proof-switch、retrieval filter/query implementation |
 | `S12` | exact Turso DDL/index/trigger/transaction/outbox/scanner/migration与capacity benchmark |
-| `S13` | local Intake/derived asset backend/locator/atomic write/orphan/GC实现 |
+| `S13` | local Intake/derived asset backend/locator/atomic write/orphan/GC及open gate引用保护实现 |
 | `S14-S15` | retention durations/policies、registry deployment、event/metric/alert/runbook |
 | `S16` | secret/hold/admin/read authorization与cross-team防护 |
 
@@ -665,3 +685,4 @@ S04 将所有外部输入统一提升为可审计的Intake身份、观察、集�
 | 版本 | 日期 | 作者 | 状态 | 主要变更 |
 |---|---|---|---|---|
 | `S04-v1.0` | `2026-07-15` | `MKB owner + Codex` | `accepted` | 吸收Q1-Q9与`T-O-30..48`；冻结五类Intake identity、十表schema、semantic/action registries、IntakeCandidateSet acceptance、三态/serving CAS、large-scatter recovery、retention/reindex/purge、greenfield bootstrap/schema evolution/acceptance及ReferenceAnchor边界。 |
+| `S04-v1.1` | `2026-07-16` | `MKB owner + Codex` | `accepted / S05-calibrated` | 接收S05-v1.0：IntakeSource锁定exact SourceKindDefinition；CandidateSet补齐typed evidence/S05 binding/preflight/rejection/exhaustion contract；single/scatter acceptance后按Outcome进入auto或Execution gate；确认review state不进入Intake并补open-gate retention fence。 |
