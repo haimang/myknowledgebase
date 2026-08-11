@@ -5,17 +5,17 @@
 >
 > **Domain / 子系统**：`D3 摄入资产 / S05 Intake & Cleaning`
 >
-> **日期**：`2026-07-16`
+> **日期**：`2026-07-18`
 >
 > **作者 / 裁决者**：`MKB owner + Codex`
 >
 > **文档性质**：`domain truth / formal subsystem specification`
 >
-> **文档状态**：`accepted`（S05 域内已接受；全系统 truth layer 尚未 frozen）
+> **文档状态**：`accepted / D02-state-calibrated`（S05 域内已接受；全系统 truth layer 尚未 frozen）
 >
-> **Truth 版本**：`S05-v1.0`
+> **Truth 版本**：`S05-v1.1`
 >
-> **上游权威输入**：形成QNA时的`D01-v1.2/S01-v1.3/S02-v1.1/S03-v1.1/S04-v1.0`、冻结的`qna-truth/S05.md v1.0`（Q1–Q10 / `T-O-49..76`）；发布后对齐版本为`D01-v1.3/S01-v1.4/S02-v1.2/S03-v1.2/S04-v1.1`
+> **上游权威输入**：形成QNA时的`D01-v1.2/S01-v1.3/S02-v1.1/S03-v1.1/S04-v1.0`、冻结的`qna-truth/S05.md v1.0`（Q1–Q10 / `T-O-49..76`）；发布后对齐版本为`D01-v1.4/S01-v1.5/S02-v1.3/S03-v1.3/S04-v1.2`
 >
 > **词汇权威**：`docs/baseline/spec-glossary.md`
 >
@@ -27,7 +27,9 @@
 
 > **准入约束**：allowlist 只授予“mandatory preflight 通过后可以自动进入 RAG”的资格。PreflightValidator 是只读 frozen evidence 的确定性检查器，不重新 fetch/clean，不拥有状态推进权。只有确实需要人工输入的路径才创建 Execution-owned durable gate。
 
-> **跨文档审计声明**：S05已与D01-v1.3/S01-v1.4/S02-v1.2/S03-v1.2/S04-v1.1完成双向校准。本文不增加第四层运行身份、不复制S03状态机、不把human review写回Intake truth，也不提前冻结S12物理表数量；Task polling、human waiting、CandidateSet acceptance与same-Execution resume均已有唯一权威归属。
+> **跨文档审计声明**：S05已与D01-v1.4/S01-v1.5/S02-v1.3/S03-v1.3/S04-v1.2完成双向状态校准。本文不增加第四层运行身份、不复制S03状态机、不把human review写回Intake truth，也不提前冻结S12物理表数量；Task polling、human waiting、CandidateSet acceptance与same-Execution resume均已有唯一权威归属。
+
+> **D02状态校准声明**：D02-v1.0已镜像CandidateSet与ExecutionGate状态、相关正交Outcome及`T-O-86..92`校准纪律；本版不改变四类source、capability surface、mandatory preflight、allowlist或ExecutionGate语义。Acquisition result、CandidateSet staging、PreflightOutcome、ExecutionGate和Execution status继续分账；S05 exact capability key是S03 manifest identity，早期coarse process family不构成alias。clean curation与mass-scatter discard/loss归S05/S06/S02，gate action exact enum归S05/S12；它们是下游设计而非D02 owner-gate，不进入S05-v1.1。
 
 ---
 
@@ -231,6 +233,19 @@ S05 不负责：
 | 升格规则 | 一旦扩展字段参与identity、validation、route、approval、proof、filter或retention，必须通过正式schema/definition version升格。 |
 | S12例外 | S12纯schema bookkeeping表是否需要该字段由S12明确裁决；业务表不得借此例外逃逸。 |
 
+### 2.8 S05 状态、结果与准入事实分账
+
+| 事实族 | Exact values | Owner | 是否推进自己的状态边 | 与S03的关系 |
+|---|---|---|---:|---|
+| AcquisitionEvidence result | `succeeded/rejected/failed` | S05 capability | 否，immutable outcome | retryability经Outcome交S03 |
+| CandidateSet staging | `open/sealed/accepted/abandoned` | S04 staging contract；S05只append/seal/abandon | 是 | producing Process仍使用S03八态 |
+| PreflightOutcome | `passed/blocked` | S05 validator | 否，immutable business outcome | Engine消费后选auto/human/failure route |
+| ExecutionGate | `open/released/rejected/superseded` | S05 control truth | 是，CAS+Decision | Execution只投影`waiting(human_review)`或恢复/终结 |
+| Execution status | S03八态 | S03 | 是 | S05不得直接自造状态边 |
+| Task action_required | bounded projection | S02 | 否 | open Gate时Task保持running |
+
+runtime/schema/evidence错误只形成Process failure/retry evidence，不生成`blocked`；Gate `released`也不等于Process、Execution、Task或Intake成功。
+
 ---
 
 ## 3. Contract schema 与数据不变量
@@ -352,7 +367,7 @@ seal必须验证：
 - `complete`具有source-specific exhaustion proof；
 - preflight Outcome绑定相同root/binding/fence。
 
-`open→sealed→accepted|abandoned`由S04 staging contract管理；S05只能append/seal/abandon，不能写accepted。
+`open→sealed→accepted`与`open→abandoned`由S04 staging contract管理；sealed可幂等重放acceptance，accepted/abandoned均不回到open。S05只能append/seal/abandon，不能写accepted。
 
 ### 3.8 Minimal Preflight records
 
@@ -858,3 +873,4 @@ S05 以严格、确定、可复验的source与clean contract把任意外部输�
 | 版本 | 日期 | 作者 | 状态 | 主要变更 |
 |---|---|---|---|---|
 | `S05-v1.0` | `2026-07-16` | `MKB owner + Codex` | `accepted` | 吸收Q1-Q10与`T-O-49..76`最终修订；冻结四类source kind、typed input/output、canonicalization/CandidateSet、mandatory preflight、最小allowlist/validator、ExecutionGate/ReviewTarget/Decision、exact binding、四窗口recovery与greenfield ReferenceAnchor边界。 |
+| `S05-v1.1` | `2026-07-18` | `MKB owner + Codex` | `accepted / D02-state-calibrated` | 保持S05 truth与v1 scope不变；分离Acquisition result、CandidateSet staging、PreflightOutcome、Gate与Execution状态；明确S05 exact capability key优先于早期coarse family；修正CandidateSet合法边表述，curation/loss policy按D02-v1.0移交S05/S06/S02。 |

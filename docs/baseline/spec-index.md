@@ -12,7 +12,7 @@
 >
 > **阶段**：`leaf-worker / LS-RAG re-foundation`
 >
-> **日期**：`2026-07-16`
+> **日期**：`2026-08-10`
 >
 > **作者**：`MKB owner + Codex`
 >
@@ -140,7 +140,7 @@ pending → designing → owner-gate → accepted → frozen
 | `D2` | 任务执行 | `S02` Task API；`S03` Workflow Engine | 上游任务如何进入，内部如何可靠执行 |
 | `D3` | 摄入资产 | `S04` Intake Asset Lifecycle | IntakeSource/IntakeSnapshot/IntakeItem/IntakeRevision/IntakeArtifact 的权威生命周期，并为未来 Knowledge 层保留语义空间 |
 | `D4` | 内容处理 | `S05` Intake & Cleaning | 输入如何变成可结构化的规范内容 |
-| `D5` | LS-RAG 构建 | `S06` Structurizer；`S07` Constructor | 如何形成 layered block 和 original/summary 双通道 |
+| `D5` | LS-RAG 构建 | `S06` Structurizer；`S07` Constructor | 如何从exact IntakeRevision形成grounded ordered structure、稳定block projection和original/summary双通道 |
 | `D6` | 向量资产 | `S08` Embedding & Vectorization；`S09` Vector Index | 向量如何生成、持久化、升级和检索 |
 | `D7` | LS-RAG 检索 | `S10` Retrieval & Reranking | 召回、Traceback、膨胀、重排和结果契约 |
 | `D8` | 模型能力 | `S11` Inference Runtime | 本地与外部模型如何以统一能力接口工作 |
@@ -155,12 +155,12 @@ pending → designing → owner-gate → accepted → frozen
 
 | 顺序 | ID | 子系统 | 优先级 | 状态 | 详细 Spec | 关键依赖 | 回填摘要 |
 |------|----|--------|--------|------|-----------|----------|----------|
-| `01` | `S01` | Skill-Worker Integration | `P0` | `accepted` | `domain-truth/S01-skill-worker-integration.md` | `00, D01` | `S01-v1.4`：standalone Contract；Task/Audit；intake.*；polling+action_required/gate decision；future adapter |
-| `02` | `S02` | Task API & Lifecycle | `P0` | `accepted` | `domain-truth/S02-task-api.md` | `00, D01, S01, S03-S05` | `S02-v1.2`：六态/CAS；Snapshot/ChangeSet scatter；restart/lineage；running+action_required与Task-scoped gate read/decide |
-| `03` | `S03` | Workflow Engine | `P0` | `accepted` | `domain-truth/S03-workflow-engine.md` | `D01-v1.3, S01-v1.4, S02-v1.2, S04-v1.1, S05-v1.0` | `S03-v1.2`：六平面/七表；Execution/Process states；preflight capability；human_review waiting；S05 binding与统一repair |
-| `04` | `S04` | Intake Asset Lifecycle | `P0` | `accepted` | `domain-truth/S04-intake-asset-lifecycle.md` | `00-v1.1, D01-v1.3, S01-v1.4, S02-v1.2, S03-v1.2, S05-v1.0` | `S04-v1.1`：五类identity/十表；typed CandidateSet/preflight acceptance；review与Intake解耦；serving/recovery/retention |
-| `05` | `S05` | Intake & Cleaning | `P1` | `accepted` | `domain-truth/S05-intake-cleaning.md` | `D01-v1.3, S01-v1.4, S02-v1.2, S03-v1.2, S04-v1.1, S12-S16` | `S05-v1.0`：Q1-Q10 / `T-O-49..76`全冻结；四类source、typed candidate/clean contract、mandatory preflight、minimal HITL gate、exact binding/recovery |
-| `06` | `S06` | LS-RAG Structurizer | `P0` | `pending` | `domain-truth/S06-lsrag-structurizer.md` | `S04-S05, S11, S13-S14` | 待设计 |
+| `01` | `S01` | Skill-Worker Integration | `P0` | `accepted` | `domain-truth/S01-skill-worker-integration.md` | `00, D01` | `S01-v1.5`：standalone Contract；Task五轴查询面分账；polling+action_required；无内部状态写面 |
+| `02` | `S02` | Task API & Lifecycle | `P0` | `accepted` | `domain-truth/S02-task-api.md` | `00, D01, S01, S03-S05` | `S02-v1.3`：六态/CAS不变；status/readiness/items/action_required/visibility分账；restart/lineage |
+| `03` | `S03` | Workflow Engine | `P0` | `accepted` | `domain-truth/S03-workflow-engine.md` | `D01-v1.4, S01-v1.5, S02-v1.3, S04-v1.2, S05-v1.1` | `S03-v1.3`：七表/八态不变；status/phase/wait/outcome/route分账；S05 exact capability key |
+| `04` | `S04` | Intake Asset Lifecycle | `P0` | `accepted` | `domain-truth/S04-intake-asset-lifecycle.md` | `00-v1.2, D01-v1.4, S01-v1.5, S02-v1.3, S03-v1.3, S05-v1.1` | `S04-v1.2`：五类identity/十表；Source/Snapshot/Item/staging/pointers/cleanup状态族分账 |
+| `05` | `S05` | Intake & Cleaning | `P1` | `accepted` | `domain-truth/S05-intake-cleaning.md` | `D01-v1.4, S01-v1.5, S02-v1.3, S03-v1.3, S04-v1.2, S12-S16` | `S05-v1.1`：四类source；typed evidence；mandatory preflight/gate；outcome/staging/runtime分账；exact capabilities |
+| `06` | `S06` | LS-RAG Structurizer | `P0` | `designing / Round 2 reframe` | `qna-truth/S06.md` | `D01, D02-v1.0, S03-S05, S07-S14` | `S06-QNA-v0.7`：Q1-Q3/`T-O-77..85`冻结；D02 hold已解除，Q4-Q6按S06/S02/S05/S08-S09 owner边界重构 |
 | `07` | `S07` | LS-RAG Constructor | `P0` | `pending` | `domain-truth/S07-lsrag-constructor.md` | `S04, S06, S11, S13-S14` | 待设计 |
 | `08` | `S08` | Embedding & Vectorization | `P0` | `pending` | `domain-truth/S08-embedding-vectorization.md` | `S07, S09, S11, S14` | 待设计 |
 | `09` | `S09` | Vector Index Lifecycle | `P0` | `pending` | `domain-truth/S09-vector-index.md` | `S04, S12, S14` | 待设计 |
@@ -176,8 +176,9 @@ pending → designing → owner-gate → accepted → frozen
 
 | ID | 文档 | 状态 | 用途 |
 |----|------|------|------|
-| `00` | `spec-glossary.md` | `active / v1.1` | 接收`T-O-30..76`与S04-S05正式Spec；登记S05 source/candidate/clean/preflight/human-gate/binding词汇并完成D01/S01-S05 alignment |
-| `D01` | `domain-truth/D01-task-execution-process-flow.md` | `accepted / S02+S04+S05-calibrated` | `D01-v1.3`：Owner主动提出Task/Execution/Process；三表运行状态不变；Preflight归Process、human gate归Execution waiting且不新增runtime identity |
+| `00` | `spec-glossary.md` | `active / v1.4` | 登记D02-v1.0、六StateFamily、状态镜像块、drift协议与S06 `T-O-77..85`工作词；S06开放kind不标frozen |
+| `D01` | `domain-truth/D01-task-execution-process-flow.md` | `accepted / D02-state-calibrated` | `D01-v1.4`：三层状态所有权与exact states；phase/outcome/assets分账；S05 exact capabilities；target/vector-index移交对应下游 |
+| `D02` | `domain-truth/D02-production-state-and-routing.md` | `frozen / v1.0` | `T-O-86..92`冻结共有域宪法、六StateFamily、四层ledger、六项镜像块与双向drift协议；Q1-Q6完成、Round 3 waived、campaign关闭 |
 | `17` | `specs/17-system-topology.md` | `pending` | 汇总 16 个子系统的运行拓扑、进程、资源和调用关系 |
 | `18` | `specs/18-acceptance-truth-freeze.md` | `pending` | 汇总不变量、验收矩阵、owner-gate closure 和冻结签署 |
 
@@ -210,7 +211,7 @@ pending → designing → owner-gate → accepted → frozen
 | 核心 domain | `8` | 新系统的业务责任分组，不对应部署单元 |
 | 详细子系统 spec | `16` | 必须逐项设计、接受并回填的最小完整集合 |
 | 跨系统基线 spec | `3` | scope/glossary、system topology、acceptance/truth freeze |
-| 跨 Domain architecture truth | `1` | `D01`：owner-originated Task / Execution / Process Flow |
+| 跨 Domain architecture truth | `2` | `D01`：owner-originated runtime identity Flow；`D02-v1.0`：frozen shared-domain state constitution/ledger |
 | Legacy TypeScript 项目 | `10` | 证据源数量，不代表新子系统数量 |
 | 新 Python 发布单元 | `1` | leaf-worker 单体应用 |
 | 已知首个上游调用单位 | `1` | `03-nano/orchestrator-core`；其他内部 orchestrator 必须遵守同一 MKB Contract |
@@ -228,10 +229,10 @@ pending → designing → owner-gate → accepted → frozen
 | `smind-rag-dispatcher` | `S03, S06-S09` | RAG 阶段、失败、purge 与跨 Worker 状态债务 |
 | `smind-skill-clean-universal` | `S05, S11, S13` | input/clean/Artifact 行为和浏览器/PDF复杂度证据；不决定首版范围 |
 | `smind-skill-clean-dedicated-apis` | `S04, S05` | API scatter、atomic key、content/meta digest 与 provider 分支证据 |
-| `smind-skill-rag-structurizer` | `S06, S11, S14` | LS-RAG layered schema、model/prompt 和 validation 行为证据 |
+| `smind-skill-rag-structurizer` | `S06, S11, S14` | layered original/summary坐标、全文层、schema/model/prompt/repair行为与历史补丁证据 |
 | `smind-skill-rag-constructor` | `S07, S11, S14` | LS-RAG 双通道、meta fusion 与 recorder 行为证据 |
 | `smind-skill-rag-vectorizer` | `S03, S08, S09, S12, S15` | embedding/index/purge、队列与持久化耦合反例 |
-| `smind-contexter` | `S10, S11` | retrieval、traceback、context expansion 与 rerank 行为证据 |
+| `smind-contexter` | `S06, S10, S11` | block/granularity坐标的真实消费、summary→original traceback、context expansion 与 rerank 行为证据 |
 | `smind-console` | `S04/S15/S16` | file/child 查询、ACL、Artifact 反扫和 UI/platform 耦合反例；MKB 不建设替代 UI |
 
 本表不是代码“新归宿”、数据迁移清单或兼容矩阵。任何 legacy package、schema、wire message、UUID/status 或 storage locator 进入 MKB runtime 都违反 `T-O-42`。
@@ -252,7 +253,7 @@ pending → designing → owner-gate → accepted → frozen
 
 ### 3.1 `S01` Skill-Worker Integration
 
-- **状态**：`accepted / D01+S02+S04+S05-calibrated`；域内truth=`S01-v1.4`；全系统尚未frozen。
+- **状态**：`accepted / D02-state-calibrated`；域内truth=`S01-v1.5`；全系统尚未frozen。
 - **权威 Spec**：`docs/baseline/domain-truth/S01-skill-worker-integration.md`。
 - **冻结范围**：MKB 先作为 standalone leaf-worker；MKB Contract 是权威接入协议；03-nano 或其他上游自行适配。
 - **冻结身份**：边界 UUIDv4/v7、MKB 内生 UUIDv7；Task 权威键为 `(team_uuid, task_uuid)`；task/trace 由上游提供；Execution/Process 仅由 MKB 创建；Attempt identity 已废止。
@@ -264,19 +265,19 @@ pending → designing → owner-gate → accepted → frozen
 
 ### 3.2 `S02` Task API & Lifecycle
 
-- **状态**：`accepted / S04+S05-calibrated`；域内truth=`S02-v1.2`；QNA Q1–Q9全部冻结，Round 4已由owner关闭；全系统尚未frozen。
+- **状态**：`accepted / D02-state-calibrated`；域内truth=`S02-v1.3`；QNA Q1–Q9全部冻结，Round 4已由owner关闭；全系统尚未frozen。
 - **权威 Spec**：`docs/baseline/domain-truth/S02-task-api.md`；问答证据保留于 `docs/baseline/qna-truth/S02.md v1.3`。
 - **范围**：Task create/get/list/result/cancel/retry/delete、幂等、aggregate 状态机、scatter item projection、restart causation/global query、优先级、deadline、错误和 retention。
 - **已冻结**：Task六态与lifecycle CAS；scatter collect-all、bounded aggregate + paginated TaskItems + canonical IntakeItem/Revision links、proof-gated early publication、forward-stop cancel；full retry同Task新generation；atomic restart创建新`intake.rebuild` Task且不创建IntakeRevision；`task_restarts`保存full/atomic因果且状态只join Task；team-scoped restart/lineage。
 - **Legacy 核查**：已复验 API 发起 → Dedicated Cleaner 散射 → SMCP callback → Clean Dispatcher diff/register → child 并行 RAG 投递 → relation child completion，以及原子 list/artifact/timeline/restart；MKB 明确修复 identity UPSERT、非事务 wakeup、无 parent fan-in 与 route 散射债务。
 - **Owner-gate closure**：Q1–Q9 与 `T-O-1..11` 全部获得 owner 确认；S02 不再增加 QNA，无域内开放 gate。
 - **关键不变量**：上游不能创建或写 Execution/Process；相同 `task_uuid + payload digest` 必须幂等收敛；Task 不承载 RAG 工序状态；原子 CRUD 不得泄漏内部 stage/process identity。
-- **已回填影响**：D01-v1.3/S01-v1.4继续确认五张Task ingress/runtime/restart真相表；S04十张canonical资产表与S05 gate/outcome supporting truth不构成runtime身份；S12必须交付exact DDL/transaction。
+- **已回填影响**：D01-v1.4/S01-v1.5继续确认五张Task ingress/runtime/restart真相表；S04十张canonical资产表与S05 gate/outcome supporting truth不构成runtime身份；S12必须交付exact DDL/transaction。
 - **完成回填**：已冻结 Task Contract v1、状态图、HTTP surface、错误码、强制验收与 legacy reference-anchor。
 
 ### 3.3 `S03` Workflow Engine
 
-- **状态**：`accepted / S03-v1.2 / S04+S05-calibrated`；QNA`docs/baseline/qna-truth/S03.md v1.0`已冻结关闭，正式权威文档为`docs/baseline/domain-truth/S03-workflow-engine.md`。
+- **状态**：`accepted / S03-v1.3 / D02-state-calibrated`；QNA`docs/baseline/qna-truth/S03.md v1.0`已冻结关闭，正式权威文档为`docs/baseline/domain-truth/S03-workflow-engine.md`。
 - **定位**：S03 是 MKB 单体内部唯一 durable、declarative、future-agent-ready 的 LS-RAG Workflow Engine。v1 采用内部注册制：关系型 schema 是 Workflow SSOT，canonical JSON 是只读派生表示；对外只有 list/get，无 create/update/delete，也不实现 agent 直接定义 Workflow。
 - **范围**：六平面 Workflow Contract；internal registry/revision；normalized step/route/binding/control/guard schema；deterministic compiler 与 compiled JSON/digest；capability/port registry 与本地 Process runtime contract；Execution binding/state/phase/tree/generation；Process dependency/materialization、I/O/outcome guard；durable scheduling；claim/lease/fencing；retry/backoff/timeout；priority/deadline；cancel/purge/case/scatter control；Workflow semantic recovery invariant/transition；Process projection cleanup eligibility。
 - **继承的冻结真相**：Task/Execution/Process 三层身份及三张核心运行表；single=root Execution、scatter=root controller + 0..N child Executions；状态自下而上、control intent 自上而下；Process/Execution 未提交 proof 前 Task 不成功；queue 不是 SSOT且只能在 durable state 提交后 wake-up；full retry 新 root generation、automatic Process retry 不换 Process；collect-all、child proof-gated early publication 与 forward-stop/no-rollback cancel。
@@ -290,7 +291,7 @@ pending → designing → owner-gate → accepted → frozen
 
 ### 3.4 `S04` Intake Asset Lifecycle
 
-- **状态**：`accepted / S04-v1.1 / S05-calibrated`；QNA`docs/baseline/qna-truth/S04.md v1.1`的Q1-Q9/`T-O-30..48`全部冻结，正式权威文档为`domain-truth/S04-intake-asset-lifecycle.md`。
+- **状态**：`accepted / S04-v1.2 / D02-state-calibrated`；QNA`docs/baseline/qna-truth/S04.md v1.1`的Q1-Q9/`T-O-30..48`全部冻结，正式权威文档为`domain-truth/S04-intake-asset-lifecycle.md`。
 - **定位**：MKB摄入资产的canonical identity、accepted observation/collection、immutable semantic revision、provenance、serving、withdrawal、retention与greenfield governance真相层；不承载Task/Execution/Process，也不提前建立Knowledge层。
 - **五类identity**：`IntakeSource`是ExternalKey namespace；`IntakeSnapshot`是accepted immutable observation；`IntakeItem`是source-scoped stable subject；`IntakeRevision`是immutable semantic state；`IntakeArtifact`是Snapshot或Revision的XOR-owned representation。
 - **十表SSOT**：五张identity表，加`intake_snapshot_memberships`、semantic/action definitions、revision semantics与item transitions；staging/outbox/repair/cleanup ledgers是supporting truth，不是新增资产或runtime identity。
@@ -301,13 +302,13 @@ pending → designing → owner-gate → accepted → frozen
 - **retention/reindex/purge**：deactivate、delete、rebuild/reindex、physical purge四intent分账；reindex采用generation proof-switch；各substrate独立cleanup proof；v1保留最小tombstone/audit skeleton且不开放deleted restore。
 - **greenfield governance**：空DB确定性bootstrap schema/registry；同版本同digest no-op、异digest fail；仅做MKB自身forward schema evolution；startup drift拒绝readiness；验收扫描零legacy runtime dependency。
 - **ReferenceAnchor纪律**：legacy-family只证明生产踩坑与设计分母，不继承代码、数据、wire/schema、UUID/status、storage、bootstrap或acceptance。
-- **跨文档回填**：D01-v1.3、S01-v1.4、S02-v1.2、S03-v1.2与S05-v1.0已完成Intake/Candidate/Preflight/HITL、single/scatter、proof/rebuild/cleanup校准，无runtime或asset状态冲突。
+- **跨文档回填**：D01-v1.4、S01-v1.5、S02-v1.3、S03-v1.3与S05-v1.1已完成Intake/Candidate/Preflight/HITL、single/scatter、proof/rebuild/cleanup与状态族校准；D02-v1.0已冻结共有边界，exact kind继续归对应下游且不构成D02未完成。
 - **关键不变量**：Snapshot不是attempt；Revision不原位覆盖；latest不等于serving；partial observation不推导全量absence；physical residue不授予retrieval eligibility；payload_extra不承载核心truth。
 - **完成回填**：正式Spec冻结44条S04 Truth、logical schema、business flow、errors、risks、36项验收与reference-anchor台账；G26-G28关闭。
 
 ### 3.5 `S05` Intake & Cleaning
 
-- **状态**：`accepted / S05-v1.0`；QNA`docs/baseline/qna-truth/S05.md v1.0`的Q1-Q10/`T-O-49..76`全部冻结，正式权威文档为`domain-truth/S05-intake-cleaning.md`。
+- **状态**：`accepted / S05-v1.1 / D02-state-calibrated`；QNA`docs/baseline/qna-truth/S05.md v1.0`的Q1-Q10/`T-O-49..76`全部冻结，正式权威文档为`domain-truth/S05-intake-cleaning.md`。
 - **定位**：MKB摄入获取、解码、source-specific mapping、canonicalization、clean、CandidateSet构建与clean后/RAG前准入域；不创建Task/Execution/Process/Intake身份或第二套状态机。
 - **能力范围**：v1覆盖inline/local、网页static/browser、PDF、registered API single/scatter/pagination、local OCR与Vision/model-assisted clean；四类source kind固定为`inline_payload/local_object/http_resource/registered_api`，获取和clean capability与source kind正交。
 - **输入与身份**：`IntakeSourceKindDefinition`内部immutable versioned注册；strict descriptor/config/secret分账；ExternalKey由source-specific pure normalizer产生；media、encoding、stream/decompress/redirect/page/time budgets形成typed evidence。
@@ -322,10 +323,15 @@ pending → designing → owner-gate → accepted → frozen
 
 ### 3.6 `S06` LS-RAG Structurizer
 
-- **范围**：layered schema、context metadata、knowledge tree、block、granularity、original/summary 结构和 schema validation。
-- **必须回答**：新 LS-RAG Schema v1 与 legacy schema 的关系；全文层和子块层；修复与 fail-loud 边界。
-- **关键不变量**：`layered_content` 非空；block 坐标稳定；结构化不得静默丢失原始内容。
-- **完成回填**：冻结LS-RAG structured content schema v1、坐标模型和验证规则。
+- **状态**：`designing / Round 2 reframe / qna-truth/S06.md v0.7`；Round 1 Q1-Q3与`T-O-77..85`已冻结，D02-v1.0前置hold已解除；Q4-Q6按S06/S02/S05/S08-S09责任重构，正式Spec尚未创建。
+- **重新定位**：S06是LS-RAG original内容结构建模与grounded block projection域。它消费exact accepted `IntakeRevision + clean IntakeArtifact + frozen S05 evidence/binding`，产出可验证的ordered structure、source anchors、stable coordinates、block projection和Process proof；不是generic text chunker、第二次clean或summary worker。
+- **上游继承**：复用S03 `lsrag.structurize` Process capability与八态/claim/fence/retry；structure/model/prompt rebuild不制造IntakeRevision；S06 success不切serving；single按Revision构建，scatter children各自构建且不形成跨Item大树；logical handle取代路径/R2 key。
+- **ReferenceAnchor结论**：legacy证明全文层、layered original/summary与共享坐标具有真实生产消费者；同时暴露flat `block_id+granularity`缺parent/order/anchor/generation、模型UUID幻觉、block 0注入/移除反复、自动修补schema drift、整文单次模型调用与物理key callback成功等债务。
+- **Web结论**：Docling/Unstructured/LlamaIndex支持“typed hierarchy/provenance先于structure-aware chunk projection”；RAPTOR支持多层抽象价值但summary tree继续归S07；JSON Schema只能证明形状，不能替代tree/coverage/order/anchor语义证明。
+- **已冻结foundation**：immutable GenerationArtifact/Invocation历史、per-Execution/per-type full-valid current pointer、Task-scoped受限read、immutable StructureSchemaDefinition、exact producer/consumer binding、deterministic kernel/governed extension与S03 max-retries收敛。
+- **D02冻结回流**：D02-v1.0已冻结六StateFamily、四层ledger、六项镜像块和drift协议；Execution subject、artifact bundle、node/anchor/block kind、curation/loss及S08/S09责任仍由对应下游QNA/Spec冻结后回填D02。S06 v0.5 Q4-Q5与Q6旧稿只作reframe素材，不自动转正；后续Truth-ID从`T-O-93`继续。
+- **关键不变量**：S06不建私有状态机；GenerationInvocation不是Attempt；invalid/repair-failed artifact不切current；source identity/fidelity不可由agent修补；S06 success不等于Execution/Task/serving success。
+- **完成回填条件**：关闭S06仍不可由既有Truth推导的必要决策后，直接发布正式Spec，冻结logical schema、coordinate/anchor、large-input execution、proof/error/idempotency、binding/rebuild/recovery和下游S07-S10 contract，再回流D01/S01-S05、D02与glossary；不以固定Q1-Q9题数作为完成条件。
 
 ### 3.7 `S07` LS-RAG Constructor
 
@@ -405,12 +411,12 @@ pending → designing → owner-gate → accepted → frozen
 
 | Gate ID | 决策点 | 影响范围 | 候选方向 | 状态 | 裁决/落点 |
 |---------|--------|----------|----------|------|-----------|
-| `G-01` | Skill-worker发现与注册方式 | `S01, 17` | 主动注册 / 上游静态配置 / 混合 | `deferred` | `S01-v1.4`：首版standalone，不注册；未来只通过防腐adapter reopen |
-| `G-02` | Task结果交付方式 | `S01-S03, S15-S16` | 上游轮询 / callback / 双支持 | `closed` | `S01-v1.4/S02-v1.2`：首版polling；open gate经action_required+Task-scoped decision交互；无webhook/callback或直接Execution/Process写面 |
+| `G-01` | Skill-worker发现与注册方式 | `S01, 17` | 主动注册 / 上游静态配置 / 混合 | `deferred` | `S01-v1.5`：首版standalone，不注册；未来只通过防腐adapter reopen |
+| `G-02` | Task结果交付方式 | `S01-S03, S15-S16` | 上游轮询 / callback / 双支持 | `closed` | `S01-v1.5/S02-v1.3`：首版polling；Task status/readiness/action_required分账；无webhook/callback或直接Execution/Process写面 |
 | `G-03` | Workflow Program语义宪法 | `S03-S09, S12-S15` | topology清单 / 多平面声明式RAG程序 / 任意代码自动化 | `closed` | `T-O-12`：采用六平面端到端Contract；BindingSource声明规则，Engine注入runtime facts；topology只是Control子平面 |
-| `G-04` | 首版 Intake 范围 | `S04-S05, S13` | text/object only / URL / PDF/browser/API/OCR/Vision | `closed` | `T-O-49..51 / S05-v1.0`：完整能力面纳入v1；source kind只有inline/local/HTTP/registered API，browser/PDF/OCR/Vision/scatter为正交capability/cardinality |
-| `G-05` | parent-child/scatter首版范围 | `D01, S03-S07` | 首版支持 / schema预留后延 | `closed` | `D01-v1.3/S04-v1.1/S05-v1.0`：scatter为一等能力；Task→root→0..N child Executions；集合truth为Snapshot/Membership/ChangeSet，root/child preflight/gate原生支持 |
-| `G-06` | MKB-native LS-RAG Schema形状 | `S06-S10` | layered normalized schema / typed hybrid projection / 其他MKB-native候选 | `open` | 待`S06`；`T-O-42`已排除legacy兼容、双读和迁移作为候选 |
+| `G-04` | 首版 Intake 范围 | `S04-S05, S13` | text/object only / URL / PDF/browser/API/OCR/Vision | `closed` | `T-O-49..51 / S05-v1.1`：完整能力面纳入v1；source kind只有inline/local/HTTP/registered API，browser/PDF/OCR/Vision/scatter为正交capability/cardinality |
+| `G-05` | parent-child/scatter首版范围 | `D01, S03-S07` | 首版支持 / schema预留后延 | `closed` | `D01-v1.4/S04-v1.2/S05-v1.1`：scatter为一等能力；Task→root→0..N child Executions；集合truth为Snapshot/Membership/ChangeSet，root/child preflight/gate原生支持 |
+| `G-06` | MKB-native LS-RAG canonical structure形状 | `S06-S10` | legacy flat layered array / single-root ordered typed tree + deterministic block projection / blocks-only | `open / S06` | `T-O-80..83`已冻结Schema authority/kernel原则；node/edge/anchor/block exact kind由S06裁决并按T-O-87回填D02，legacy兼容已排除 |
 | `G-07` | Retrieval 是否承担 answer generation | `S01-S02, S10-S11` | 只返回 context / 可选生成任务 | `open` | 待 `S10` |
 | `G-08` | Turso 运行和进程模型 | `S03, S09, S12, 17` | 单进程 embedded / 多进程 / remote-sync | `open` | 待 `S12` spike |
 | `G-09` | 首版向量索引 | `S08-S10, S12` | Turso exact / 独立 ANN / 分阶段 | `open` | 待 `S09` benchmark |
@@ -421,22 +427,25 @@ pending → designing → owner-gate → accepted → frozen
 | `G-14` | Workflow normalized table 与 JSON 边界 | `S03, S12, S14` | 单表 JSON / 七表职责拆分 / 更细粒度规范化 | `closed` | `T-O-17..18`：冻结七表职责、跨 revision 围栏、typed extension 与 compiled/diagnostic JSON 非权威边界 |
 | `G-15` | Workflow route/control graph 语义 | `S03, S05-S09, S12` | rank 线性 / typed acyclic graph / 支持业务 loop | `closed` | `T-O-19`：typed/guarded/acyclic RAG graph；branch/fan-out/fan-in；retry/cancel cycles 归 Engine；S03 cutoff 已冻结 |
 | `G-16` | Compiled plan、Execution binding 与 Process runtime boundary | `S03, S05-S09, S12-S15` | whole JSON 直交 Process / Engine interpret + command/outcome / direct local function coupling | `closed` | `T-O-20..21`：internal register/compile；Execution exact binding；eligible Process materialization；ProcessCommand/Outcome leaf contract |
-| `G-17` | Process state、claim/lease/fencing/retry | `S03, S12, S15` | pending-heavy / eligibility-ready + fenced lease / queue-delivery-driven | `closed` | `T-O-22..24 / S03-v1.2`：exact八态、atomic claim/current fence、delivery/recovery/retry三账、same-process retry/max-retries；preflight错误复用同一模型 |
-| `G-18` | Execution status、RAG phase与scatter/cancel convergence | `S02-S09, S12, S15` | 混合大enum / control status + separate RAG phase / Process直写Task | `closed` | `T-O-25..27 / S03-v1.2`：exact八态、human_review typed waiting、独立phase、Snapshot/ChangeSet collect-all、cancel convergence |
-| `G-19` | Workflow semantic recovery与Process cleanup eligibility | `S03, S12, S15` | 无恢复机制 / S03定义语义不变量与幂等repair、S12执行扫描/outbox/cleanup / 独立通用reconciler | `closed` | `T-O-28..29 / S03-v1.2`：repair含S05四窗口、无独立Reconciler、summary-before-cleanup、S12/S15 cutoff |
+| `G-17` | Process state、claim/lease/fencing/retry | `S03, S12, S15` | pending-heavy / eligibility-ready + fenced lease / queue-delivery-driven | `closed` | `T-O-22..24 / S03-v1.3`：exact八态、atomic claim/current fence、delivery/recovery/retry三账、same-process retry/max-retries；Outcome与status分账 |
+| `G-18` | Execution status、RAG phase与scatter/cancel convergence | `S02-S09, S12, S15` | 混合大enum / control status + separate RAG phase / Process直写Task | `closed` | `T-O-25..27 / S03-v1.3`：exact八态、typed waiting reason、独立phase、Snapshot/ChangeSet collect-all；phase不决定Process粒度 |
+| `G-19` | Workflow semantic recovery与Process cleanup eligibility | `S03, S12, S15` | 无恢复机制 / S03定义语义不变量与幂等repair、S12执行扫描/outbox/cleanup / 独立通用reconciler | `closed` | `T-O-28..29 / S03-v1.3`：repair含S05四窗口、无独立Reconciler、terminal-summary-before-cleanup、S12/S15 cutoff |
 | `G-20` | Intake aggregate identity ownership | `S04-S10, S12-S13` | mutable file/relation / IntakeSource+Snapshot+Item+immutable Revision+scoped IntakeArtifact / content blob即Item | `closed` | `T-O-30..31 / S04 Q1`：五类ownership、membership、single/scatter、无伪parent Item与future Knowledge cutoff已冻结 |
 | `G-21` | IntakeRevision creation 与 external identity scope | `S04-S09, S12-S15` | 裸atomic_id+原位覆盖 / source-scoped key+semantic-change追加Revision / 每次执行都建Revision | `closed` | `T-O-32..33 / S04 Q2`：stable Item、immutable Revision、runtime generation分账；semantic dimensions 内部注册且版本化 |
 | `G-22` | Serving、deactivate 与 delete 语义 | `S02-S04, S09-S10, S12-S16` | latest即serving / proof-gated serving pointer+logical fence+physical convergence / 以vector存在判断可见 | `closed` | `T-O-34..35 / S04 Q3`：latest/serving、proof CAS、tombstone、authoritative absence 与 versioned action/route 已冻结 |
 | `G-23` | S04 relational truth topology 与 semantic/action registry | `S04-S05, S12-S15` | mutable Item JSON / 十张 normalized truth tables+immutable internal registries / 每个分支单独增表 | `closed` | `T-O-36..37 / S04 Q4`：十表职责、registry/JSON cutoff已冻结；所有 MKB-owned 持久业务表强制 `payload_extra`，关键语义须晋升 |
 | `G-24` | Snapshot acceptance 与 Revision decision transaction | `S03-S05, S12, S15` | 分步最终一致 / CandidateSet到Snapshot+ChangeSet+child intent原子提交 / queue message为SSOT | `closed` | `T-O-38..39 / S04 Q5`：幂等 acceptance、semantic comparison、authoritative absence、outbox 与 typed Workflow route cutoff 已冻结 |
 | `G-25` | Intake lifecycle、CoreEffect 与可扩展 ActionDefinition | `S02-S04, S09-S10, S12-S16` | 业务原因扩成状态 / 三态core+有限effect+versioned action / 自定义action直接写状态 | `closed` | `T-O-40..41 / S04 Q6`：active/deactivated/deleted、CAS/audit/outbox transition、typed facts 与 route binding 已冻结 |
-| `G-26` | Large-scatter acceptance recovery | `S03-S05, S12-S15` | 无界单事务 / paged sealed CandidateSet+size fence+single acceptance+deterministic recovery / partial Snapshot | `closed` | `T-O-43..44 / S04-v1.1/S05-v1.0`：typed pages/root/preflight/exhaustion、唯一canonical commit、受限recovery；不得合成未提交truth |
-| `G-27` | MKB-only Intake retention、reindex与physical purge | `S04, S08-S10, S12-S15` | purge混合reset / 四intent+generation switch+substrate proofs+tombstone skeleton / 直接硬删 | `closed` | `T-O-45..46 / S04-v1.1`：policy/reference fence含open gate引用、proof-switch、cleanup convergence；v1无deleted restore/tombstone hard delete |
-| `G-28` | Greenfield bootstrap、MKB schema evolution与S04 acceptance | `S04, S12-S18` | 隐式代码默认 / deterministic schema+RegistryManifest+readiness/acceptance gate / legacy migration/cutover | `closed` | `T-O-47..48 / S04-v1.1`：empty-DB bootstrap、forward MKB migrations、drift fail-loud、完整acceptance与零legacy dependency |
+| `G-26` | Large-scatter acceptance recovery | `S03-S05, S12-S15` | 无界单事务 / paged sealed CandidateSet+size fence+single acceptance+deterministic recovery / partial Snapshot | `closed` | `T-O-43..44 / S04-v1.2/S05-v1.1`：open→sealed→accepted与open→abandoned；唯一canonical commit；不得合成未提交truth |
+| `G-27` | MKB-only Intake retention、reindex与physical purge | `S04, S08-S10, S12-S15` | purge混合reset / 四intent+generation switch+substrate proofs+tombstone skeleton / 直接硬删 | `closed` | `T-O-45..46 / S04-v1.2`：lifecycle/pointers/cleanup proofs分账；v1无deleted restore/tombstone hard delete |
+| `G-28` | Greenfield bootstrap、MKB schema evolution与S04 acceptance | `S04, S12-S18` | 隐式代码默认 / deterministic schema+RegistryManifest+readiness/acceptance gate / legacy migration/cutover | `closed` | `T-O-47..48 / S04-v1.2`：empty-DB bootstrap、forward MKB migrations、drift fail-loud、完整acceptance与零legacy dependency |
 | `G-29` | MKB 与 legacy-family 的应用边界 | `00, S01-S16, 17-18` | compatibility/migration / reference-anchor only | `closed` | `T-O-42`：完全独立；无 importer、dual-read、identity mapping、cutover/rollback 或 runtime/schema/API/acceptance dependency |
-| `G-30` | S05 source/input/output与CandidateSet完整性 | `S04-S06, S12-S16` | opaque payload/child_files / strict definitions+typed evidence+deterministic seal | `closed` | `T-O-59..64 / S05-v1.0`：四类descriptor、ExternalKey normalizer、四类typed output、canonical digest、paged seal/rejection/exhaustion全部冻结 |
+| `G-30` | S05 source/input/output与CandidateSet完整性 | `S04-S06, S12-S16` | opaque payload/child_files / strict definitions+typed evidence+deterministic seal | `closed` | `T-O-59..64 / S05-v1.1`：四类descriptor、ExternalKey normalizer、typed output、canonical digest与staging合法边全部冻结 |
 | `G-31` | Allowlist与mandatory preflight最小闭环 | `S03-S05, S12, S15-S16` | allowlist绕过 / code-owned只读validator / 通用policy-plugin平台 | `closed` | `T-O-52/T-O-65/T-O-70..74`：每条allowlist exact绑定validator；passed自动路由无gate；只冻结四组durable职责，外围治理defer |
 | `G-32` | Human review ownership、binding与恢复 | `S02-S05, S12-S16` | Intake review状态 / Execution durable gate+exact target / Process持lease等待 | `closed` | `T-O-53..58/T-O-73/T-O-75..76`：Execution-owned四态gate、append decision+CAS+outbox、same-Execution resume、binding不热切与四窗口recovery |
+| `G-33` | S06 generation历史、schema authority与current selection foundation | `S03-S09, S12-S15` | 覆盖Revision JSON / immutable history+exact schema+CAS current / mutable latest file | `closed foundation` | `T-O-77..82`：GenerationArtifact/Invocation、受限read、per-type pointer、StructureSchemaDefinition与consumer exact binding已冻结；type/bundle归S06 Round 2 |
+| `G-34` | S06 deterministic kernel、governed extension与failure convergence | `S05-S08, S11, S14-S15` | 完全信任LLM+原位修补 / governed new-artifact repair+full validation / deterministic-only | `closed foundation` | `T-O-83..85`：kernel不可agent修、extension受注册policy、repair新artifact且全量复验、S03 max-retries止血 |
+| `G-35` | 全生产状态、路由与kind矩阵校准 | `D01-D02, S01-S09, S12-S16` | monolithic status / shared-domain constitution+six StateFamilies+downstream mirrors / D02执行总Spec | `closed / D02-v1.0` | `T-O-86..92`冻结共有宪法、六StateFamily、四层ledger、六项镜像块与双向drift协议；具体业务kind/route明确归下游，非D02 blocker |
 
 ---
 
@@ -475,13 +484,15 @@ pending → designing → owner-gate → accepted → frozen
 |------------|------|----------|
 | MKB leaf-worker 产品定位 | 业主裁决 | 沿用，不再讨论平台化回退 |
 | `03-nano/orchestrator-core` 为上游 | 业主裁决 | 所有接口设计以此为调用方 |
-| `team_uuid`为审计/分区/追踪ID，并需本地预注册 | 业主裁决 + `S01-v1.4` | 允许最小Team Registry；不得重新引入membership/ownership/billing |
-| Task/Audit接入基线 | `S01-v1.4` | `(team_uuid, task_uuid)`、root trace、`request_intent`、immutable Audit、原子创建、polling/action_required必须被下游继承 |
-| Task/Execution/Process Flow | `D01-v1.3 + S01-v1.4` | Owner-originated三层切分；Attempt废止；preflight归Process、human gate归Execution waiting；三表运行架构不得重问 |
-| Task API / Aggregate Lifecycle | `S02-v1.2` | 六态/CAS、Snapshot/ChangeSet items/collect-all、cancel/generation/restart、running+action_required与Task-scoped gate decision不得重问 |
-| Declarative Workflow Engine | `S03-v1.2` | 六平面、关系型Workflow SSOT、七表、exact Workflow/S05 binding、Process状态/claim/retry、human_review waiting、semantic recovery不得重问 |
-| Intake Asset Lifecycle | `S04-v1.1` | 五类identity、十表SSOT、typed CandidateSet/preflight acceptance、Revision/serving、retention/purge与review解耦不得绕过 |
-| Intake & Cleaning | `S05-v1.0` | 四类source、完整clean能力面、typed evidence/CandidateSet、mandatory preflight、minimal ExecutionGate、binding不热切与v1 scope cutoff不得扩张或绕过 |
+| `team_uuid`为审计/分区/追踪ID，并需本地预注册 | 业主裁决 + `S01-v1.5` | 允许最小Team Registry；不得重新引入membership/ownership/billing |
+| Task/Audit接入基线 | `S01-v1.5` | `(team_uuid, task_uuid)`、root trace、`request_intent`、immutable Audit、原子创建、polling/action_required必须被下游继承；Task status/readiness/items/action_required/visibility必须分账 |
+| Task/Execution/Process Flow | `D01-v1.4 + S01-v1.5` | Owner-originated三层切分；Attempt废止；preflight归Process、human gate归Execution waiting；三层exact state及phase/outcome/asset边界不得重问 |
+| Task API / Aggregate Lifecycle | `S02-v1.3` | 六态/CAS、Snapshot/ChangeSet items/collect-all、cancel/generation/restart、running+action_required与Task五轴查询面不得重问 |
+| Declarative Workflow Engine | `S03-v1.3` | 六平面、关系型Workflow SSOT、七表、S05 exact capability binding、Process状态/claim/retry、human_review waiting、semantic recovery不得重问 |
+| Intake Asset Lifecycle | `S04-v1.2` | 五类identity、十表SSOT、typed CandidateSet/preflight acceptance、Revision/serving、retention/purge与各状态族解耦不得绕过 |
+| Intake & Cleaning | `S05-v1.1` | 四类source、完整clean能力面、typed evidence/CandidateSet、mandatory preflight、minimal ExecutionGate、binding不热切、Candidate合法边与v1 scope cutoff不得扩张或绕过 |
+| Production State Constitution & Ledger | `D02-v1.0 / T-O-86..92` | D02已冻结：六StateFamily、state-vs-fact、四层ledger、六项镜像块及双向drift协议；具体执行/路由归下游，命中状态语义时同轮回填 |
+| S06 frozen foundation | `qna-truth/S06.md v0.7 / T-O-77..85` | Q1-Q3保持冻结；D02 hold已解除，Q4-Q6按owner domain重构且不得新增私有状态机；新Truth从`T-O-93`继续 |
 | 无 UI、无复杂平台鉴权 | 业主裁决 | `S16` 只设计内部最小安全边界 |
 | Python 单体、废弃过细 packages | 业主裁决 | 内部模块化，但不建立多个 distribution |
 | CUDA/vLLM + 外部服务 adapter | 业主裁决 | `S11` 设计能力接口，不再回到 MLX 叙事 |
@@ -520,7 +531,7 @@ pending → designing → owner-gate → accepted → frozen
 
 ### 8.3 Truth Freeze 流程
 
-当 20 份详细/跨系统/cross-domain truth 文档全部达到 `accepted`：
+当 21 份详细/跨系统/cross-domain truth 文档（`00 + D01 + D02 + S01-S16 + 17 + 18`）全部达到 `accepted`：
 
 1. 生成 `18-acceptance-truth-freeze.md` 的最终矩阵；
 2. 对账所有 contract、ID、状态机、error、event 和 version；
@@ -552,6 +563,7 @@ implementation finding
 - Domain Truth 目录：`docs/baseline/domain-truth/`
 - Task/Execution/Process Flow：`docs/baseline/domain-truth/D01-task-execution-process-flow.md`
 - Intake & Cleaning：`docs/baseline/domain-truth/S05-intake-cleaning.md`
+- S06 Progressive QNA：`docs/baseline/qna-truth/S06.md`
 - 系统拓扑：`docs/baseline/specs/17-system-topology.md`（待创建）
 - Truth freeze：`docs/baseline/specs/18-acceptance-truth-freeze.md`（待创建）
 
@@ -562,13 +574,14 @@ implementation finding
 | 检查项 | 状态 | 证据/备注 |
 |--------|------|-----------|
 | `00` Scope & Glossary accepted | `pending` | |
-| `D01` Task/Execution/Process Flow accepted | `accepted / S02+S04+S05-calibrated` | Owner-originated；D01-v1.3/S01-v1.4已接收restart、Intake、preflight与ExecutionGate truth |
+| `D01` Task/Execution/Process Flow accepted | `accepted / D02-state-calibrated` | Owner-originated；D01-v1.4/S01-v1.5已接收restart、Intake、preflight与ExecutionGate truth，并完成exact state/phase/outcome/asset分账 |
+| `D02` Production State Constitution & Ledger | `frozen / v1.0` | `T-O-86..92`、六StateFamily、镜像块与drift协议已冻结；Q1-Q6完成、Round 3 waived，S06 D02 hold解除 |
 | `S01-S16` 全部 accepted | `pending` | |
 | `17` System Topology accepted | `pending` | |
 | `18` Acceptance Matrix accepted | `pending` | |
 | Owner-gate 全部 closed/deferred | `pending` | |
 | 跨 spec ID 对账完成 | `pending` | |
-| 跨 spec 状态机对账完成 | `pending` | |
+| 跨 spec 状态机对账完成 | `D02 baseline completed / downstream ongoing` | D01/S01-S05及六StateFamily已按D02-v1.0对账；S06-S16后续仍须逐Spec继承并回填，不等于全baseline状态对账完成 |
 | 错误、事件、版本语义对账完成 | `pending` | |
 | LS-RAG golden scenarios 冻结 | `pending` | |
 | Turso/process spike 证据完成 | `pending` | |
@@ -601,3 +614,7 @@ implementation finding
 | `v0.18` | `2026-07-15` | `MKB owner + Codex` | Owner 明确 MKB 与 legacy-family 完全独立；冻结 `T-O-42`并关闭 G-29，将全索引 legacy 关系校准为 reference-anchor only；Q8 改为 MKB-only lifecycle，撤回旧 Q9 migration/cutover并将 G-28/Q9 重建为 greenfield bootstrap、MKB schema evolution 与 S04 acceptance。glossary 升至 v0.4。 |
 | `v0.19` | `2026-07-15` | `MKB owner + Codex` | Owner接受S04 Q7-Q9；冻结`T-O-43..48`并关闭G26-G28；发布S04-v1.0。完成D01-v1.2、S01-v1.3、S02-v1.1、S03-v1.1 Intake语义回填及全量一致性审计；glossary迁移后的权威路径更新为`spec-glossary.md`并升至v1.0，补登记S04 ports、IntakeItemTransition、SkillWorkerManifest等已知定义；G06移除legacy兼容/双读候选。 |
 | `v0.20` | `2026-07-16` | `MKB owner + Codex` | Owner接受收紧后的S05 Q7-Q10并锁定QNA；发布S05-v1.0，冻结四类source/typed candidate-clean contract、mandatory preflight、minimal ExecutionGate、exact binding与四窗口recovery；关闭G04并登记/关闭G30-G32；glossary升至v1.1，完成D01/S01-S05一致性校准。 |
+| `v0.21` | `2026-07-16` | `MKB owner + Codex` | 启动S06 3+3+3 progressive QNA；依据D01/S01-S05将S06重述为grounded original structure compiler；完成Structurizer/Dispatcher/Constructor/Recorder/Traceback及Git补丁史核查，并用Docling/Unstructured/LlamaIndex/RAPTOR/JSON Schema一手资料校验；登记G33-G34并重写G06，提出Round 1 Q1-Q3。 |
+| `v0.22` | `2026-07-18` | `MKB owner + Codex` | Owner要求暂停S06并发起全状态合集校准；建立D02-v0.2 DAG、状态族/路由/kind与冲突台账；完成D01-v1.4、S01-v1.5、S02-v1.3、S03-v1.3、S04-v1.2、S05-v1.1状态边界回填；S06-v0.6保留T-O-77..85并hold Q4-Q6；glossary升至v1.2。开放提案仍为owner-gate，未扩充v1。 |
+| `v0.23` | `2026-07-19` | `MKB owner + Codex` | 冻结D02 QNA Round 1 `T-O-86..89`：D02成为共有域状态宪法与Truth镜像ledger，六StateFamily成为owner-frozen最小状态集合，具体执行/路由归下游冻结后双向回填；撤回D02直接裁决route authority的扩张。D02升至v0.3、glossary升至v1.3，进入Q4-Q6 ledger execution owner-gate。 |
+| `v0.24` | `2026-08-10` | `MKB owner + Codex` | Owner要求直接收口并冻结D02：接受Q4-Q6、冻结`T-O-90..92`，发布D02-v1.0四层宪法/ledger并waive Round 3；G35关闭，glossary升至v1.4；S06升至v0.7并解除D02 hold，剩余业务问题归对应下游而不再上提D02。 |

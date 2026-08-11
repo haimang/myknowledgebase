@@ -4,11 +4,11 @@
 >
 > **文档角色**：跨规格词汇手册、命名边界与对齐登记册
 >
-> **权威输入**：D01-v1.3、S01-v1.4、S02-v1.2、S03-v1.2、S04-v1.1、S05-v1.0、S04-S05冻结QNA / `T-O-30..76`
+> **权威输入**：D01-v1.4、S01-v1.5、S02-v1.3、S03-v1.3、S04-v1.2、S05-v1.1、S06冻结QNA `T-O-77..85`、D02-v1.0与D02 QNA `T-O-86..92`
 >
-> **状态**：`active / S05 complete / D01-S05 cross-spec alignment complete`
+> **状态**：`active / D01-S05 state-calibrated / S06 Q1-Q3 registered / D02-v1.0 frozen and registered`
 >
-> **版本 / 日期**：`v1.1 / 2026-07-16`
+> **版本 / 日期**：`v1.4 / 2026-08-10`
 
 ## 0. 使用规则
 
@@ -18,7 +18,7 @@
 
 | 标记 | 含义 |
 |---|---|
-| `frozen` | 已由 owner 在 D01 或 S01-S03 冻结；本手册只转述，不改变原裁决 |
+| `frozen` | 已由 owner 在 D01 或 S01-S06 QNA 的已接受 Truth 中冻结；本手册只转述，不改变原裁决 |
 | `owner-directed / designing` | 名称由owner指定，但其exact职责仍在尚未完成的下游Spec中设计 |
 | `reserved` | 仅保留命名空间；当前不得建表、暴露 API 或作为现有对象别名 |
 | `derived` | 由权威真相编译、投影或构建，可重建，不反向成为 SSOT |
@@ -29,7 +29,7 @@
 
 1. 新 schema、API 和事件必须使用本手册的 canonical term；无法归类时先更新词汇手册，不得临时复用 `file`、`document`、`artifact` 等宽泛名词。
 2. Domain Truth 的 exact 定义优先于本手册摘要；发现冲突必须显式修订，禁止靠同义词绕过 Truth Gate。
-3. D01与S01-S04已按S05-v1.0完成边界审计和版本化校准。历史QNA/legacy code anchor可保留旧词；当前正式Spec、schema、API与event不得继续把`Document`当canonical alias，也不得让S05重建独立runtime或Intake lifecycle。
+3. D01与S01-S05已按D02完成既有Truth的状态边界审计；D02-v1.0冻结共有域ledger角色、六StateFamily、六项镜像块和citation/semantic drift协议。历史QNA/legacy code anchor可保留旧词；当前正式Spec、schema、API与event不得继续把`Document`当canonical alias，也不得让S05重建独立runtime或Intake lifecycle。D02 non-normative Appendix中的`OPEN/PROPOSED/CONFLICT`仍不是frozen词汇。
 4. 大写 CamelCase 表示业务类型；`snake_case_uuid` 表示持久化身份字段；自然语言中的普通名词不自动成为业务类型。
 5. 在已经明确进入 Intake 语境的说明性 prose/diagram 中，可用 `Snapshot / Item / Revision / Membership / CandidateSet / ChangeSet` 作为对应完整类型的短写；schema、field、API、event、port 和首次定义仍必须使用完整 canonical term。`Source` 与 `Artifact` 因跨域碰撞风险不得采用此短写规则。
 
@@ -55,7 +55,7 @@
 | Canonical term | 成熟度 | 定义 | 稳定身份 | 明确不承担 |
 |---|---|---|---|---|
 | `Task` | `frozen` | 对外API ACK/CRUD/aggregate单元，持有RequestIntent、总状态、current root Execution指针与结果投影 | `(team_uuid, task_uuid)` | RAG工序细节、内部claim/retry、长期Intake资产状态 |
-| `RequestIntent` / `request_intent` | `frozen / S01-v1.4` | Task对外资源动作的严格discriminator；v1为`intake.ingest/rebuild/update_metadata/deactivate/delete`与`index.rebuild` | request intent不是Workflow/Process分类；`task_type`不是兼容别名 |
+| `RequestIntent` / `request_intent` | `frozen / S01-v1.5` | Task对外资源动作的严格discriminator；v1为`intake.ingest/rebuild/update_metadata/deactivate/delete`与`index.rebuild` | request intent不是Workflow/Process分类；`task_type`不是兼容别名 |
 | `TaskAudit` | `frozen / S01` | 与Task 1:1原子保存的immutable上游业务审查快照 | `(team_uuid, task_uuid)` | 不等于MKB Event/Log，也不由Task PATCH修改 |
 | `TaskGeneration` | `frozen` | 同一 Task 在 full retry 下的有序 root execution generation | Task 内 generation ordinal/ref | 不等于 IntakeRevision；automatic Process retry 不创建 generation |
 | `TaskItem` | `frozen / projection` | scatter generation与IntakeSnapshot/ChangeSet下的有界结果项，供API分页与聚合 | Task/generation/Intake item projection key | 不成为IntakeItem、Membership或canonical asset SSOT |
@@ -65,10 +65,10 @@
 | `Workflow` | `frozen` | MKB 内部注册、声明式、关系 schema 为 SSOT 的执行定义 | workflow key + immutable revision | v1 不允许外部/agent CUD，也不是 Task 生命周期 |
 | `WorkflowRevision` | `frozen` | 已注册 Workflow 的不可变定义版本；Execution 创建时固定绑定 | workflow revision UUID/key | registry 更新不得热改已存在 Execution |
 | `CompiledWorkflowJSON` | `derived` | 由关系型 Workflow truth 确定性编译的只读声明式 JSON | compiler/schema/digest 标识 | 不得反向编辑或成为 Workflow SSOT |
-| `ProcessCapabilityManifest` | `frozen / S03-v1.2` | 由MKB内部code registry持有的versioned Process contract，定义process key、typed ports/parameters、outcome/proof、side-effect和idempotency语义 | process key + contract version + digest | 不是外部skill manifest，不是第八张Workflow truth表，不承载一次Process状态 |
-| `SkillWorkerManifest` | `deferred / S01-v1.4` | 未来防腐adapter可能向03-nano/skill-worker生态投影的外部能力声明 | 由MKB capability read model确定性派生；exact schema届时由adapter Spec冻结 | v1不存在该对象或生命周期；不得作为启动依赖、MKB domain SSOT、ProcessCapabilityManifest或RegistryManifest的别名 |
-| `BindingSource` | `frozen / S03-v1.2` | Workflow binding中某个typed值的来源类别，如execution context、IntakeSnapshot、prior output、control value、registry ref或literal | binding row + exact source fields | 不等于IntakeSource；禁止再用裸`Source`作为业务类型名 |
-| `RegistrationOrigin` | `frozen / S03-v1.2` | Workflow/definition由code、migration或bootstrap注册的provenance | module/commit/migration/fingerprint refs | 不等于IntakeSource或user identity |
+| `ProcessCapabilityManifest` | `frozen / S03-v1.3` | 由MKB内部code registry持有的versioned Process contract，定义process key、typed ports/parameters、outcome/proof、side-effect和idempotency语义 | process key + contract version + digest | 不是外部skill manifest，不是第八张Workflow truth表，不承载一次Process状态 |
+| `SkillWorkerManifest` | `deferred / S01-v1.5` | 未来防腐adapter可能向03-nano/skill-worker生态投影的外部能力声明 | 由MKB capability read model确定性派生；exact schema届时由adapter Spec冻结 | v1不存在该对象或生命周期；不得作为启动依赖、MKB domain SSOT、ProcessCapabilityManifest或RegistryManifest的别名 |
+| `BindingSource` | `frozen / S03-v1.3` | Workflow binding中某个typed值的来源类别，如execution context、IntakeSnapshot、prior output、control value、registry ref或literal | binding row + exact source fields | 不等于IntakeSource；禁止再用裸`Source`作为业务类型名 |
+| `RegistrationOrigin` | `frozen / S03-v1.3` | Workflow/definition由code、migration或bootstrap注册的provenance | module/commit/migration/fingerprint refs | 不等于IntakeSource或user identity |
 | `ProcessCommand` | `frozen` | Engine 交给叶子工序的类型化输入、logical refs、digests 与 control envelope | command/delivery refs | 不携带任意 graph 或让 leaf 决定路由 |
 | `ProcessOutcome` | `frozen` | 叶子工序返回的类型化结果、错误和 proof inputs | process + fencing token + outcome refs | transport ACK 不等于业务成功 |
 | `PublicationProof` | `frozen contract / exact schema downstream` | 证明某 Execution/Process 的业务产物满足上线条件的类型化证据集合 | target + proof digest/version | queue empty、日志字符串、单个 vector ACK 均不是充分证明 |
@@ -96,6 +96,24 @@ durable Intake truth survives every runtime object's retention
 | `Fence` / `FencingToken` | `frozen principle` | 使旧claim、旧pointer或旧command在新代提交后失效的递增/不可伪造围栏 | UUID、queue delivery count或timestamp本身不自动成为fence |
 | `Outbox` | `frozen principle` | 与业务truth同事务写入、commit后驱动wake/delivery的durable intent ledger | queue ACK不是outbox commit；outbox不拥有业务终态 |
 | `DeterministicRecovery` | `frozen / S03 + S04-T044` | 只依据durable truth、idempotency key与fence补齐确定性projection/wakeup/intent的恢复行为 | 不要求独立Reconciler产品；不得从日志猜或合成业务truth |
+
+### 2.3 状态族与正交事实
+
+| Canonical term | 成熟度 | 定义 | 禁止误用 |
+|---|---|---|---|
+| `StateFamily` | `frozen / D02 T-O-88` | 由一个domain唯一拥有、具有自身合法边与写入guard的一组状态；v1只有Task、Execution、Process、IntakeItem、CandidateSet与ExecutionGate六个StateFamily | 不得建立第七个、跨owner的`production_status`或stage-specific/组合状态；D02 Appendix或下游开放设计不因本词条自动冻结 |
+| `D02 State Ledger` | `frozen / D02 T-O-86..92` | MKB共有域状态宪法与镜像ledger，保存上层形状、非法行为及下游已冻结状态Truth的可核对六项镜像块 | 不是runtime identity、数据库、route engine或所有domain的执行总Spec；non-normative Appendix不得生成contract |
+| `StateContractMirrorBlock` | `frozen / D02 T-O-91` | 下游状态Truth回填D02的唯一Markdown单元，固定包含权威来源、所有权、exact状态/边或not-a-state声明、跨域输入输出、非法行为、校准影响 | 不复制完整schema、算法、DDL、API、风险或实现计划 |
+| `CitationDrift` | `frozen / D02 T-O-92` | source version、章节或链接变化而语义完全不变的引用漂移，可在同一校准变更中机械修正 | 不得用此标签掩盖name、owner、enum、合法边或分类变化 |
+| `SemanticDrift` | `frozen / D02 T-O-92` | canonical name、owner、enum、合法边、state-vs-fact或非法行为发生差异 | 必须显式登记并在同一校准工作单元双向更新；新分支在关闭前fail-closed |
+| `ControlStatus` | `frozen distinction` | 回答一个runtime identity当前能否claim、推进、等待、取消或终结；Task/Execution/Process各有exact enum | 不等于业务phase、Outcome、readiness或资产lifecycle |
+| `BusinessPhase` / `phase_key` | `frozen / S03` | 由bound route与active Process set确定性归约的Execution业务焦点，如cleaning/structurizing；terminal保留last phase | 不创建stage-specific状态机，不进入Task status |
+| `WaitingReason` | `frozen / S03` | Execution处于waiting时必须绑定的typed durable trigger类别与ref | 不等于新状态；无ref的generic pending非法 |
+| `BusinessOutcome` | `frozen distinction` | Process、preflight、acquisition或membership产生的immutable typed判断，经过owner guard后才能影响route/state | handler返回或Outcome值本身不自动成为current status |
+| `StagingState` | `frozen distinction / S04-S05` | 候选集合在canonical acceptance前的资格生命周期；v1 CandidateSet为open/sealed/accepted/abandoned | 不等于Process status或IntakeSnapshot state |
+| `SelectionPointer` | `frozen principle / exact families owned downstream` | 通过CAS选择一个exact immutable target的指针族，如latest Revision、serving Revision或GenerationArtifact current | 不得用裸latest/current混用不同owner，也不等于lifecycle |
+| `ResultReadiness` | `frozen / S02` | Task result endpoint的`not_ready/ready/terminal_failed/terminal_cancelled`响应事实 | 不得作为第七个Task状态 |
+| `FailureDisposition` | `frozen distinction / S03` | terminal/guard失败后的分类、隔离或下一处理方式 | `quarantined/remediating`不得偷偷变成第九个Execution/Process状态 |
 
 ---
 
@@ -178,12 +196,12 @@ Revision 回答“来源业务事实是否改变”；build generation 回答“
 
 | Canonical term | 成熟度 | 定义 |
 |---|---|---|
-| `ExternalKey` / `external_key` | `frozen / S04+S05-v1.0` | 外部provider对某一业务项的稳定键，只能在team + IntakeSource namespace内解释；S05 source-specific pure normalizer输出normalized key、exact version/digest/evidence，缺失时不得随机UUID/content-hash fallback |
+| `ExternalKey` / `external_key` | `frozen / S04-v1.2+S05-v1.1` | 外部provider对某一业务项的稳定键，只能在team + IntakeSource namespace内解释；S05 source-specific pure normalizer输出normalized key、exact version/digest/evidence，缺失时不得随机UUID/content-hash fallback |
 | `IntakeSnapshotMembership` | `frozen / T-O-31` | Snapshot 与 Item/Revision 之间的不可变集合事实，记录 seen/no-change/new-revision/absence 等 decision；不是上层业务资产 |
 | `SnapshotCompleteness` | `frozen / T-O-31/T-O-35` | Snapshot 对声明 scope 的 `complete` 或 `partial` 事实；failure 不是第三种 Snapshot completeness |
 | `AuthoritativeScope` | `frozen / T-O-31/T-O-35` | Snapshot 有权对哪个集合声明“本次完整”；只有 complete + authoritative 才可能依据 absence 推导失活 |
-| `HTTPValidatorEvidence` | `frozen distinction / S05-v1.0` | ETag、Last-Modified等HTTP条件请求/一致性提示证据，不自动成为Revision identity、完整性证明或PreflightValidator |
-| `Digest` | `frozen / S05-v1.0` | 带scope、SHA-256算法和canonicalization/schema/definition版本的内容或metadata摘要；JSON基线JCS，text基线UTF-8/LF/NFC；用于完整性/变更判断，不替代UUID、authority或identity |
+| `HTTPValidatorEvidence` | `frozen distinction / S05-v1.1` | ETag、Last-Modified等HTTP条件请求/一致性提示证据，不自动成为Revision identity、完整性证明或PreflightValidator |
+| `Digest` | `frozen / S05-v1.1` | 带scope、SHA-256算法和canonicalization/schema/definition版本的内容或metadata摘要；JSON基线JCS，text基线UTF-8/LF/NFC；用于完整性/变更判断，不替代UUID、authority或identity |
 | `IntakeSourceKindDefinition` | `frozen / S05-T004` | 内部注册、immutable versioned的source contract，绑定strict descriptor/config schemas、cardinality/completeness、capability eligibility、normalizer、budget与preflight eligibility |
 | `AcquisitionEvidence` | `frozen / S05-T008` | 一次acquisition Process在exact Execution fence下形成的typed representation/media/encoding/redirect/page/budget证据；不是IntakeSnapshot或HTTP日志 |
 | `IntakeCandidateMember` | `frozen / S05-T008` | CandidateSet内具有stable ordinal、ExternalKey evidence、canonical semantic tuples、Artifact/clean/validation refs的typed member；不是IntakeItem，需经S04 acceptance解析 |
@@ -193,9 +211,9 @@ Revision 回答“来源业务事实是否改变”；build generation 回答“
 | `RevisionSemantic` | `frozen / T-O-36` | 某 IntakeRevision 对一个 exact SemanticDefinition version 的 canonical value digest/value-ref；normalized row 是 SSOT |
 | `IntakeItemTransition` | `frozen / T-O-36/T-O-40` | IntakeItem 每次 lifecycle/pointer/action CAS 的 append-only 审计事实，绑定before/after state、action version、causation、fence与proof refs；对应`intake_item_transitions` | 不是Process状态、可变Item快照或普通Event文本 |
 | `RevisionFingerprint` | `frozen principle / T-O-32..33/T-O-38` | 由该 Revision 绑定且参与 fingerprint 的 semantic definition/value tuples 确定性计算，用于幂等收敛 |
-| `IntakeCandidateSet` | `frozen / S04+S05-v1.0` | S05在S04 acceptance前产出的typed观察候选，包含scope/completeness、staged Artifact refs、ExternalKeys、canonical semantic values、rejection/gap evidence与PreflightOutcome；不是accepted Snapshot |
-| `CandidateSetPage` | `frozen / S04+S05-v1.0` | Large-scatter CandidateSet中具有stable ordinal、ordered member digests与SHA-256/JCS page digest的immutable staging分片；page不是独立Snapshot，缺页集合不得seal |
-| `CandidateSetSeal` | `frozen / S04+S05-v1.0` | pages/root digest、count/bytes、dedupe、Artifact refs、scope、rejection/gap与source-exhaustion proof通过后形成的immutable acceptance资格；seal不等于accepted Snapshot或Task成功 |
+| `IntakeCandidateSet` | `frozen / S04-v1.2+S05-v1.1` | S05在S04 acceptance前产出的typed观察候选，包含scope/completeness、staged Artifact refs、ExternalKeys、canonical semantic values、rejection/gap evidence与PreflightOutcome；不是accepted Snapshot |
+| `CandidateSetPage` | `frozen / S04-v1.2+S05-v1.1` | Large-scatter CandidateSet中具有stable ordinal、ordered member digests与SHA-256/JCS page digest的immutable staging分片；page不是独立Snapshot，缺页集合不得seal |
+| `CandidateSetSeal` | `frozen / S04-v1.2+S05-v1.1` | pages/root digest、count/bytes、dedupe、Artifact refs、scope、rejection/gap与source-exhaustion proof通过后形成的immutable acceptance资格；seal不等于accepted Snapshot或Task成功 |
 | `PreflightAllowlistBinding` | `frozen / S05-T014..19` | 将exact selector/source-acquisition-clean适用面绑定到code-owned validator/check-set版本与digest的内部准入定义；allowlist只授予preflight通过后的自动资格 |
 | `PreflightValidator` | `frozen / S05-T016..18` | 只读取当前Execution frozen acquisition/collection/clean evidence并返回`passed|blocked`的code-owned确定性检查器；不重新fetch/clean，无network/secret/path/state mutation权 |
 | `PreflightValidatorManifest` | `frozen / S05-T027..28` | 随代码发布的minimal immutable registry manifest，记录identity、handler、applicability、input/output schemas、ordered check-set与implementation/manifest digests；无外部CRUD/plugin/runtime selfTest |
@@ -227,13 +245,13 @@ Revision 回答“来源业务事实是否改变”；build generation 回答“
 
 | Canonical term | 成熟度 | 唯一职责 | 禁止误用 |
 |---|---|---|---|
-| `CandidateSetStagingPort` | `frozen boundary / S04-v1.1` | 接受IntakeCandidateSet page append、seal与abandon，并执行size/digest/Execution/S05 binding/preflight fence校验 | 不接受业务truth直写；sealed candidate仍不是IntakeSnapshot |
-| `IntakeAcceptancePort` | `frozen boundary / S04-v1.1` | 将sealed candidate ref幂等提交为accepted IntakeSnapshot、IntakeChangeSet及同事务child scheduling intents | queue wake或Process success不能替代该线性化点 |
-| `IntakeReadPort` | `frozen boundary / S04-v1.0` | 提供team-scoped Intake identities、membership、semantic与transition truth只读查询 | 不开放绕过state machine的mutation |
-| `IntakeTransitionPort` | `frozen boundary / S04-v1.0` | 接收versioned action、expected pointers/state、proof/policy与causation，并执行受围栏CAS transition | 不执行物理Artifact/vector清理，不允许任意字段patch |
-| `IntakeEligibilityPort` | `frozen boundary / S04-v1.0` | 验证exact team、IntakeItem lifecycle、ServingRevision与派生generation检索围栏 | vector row存在不等于eligible |
-| `IntakeCleanupPort` | `frozen boundary / S04-v1.0` | 提供CleanupIntent读取、逐substrate CleanupProof提交与PhysicalPurgeComplete聚合读取 | 不拥有Process retry，也不改变IntakeItem lifecycle |
-| `IntakeRegistryPort` | `frozen boundary / S04-v1.0` | 供bootstrap/internal compiler确定性注册并只读获取SemanticDefinition/ActionDefinition | 不提供外部CRUD，不接受同版本异digest覆写 |
+| `CandidateSetStagingPort` | `frozen boundary / S04-v1.2` | 接受IntakeCandidateSet page append、seal与abandon，并执行size/digest/Execution/S05 binding/preflight fence校验 | 不接受业务truth直写；sealed candidate仍不是IntakeSnapshot |
+| `IntakeAcceptancePort` | `frozen boundary / S04-v1.2` | 将sealed candidate ref幂等提交为accepted IntakeSnapshot、IntakeChangeSet及同事务child scheduling intents | queue wake或Process success不能替代该线性化点 |
+| `IntakeReadPort` | `frozen boundary / S04-v1.2` | 提供team-scoped Intake identities、membership、semantic与transition truth只读查询 | 不开放绕过state machine的mutation |
+| `IntakeTransitionPort` | `frozen boundary / S04-v1.2` | 接收versioned action、expected pointers/state、proof/policy与causation，并执行受围栏CAS transition | 不执行物理Artifact/vector清理，不允许任意字段patch |
+| `IntakeEligibilityPort` | `frozen boundary / S04-v1.2` | 验证exact team、IntakeItem lifecycle、ServingRevision与派生generation检索围栏 | vector row存在不等于eligible |
+| `IntakeCleanupPort` | `frozen boundary / S04-v1.2` | 提供CleanupIntent读取、逐substrate CleanupProof提交与PhysicalPurgeComplete聚合读取 | 不拥有Process retry，也不改变IntakeItem lifecycle |
+| `IntakeRegistryPort` | `frozen boundary / S04-v1.2` | 供bootstrap/internal compiler确定性注册并只读获取SemanticDefinition/ActionDefinition | 不提供外部CRUD，不接受同版本异digest覆写 |
 
 ### 3.5 Intake lifecycle 与 runtime 的分界
 
@@ -247,7 +265,7 @@ Revision 回答“来源业务事实是否改变”；build generation 回答“
 | Workflow/model/embed upgrade | 否 | 否 | 否 | 是，新派生 generation/space |
 | deactivate/delete | 否 | 否 | 否 | 是，执行独立资源 command并推进 Item lifecycle |
 
-该矩阵、exact acceptance、三态lifecycle、ActionDefinition/CoreEffect、large-scatter recovery、retention/purge与greenfield governance已由`T-O-30..48`及S04-v1.1冻结；S05-v1.0进一步冻结candidate/preflight输入，但不改变矩阵。
+该矩阵、exact acceptance、三态lifecycle、ActionDefinition/CoreEffect、large-scatter recovery、retention/purge与greenfield governance已由`T-O-30..48`冻结并由S04-v1.2承接；S05-v1.1进一步冻结candidate/preflight输入，但不改变矩阵。
 
 ---
 
@@ -265,6 +283,20 @@ Revision 回答“来源业务事实是否改变”；build generation 回答“
 | `VectorRecord` | `pending S08-S09` | 与 Block/ConstructionUnit、embedding space 和 filter metadata 绑定的索引记录 | 必须引用 exact IntakeRevision；不是 Process row或 IntakeArtifact |
 | `IndexGeneration` | `frozen lifecycle / exact schema pending S09` | 一组隔离构建、验证、CAS切换、grace后失效的vector index projection代次 | reindex不创建IntakeRevision；失败继续服务旧generation |
 | `RetrievalEligibility` | `frozen fence / exact query pending S09-S10` | team、IntakeItem lifecycle、ServingRevision与IndexGeneration共同形成的查询围栏 | 不能仅由vector是否存在或Task成功决定 |
+
+### 4.1 S06 Round 1 已冻结工作词
+
+| Canonical term | 成熟度 | 定义 | 当前开放边界 |
+|---|---|---|---|
+| `GenerationArtifact` | `frozen foundation / T-O-77..79` | S06 generation/repair/retry形成的immutable派生产物记录；不是IntakeArtifact、第四层runtime identity或serving pointer | D02已确认其不是StateFamily；exact artifact_type集合与跨type bundle一致性归S06 |
+| `GenerationInvocation` | `frozen foundation / T-O-77` | 每次模型调用的durable成本与因果记录，保存exact binding、token与结果/错误证据，即使未形成Artifact也存在 | 不是Attempt identity，不拥有claim/retry状态 |
+| `GenerationArtifactCurrentPointer` | `frozen foundation / T-O-78` | 每个`(team, execution, artifact_type)`至多一个、只指向full-valid immutable artifact的CAS selection | artifact type集合、跨pointer原子性尚未冻结 |
+| `StructureSchemaDefinition` | `frozen foundation / T-O-80..82` | S06内部注册、immutable、versioned的完整结构Contract，包含strict shape、kernel、extension与semantic validators；producer/consumer绑定exact key/version/digest | node/edge/anchor/block exact schema归S06及其消费者，不由D02代答 |
+| `DeterministicKernel` | `frozen foundation / T-O-83` | identity、binding、tree/order/coordinate、source fidelity与proof等不可由agent修补的结构真相 | exact字段随StructureSchemaDefinition冻结 |
+| `GovernedExtension` | `frozen foundation / T-O-83..84` | 只有exact schema/profile允许时才可由agent生成新immutable repair artifact并全量复验的扩展面 | v1 profile可将repair budget设为0；不等于人工精修入口 |
+| `StructureNodeKind` | `owner-directed / designing / S06-v0.7` | S06 original structure节点分类轴 | exact core/extension enum未冻结；不得与edge/anchor/block/process kind拼接 |
+| `SourceAnchorKind` | `owner-directed / designing / S06-v0.7` | structure/block回到exact clean/source evidence的grounding分类轴 | exact/approximate与coordinate contract未冻结 |
+| `RetrievalBlockKind` | `owner-directed / designing / S06-v0.7` | 从canonical original structure确定性派生的检索投影分类轴 | exact kinds与S07-S10消费contract未冻结 |
 
 ---
 
@@ -345,11 +377,11 @@ Revision 回答“来源业务事实是否改变”；build generation 回答“
 |---|---|---|
 | Task aggregate state | S02 | 对外六态；不混入 clean/rag stage |
 | Execution/Process runtime state | S03 | claim、running、retry、cancel、terminal |
-| Execution human gate state | S05（状态投影仍由S03 Execution承接） | `open/released/rejected/superseded`只描述gate；Execution使用既有`waiting`，Intake无review state |
+| ExecutionGate state | S05（Execution control仍由S03承接） | `open/released/rejected/superseded`只描述gate；Execution使用既有`waiting`，Intake无review state |
 | Workflow phase/reason | S03 | 与 runtime state 正交 |
 | IntakeItem lifecycle | S04 | `active/deactivated/deleted` 三态已由 `T-O-40` 冻结；业务原因由 versioned ActionDefinition 表达 |
 | Revision serving/build projection | S04 + S03/S09 | latest、serving、proof/derived generation 分离 |
-| IntakeArtifact/Vector physical state | S09/S13 | materialized、invalidated、purged等不得决定业务可见性 |
+| Physical convergence facts | S04/S09/S13 | physical existence、CleanupIntent/Proof与index generation事实另账；IntakeArtifact没有万能业务lifecycle，这些事实不得决定Item业务可见性 |
 
 ### 7.4 `payload_extra` 跨数据库契约
 
@@ -372,12 +404,15 @@ Revision 回答“来源业务事实是否改变”；build generation 回答“
 
 | 权威文档 | 校准结果 | 版本 / 状态 |
 |---|---|---|
-| `domain-truth/D01-task-execution-process-flow.md` | Intake/runtime分离；Preflight归Process、human gate归Execution waiting、S05 binding不热切；无第四层runtime identity | `D01-v1.3 / completed` |
-| `domain-truth/S01-skill-worker-integration.md` | Intake词汇、polling action_required与Task-scoped gate decision；仍无直接Execution/Process写面 | `S01-v1.4 / completed` |
-| `domain-truth/S02-task-api.md` | 六态不变；running+action_required、gate list/get/decide与required rejection collect-all | `S02-v1.2 / completed` |
-| `domain-truth/S03-workflow-engine.md` | preflight capability、human_review wait reason、S05 binding与四窗口repair；七表/八态不变 | `S03-v1.2 / completed` |
-| `domain-truth/S04-intake-asset-lifecycle.md` | CandidateSet exact producer contract、ExternalKey/digest与Preflight/acceptance顺序按S05补全；五类identity与十表SSOT不变 | `S04-v1.1 / completed` |
-| `domain-truth/S05-intake-cleaning.md` | 四类source、typed acquisition/candidate/clean、canonicalization、mandatory preflight、ExecutionGate与binding词汇进入正式权威 | `S05-v1.0 / completed` |
+| `domain-truth/D01-task-execution-process-flow.md` | 三层状态所有权、exact states、phase/outcome/asset分账；S05 exact intake capabilities；target/vector-index移交对应下游 | `D01-v1.4 / completed` |
+| `domain-truth/S01-skill-worker-integration.md` | Task status/readiness/items/action_required/visibility分账；仍无直接Execution/Process写面 | `S01-v1.5 / completed` |
+| `domain-truth/S02-task-api.md` | 六态不变；五轴Task查询面、gate与required rejection collect-all | `S02-v1.3 / completed` |
+| `domain-truth/S03-workflow-engine.md` | status/phase/wait/outcome/route分账；S05 exact process keys；七表/八态不变 | `S03-v1.3 / completed` |
+| `domain-truth/S04-intake-asset-lifecycle.md` | Source fence/Snapshot completeness/Item三态/staging/pointers/cleanup分账 | `S04-v1.2 / completed` |
+| `domain-truth/S05-intake-cleaning.md` | Acquisition/Preflight/Gate/Execution分账；Candidate合法边与exact capability key校准 | `S05-v1.1 / completed` |
+| `domain-truth/D02-production-state-and-routing.md` | 共有域宪法与状态ledger；六StateFamily、四层结构、六项镜像块和双向漂移协议全部冻结 | `D02-v1.0 / frozen` |
+| `qna-truth/D02.md` | `T-O-86..92`冻结；Q1-Q6完成，Round 3 waived，campaign关闭 | `D02-QNA-v1.0 / frozen` |
+| `qna-truth/S06.md` | `T-O-77..85`稳定；D02 hold已解除，Q4-Q6归S06及相关owner边界重构 | `S06-QNA-v0.7 / active reframe` |
 | `qna-truth/S02.md`、`qna-truth/S03.md` | 保留owner问答历史原词，不作为当前schema/API词汇权威 | `historical / intentionally unchanged` |
 
 所有后续实现与Spec遵守：
@@ -399,3 +434,6 @@ Revision 回答“来源业务事实是否改变”；build generation 回答“
 | `v0.4` | `2026-07-15` | 接收 `T-O-42`：MKB 与 legacy-family 完全独立，legacy 仅为 ReferenceAnchor；登记 GreenfieldBootstrap/MKBSchemaEvolution，移除 payload_extra legacy-raw 用途，并将 Deferred Migration Register 更名为 MKB 内部 Cross-Spec Alignment Register。 |
 | `v1.0` | `2026-07-15` | 接收S04 Q7-Q9 / `T-O-43..48`与S04-v1.0；冻结CandidateSet seal/acceptance、recovery、retention/cleanup、greenfield governance词汇；补登记RequestIntent、TaskAudit、ProcessCapabilityManifest、SkillWorkerManifest、BindingSource、RegistrationOrigin、S04 ports、IntakeItemTransition、CAS/Fence/Outbox/Readiness及legacy ConsumableTask；记录D01/S01-S03对齐完成。 |
 | `v1.1` | `2026-07-16` | 接收S05 Q1-Q10 / `T-O-49..76`与S05-v1.0；冻结四类source kind、ExternalKey normalizer、SHA-256/JCS/NFC digest、四类typed output、PreflightValidator/Outcome、ExecutionGate/ReviewTarget/Decision与S05Binding；记录D01/S01-S04按S05完成边界校准。 |
+| `v1.2` | `2026-07-18` | 记录D02-v0.2既有Truth校准输出（开放提案仍未冻结）与S06 `T-O-77..85`：登记StateFamily/ControlStatus/BusinessPhase/Outcome/Staging/Selection/Readiness等正交词汇；登记GenerationArtifact/Invocation/StructureSchemaDefinition/kernel/extension；更新D01-S05版本与S06暂停门，开放kind不标为frozen。 |
+| `v1.3` | `2026-07-19` | 接收D02 QNA Round 1 `T-O-86..89`与D02-v0.3：将StateFamily从derived升级为owner-frozen六族宪法；登记D02 State Ledger共有域角色、下游执行cutoff与Truth镜像义务；不提前冻结Q4-Q6的exact镜像块或治理协议。 |
+| `v1.4` | `2026-08-10` | 接收D02-v1.0与QNA `T-O-90..92`：冻结四层ledger结构、StateContractMirrorBlock、CitationDrift/SemanticDrift及同轮双向校准；登记D02 campaign关闭和S06 hold解除，开放S06 kind仍保持designing。 |

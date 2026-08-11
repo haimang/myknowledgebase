@@ -4,17 +4,17 @@
 >
 > **Domain / 子系统**：`D3 摄入资产 / S04 Intake Asset Lifecycle`
 >
-> **日期**：`2026-07-16`
+> **日期**：`2026-07-18`
 >
 > **作者 / 裁决者**：`MKB owner + Codex`
 >
 > **文档性质**：`domain truth / formal subsystem specification`
 >
-> **文档状态**：`accepted`（S04 域内已接受；全系统 truth layer 尚未 frozen）
+> **文档状态**：`accepted / D02-state-calibrated`（S04 域内已接受；全系统 truth layer 尚未 frozen）
 >
-> **Truth 版本**：`S04-v1.1`
+> **Truth 版本**：`S04-v1.2`
 >
-> **上游权威输入**：形成QNA时的`D01-v1.1/S01-v1.2/S02-v1.0/S03-v1.0`，冻结的`qna-truth/S04.md v1.1`（Q1–Q9 / `T-O-30..48`）；发布后对齐版本为`D01-v1.3/S01-v1.4/S02-v1.2/S03-v1.2/S05-v1.0`
+> **上游权威输入**：形成QNA时的`D01-v1.1/S01-v1.2/S02-v1.0/S03-v1.0`，冻结的`qna-truth/S04.md v1.1`（Q1–Q9 / `T-O-30..48`）；发布后对齐版本为`D01-v1.4/S01-v1.5/S02-v1.3/S03-v1.3/S05-v1.1`
 >
 > **词汇权威**：`docs/baseline/spec-glossary.md`
 >
@@ -27,6 +27,8 @@
 > **应用边界**：MKB 是完全独立的 greenfield application。`legacy-family` 不构成代码、数据、协议、schema、UUID/status、storage、bootstrap、运行或验收兼容关系，只允许作为 ReferenceAnchor。
 
 > **跨文档审计声明**：S04已与D01/S01-S03/S05的Task/Execution/Process、single/scatter、retry/rebuild、candidate/preflight/HITL、proof、cancel、routing和cleanup完成逻辑对账。S05精化CandidateSet producer contract、ExternalKey/digest与准入顺序，但不改变五类Intake identity、十张canonical truth tables或三层runtime identity。
+
+> **D02状态校准声明**：D02-v1.0已镜像Item三态、CandidateSet四态及相关正交事实，并冻结`T-O-86..92`；本版不改变五类Intake identity、十表SSOT、CoreEffect、合法边或latest/serving规则。IntakeSource admission fence、Snapshot completeness、Item lifecycle、Candidate staging、Membership decision、pointer selection和physical cleanup继续分账；Membership exact `decision_kind` spelling归S04/S12，Source reopen治理归S04/S16，均按fail-closed处理并在冻结后回填D02，不从prose猜DDL。
 
 ---
 
@@ -178,7 +180,7 @@ ReferenceAnchor 无权定义 MKB runtime/schema/API/acceptance；若证据叙事
 | Truth ID | 冻结真相 | 来源 | 下游约束 |
 |---|---|---|---|
 | `S04-T010` | 只有 canonical business semantics 变化才追加 IntakeRevision；no-change、rebuild、Workflow/model/embed/index升级不创建 Revision。 | `T-O-32` | business revision 与 runtime/build/index generation 分账。 |
-| `S04-T011` | 内建最小 semantic dimensions 为 source representation、canonical content、context metadata、filter metadata。 | `T-O-33/T-O-47` | exact digest/canonicalizer已由S05-v1.0以versioned definition冻结。 |
+| `S04-T011` | 内建最小 semantic dimensions 为 source representation、canonical content、context metadata、filter metadata。 | `T-O-33/T-O-47` | exact digest/canonicalizer已由S05-v1.1以versioned definition承接。 |
 | `S04-T012` | SemanticDefinition 以 `(semantic_key, definition_version)` 内部注册、immutable；声明value/schema kind、fingerprint participation与typed route signal。 | `T-O-33/T-O-36` | 无外部CRUD；追加维度不改历史定义。 |
 | `S04-T013` | RevisionSemantic 绑定 exact definition version；RevisionFingerprint由参与fingerprint的有序definition/value tuples确定性计算。 | `T-O-33/T-O-36/T-O-38` | 读取历史不得join当前最新版后重解释。 |
 | `S04-T014` | `payload_extra` 默认不参与identity、observation fence、fingerprint、diff、route、proof或filter。 | `T-O-37/T-O-39` | 进入关键语义前必须晋升正式列或versioned definition。 |
@@ -209,7 +211,7 @@ ReferenceAnchor 无权定义 MKB runtime/schema/API/acceptance；若证据叙事
 | `S04-T029` | 显式`max_members_per_snapshot/max_candidate_bytes/transaction_budget`；超限在Snapshot创建前fail-loud。 | `T-O-43` | v1不静默拆分authoritative Snapshot。 |
 | `S04-T030` | recovery只依据durable candidate/snapshot/outbox/fence/ledger执行幂等补齐、重放、隔离或cleanup。 | `T-O-44` | 日志/queue/payload_extra无合成truth权限。 |
 | `S04-T031` | missing IntakeArtifact fail-closed并产生repair intent；DB rollback后的orphan IntakeArtifact按owner/digest/grace清理。 | `T-O-44` | 禁止virtual IntakeArtifact伪造成功。 |
-| `S04-T032` | Reconciler只修projection/wakeup/intent，不创建从未提交的Snapshot/Revision/proof；repair保存causation/fence/audit。 | `T-O-44` | 不建设第二套业务状态机。 |
+| `S04-T032` | semantic recovery/repair只修projection/wakeup/intent，不创建从未提交的Snapshot/Revision/proof；repair保存causation/fence/audit。 | `T-O-44` | 不建设独立通用Reconciler产品或第二套业务状态机。 |
 
 ### 2.6 Retention、reindex 与 purge 真相
 
@@ -332,6 +334,22 @@ abandoned → never creates IntakeSnapshot
 ```
 
 staging state不替代Process status；它只表示候选集合是否具备进入canonical transaction的资格。
+
+### 3.6 Intake 状态族 cutoff
+
+| 对象/事实 | Exact state/value | 是否是lifecycle | 唯一路由作用 | 禁止误用 |
+|---|---|---:|---|---|
+| IntakeSource admission | `accepts_new_snapshots=true/false` | 否，当前只是fence | 是否允许新observation进入 | 推导Source active/deleted状态 |
+| IntakeSnapshot completeness | `complete/partial` | 否，Snapshot本身immutable accepted | complete+authoritative才允许absence | 增加failed/pending Snapshot |
+| IntakeItem lifecycle | `active/deactivated/deleted` | 是 | serving eligibility与withdrawal | clean/RAG/review/retry状态 |
+| IntakeRevision | immutable row + ordinal/predecessor | 否 | latest/serving pointer target | draft/current/failed状态 |
+| IntakeArtifact | immutable representation | 否 | typed I/O与retention引用 | uploaded/processing/ready万能状态 |
+| CandidateSet staging | `open/sealed/accepted/abandoned` | staging lifecycle | acceptance资格 | Process状态或Snapshot状态 |
+| Membership decision | seen/new-revision/no-change/absence语义族 | immutable outcome | ChangeSet与Workflow route输入 | Item lifecycle本身；exact enum仍开放 |
+| selection | latest/serving pointers | CAS选择 | candidate与服务资格分离 | 用latest暗示serving |
+| physical convergence | CleanupIntent + substrate proofs | proof聚合 | 物理清理资格/完成 | 反向改变Item lifecycle |
+
+任何实现不得把上述轴拼为`revision_processing`、`snapshot_failed`、`item_reviewing`或`deleted_purging`组合状态。查询可以并列展示，但mutation必须回到各自owner port与guard。
 
 ---
 
@@ -686,3 +704,4 @@ S04 将所有外部输入统一提升为可审计的Intake身份、观察、集�
 |---|---|---|---|---|
 | `S04-v1.0` | `2026-07-15` | `MKB owner + Codex` | `accepted` | 吸收Q1-Q9与`T-O-30..48`；冻结五类Intake identity、十表schema、semantic/action registries、IntakeCandidateSet acceptance、三态/serving CAS、large-scatter recovery、retention/reindex/purge、greenfield bootstrap/schema evolution/acceptance及ReferenceAnchor边界。 |
 | `S04-v1.1` | `2026-07-16` | `MKB owner + Codex` | `accepted / S05-calibrated` | 接收S05-v1.0：IntakeSource锁定exact SourceKindDefinition；CandidateSet补齐typed evidence/S05 binding/preflight/rejection/exhaustion contract；single/scatter acceptance后按Outcome进入auto或Execution gate；确认review state不进入Intake并补open-gate retention fence。 |
+| `S04-v1.2` | `2026-07-18` | `MKB owner + Codex` | `accepted / D02-state-calibrated` | 保持五类identity、十表、Item三态与CandidateSet合法边不变；明确Source fence、Snapshot completeness、Membership outcome、latest/serving selection和cleanup proof均非Item/runtime状态；Membership exact enum与Source reopen按D02-v1.0移交S04/S12/S16。 |

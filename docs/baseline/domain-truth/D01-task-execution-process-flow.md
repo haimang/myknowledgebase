@@ -3,11 +3,11 @@
 > **项目**：`myknowledgebase`（MKB）
 > **Domain / 子系统**：跨 `D2 / S02-S03` 的任务与执行基础模型
 > **文档性质**：`specification / domain-truth / cross-domain decision`
-> **文档状态**：`accepted architecture direction / S02+S04+S05-calibrated`（三层切分由 owner 主动提出；Task lifecycle/API、Intake truth与clean/preflight/HITL执行边界已回流）
-> **Truth 版本**：`D01-v1.3`
-> **日期**：`2026-07-16`
+> **文档状态**：`accepted architecture direction / S02-S05+D02-state-calibrated`（三层切分由 owner 主动提出；Task lifecycle/API、Intake truth、clean/preflight/HITL与跨域状态族已回流）
+> **Truth 版本**：`D01-v1.4`
+> **日期**：`2026-07-18`
 > **作者归属**：`MKB owner` 主动提出切分；`Codex` 负责代码复核、规范化表达与 architecture verdict
-> **权威输入**：Owner 对 `task_uuid / execution_uuid / process_uuid` 的直接裁决、`S01-v1.3`、`S02-v1.1`、`S03-v1.1`、`S04-v1.0`、`S05-v1.0`、`legacy-family/` 的 reference-anchor 生产事实
+> **形成初稿的权威输入**：Owner 对 `task_uuid / execution_uuid / process_uuid` 的直接裁决、`S01-v1.3`、`S02-v1.1`、`S03-v1.1`、`S04-v1.0`、`S05-v1.0`、`legacy-family/` 的 reference-anchor 生产事实；当前回流版本见D02状态校准声明与修订历史
 > **上游索引**：`docs/baseline/spec-index.md`
 > **上游真相**：`docs/baseline/domain-truth/S01-skill-worker-integration.md`
 > **下游消费者**：`S02` Task API、`S03` Workflow Engine、`S04-S05` Intake/Scatter、`S08-S09` Vector、`S12` Persistence、`S15` Observability、跨系统拓扑 `17`
@@ -19,6 +19,8 @@
 > **S04 回流声明**：`S04-v1.0` 没有增加第四层运行身份。D01 原先宽泛的 `Source/Document/DocumentVersion/manifest` 资源口径现校准为 `IntakeSource/IntakeSnapshot/IntakeItem/IntakeRevision/IntakeSnapshotMembership`；`Artifact` 在 Intake 语境中必须写为 `IntakeArtifact`。Execution tree 与 Intake identity graph 仍是两个独立事实面。
 
 > **S05 回流声明**：`S05-v1.0`没有增加preflight/review运行身份或第二套状态机。Preflight是S03 Process capability；human review是clean后、RAG前的Execution `waiting` durable gate，Process先terminal且不持lease。Execution锁定exact S05 binding，retry/recovery/resume不得热切；gate/outcome/decision只是supporting truth，不改变D01三张核心运行状态表。
+
+> **D02 状态校准声明**：D02-v1.0将已经由S02-S05冻结的状态事实镜像为共有域ledger，并冻结`T-O-86..92`，不改变D01三层运行语义。Task/Execution/Process分别继续拥有S02六态、S03 Execution八态与S03 Process八态；phase、Outcome、waiting reason、Task result readiness、TaskItem outcome、Intake lifecycle、CandidateSet staging和ExecutionGate不得合并为第四套runtime状态。S03-v1.3已依据S05-v1.1确认exact capability key是唯一manifest identity；Execution subject/accepted output物理字段归S03/S04/S12，S08/S09 vector/index职责归S08/S09，均为D02-v1.0下游移交而非D02开放门。
 
 > **约束级别**：本文中的“必须 / 禁止 / 仅允许”是后续设计与实现的强制约束；“应当”是 D01 verdict 的默认约束，若要偏离必须 reopen D01；“建议 / 可以”不冻结具体实现。本文明确标为“交由 S02/S03 冻结”的状态名、字段名或算法，不得被误读为已定 DDL。
 
@@ -59,6 +61,20 @@ Owner 因此主动将运行模型切分为：
 - **Workflow Definition** 是“如何运行”的不可变/版本化模板，不是第四个运行实例身份；Execution 必须记录自己采用的 definition/version。
 - **Process lifecycle** 是 Workflow Definition 中一个工序被实例化后的运行生命周期。
 
+#### 1.2.1 状态、阶段、结果与资产生命周期分账
+
+| 事实族 | 唯一 owner | D01中的作用 | 禁止混入 |
+|---|---|---|---|
+| Task aggregate status | S02 | 对外current generation六态 | RAG phase、human waiting、soft-delete |
+| Execution control status | S03 | 一次durable workflow run八态 | Intake lifecycle、Process retry_wait |
+| Process control status | S03 | claim/lease/retry/terminal八态 | queue delivery、业务phase |
+| Execution phase/wait reason | S03 | 当前RAG焦点与durable trigger | 独立生命周期或Task状态 |
+| ProcessOutcome/proof | S03 + capability owner | 驱动受guard的状态边和上卷 | current status本身 |
+| Intake/Candidate/Gate state | S04/S05 | 长期资产、staging与人工准入事实 | 第四层runtime identity |
+| readiness/current/serving | S02/S04/S06-S09 | 结果或版本选择 | 通用`status`字段 |
+
+三层运行状态仍只允许自下而上归约，控制命令仍只允许自上而下传播。任何查询投影可以并列展示这些事实，但不能反向写入或制造一个笛卡尔积式`production_status`。
+
 因此，Task 可以保持稳定、通用的 ACK/CRUD 语义；RAG 的业务专属性必须下沉到 Execution 的 workflow/target/mode 与 Process 的 `process_type / process_key / action_branch`，而不能丢失。
 
 ### 1.3 在整体运行拓扑中的位置
@@ -75,15 +91,16 @@ Task  (team_uuid, task_uuid)
 Root Execution  (execution_uuid, durable)
   │
   ├── single Intake 入口
-  │     ├── Process: clean / normalize
+  │     ├── Processes: exact S05 acquire → decode/clean → seal/preflight → accept
   │     ├── Process: lsrag.structurize
   │     ├── Process: lsrag.construct
   │     ├── Process: lsrag.vectorize_index
   │     └── Process: index.validate_publication
   │
   └── API 散射入口
-        ├── Process: intake.api_fetch
-        ├── Process: clean.api_scatter
+        ├── Process: intake.acquire.registered_api
+        ├── Process: clean.map.registered_api
+        ├── Process: intake.collection.seal / intake.preflight_validate
         ├── Process: intake.accept_snapshot
         ├── Child Execution A (IntakeItem A)
         │     └── Processes: clean? → structurize → construct → vectorize → validate
@@ -120,7 +137,7 @@ Root Execution  (execution_uuid, durable)
 本文不负责完整冻结：
 
 - Task 对外精确 status enum、URI、HTTP error envelope、分页与 retention（`S02`）；
-- Workflow Definition schema、Process 精确状态 enum、claim/lease、backoff 与 reconciliation 算法（`S03`）；
+- Workflow Definition schema、Process 精确状态 enum、claim/lease、backoff 与 semantic recovery/repair 规则（`S03`）；
 - IntakeSource/Snapshot/Item/Revision/Membership 的 exact DDL 与 S05 adapter contract（`S04-S05`）；
 - IntakeArtifact bytes/backend 与本地路径布局（`S13`）；
 - Vector record、filter metadata 和 publication proof 的完整 schema（`S08-S09/S12`）；
@@ -164,7 +181,7 @@ D01 在实现层完成，至少要求：
 | `D01-T003` | `task_uuid` 面向外部 API；无论 single Intake 还是 scatter 入口，都以 Task 作为唯一请求起点。 | `OWNER-ORIGINATED + S04-CALIBRATION` | 上游不得创建 `execution_uuid` 或 `process_uuid` 来绕过 Task ingress。 |
 | `D01-T004` | `execution_uuid` 只在 MKB 内部产生和流转，必须 durable；它是执行阶段唯一稳定的内部查询 UUID。 | `OWNER-ORIGINATED` | 进程重启、队列 redelivery、工序 retry 不得替换当前 Execution 身份。 |
 | `D01-T005` | 散射 Task 可以产生多个 `execution_uuid`；每个 Execution 持有具体执行状态与业务流转总体控制。 | `OWNER-ORIGINATED` | Task:Execution 是 1:N，禁止 schema 假设“一 Task 永远只有一个 Execution”。 |
-| `D01-T006` | `process_uuid` 承载具体业务项下某个工序实例的状态细节；Process 不是外部资源，允许在满足 retention/compaction 条件后定期清理。 | `OWNER-ORIGINATED` | `S03/S12/S15` 必须先把 durable 摘要上卷到 Execution，再允许清理。 |
+| `D01-T006` | `process_uuid` 承载具体业务项下某个工序实例的状态细节；Process 不是外部资源，满足S03 terminal-summary与cleanup-eligibility围栏后可按retention清理。 | `OWNER-ORIGINATED + S03-CALIBRATION` | `S03/S12/S15` 必须先把 durable 摘要上卷到 Execution、关闭全部控制围栏，再允许清理。 |
 | `D01-T007` | 具体是 clean 还是 RAG、采用哪些工序、每个工序如何流转，必须由下游 Workflow/Process 定义，不由 Task type 冒充。 | `OWNER-ORIGINATED` | RAG 专属性必须存在于 workflow/process schema；不得再提出可用于任意业务域的空泛内部 task type。 |
 
 ### 2.3 身份、基数与血缘真相
@@ -196,7 +213,7 @@ D01 在实现层完成，至少要求：
 | Truth ID | 冻结真相 | 来源 | 下游约束 |
 |---|---|---|---|
 | `D01-T022` | 标准 LS-RAG 的业务工序至少要能表达 intake resolve/fetch/accept、clean、structurize、construct、vectorize/index与publication validate；具体是否跳过clean由IntakeSource capability与versioned Workflow决定。 | `CODE-FACT + OWNER direction + S04` | `S03/S05-S09` 必须用RAG-specific process keys，而不是generic `process_data`。 |
-| `D01-T023` | 推荐的 canonical process key 为 `clean.*`、`lsrag.structurize`、`lsrag.construct`、`lsrag.vectorize_index`、`index.validate_publication`；它们是版本化 workflow 中的工序类型，不是 Task type。 | `D01-VERDICT` | exact branch/model 可版本化，但不得丢失上述业务边界。 |
+| `D01-T023` | Process必须以唯一versioned manifest identity承载RAG-specific业务边界：Intake/Clean使用S05 exact capability keys；下游目前登记`lsrag.structurize`、`lsrag.construct`、`index.validate_publication`，而`lsrag.vectorize_index`仅是等待S08/S09拆分裁决的coarse placeholder。它们都不是Task type。 | `D01-VERDICT + S03/S05-CALIBRATION` | coarse family不得作为兼容process key；S08/S09 exact key未冻结前不得自行猜值。 |
 | `D01-T024` | Process 成功必须由 type-specific completion guard 判定；仅收到 callback、队列为空或 `pending_count=0` 都不等于成功。 | `OWNER direction + CODE-FACT + D01-VERDICT` | 每个 Process type 需要明确 output schema、validation proof 与失败语义。 |
 | `D01-T025` | 单个IntakeItem Execution的业务成功终点是预期向量及filter metadata写入目标vector store并校验通过；proof必须绑定exact IntakeRevision并持久化到Execution summary。 | `OWNER-ORIGINATED + S04-T015/T016` | Process清理后仍能审计成功依据；latest不能冒充serving。 |
 | `D01-T026` | scatter root Execution的成功还要求accepted IntakeSnapshot/ChangeSet required set已提交，且其中所有required child Executions满足各自成功guard。 | `D01-VERDICT + S04-T024..T029` | fan-in以持久membership/required set为准，不能以当前child count猜分母。 |
@@ -209,7 +226,7 @@ D01 在实现层完成，至少要求：
 | `D01-T028` | 对一次已终结 Execution 的人工/命令级整次 retry 必须创建新的 `execution_uuid`，用 `retry_of_execution_uuid` 保留血缘，并产生新的 Process 实例。 | `OWNER model + D01-VERDICT` | 旧 Execution/Process 不得被复活或覆盖；Task identity 不变。 |
 | `D01-T029` | `execution_uuid` 吸收 S01 中“完整执行尝试”的 `attempt_uuid` 语义；MKB 不应同时保留两个职责重叠的 durable 执行身份。 | `D01-VERDICT` | 必须 reopen/回填 `S01-T014` 及其 Attempt 表述。 |
 | `D01-T030` | cancel 的接收属于 Task，传播与收敛属于 Execution，停止/补偿属于 Process；最终 Task 状态只能在 current root 收敛后归约。 | `D01-VERDICT` | S02 冻结 API race；S03 冻结 cooperative cancel、lease fencing 与补偿。 |
-| `D01-T031` | Process 只能在所属 Execution 已终结、retry/reconciliation 窗口关闭、durable summary 已上卷且不存在 dangling pointer 后清理。 | `OWNER-ORIGINATED + D01-VERDICT` | `executions.current_process_uuid` 清空或转为 final_process_uuid 后才允许物理清理。 |
+| `D01-T031` | Process 只能在所属 Execution 已终结、retry/recovery/cancel/outbox控制窗口关闭、durable summary 已上卷且不存在 dangling pointer 后清理。 | `OWNER-ORIGINATED + D01-VERDICT` | `executions.current_process_uuid` 清空或转为 final_process_uuid 后才允许物理清理。 |
 | `D01-T032` | Process retention 与 Event/Log retention 是不同策略；删除 process projection 不授权删除 append-only 运行证据。 | `D01-VERDICT` | `S15` 单独冻结 event/log 归档与删除。 |
 
 ### 2.7 本地化与 legacy 借鉴边界真相
@@ -323,49 +340,50 @@ source_acquisition
 | 责任 | 具体含义 |
 |---|---|
 | Instance identity | 每次由 Workflow Definition 实例化工序时生成新的 `process_uuid` |
-| Business classification | 保存 `process_type/process_key`、rank、action branch 与 definition snapshot/ref |
+| Business classification | 保存唯一exact `process_key/contract_version`、requiredness、Workflow step/ref与process spec digest；family/phase只作正交分类 |
 | I/O contract | 保存严格input/output schema version、IntakeArtifact/derived asset refs、digest与validation result |
 | Scheduling | 保存 queue/scheduling state、available_at、priority 或等价 claim 条件 |
 | Concurrency control | 保存 claim token、lease owner、lease expiry、fencing generation |
-| Runtime status | 记录 pending/claimed/running/retry-wait/succeeded/failed/cancelled 等语义 |
+| Runtime status | 只记录 `ready/claimed/running/retry_wait/succeeded/failed/cancelling/cancelled` |
 | Retry control | 保存 retry_count、max_retries、last_error_class、next_retry_at |
 | Observability | 保存 started/completed/heartbeat 时间、error code/message/details ref、metrics summary |
 | Completion guard | 按 process type 校验输出；校验失败必须是失败，不能伪装 completed |
 
 #### 3.3.2 Process 类型必须与 RAG 实际业务对齐
 
-首版至少应能形成以下类型族：
+首版至少应覆盖以下业务能力。S05已冻结的exact capability key优先于D01早期coarse示例；coarse family不再作为兼容`process_key`进入registry：
 
-| Process key 示例 | 业务职责 | 成功 guard 示例 |
+| Exact capability key / downstream placeholder | 业务职责 | 成功 guard 示例 |
 |---|---|---|
-| `intake.resolve_source` | 解析单文件/本地 source 并建立受控输入引用 | source 可读、hash/size/mime 通过输入约束 |
-| `intake.api_fetch` | 对 API 单点请求取回原始响应 | 响应被完整接收、schema/version 可判定 |
-| `clean.universal_extract` | 将异构输入清洗为 canonical text | canonical text artifact 存在且内容校验通过 |
-| `clean.api_scatter` | 将一次 API 响应解析为 N 个稳定 typed child candidates | 每个 child 有normalized ExternalKey、versioned semantic tuples、Artifact/validation evidence与稳定member digest |
+| `intake.acquire.inline` / `intake.acquire.local_object` / `intake.acquire.http_static` / `intake.acquire.http_browser` / `intake.acquire.registered_api` | 按exact SourceKindDefinition获取representation | typed AcquisitionEvidence、media/encoding/budget和logical handle完整 |
+| `intake.decode.text_json_html` / `intake.decode.pdf` | 确定性解码与canonicalization | exact schema/canonicalizer/digest与loss evidence通过 |
+| `clean.extract.deterministic` / `clean.ocr.local` / `clean.extract.vision` / `clean.map.registered_api` | 产生typed clean/member候选 | CleanArtifactCandidate、ExternalKey/semantic/anchor/quality evidence完整 |
+| `intake.collection.seal` | 对single/scatter CandidateSet执行完整性封口 | page/root digest、count、dedupe、scope/completeness与exhaustion proof通过 |
 | `intake.preflight_validate` | 以exact code-owned validator只读校验frozen acquisition/collection/clean evidence | typed`passed|blocked` Outcome与ordered check evidence已提交；runtime错误走Process retry/failed |
 | `intake.accept_snapshot` | 接受sealed CandidateSet并原子提交Snapshot/Membership/ChangeSet与child intent | accepted Snapshot/required set已提交，可重放 |
 | `lsrag.structurize` | 生成目录/逻辑分块/structured representation | structured schema、块坐标与 source coverage 校验通过 |
 | `lsrag.construct` | 生成 layered 内容、summary/original 双通道与 vector-ready units | layered/vector-ready schema、引用和 channel 完整性通过 |
-| `lsrag.vectorize_index` | embedding 并写入 Turso vector/index 数据 | 预期 vector records 写入，维度/model/filter 字段合法 |
+| `lsrag.vectorize_index`（S08/S09待校准的coarse placeholder） | 当前只表示embedding到index写入的能力覆盖，不冻结是否为一个exact Process | 不能以embedding成功代替index publication proof |
 | `index.validate_publication` | 独立验证本次发布集合 | expected/actual 集合、filter metadata、可检索性证明一致 |
 | `intake.physical_purge` | delete/retention后受控清理eligible派生数据 | scope内required substrate cleanup proofs完成 |
 
 `process_uuid` 永远是上述类型的一次运行实例。相同 `process_key` 可在不同 Execution 中出现，也可以因整次 Execution retry 产生新的 Process UUID。
 
-#### 3.3.3 Process 的建议状态语义
+#### 3.3.3 Process 的 exact 状态语义
 
-精确 enum 交由 S03，但状态机至少必须区分：
+S03-v1.3承接的Process exact enum保持不变，本版不再保留`pending/scheduled/completed/retrying`占位别名：
 
 ```text
-pending / scheduled
+materialize
+  → ready
   → claimed (持有 lease/fencing token)
   → running
      ├── succeeded (type-specific guard 通过)
-     ├── retry_wait → scheduled（retry_count < max_retries）
+     ├── retry_wait → ready（retry_count < max_retries且due）
      ├── failed（不可重试或预算耗尽）
      └── cancelling → cancelled
 
-lease 过期：claimed/running → reconciliation → 同一 process_uuid 重新可 claim
+lease 过期：claimed/running → fenced recovery → ready | failed
 queue redelivery：若状态/claim token 不允许执行，则幂等 no-op
 ```
 
@@ -376,15 +394,15 @@ Process 状态与消息意图不能混为一个字段。`STEP_START/STEP_RESTART
 | 维度 | Task | Execution | Process |
 |---|---|---|---|
 | 谁创建 | 外部 caller 提供 Task UUID；MKB 原子接收 | MKB scheduler/orchestrator 创建 | MKB workflow engine 创建 |
-| 主要读者 | 外部 orchestrator、polling client | 内部 orchestrator、reconciler、运维诊断 | worker runner、queue adapter、reconciler、调试工具 |
+| 主要读者 | 外部 orchestrator、polling client | 内部 orchestrator、semantic recovery scanner、运维诊断 | worker runner、queue adapter、transition/repair service、调试工具 |
 | 基数 | 每个外部请求一个 Task | 每 Task 1:N；含历史 root 与 scatter children | 每 Execution 1:N |
-| 稳定期 | API retention 期内 durable | durable，至少不短于 Task/业务审计需要 | 可清理，但受终态/压缩/对账 fence 约束 |
+| 稳定期 | API retention 期内 durable | durable，至少不短于 Task/业务审计需要 | projection可清理，但受终态summary与cleanup-eligibility fence约束 |
 | 状态粒度 | 总状态 | 一次目标执行总体状态 + RAG phase | 一个工序的精确运行状态 |
 | retry 身份 | Task 不变 | 整次 retry 新 Execution | 自动 retry 保持 Process |
 | scatter 角色 | 聚合一棵执行树 | root fan-out + N child runs | root/child Execution 内各自工序 |
 | 成功依据 | current root 汇总 | required processes/children + proof | type-specific output validation |
 | 允许外部写 | create、白名单 patch、command | 无外部直接状态写 | 无外部直接状态写 |
-| 可否软删/清理 | soft-delete，不破坏 Audit | durable/tombstone/归档策略 | retention 后可 compact/delete |
+| 可否软删/清理 | soft-delete，不破坏 Audit | durable/tombstone/归档策略 | cleanup-eligible 后可 archive/delete |
 
 ---
 
@@ -397,11 +415,13 @@ Process 状态与消息意图不能混为一个字段。`STEP_START/STEP_RESTART
 ```text
 Task T
   └── Root Execution E1
-        target = IntakeItem/IntakeRevision I1
+        ingress subject = IntakeSource/new input（ingest）或exact IntakeItem/Revision（rebuild）
+        accepted output binding = IntakeItem/Revision I1（只在S04 acceptance后存在）
         root_execution_uuid = E1
         parent_execution_uuid = null
-        ├── Process P1: intake.resolve_source / clean.universal_extract
-        ├── Process P2: intake.preflight_validate
+        ├── Processes P1..n: exact S05 acquire/decode/clean/seal capabilities
+        ├── Process P-preflight: intake.preflight_validate
+        ├── Process P-accept: intake.accept_snapshot（ingest）
         ├── ExecutionGate G1 (conditional; no Process lease)
         ├── Process P3: lsrag.structurize
         ├── Process P4: lsrag.construct
@@ -453,9 +473,10 @@ Task T
 ```text
 Task T
   └── Root Execution E-root
-        target = IntakeSource S1
-        ├── Process P-fetch: intake.api_fetch
-        ├── Process P-scatter: clean.api_scatter
+        ingress subject = IntakeSource S1
+        ├── Process P-fetch: intake.acquire.registered_api
+        ├── Process P-map: clean.map.registered_api
+        ├── Process P-seal: intake.collection.seal
         ├── Process P-preflight: intake.preflight_validate
         ├── Process P-accept: intake.accept_snapshot
         ├── Child Execution E-A → target IntakeItem/Revision A → RAG Processes...
@@ -469,8 +490,8 @@ Root Execution是本次API fetch/scatter/fan-in的durable controller。每个chi
 
 ```text
 1. Task ingress 原子提交
-2. 创建 E-root，执行 intake.api_fetch
-3. clean.api_scatter 输出stable ordered CandidateSet pages、typed rejection/gap evidence与clean Artifact candidates
+2. 创建 E-root，执行 `intake.acquire.registered_api`
+3. `clean.map.registered_api` 输出stable ordered CandidateSet pages、typed rejection/gap evidence与clean Artifact candidates
 4. mandatory root preflight只读frozen acquisition/collection/clean evidence；required异常产生blocked Outcome：不可保存/不可审核者fail，可信candidate可按contract seal并由S04接受后进入受控human path
 5. seal验证page/root digest、count/bytes、ExternalKey、Artifact与source-exhaustion proof
 6. S04以source-scoped ExternalKey解析/复用IntakeItem、计算versioned semantics，并单事务提交accepted Snapshot、Membership、Revision decision、ChangeSet与fan-out intents
@@ -705,15 +726,15 @@ Process runner + local queue adapter
 - crash发生在Snapshot/ChangeSet/outbox commit后、queue wake-up前时，recovery必须可补发；
 - crash 发生在部分 child 创建后时，幂等 uniqueness 必须补齐而非重复创建。
 
-### 6.7 `D01-E07` — 实施 Process compaction/cleanup fence
+### 6.7 `D01-E07` — 实施 Process terminal-summary / cleanup-eligibility fence
 
 建议清理流程：
 
 ```text
 Execution terminal
-  → reconciliation window elapsed
+  → semantic recovery/grace window elapsed
   → verify no retry/cancel/compensation command pending
-  → compact durable summary into Execution
+  → complete and validate durable Execution terminal summary
   → clear/replace dangling current_process_uuid
   → archive or delete eligible Process projections
   → retain Event/Log according to S15 policy
@@ -757,7 +778,7 @@ D01 不在本文中静默修改已 accepted 的 S01；但后续 truth freeze 必
 | `D01-C03` | “process_uuid 就是 structurize/vectorize 之类的分类。” | UUID 是实例；分类必须另设 process key/type。 |
 | `D01-C04` | “clean 完成后像 legacy 一样生成新的 RAG Execution。” | legacy 因跨 dispatcher/job 边界重生 job UUID；MKB 单体用同一 Execution 贯穿一个目标，Process 表达领域工序。 |
 | `D01-C05` | “复制三张 legacy process 表最安全，因为已经生产验证。” | 三表体现历史增量演进：clean/rag step control 与 vec unit queue 职责不同。MKB 应统一控制表、分离向量资产。 |
-| `D01-C06` | “Process 可定期清理，所以它不是状态真相。” | 活跃期 Process 是精确控制真相；只有在 Execution durable compact 且 reconciliation fence 关闭后才可清理。 |
+| `D01-C06` | “Process 可定期清理，所以它不是状态真相。” | 活跃期 Process 是精确控制真相；只有Execution terminal summary完整且全部retry/recovery/cancel/outbox围栏关闭后才可清理。 |
 | `D01-C07` | “pending_count=0 或收到成功 callback 就能完成 Task。” | legacy 此检查存在盲区；MKB 必须验证 expected vector set、failed/in-progress、filter metadata 与 publication proof。 |
 | `D01-C08` | “本地 queue item 就是 task/process。” | Queue 是 transport；durable Process 才是 claim、retry 和恢复 SSOT。 |
 | `D01-C09` | “Execution parent-child 可以替代Intake集合/资产关系。” | Execution tree描述一次运行；SnapshotMembership与Item/Revision描述长期集合和资产血缘，生命周期不同。 |
@@ -768,16 +789,16 @@ D01 不在本文中静默修改已 accepted 的 S01；但后续 truth freeze 必
 | Risk ID | 风险 | 严重度 | 预防/围栏 |
 |---|---|---:|---|
 | `D01-R01` | `attempt_uuid` 与 `execution_uuid` 并存导致 retry 双真相 | P0 | reopen S01；只保留 Execution durable identity |
-| `D01-R02` | Task status 与 Execution 集合漂移 | P0 | transition service + reconciliation + projection rebuild test |
+| `D01-R02` | Task status 与 Execution 集合漂移 | P0 | transition service + semantic repair + projection rebuild test |
 | `D01-R03` | Snapshot/ChangeSet与child scheduling非原子，漏任务或重复任务 | P0 | S04 canonical acceptance transaction + outbox/fence |
-| `D01-R04` | Process 清理留下 dangling current pointer | P0 | cleanup FK/precondition + compact transaction |
+| `D01-R04` | Process 清理留下 dangling current pointer | P0 | cleanup FK/precondition + terminal-summary completion transaction |
 | `D01-R05` | 只聚合已创建 child，漏掉应创建但未创建的 child | P0 | fan-in 对照 persisted expected set，不以 count query 猜测 |
 | `D01-R06` | 旧 lease holder 在恢复后继续写，产生双执行 | P0 | fencing generation/token，所有完成提交校验 token |
 | `D01-R07` | Process type 过度 generic，RAG 业务验证再次丢失 | P0 | versioned RAG-specific process registry + output schema/guard |
 | `D01-R08` | 将 vector units 全塞入 processes，导致表膨胀且 retention 冲突 | P1 | Process 记录批次/工序；Vector domain 持有资产明细 |
 | `D01-R09` | Task 对外暴露内部 UUID 后，上游开始编排 Process | P1 | execution/process 仅 internal read/diagnostic；外部命令仍以 Task 为边界 |
 | `D01-R10` | single 与 scatter 使用两套 engine，行为漂移 | P1 | 同一 Execution/Process engine；差异只在 root role 和 child fan-out |
-| `D01-R11` | all-required fan-in 遇到部分失败后永久卡 running | P0 | terminal aggregation policy + retry exhaustion + reconciliation timeout |
+| `D01-R11` | all-required fan-in 遇到部分失败后永久卡 running | P0 | terminal aggregation policy + retry exhaustion + durable repair trigger |
 | `D01-R12` | local filesystem locator泄漏绝对路径进API/DB identity | P1 | logical Intake/derived asset ref + relative locator + storage adapter |
 
 ### 7.3 明确禁止的实现方向
@@ -818,9 +839,9 @@ D01 不在本文中静默修改已 accepted 的 S01；但后续 truth freeze 必
 | `D01-A13` | Full retry | 对 terminal failed Execution 执行整次 retry | Task 不变；新 Execution/Processes；retry_of 指向旧 Execution |
 | `D01-A14` | No dual identity | schema/migration 扫描 | 不存在与 Execution 同义的 `task_attempts/attempt_uuid` 业务身份 |
 | `D01-A15` | Cancel | scatter 运行中取消 Task | cancel 传播 root/children/active Processes；无新 claim；收敛后才 Task cancelled |
-| `D01-A16` | Process cleanup | terminal Execution 过 retention | 先 compact；无 dangling current_process FK；Task/Execution 仍可完整查询摘要 |
+| `D01-A16` | Process cleanup | terminal Execution 过 retention | 先完成并验证terminal summary；无 dangling current_process FK；Task/Execution 仍可完整查询摘要 |
 | `D01-A17` | Event retention | Process projection 被清理 | 按 S15 策略保留的 event/log 不被隐式级联删除 |
-| `D01-A18` | Projection repair | 故意篡改 Task counters 后运行 reconciliation | 从 Executions 重建正确 projection，并留下修复事件 |
+| `D01-A18` | Projection repair | 故意篡改 Task counters 后运行semantic recovery scanner | 从 Executions 重建正确 projection，并留下修复事件 |
 | `D01-A19` | Resource/runtime split | 同一IntakeItem/Revision多次rebuild | Intake identity不变且不新增Revision；每次full run有新Execution lineage |
 | `D01-A20` | Table architecture | D01 schema review | 核心状态恰为 tasks/executions/processes；无 clean/rag 分表、无 relation/join 冗余表 |
 | `D01-A21` | RAG specificity | Process registry/schema scan | 存在 clean/structurize/construct/vectorize/validate 业务类型和各自 guard |
@@ -895,7 +916,7 @@ nl -ba legacy-family/smind-skill-rag-structurizer/flows/processor.ts | sed -n '4
 | Durable 查询 | `PASS` | execution_uuid 是内部稳定查询锚点，Process 清理后仍保留执行摘要与证明。 |
 | 本地化适配 | `PASS` | 三层模型与 Cloudflare topology 无关，可由 Turso + local filesystem + lightweight queue 实现。 |
 | 数据表复杂度 | `PASS` | 三张核心状态表足够；既避免单表多态，也避免 legacy 按领域分表漂移。 |
-| 与 S01 一致性 | `REOPEN REQUIRED` | S01 的 Attempt identity 与 D01 Execution 重叠；task_type 必须降格/重解释为 external request intent。 |
+| 与 S01 一致性 | `PASS` | S01-v1.5已废止Attempt并将`task_type`替换为external `request_intent`；D02校准继续禁止旧alias回流。 |
 | 实施风险 | `MANAGEABLE / P0 fences required` | 主要风险集中在Snapshot acceptance原子性、lease fencing、投影对账、publication proof与Process cleanup。 |
 
 ### 10.2 Verdict 的关键理由
@@ -904,7 +925,7 @@ nl -ba legacy-family/smind-skill-rag-structurizer/flows/processor.ts | sed -n '4
 2. **它给散射提供了正确的基数。** 一次API请求仍是一个Task，但每个required IntakeItem/Revision有自己的durable Execution，分母来自accepted Snapshot/ChangeSet。
 3. **它让 retry 有明确层级。** Process retry 解决短暂工序失败；Execution retry 解决一次完整运行失败；新 Task 代表新的外部业务请求。
 4. **它保留了 legacy 的生产经验，而没有继承平台负债。** 状态、I/O、控制、错误、retry、max_retries、fan-out/fan-in 都被保留；Worker callback、D1/R2/DO 与 clean/rag job 断裂被删除。
-5. **它允许 Process 清理但不牺牲审计。** 精细运行明细可按策略 compact，Execution 仍是 durable 内部执行账本，Task 仍是稳定外部账本。
+5. **它允许 Process 清理但不牺牲审计。** 精细运行明细只能在terminal summary与cleanup eligibility成立后按策略归档/清理；Execution仍是durable内部执行账本，Task仍是稳定外部账本。
 6. **它把 RAG 的成功边界放在正确层级。** Vector/filter publication 由 Process 验证、Execution 保存 proof、Task 聚合，而不是由 Task 自己猜测内部是否成功。
 
 ### 10.3 GO 的强制条件
@@ -949,3 +970,4 @@ S02-S05已经关闭Task、Workflow、Intake与clean/preflight/HITL语义；仍�
 | `D01-v1.1` | `2026-07-15` | `MKB owner + Codex` | `accepted / S02-calibrated` | 接收 S02-v1.0 回流：三张核心运行表不变；新增 `task_restarts` 因果/admission truth，将 Task ingress/runtime/restart 最小 durable 业务真相集合由四张校准为五张。 |
 | `D01-v1.2` | `2026-07-15` | `MKB owner + Codex` | `accepted / S02+S04-calibrated` | 接收S04-v1.0：将Source/Document/Version/manifest资源口径校准为IntakeSource/Snapshot/Item/Revision/Membership；确认Intake不是第四层runtime identity，single/scatter fan-in改以accepted Snapshot/ChangeSet为分母，rebuild不创建Revision。 |
 | `D01-v1.3` | `2026-07-16` | `MKB owner + Codex` | `accepted / S02+S04+S05-calibrated` | 接收S05-v1.0：Preflight归统一Process capability；human review归Execution waiting gate且不新增runtime identity；Execution锁定S05 binding；single/scatter加入preflight、gate和same-Execution resume；修正Execution无retrying状态并更新未决下游边界。 |
+| `D01-v1.4` | `2026-07-18` | `MKB owner + Codex` | `accepted / D02-state-calibrated` | 依据S02-S05已冻结事实完成状态族校准：Task/Execution/Process exact states与phase/outcome/readiness/Intake/Gate分账；以S05 exact capability keys取代早期coarse intake process示例；将Process compaction旧词校准为terminal-summary/cleanup-eligibility；Execution target与S08/S09职责按D02-v1.0明确移交对应下游，不扩大v1。 |

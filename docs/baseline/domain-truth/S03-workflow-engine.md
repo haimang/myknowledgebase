@@ -4,17 +4,17 @@
 >
 > **Domain / 子系统**：`D2 任务执行 / S03 Declarative LS-RAG Workflow Engine`
 >
-> **日期**：`2026-07-16`
+> **日期**：`2026-07-18`
 >
 > **作者 / 裁决者**：`MKB owner + Codex`
 >
 > **文档性质**：`domain truth / formal subsystem specification`
 >
-> **文档状态**：`accepted`（S03 域内已接受；全系统 truth layer 尚未 frozen）
+> **文档状态**：`accepted / D02-state-calibrated`（S03 域内已接受；全系统 truth layer 尚未 frozen）
 >
-> **Truth 版本**：`S03-v1.2`
+> **Truth 版本**：`S03-v1.3`
 >
-> **上游权威输入**：`D01-v1.3`、`S01-v1.4`、`S02-v1.2`、`S04-v1.1`、`S05-v1.0`、冻结的`qna-truth/S03.md v1.0`（Q1–Q9 / `T-O-12..29`）
+> **上游权威输入**：`D01-v1.4`、`S01-v1.5`、`S02-v1.3`、`S04-v1.2`、`S05-v1.1`、冻结的`qna-truth/S03.md v1.0`（Q1–Q9 / `T-O-12..29`）及S06已冻结`T-O-77..85`
 >
 > **事实证据**：`legacy-family/` 中 SMCP、Workflow editor/compiler、Clean/RAG Dispatcher、Process tracking、restart 与 atomic scatter 生产实现
 >
@@ -27,6 +27,8 @@
 > **S04校准声明**：S03原有`Source/Document/Version/manifest`是S04冻结前的资源占位词。本版将MKB资源binding、fan-out分母、proof target和cleanup cutoff校准为`IntakeSource/IntakeSnapshot/IntakeItem/IntakeRevision/IntakeChangeSet/IntakeArtifact`；Workflow/Execution/Process状态机与七张定义表不变。
 
 > **S05校准声明**：S05-v1.0不改变Workflow七表、Execution/Process exact states或Engine路由权。PreflightValidator作为普通leaf Process capability提交typed Outcome；human review使用Execution既有`waiting`并以`human_review`+exact gate ref作为durable trigger，Process先terminal。Execution额外锁定S05 domain binding；四个crash窗口复用本域transition/repair与S12 outbox，不新增Reconciler。
+
+> **D02状态校准声明**：D02-v1.0已镜像Execution/Process八态、合法边与正交事实，并冻结`T-O-86..92`；本版不改变Workflow七表、retry/cancel/recovery或phase registry。状态、phase、waiting reason、ProcessOutcome、route decision和资产状态严格分账；S05 exact intake capability key取代S03早期coarse intake key作为实际manifest identity。Execution ingress subject与acceptance后exact output的物理字段归S03/S04/S12，embedding与index工序拆分归S08/S09；二者是D02下游移交，不再等待D02裁决。
 
 ---
 
@@ -199,7 +201,7 @@ Legacy 只能证明需求和失败模式，不能把 Cloudflare Worker/Queue/Dur
 | `S03-T035` | RAG phase 与 control status 分列，并从 bound route 与 active Process set 归约。 | `T-O-25` | phase 不进入 Task status，不由 worker 任意写。 |
 | `S03-T036` | `waiting` 必须持有 typed reason、durable trigger/ref 和可选 next wake time；无 trigger 的 waiting 是 invariant violation。 | `T-O-25/T-O-28` | 禁止 generic pending 黑洞。 |
 | `S03-T037` | `current_process_uuid` 只允许 nullable focus/last pointer；并发 active set 以 `processes` 查询和 Execution counters 为真。 | `T-O-25` | pointer 不承担 fan-out membership SSOT。 |
-| `S03-T038` | single使用一个绑定exact IntakeItem/Revision的root Execution贯穿clean→LS-RAG→publication validation。 | `T-O-26 + UPSTREAM + S04` | 不在Clean/RAG边界重生Execution/job。 |
+| `S03-T038` | single使用同一个root Execution贯穿ingress→clean→acceptance→LS-RAG→publication validation；acceptance前绑定创建时已有的Source/input subject，acceptance后各下游Process只消费exact accepted IntakeItem/Revision binding。 | `T-O-26 + UPSTREAM + S04 + D02-CALIBRATION` | 不在Clean/RAG边界重生Execution/job，也不得让下游Process读取“latest”猜target；subject/output exact字段由S03/S04在S12物理schema中冻结并按D02-v1.0回填。 |
 | `S03-T039` | scatter使用root controller + accepted IntakeSnapshot/ChangeSet + 0..N child Executions；child identity/required set来自S04 durable truth。 | `T-O-26 + UPSTREAM + S04-T024..T029` | 一个外部Task；禁止child Task。 |
 | `S03-T040` | scatter root collect-all：healthy child 不因 sibling failure停止；全部 required terminal 后才归约 root。 | `T-O-26 + S02` | 不提供 partial-success Task terminal。 |
 | `S03-T041` | proof-valid child可早发布；parent failure/cancel不隐式回滚；cancel是forward-stop。 | `T-O-26 + S02 + S04` | 可见性依据IntakeItem lifecycle + exact ServingRevision proof，不依据root/Task单一状态。 |
@@ -226,6 +228,20 @@ Legacy 只能证明需求和失败模式，不能把 Cloudflare Worker/Queue/Dur
 | `S03-T052` | 只有需要人工输入时，Engine在Process terminal后创建/引用ExecutionGate，并将Execution CAS为`waiting(reason=human_review, ref=gate_uuid)`。 | `S05-T020..24` | 自动passed路径不建gate；Process不得持claim/lease等待。 |
 | `S03-T053` | Execution binding除Workflow exact binding外，还必须引用actual S05 source/acquisition/clean/preflight binding及`s05_binding_digest`；retry/recovery/human resume均不可热切。 | `S05-T025..26` | 旧Task升级走S02 restart/new generation；同version异digest失败隔离。 |
 | `S03-T054` | Outcome→route、gate→waiting、decision→outbox与late/stale四窗口调用正常transition service幂等repair；waiting永不自动approve。 | `S05-T029..30` | S03/S12不得从UI/log/storage/payload_extra合成decision，也不建设第二套gate recovery engine。 |
+
+### 2.9 状态族校准矩阵
+
+| 事实族 | Exact vocabulary | 谁推进 | 与Execution/Process status的关系 |
+|---|---|---|---|
+| Execution status | `created/ready/running/waiting/succeeded/failed/cancelling/cancelled` | Engine transition service | 唯一Execution控制状态 |
+| Process status | `ready/claimed/running/retry_wait/succeeded/failed/cancelling/cancelled` | Process transition service | 唯一Process控制状态 |
+| Execution phase | §4.9 registry | route/active Process deterministic归约 | 正交；terminal保留last phase，不新增completed |
+| waiting reason | `retry_due/process_join/scatter_children/durable_prerequisite/human_review` | Engine CAS | 只在Execution `waiting`时存在，必须带durable ref |
+| ProcessOutcome | `succeeded/failed/cancelled` + retryability | leaf提交、Engine验证 | immutable input；验证后才驱动Process状态边 |
+| route decision | route key(s)+guard results+decision digest | Engine | immutable evidence；不是状态 |
+| Preflight/Gate/Intake facts | S04/S05 exact词汇 | 各owner domain | 只作为typed route/trigger输入，不写入runtime status |
+
+v1禁止新增`pending/retrying/completed/reviewing/partially_succeeded/quarantined`状态别名。`quarantine`只能是failed后的disposition/evidence；`action_required`只由S02投影；`CandidateSet accepted`也不能使Execution直接成功。
 
 ---
 
@@ -407,19 +423,23 @@ v1 operator allowlist 至少包含：`eq/ne/lt/lte/gt/gte/exists/not_exists/in_r
 | `retry_error_policy` | process-specific error code → retryable/non-retryable allowlist |
 | `resource_access` | 允许读写的logical Intake/derived asset kind |
 
-首版 canonical process families：
+首版 capability coverage。S05-v1.1已经冻结的key是实际`process_key`；`resolve/fetch/universal_extract/api_scatter`只保留为历史coarse family说明，不注册兼容alias：
 
-| Process key | 业务边界 | 典型成功 guard |
+| Exact process key / downstream placeholder | 业务边界 | 典型成功 guard |
 |---|---|---|
-| `intake.resolve_source` | 解析本地/已登记IntakeSource | IntakeSource ref可读、digest/mime/size有效 |
-| `intake.api_fetch` | 单点 API 获取原始响应 | 响应完整持久化、schema/profile 可判定 |
-| `clean.universal_extract` | 异构内容转canonical text | typed content asset存在且digest/schema通过 |
-| `clean.api_scatter` | 解析稳定atomic candidates | ExternalKey、semantic values、CandidateSet schema完整 |
+| `intake.acquire.inline` | 获取inline staged representation | AcquisitionEvidence、digest/media/size/budget有效 |
+| `intake.acquire.local_object` | 获取本地logical object | stream/digest/media/encoding/budget有效 |
+| `intake.acquire.http_static` / `intake.acquire.http_browser` | 获取HTTP raw/rendered representation | redirect/status/budget/profile/lineage完整 |
+| `intake.acquire.registered_api` | 获取registered API single/collection pages | envelope/page/cursor/scope evidence完整 |
+| `intake.decode.text_json_html` / `intake.decode.pdf` | 确定性解码与canonicalization | exact schema/canonicalizer/digest/loss evidence通过 |
+| `clean.extract.deterministic` / `clean.ocr.local` / `clean.extract.vision` | 产生clean candidate | typed CleanArtifactCandidate、anchor/quality/producer evidence完整 |
+| `clean.map.registered_api` | provider member→ExternalKey/semantic/clean candidate | schema、ExternalKey、semantic tuples、rejection evidence完整 |
+| `intake.collection.seal` | single/scatter CandidateSet完整性封口 | stable order、page/root digest、counts、scope/completeness/exhaustion proof通过 |
 | `intake.preflight_validate` | 以exact PreflightValidator只读校验frozen acquisition/collection/clean evidence | `passed|blocked` Outcome、ordered check evidence与binding digest完整；runtime错误不伪装blocked |
-| `intake.accept_snapshot` | 接受sealed CandidateSet并提交Snapshot/Membership/ChangeSet | accepted Snapshot/required set durable，可重放 |
-| `lsrag.structurize` | 结构化/逻辑分块 | structured schema、coverage/coordinates 合法 |
-| `lsrag.construct` | layered/vector-ready 内容构建 | summary/original channels 与引用完整 |
-| `lsrag.vectorize_index` | embedding + Turso vector/filter 写入 | expected vector set、维度/model/filter 合法 |
+| `intake.accept_snapshot` | 调用S04 acceptance提交Snapshot/Membership/ChangeSet | accepted Snapshot/required set durable，可重放；truth仍归S04 |
+| `lsrag.structurize` | 结构化/逻辑分块 | exact S06 schema、coverage/coordinates 合法 |
+| `lsrag.construct` | layered/vector-ready 内容构建 | summary/original channels 与引用完整；exact contract归S07 |
+| `lsrag.vectorize_index`（coarse downstream placeholder） | 覆盖embedding与index写入需求 | embedding成功不能代替index publication；是否拆Process由S08/S09冻结 |
 | `index.validate_publication` | 独立验证发布集合 | expected/actual、filter、检索 proof 一致 |
 | `intake.update_metadata` | 更新Intake semantic metadata/filter | versioned semantic/proof完整，必要时追加IntakeRevision |
 | `intake.physical_purge` | 受控清理eligible派生数据 | retention/hold/substrate cleanup proofs完成 |
@@ -526,6 +546,8 @@ Resolver 输出：`workflow_uuid + workflow_revision_uuid + compiled_digest + re
 ### 4.6 `S03-E06` — 冻结 `executions` 与 `processes` 逻辑 Schema
 
 #### 4.6.1 `executions` 最小列族
+
+> **Downstream implementation hold**：D02-v1.0已冻结immutable subject与accepted output必须分账，但不替S03/S04/S12设计物理字段。`target_kind/target_ref`当前只能理解为逻辑列族，不得直接冻结为一个同时承担ingress subject与acceptance后Item/Revision output的封闭enum；single ingest在acceptance前可能尚无Item/Revision。该下游schema hold不改变一个root Execution贯穿single链路的冻结事实，也不构成D02未完成。
 
 | 列族 | 逻辑字段 |
 |---|---|
@@ -706,6 +728,8 @@ Phase 由 active Process set/route priority 归约；同一 Execution 并行多 
 
 Waiting reason registry：`retry_due/process_join/scatter_children/durable_prerequisite/human_review`。每个reason必须携带对应`wait_ref`；`human_review`的ref必须是current-fenced open ExecutionGate，retry_due还必须有`next_wake_at`。无reason/ref、terminal/stale gate或Process仍持lease等待human均为invariant violation。
 
+`vectorizing_indexing`只冻结为当前Execution focus phase，不证明embedding生成、index generation写入与publication validation必须由一个Process完成。S08/S09冻结exact capability前，禁止从该phase反推`lsrag.vectorize_index`的事务或retry边界。
+
 ### 4.10 `S03-E10` — 实施 Typed Route/Guard Engine
 
 每次route evaluation必须输入：bound WorkflowRevision/digest、current step/outcome、IntakeSnapshot/ChangeSet immutable decisions、Execution control、registered guard values。输出必须是：
@@ -731,11 +755,13 @@ Waiting reason registry：`retry_due/process_join/scatter_children/durable_prere
 
 ```text
 Task(intake.ingest/rebuild)
-  → IntakeItem/Revision root Execution
-      → intake.resolve_source / intake.api_fetch
-      → clean.universal_extract（按IntakeSource capability可受控skip）
+  → root Execution（ingest初始subject为Source/input；rebuild为exact Item/Revision）
+      → exact intake.acquire.*
+      → exact intake.decode.* / clean.*（按IntakeSource capability可受控skip）
+      → intake.collection.seal
       → intake.preflight_validate
       → intake.accept_snapshot（ingest路径）
+           bind exact accepted Item/Revision output for downstream Processes
       → admission route
            passed+allowlisted → continue（无gate）
            review needed → waiting(human_review, exact accepted target/gate ref)
@@ -764,8 +790,9 @@ Task(intake.ingest/rebuild)
 ```text
 Task(intake.ingest, API IntakeSource)
   → root controller Execution
-      → intake.api_fetch
-      → clean.api_scatter
+      → intake.acquire.registered_api
+      → clean.map.registered_api
+      → intake.collection.seal
       → intake.preflight_validate（root frozen evidence）
       → intake.accept_snapshot
            commit IntakeSnapshot / Membership / ChangeSet required set
@@ -1199,3 +1226,4 @@ S03 将 legacy 已验证的声明式 Workflow 与 Process 解耦原理，重建�
 | `S03-v1.0` | `2026-07-15` | `MKB owner + Codex` | `accepted` | 吸收冻结 Q1–Q9 与 `T-O-12..29`；正式冻结六平面 Workflow 宪法、内部注册、七表 schema、compiled JSON、capability registry、typed route/compiler、ProcessCommand/Outcome、Execution/Process exact states、claim/fencing/retry、single/scatter/cancel、semantic recovery、cleanup eligibility、验收与 legacy reference anchors。 |
 | `S03-v1.1` | `2026-07-15` | `MKB owner + Codex` | `accepted / S04-calibrated` | 接收S04-v1.0：resource bindings与single/scatter targets改为Intake identities；fan-out/fan-in改以Snapshot/ChangeSet为分母；publication/cleanup绑定ServingRevision与Intake asset fence；ProcessCapabilityManifest和BindingSource词义去歧义。 |
 | `S03-v1.2` | `2026-07-16` | `MKB owner + Codex` | `accepted / S05-calibrated` | 接收S05-v1.0：增加preflight leaf capability；Execution waiting reason登记human_review+gate ref；锁定S05 domain binding且resume不热切；single/scatter加入preflight/gate顺序；四个crash窗口纳入统一semantic repair，Workflow七表与runtime exact states不变。 |
+| `S03-v1.3` | `2026-07-18` | `MKB owner + Codex` | `accepted / D02-state-calibrated` | 保持Workflow七表、Execution/Process八态与合法边不变；明确status/phase/wait reason/Outcome/route evidence分账；以S05 exact intake capability keys取代早期coarse process key；校准single ingress subject与acceptance后exact binding叙事，target字段与S08/S09 process粒度按D02-v1.0移交对应下游。 |
