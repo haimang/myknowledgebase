@@ -1,0 +1,43 @@
+"""Public vectorization and context-only retrieval contracts."""
+
+from src.contracts.vector.models import (
+    EmbeddingModelRef,
+    GenerationScopedCoordinate,
+    PackSegment,
+    PackView,
+    RetrievalBody,
+    RetrievalBundle,
+    RetrievalDiagnostics,
+    RetrievalGenerationRefs,
+    RetrievalResult,
+    VectorizeChannelFilter,
+    VectorizeCommand,
+    VectorizeCommandV1,
+    VectorizeHandoffV1,
+    VectorizeIntent,
+    VectorizeMode,
+    VectorizeOutcome,
+    VectorizeOutcomeV1,
+    VectorizePurgeReceiptV1,
+)
+
+__all__ = [
+    "EmbeddingModelRef",
+    "GenerationScopedCoordinate",
+    "PackSegment",
+    "PackView",
+    "RetrievalBody",
+    "RetrievalBundle",
+    "RetrievalDiagnostics",
+    "RetrievalGenerationRefs",
+    "RetrievalResult",
+    "VectorizeIntent",
+    "VectorizeChannelFilter",
+    "VectorizeCommand",
+    "VectorizeCommandV1",
+    "VectorizeHandoffV1",
+    "VectorizeMode",
+    "VectorizeOutcome",
+    "VectorizeOutcomeV1",
+    "VectorizePurgeReceiptV1",
+]
