@@ -151,7 +151,12 @@ _METRIC_CATALOG = MappingProxyType(
             labels=("code",),
             allowed={
                 "code": frozenset(
-                    {"SEC_SUPPLY_UNBOUND", "SEC_SUPPLY_DIGEST_MISMATCH", "SEC_SUPPLY_SIGNATURE_INVALID"}
+                    {
+                        "SEC_SUPPLY_UNBOUND",
+                        "SEC_MODEL_ENDPOINT_REJECTED",
+                        "SEC_SUPPLY_DIGEST_MISMATCH",
+                        "SEC_SUPPLY_SIGNATURE_INVALID",
+                    }
                 )
             },
         ),

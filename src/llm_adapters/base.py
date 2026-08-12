@@ -14,6 +14,12 @@ from src.contracts.inference.models import (
 
 @runtime_checkable
 class InferenceAdapter(Protocol):
+    """Provider transport port with a non-secret S16 identity surface."""
+
+    adapter_kind: str
+    base_url: str
+    secret_slot: str | None
+
     async def embed(self, request: EmbeddingRequest) -> EmbeddingResponse: ...
 
     async def generate(self, request: GenerateRequest) -> GenerateResponse: ...
