@@ -105,6 +105,9 @@ async def create_task(
 ) -> Response:
     del ready
     team_uuid = _team_path(team_uuid)
+    # Preserve the caller-owned root trace for any later safe error envelope.
+    # Runtime IDs remain internal; this is only request correlation.
+    request.state.trace_uuid = body.trace_uuid
     if body.team_uuid != team_uuid:
         raise MkbError("team-path-mismatch", "Body team_uuid must match path", 422)
     task, replay = await request.app.state.container.tasks.create(body, token)
@@ -123,6 +126,11 @@ async def list_tasks(
     token: BusinessToken,
     status: str | None = None,
     request_intent: str | None = None,
+    priority: str | None = None,
+    created_at_from: str | None = None,
+    created_at_to: str | None = None,
+    updated_at_from: str | None = None,
+    updated_at_to: str | None = None,
     include_deleted: bool = False,
     limit: int = 50,
     cursor: str | None = None,
@@ -132,6 +140,11 @@ async def list_tasks(
         _team_path(team_uuid),
         status=status,
         request_intent=request_intent,
+        priority=priority,
+        created_at_from=created_at_from,
+        created_at_to=created_at_to,
+        updated_at_from=updated_at_from,
+        updated_at_to=updated_at_to,
         include_deleted=include_deleted,
         limit=limit,
         cursor=cursor,

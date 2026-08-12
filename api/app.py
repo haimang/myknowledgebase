@@ -7,18 +7,20 @@ from contextlib import asynccontextmanager
 from dataclasses import dataclass
 
 from fastapi import FastAPI, Request
+from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse, PlainTextResponse
 
 from api.internal.routes import router as internal_router
 from api.public.routes import router as public_router
 from src.contracts.common.errors import MkbError
+from src.contracts.common.ids import uuid7, validate_external_uuid
 from src.llm_adapters.local_vllm import LocalVllmAdapter
 from src.persistence.sqlite_port import SqlitePersistence
 from src.runtime.config import Settings
 from src.runtime.health import HealthAggregator
 from src.runtime.inference.facade import InferenceFacade
 from src.runtime.metrics import MetricRegistry, default_metrics
-from src.runtime.security import ActiveTokenSet, FixedWindowRateLimiter
+from src.runtime.security import ActiveTokenSet, FixedWindowRateLimiter, safe_request_id
 from src.runtime.task_service import TaskService
 from src.services.events import DomainEventWriter, SecurityAuditWriter
 from src.services.registry import RegistryService
@@ -41,6 +43,45 @@ class Container:
     tasks: TaskService
     inference: InferenceFacade
     health: HealthAggregator
+
+
+def _public_error_trace_uuid(
+    request: Request,
+    *,
+    body: object | None = None,
+    explicit: str | None = None,
+) -> str:
+    """Return a safe request correlation trace without reflecting raw input.
+
+    A valid Task Create body keeps its caller-owned root trace even when a
+    sibling field fails validation.  Other rejected requests receive a fresh
+    server trace so every public error envelope remains correlatable without
+    trusting arbitrary header/body text.
+    """
+
+    candidates: list[object | None] = [explicit, getattr(request.state, "trace_uuid", None)]
+    if isinstance(body, dict):
+        candidates.append(body.get("trace_uuid"))
+    candidates.append(request.headers.get("x-mkb-trace-uuid"))
+    for candidate in candidates:
+        try:
+            return validate_external_uuid(candidate, field="trace_uuid")
+        except Exception:
+            continue
+    return uuid7()
+
+
+def _is_task_contract_request(request: Request) -> bool:
+    """Keep Task schema failures distinct from unrelated public DTO errors."""
+
+    path = request.url.path
+    return path.startswith("/v1/teams/") and "/tasks" in path
+
+
+def _public_request_id(request: Request) -> str:
+    """Always put a safe correlation ID on public error envelopes."""
+
+    return safe_request_id(request.headers.get("x-request-id")) or uuid7()
 
 
 async def _probe(container: Container) -> dict[str, bool]:
@@ -139,7 +180,33 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @app.exception_handler(MkbError)
     async def mkb_error_handler(request: Request, exc: MkbError) -> JSONResponse:
-        return JSONResponse(status_code=exc.status_code, content=exc.as_dict(request.headers.get("x-request-id")))
+        return JSONResponse(
+            status_code=exc.status_code,
+            content=exc.as_dict(
+                _public_request_id(request),
+                trace_uuid=_public_error_trace_uuid(request, explicit=exc.trace_uuid),
+            ),
+        )
+
+    @app.exception_handler(RequestValidationError)
+    async def validation_error_handler(request: Request, exc: RequestValidationError) -> JSONResponse:
+        # FastAPI's default ``detail`` can reflect raw body fragments.  The
+        # public contract intentionally returns one stable, non-echoing error
+        # family instead.
+        error = MkbError(
+            "task-schema-invalid" if _is_task_contract_request(request) else "request-invalid",
+            "Task request does not satisfy the typed public contract"
+            if _is_task_contract_request(request)
+            else "Request does not satisfy the typed public contract",
+            422,
+        )
+        return JSONResponse(
+            status_code=422,
+            content=error.as_dict(
+                _public_request_id(request),
+                trace_uuid=_public_error_trace_uuid(request, body=exc.body),
+            ),
+        )
 
     @app.get("/live", tags=["probes"])
     @app.get("/healthz", tags=["probes"])

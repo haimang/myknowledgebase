@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from collections.abc import Mapping
 from typing import Annotated, Any, Literal
 
@@ -24,6 +25,9 @@ def _uuid(value: str, field: str) -> str:
         return validate_external_uuid(value, field=field)
     except Exception as exc:
         raise ValueError(str(exc)) from exc
+
+
+_UTC_RFC3339 = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|\+00:00)$")
 
 
 class TeamCreateRequest(PayloadExtraModel):
@@ -84,7 +88,14 @@ class TaskAudit(PayloadExtraModel):
     @field_validator("created_at", "reviewed_at", "expires_at")
     @classmethod
     def normalize_time(cls, value: str | None, info: Any) -> str | None:
-        return None if value is None else normalize_rfc3339(value, field=info.field_name)
+        if value is None:
+            return None
+        try:
+            return normalize_rfc3339(value, field=info.field_name)
+        except MkbError as exc:
+            # Boundary model validators must raise validation errors rather
+            # than leak a lower-layer exception family through FastAPI.
+            raise ValueError(f"{info.field_name} must be RFC3339") from exc
 
 
 class InlineSourceDescriptor(PayloadExtraModel):
@@ -210,8 +221,20 @@ class TaskCreateRequest(PayloadExtraModel):
     title: Annotated[str | None, Field(max_length=1024)] = None
     description: Annotated[str | None, Field(max_length=8192)] = None
     priority: Literal["low", "normal", "high", "urgent"] = "normal"
+    deadline_at: str | None = None
     payload: TaskPayload
     audit: TaskAudit
+
+    @field_validator("deadline_at")
+    @classmethod
+    def normalize_deadline_at(cls, value: str | None) -> str | None:
+        """Keep the create-only scheduling fence in one UTC wire form."""
+
+        if value is None:
+            return None
+        if not _UTC_RFC3339.fullmatch(value):
+            raise ValueError("deadline_at must be RFC3339 UTC")
+        return normalize_rfc3339(value, field="deadline_at")
 
     @model_validator(mode="before")
     @classmethod
@@ -257,7 +280,12 @@ class TaskPatchRequest(PayloadExtraModel):
 
     @model_validator(mode="after")
     def require_mutation(self) -> TaskPatchRequest:
-        if self.title is None and self.description is None and self.priority is None and not self.payload_extra:
+        if (
+            self.title is None
+            and self.description is None
+            and self.priority is None
+            and "payload_extra" not in self.model_fields_set
+        ):
             raise ValueError("at least one mutable Task field is required")
         return self
 
@@ -408,6 +436,7 @@ class TaskView(StrictModel):
     title: str | None = None
     description: str | None = None
     priority: str
+    deadline_at: str | None = None
     payload_extra: dict[str, Any]
     received_at: str
     started_at: str | None = None

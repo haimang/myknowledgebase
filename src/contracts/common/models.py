@@ -103,6 +103,7 @@ class ErrorBody(StrictModel):
 
 class ErrorEnvelope(StrictModel):
     error: ErrorBody
+    trace_uuid: str | None = None
     request_id: str | None = None
 
 

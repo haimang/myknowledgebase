@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+import uuid
 from dataclasses import dataclass
 from typing import Any
 
@@ -22,6 +23,20 @@ _CONNECTION_URL = re.compile(
 )
 _ABS_PATH = re.compile(r"(?<![:A-Za-z0-9_])/(?:[A-Za-z0-9_.-]+/)*[A-Za-z0-9_.-]+")
 _REQUEST_ID = re.compile(r"^[A-Za-z0-9._:-]{1,128}$")
+
+
+def _safe_trace_uuid(value: str | None) -> str | None:
+    """Return only a valid public correlation UUID, never raw request text."""
+
+    if not isinstance(value, str):
+        return None
+    try:
+        parsed = uuid.UUID(value)
+    except (ValueError, AttributeError):
+        return None
+    if parsed.int == 0 or parsed.version not in (4, 7):
+        return None
+    return str(parsed)
 
 
 def _safe_text(value: str) -> str:
@@ -60,14 +75,15 @@ class MkbError(Exception):
     message: str
     status_code: int = 400
     details: dict[str, Any] | None = None
+    trace_uuid: str | None = None
 
-    def as_dict(self, request_id: str | None = None) -> dict[str, Any]:
+    def as_dict(self, request_id: str | None = None, *, trace_uuid: str | None = None) -> dict[str, Any]:
         error: dict[str, Any] = {"code": self.code[:128], "message": _safe_text(self.message)[:512]}
         if self.details:
             safe_details = _safe_detail(self.details)
             if isinstance(safe_details, dict):
                 error["details"] = safe_details
-        result: dict[str, Any] = {"error": error}
+        result: dict[str, Any] = {"error": error, "trace_uuid": _safe_trace_uuid(trace_uuid or self.trace_uuid)}
         if request_id and _REQUEST_ID.fullmatch(request_id):
             result["request_id"] = request_id
         return result

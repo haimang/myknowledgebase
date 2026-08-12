@@ -12,7 +12,7 @@ from src.contracts.common.errors import MkbError
 from src.contracts.common.ids import uuid7
 from src.contracts.common.time import utc_now
 from src.persistence.sqlite_port import SqlitePersistence
-from src.runtime.task_service import TaskService
+from src.runtime.task_service import TaskService, _decode_task_list_cursor
 from src.services.events import DomainEventWriter
 from src.services.teams import TeamService
 
@@ -159,8 +159,10 @@ async def test_generation_restart_and_lineage_are_task_scoped_summaries(tmp_path
             )
             assert task is not None
             await tx.execute(
-                "UPDATE mkb_tasks SET status='failed',error_code='terminal-test' WHERE team_uuid=? AND task_uuid=?",
-                (team_uuid, task_uuid),
+                "UPDATE mkb_tasks SET status='failed',error_code='terminal-test',result_ref='mkbobj:v1:old-result',"
+                "proof_ref='mkbobj:v1:old-proof',started_at=?,completed_at=?,cnt_total=3,cnt_required=2,cnt_active=0,"
+                "cnt_succeeded=1,cnt_failed=1,cnt_cancelled=1,cnt_skipped=0 WHERE team_uuid=? AND task_uuid=?",
+                (utc_now(), utc_now(), team_uuid, task_uuid),
             )
             await tx.execute(
                 "UPDATE mkb_executions SET status='failed' WHERE execution_uuid=?",
@@ -170,11 +172,28 @@ async def test_generation_restart_and_lineage_are_task_scoped_summaries(tmp_path
         # This exercises the full-retry restart insert, including the placeholder
         # count regression that would otherwise fail before the projection exists.
         retried = await service.retry(team_uuid, task_uuid, RetryRequest(expected_revision=0, reason="retry"))
+        # The same network command is a replay even though accepting it has
+        # advanced Task revision/generation.  It must not create a third root
+        # or report a misleading revision conflict.
+        replay = await service.retry(team_uuid, task_uuid, RetryRequest(expected_revision=0, reason="retry"))
         generations, _ = await service.generations(team_uuid, task_uuid)
         restarts, _ = await service.restarts(team_uuid, source_task_uuid=task_uuid)
         graph = await service.lineage(team_uuid, task_uuid=task_uuid)
 
         assert retried["current_generation"] == 2
+        assert replay["current_generation"] == 2
+        assert retried["started_at"] is None
+        assert retried["completed_at"] is None
+        assert retried["result_ref"] is None and retried["proof_ref"] is None
+        assert retried["counts"] == {
+            "total": 0,
+            "required": 0,
+            "active": 0,
+            "succeeded": 0,
+            "failed": 0,
+            "cancelled": 0,
+            "skipped": 0,
+        }
         assert [row["generation"] for row in generations] == [2, 1]
         assert len(restarts) == 1 and restarts[0]["scope"] == "full_task"
         filtered, _ = await service.restarts(
@@ -203,6 +222,71 @@ async def test_generation_restart_and_lineage_are_task_scoped_summaries(tmp_path
         assert "execution_uuid" not in rendered
         assert "process_uuid" not in rendered
         assert "fencing_generation" not in rendered
+    finally:
+        await persistence.close()
+
+
+@pytest.mark.asyncio
+async def test_task_list_filters_and_cursor_are_opaque_and_filter_bound(tmp_path: Path) -> None:
+    persistence, service, team_uuid, task_uuid, _ = await _service(tmp_path)
+    try:
+        first = await service.get(team_uuid, task_uuid)
+        assert first["deadline_at"] is None
+        async with persistence.transaction() as tx:
+            row = await tx.fetchone(
+                "SELECT row_revision FROM mkb_tasks WHERE team_uuid=? AND task_uuid=?", (team_uuid, task_uuid)
+            )
+            assert row is not None
+            await tx.execute(
+                "UPDATE mkb_tasks SET priority='high',created_at='2026-01-01T00:00:00.000000Z',"
+                "updated_at='2026-01-02T00:00:00.000000Z' WHERE team_uuid=? AND task_uuid=?",
+                (team_uuid, task_uuid),
+            )
+        second_task_uuid, second_trace_uuid = uuid7(), uuid7()
+        second = TaskCreateRequest.model_validate(
+            {
+                "schema_version": "mkb.task.v1",
+                "team_uuid": team_uuid,
+                "task_uuid": second_task_uuid,
+                "trace_uuid": second_trace_uuid,
+                "request_intent": "intake.ingest",
+                "priority": "low",
+                "deadline_at": "2099-01-01T00:00:00Z",
+                "payload": {"source": {"source_kind": "inline_payload", "external_key": "two", "content": "world"}},
+                "audit": {
+                    "schema_version": "mkb.task-audit.v1",
+                    "team_uuid": team_uuid,
+                    "task_uuid": second_task_uuid,
+                    "trace_uuid": second_trace_uuid,
+                    "audit_type": "business_review",
+                    "audit_status": "not_required",
+                    "source": "test",
+                    "created_at": utc_now(),
+                },
+            }
+        )
+        created, replay = await service.create(second, "token-fingerprint")
+        assert replay is False
+        assert created["deadline_at"] == "2099-01-01T00:00:00.000Z"
+
+        high, cursor = await service.list(team_uuid, priority="high", limit=1)
+        assert [row["task_uuid"] for row in high] == [task_uuid]
+        assert cursor is None
+        page, cursor = await service.list(team_uuid, limit=1)
+        assert len(page) == 1 and cursor is not None
+        assert "|" not in cursor
+        decoded = _decode_task_list_cursor(cursor)
+        assert decoded["task_uuid"] == page[0]["task_uuid"]
+        with pytest.raises(MkbError, match="cursor"):
+            await service.list(team_uuid, priority="high", cursor=cursor)
+        bounded, _ = await service.list(
+            team_uuid,
+            created_at_from="2025-12-31T00:00:00Z",
+            created_at_to="2026-01-01T23:59:59Z",
+            updated_at_from="2026-01-01T00:00:00Z",
+            updated_at_to="2026-01-03T00:00:00Z",
+        )
+        assert [row["task_uuid"] for row in bounded] == [task_uuid]
     finally:
         await persistence.close()
 

@@ -7,6 +7,8 @@ records in the same Task/Audit/outbox transaction.
 
 from __future__ import annotations
 
+import base64
+import binascii
 import json
 from typing import Any
 
@@ -19,7 +21,7 @@ from src.contracts.api.models import (
 from src.contracts.common.errors import ConflictError, MkbError, NotFoundError
 from src.contracts.common.ids import stable_digest, uuid7
 from src.contracts.common.models import TaskStatus
-from src.contracts.common.time import utc_now
+from src.contracts.common.time import normalize_rfc3339, utc_now
 from src.persistence.ports import PersistencePort, UnitOfWork
 from src.services.events import DomainEventWriter
 from src.services.teams import TeamService
@@ -29,7 +31,40 @@ def _json(value: Any) -> str:
     return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
 
 
+def _encode_task_list_cursor(**fields: Any) -> str:
+    """Produce an opaque, URL-safe Task-list continuation token."""
+
+    payload = _json(fields).encode("utf-8")
+    return base64.urlsafe_b64encode(payload).decode("ascii").rstrip("=")
+
+
+def _decode_task_list_cursor(cursor: str) -> dict[str, Any]:
+    """Decode only the Task-list token shape; callers bind its filters."""
+
+    try:
+        padded = cursor + "=" * (-len(cursor) % 4)
+        value = json.loads(base64.urlsafe_b64decode(padded.encode("ascii")))
+    except (ValueError, UnicodeDecodeError, binascii.Error, json.JSONDecodeError) as exc:
+        raise MkbError("cursor-invalid", "Task cursor is invalid", 422) from exc
+    if not isinstance(value, dict):
+        raise MkbError("cursor-invalid", "Task cursor is invalid", 422)
+    return value
+
+
 class TaskService:
+    _REQUEST_INTENTS = frozenset(
+        {
+            "intake.ingest",
+            "intake.rebuild",
+            "intake.update_metadata",
+            "intake.deactivate",
+            "intake.reactivate",
+            "intake.delete",
+            "index.rebuild",
+        }
+    )
+    _PRIORITIES = frozenset({"low", "normal", "high", "urgent"})
+
     def __init__(self, persistence: PersistencePort, teams: TeamService, events: DomainEventWriter) -> None:
         self.persistence = persistence
         self.teams = teams
@@ -72,6 +107,7 @@ class TaskService:
             "title": row["title"] or None,
             "description": row["description"],
             "priority": row["priority"],
+            "deadline_at": row["deadline_at"],
             "payload_extra": json.loads(row["payload_extra"]),
             "received_at": row["received_at"],
             "started_at": row["started_at"],
@@ -106,6 +142,53 @@ class TaskService:
             raise NotFoundError("task-not-found", "Task was not found")
         return row
 
+    @staticmethod
+    def _require_public_visibility(row: dict[str, Any]) -> None:
+        """Make a Task tombstone a real public visibility fence.
+
+        Lineage and restart governance deliberately bypass this helper because
+        those surfaces are specified to retain tombstone identity.  Ordinary
+        Task reads and commands must not resurrect a hidden Task through a
+        subresource.
+        """
+
+        if row["deleted_at"] is not None:
+            error = {"code": row["error_code"]} if row["error_code"] else None
+            raise MkbError(
+                "task-deleted",
+                "Task has been soft-deleted",
+                410,
+                {
+                    "tombstone": {
+                        "task_uuid": row["task_uuid"],
+                        "status": row["status"],
+                        "current_generation": row["current_generation"],
+                        "result_ref": row["result_ref"],
+                        "proof_ref": row["proof_ref"],
+                        "error": error,
+                        "completed_at": row["completed_at"],
+                        "deleted_at": row["deleted_at"],
+                    }
+                },
+                trace_uuid=row["trace_uuid"],
+            )
+
+    @staticmethod
+    def _assert_future_deadline(deadline_at: str | None, *, received_at: str) -> None:
+        """Reject an already-expired create-time scheduling fence."""
+
+        if deadline_at is None:
+            return
+        try:
+            # Both values have already been normalized to canonical UTC
+            # RFC3339 strings.  Their lexicographic order is chronological.
+            deadline = normalize_rfc3339(deadline_at)
+            received = normalize_rfc3339(received_at)
+        except (ValueError, MkbError) as exc:  # defensive seam for non-HTTP callers
+            raise MkbError("task-deadline-invalid", "Task deadline is invalid", 422) from exc
+        if deadline <= received:
+            raise MkbError("task-deadline-invalid", "Task deadline must be later than receipt", 422)
+
     async def create(self, request: TaskCreateRequest, caller_token_fingerprint: str) -> tuple[dict[str, Any], bool]:
         fingerprint = stable_digest(request.model_dump(mode="json"))
         now = utc_now()
@@ -134,12 +217,13 @@ class TaskService:
                 if existing["creation_fingerprint"] != fingerprint:
                     raise ConflictError("task-identity-conflict", "Task identity has a different creation fingerprint")
                 return self._view(existing, await self._open_gate(tx, request.team_uuid, request.task_uuid)), True
+            self._assert_future_deadline(request.deadline_at, received_at=now)
             await tx.execute(
                 "INSERT INTO mkb_tasks "
                 "(team_uuid,task_uuid,trace_uuid,schema_version,request_intent,creation_fingerprint,audit_bound,title,"
-                "description,priority,status,row_revision,current_generation,current_root_execution_uuid,received_at,"
+                "description,priority,deadline_at,status,row_revision,current_generation,current_root_execution_uuid,received_at,"
                 "created_at,updated_at,payload_extra) "
-                "VALUES (?,?,?,?,?,?,1,?,?,?,'queued',0,1,?,?,?,?,?)",
+                "VALUES (?,?,?,?,?,?,1,?,?,?,?,'queued',0,1,?,?,?,?,?)",
                 (
                     request.team_uuid,
                     request.task_uuid,
@@ -150,6 +234,7 @@ class TaskService:
                     request.title or "",
                     request.description,
                     request.priority,
+                    request.deadline_at,
                     root_execution_uuid,
                     now,
                     now,
@@ -272,7 +357,7 @@ class TaskService:
             row = await self._get_row(tx, team_uuid, task_uuid)
             gate = await self._open_gate(tx, team_uuid, task_uuid)
         if row["deleted_at"] and not include_deleted:
-            raise MkbError("task-deleted", "Task has been soft-deleted", 410)
+            self._require_public_visibility(row)
         return self._view(row, gate)
 
     async def list(
@@ -281,10 +366,33 @@ class TaskService:
         *,
         status: str | None = None,
         request_intent: str | None = None,
+        priority: str | None = None,
+        created_at_from: str | None = None,
+        created_at_to: str | None = None,
+        updated_at_from: str | None = None,
+        updated_at_to: str | None = None,
         include_deleted: bool = False,
         limit: int = 50,
         cursor: str | None = None,
     ) -> tuple[list[dict[str, Any]], str | None]:
+        if status is not None and status not in {item.value for item in TaskStatus}:
+            raise MkbError("task-status-invalid", "Task status filter is invalid", 422)
+        if request_intent is not None and request_intent not in self._REQUEST_INTENTS:
+            raise MkbError("task-intent-invalid", "Task request intent filter is invalid", 422)
+        if priority is not None and priority not in self._PRIORITIES:
+            raise MkbError("task-priority-invalid", "Task priority filter is invalid", 422)
+        if created_at_from is not None:
+            created_at_from = normalize_rfc3339(created_at_from, field="created_at_from")
+        if created_at_to is not None:
+            created_at_to = normalize_rfc3339(created_at_to, field="created_at_to")
+        if updated_at_from is not None:
+            updated_at_from = normalize_rfc3339(updated_at_from, field="updated_at_from")
+        if updated_at_to is not None:
+            updated_at_to = normalize_rfc3339(updated_at_to, field="updated_at_to")
+        if created_at_from is not None and created_at_to is not None and created_at_from > created_at_to:
+            raise MkbError("task-time-range-invalid", "Task creation time range is invalid", 422)
+        if updated_at_from is not None and updated_at_to is not None and updated_at_from > updated_at_to:
+            raise MkbError("task-time-range-invalid", "Task update time range is invalid", 422)
         limit = min(max(limit, 1), 100)
         conditions = ["team_uuid=?"]
         params: list[Any] = [team_uuid]
@@ -296,11 +404,43 @@ class TaskService:
         if request_intent:
             conditions.append("request_intent=?")
             params.append(request_intent)
+        if priority:
+            conditions.append("priority=?")
+            params.append(priority)
+        if created_at_from is not None:
+            conditions.append("julianday(created_at)>=julianday(?)")
+            params.append(created_at_from)
+        if created_at_to is not None:
+            conditions.append("julianday(created_at)<=julianday(?)")
+            params.append(created_at_to)
+        if updated_at_from is not None:
+            conditions.append("julianday(updated_at)>=julianday(?)")
+            params.append(updated_at_from)
+        if updated_at_to is not None:
+            conditions.append("julianday(updated_at)<=julianday(?)")
+            params.append(updated_at_to)
+        filter_digest = stable_digest(
+            {
+                "team_uuid": team_uuid,
+                "status": status,
+                "request_intent": request_intent,
+                "priority": priority,
+                "created_at_from": created_at_from,
+                "created_at_to": created_at_to,
+                "updated_at_from": updated_at_from,
+                "updated_at_to": updated_at_to,
+                "include_deleted": include_deleted,
+            }
+        )
         if cursor:
-            try:
-                created_at, task_uuid = cursor.split("|", 1)
-            except ValueError as exc:
-                raise MkbError("cursor-invalid", "Task cursor is invalid", 422) from exc
+            decoded = _decode_task_list_cursor(cursor)
+            created_at, task_uuid = decoded.get("created_at"), decoded.get("task_uuid")
+            if (
+                decoded.get("filter_digest") != filter_digest
+                or not isinstance(created_at, str)
+                or not isinstance(task_uuid, str)
+            ):
+                raise MkbError("cursor-invalid", "Task cursor is invalid", 422)
             conditions.append("(created_at < ? OR (created_at = ? AND task_uuid < ?))")
             params.extend([created_at, created_at, task_uuid])
         params.append(limit + 1)
@@ -313,14 +453,21 @@ class TaskService:
             rows = await tx.fetchall(query, tuple(params))
         more = len(rows) > limit
         page = rows[:limit]
-        next_cursor = f"{page[-1]['created_at']}|{page[-1]['task_uuid']}" if more and page else None
+        next_cursor = (
+            _encode_task_list_cursor(
+                filter_digest=filter_digest,
+                created_at=page[-1]["created_at"],
+                task_uuid=page[-1]["task_uuid"],
+            )
+            if more and page
+            else None
+        )
         return [self._view(row) for row in page], next_cursor
 
     async def patch(self, team_uuid: str, task_uuid: str, request: TaskPatchRequest) -> dict[str, Any]:
         async with self.persistence.transaction() as tx:
             row = await self._get_row(tx, team_uuid, task_uuid)
-            if row["deleted_at"]:
-                raise MkbError("task-deleted", "Task has been soft-deleted", 410)
+            self._require_public_visibility(row)
             if row["row_revision"] != request.expected_revision:
                 raise ConflictError(
                     "revision-conflict", "Task revision is stale", {"current_revision": row["row_revision"]}
@@ -330,7 +477,7 @@ class TaskService:
             title = request.title if request.title is not None else row["title"]
             description = request.description if request.description is not None else row["description"]
             priority = request.priority if request.priority is not None else row["priority"]
-            extra = request.payload_extra if request.payload_extra else json.loads(row["payload_extra"])
+            extra = request.payload_extra if "payload_extra" in request.model_fields_set else json.loads(row["payload_extra"])
             await tx.execute(
                 "UPDATE mkb_tasks SET title=?,description=?,priority=?,payload_extra=?,row_revision=row_revision+1,updated_at=? "
                 "WHERE team_uuid=? AND task_uuid=? AND row_revision=?",
@@ -353,6 +500,7 @@ class TaskService:
     ) -> tuple[dict[str, Any], bool]:
         async with self.persistence.transaction() as tx:
             row = await self._get_row(tx, team_uuid, task_uuid)
+            self._require_public_visibility(row)
             if row["row_revision"] != request.expected_revision:
                 raise ConflictError(
                     "revision-conflict", "Task revision is stale", {"current_revision": row["row_revision"]}
@@ -393,6 +541,20 @@ class TaskService:
         command_digest = stable_digest({"expected_revision": request.expected_revision, "reason": request.reason})
         async with self.persistence.transaction() as tx:
             row = await self._get_row(tx, team_uuid, task_uuid)
+            self._require_public_visibility(row)
+            # A retry command is replayed by its immutable command digest,
+            # not by the Task's *current* generation/revision.  The first
+            # accepted attempt has already advanced both coordinates, so
+            # checking CAS first would turn a normal network replay into a
+            # false revision conflict and invite duplicate manual retries.
+            replay = await tx.fetchone(
+                "SELECT restart_uuid FROM mkb_task_restarts WHERE team_uuid=? AND source_task_uuid=? "
+                "AND restart_scope='full_task' AND admission_outcome='accepted' AND command_fingerprint=? "
+                "ORDER BY requested_at DESC,restart_uuid DESC LIMIT 1",
+                (team_uuid, task_uuid, command_digest),
+            )
+            if replay is not None:
+                return self._view(row)
             if row["row_revision"] != request.expected_revision:
                 raise ConflictError(
                     "revision-conflict", "Task revision is stale", {"current_revision": row["row_revision"]}
@@ -402,16 +564,6 @@ class TaskService:
             if row["status"] == "succeeded":
                 raise ConflictError("retry-not-allowed", "Succeeded Task must be rebuilt as a new Task")
             prior_root = row["current_root_execution_uuid"]
-            existing = await tx.fetchone(
-                "SELECT * FROM mkb_task_restarts WHERE team_uuid=? AND source_task_uuid=? AND source_generation=? "
-                "AND restart_scope='full_task' AND admission_outcome='accepted'",
-                (team_uuid, task_uuid, row["current_generation"]),
-            )
-            if existing:
-                if existing["command_fingerprint"] == command_digest:
-                    current = await self._get_row(tx, team_uuid, task_uuid)
-                    return self._view(current)
-                raise ConflictError("retry-conflict", "A different retry command was already accepted")
             target_generation = row["current_generation"] + 1
             root_execution_uuid = uuid7()
             previous = await tx.fetchone("SELECT * FROM mkb_executions WHERE execution_uuid=?", (prior_root,))
@@ -424,7 +576,7 @@ class TaskService:
                 "(restart_uuid,team_uuid,restart_scope,source_task_uuid,source_generation,source_root_execution_uuid,"
                 "restart_task_uuid,target_generation,target_root_execution_uuid,causation_trace_uuid,command_fingerprint,"
                 "admission_outcome,decision_code,reason,requested_at,decided_at,payload_extra) "
-                "VALUES (?,?,'full_task',?,?,?,?,?,?,?,?,?,'accepted','retry-accepted',?,?,?,'{}')",
+                "VALUES (?,?,'full_task',?,?,?,?,?,?,?,?,'accepted','retry-accepted',?,?,?,'{}')",
                 (
                     restart_uuid,
                     team_uuid,
@@ -454,7 +606,9 @@ class TaskService:
             )
             await tx.execute(
                 "UPDATE mkb_tasks SET status='queued',current_generation=?,current_root_execution_uuid=?,"
-                "cancel_requested_at=NULL,result_ref=NULL,proof_ref=NULL,error_code=NULL,error_message=NULL,completed_at=NULL,"
+                "cancel_requested_at=NULL,intake_snapshot_uuid=NULL,change_set_uuid=NULL,"
+                "cnt_total=0,cnt_required=0,cnt_active=0,cnt_succeeded=0,cnt_failed=0,cnt_cancelled=0,cnt_skipped=0,"
+                "result_ref=NULL,proof_ref=NULL,error_code=NULL,error_message=NULL,started_at=NULL,completed_at=NULL,"
                 "row_revision=row_revision+1,updated_at=? WHERE team_uuid=? AND task_uuid=? AND row_revision=?",
                 (target_generation, root_execution_uuid, now, team_uuid, task_uuid, request.expected_revision),
             )
