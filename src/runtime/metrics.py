@@ -29,7 +29,9 @@ _READINESS_COMPONENTS = frozenset(
         "sec_token_loaded",
     }
 )
-_OUTBOX_KINDS = frozenset({"wake_execution", "wake_process", "cancel_execution", "gate_decision"})
+_OUTBOX_KINDS = frozenset(
+    {"wake_execution", "wake_process", "cancel_execution", "gate_decision", "vectorize_construct"}
+)
 _CAPABILITIES = frozenset({"embed", "rerank", "structured_generate", "text_generate"})
 _COMMON_RESULTS = frozenset({"success", "conflict", "error", "ok", "noop", "fail"})
 _OBS_TABLES = frozenset(

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from pathlib import Path
 
 import pytest
@@ -289,6 +290,170 @@ async def test_materialized_processes_copy_task_priority_and_latest_claim_deadli
             (ids["execution_uuid"],),
         )
     assert process == {"priority_rank": 400, "deadline_at": deadline_at}
+    await persistence.close()
+
+
+async def _seed_vectorize_construct_intent(
+    persistence: SqlitePersistence,
+    ids: dict[str, str],
+    *,
+    corrupt_dual_digest: bool = False,
+) -> tuple[dict[str, str], dict[str, str]]:
+    """Create the smallest durable S07 package consumed by the S08 handoff."""
+
+    schema_digest = stable_digest({"schema": "construction", "version": "v1"})
+    construction_uuid, dual_uuid, validation_uuid = uuid7(), uuid7(), uuid7()
+    construction_digest = stable_digest({"member": construction_uuid})
+    dual_digest = stable_digest({"member": dual_uuid})
+    validation_digest = stable_digest({"member": validation_uuid})
+    construction_ref = f"mkbtest:generation:{construction_uuid}"
+    dual_ref = f"mkbtest:generation:{dual_uuid}"
+    validation_ref = f"mkbtest:generation:{validation_uuid}"
+    payload = {
+        "schema_version": "mkb.vectorize-construct-intent.v1",
+        "team_uuid": ids["team_uuid"],
+        "task_uuid": ids["task_uuid"],
+        "execution_uuid": ids["execution_uuid"],
+        "construction_artifact_uuid": construction_uuid,
+        "construction_ref": construction_ref,
+        "construction_content_digest": construction_digest,
+        "dual_channel_artifact_uuid": dual_uuid,
+        "dual_channel_ref": dual_ref,
+        "dual_channel_content_digest": "0" * 64 if corrupt_dual_digest else dual_digest,
+        "construction_schema_digest": schema_digest,
+        "content_full_recipe_version": "content_full.v1",
+    }
+    now = utc_now()
+    async with persistence.transaction() as tx:
+        await tx.execute(
+            "INSERT INTO mkb_construction_schema_definitions "
+            "(schema_key,schema_version,schema_digest,structure_schema_range,content_full_recipe_version,"
+            "channel_contracts_digest,semantic_invariant_manifest_digest,media_contracts_digest,registration_origin,"
+            "definition_body_json,registered_at,payload_extra) VALUES "
+            "('lsrag.construction.default','v1',?,'lsrag.structure.default@v1','content_full.v1',?,?,?,"
+            "'test','{}',?,'{}')",
+            (
+                schema_digest,
+                stable_digest({"channels": ["original", "summary"]}),
+                stable_digest({"invariants": "construction"}),
+                stable_digest({"media": "application/json"}),
+                now,
+            ),
+        )
+        step = await tx.fetchone(
+            "SELECT workflow_step_uuid FROM mkb_workflow_steps WHERE workflow_revision_uuid=? AND step_key='vectorize'",
+            (ids["workflow_revision_uuid"],),
+        )
+        assert step is not None
+        await tx.execute(
+            "INSERT INTO mkb_processes "
+            "(process_uuid,team_uuid,execution_uuid,task_uuid,workflow_step_uuid,step_key,process_key,"
+            "process_contract_version,materialization_key,process_spec_digest,config_snapshot_ref,"
+            "config_snapshot_digest,available_at,created_at,updated_at,payload_extra) "
+            "VALUES (?,?,?,?,?,'vectorize','lsrag.vectorize','v1',?,?,?,?,?,?,?,'{}')",
+            (
+                uuid7(),
+                ids["team_uuid"],
+                ids["execution_uuid"],
+                ids["task_uuid"],
+                step["workflow_step_uuid"],
+                stable_digest({"materialization": "vectorize"}),
+                stable_digest({"process": "vectorize"}),
+                f"mkbtest:config:{stable_digest({'config': 'test'})}",
+                stable_digest({"config": "test"}),
+                now,
+                now,
+                now,
+            ),
+        )
+        for artifact_uuid, artifact_type, handle, digest in (
+            (construction_uuid, "construction_document", construction_ref, construction_digest),
+            (dual_uuid, "dual_channel_projection", dual_ref, dual_digest),
+            (validation_uuid, "construction_validation_report", validation_ref, validation_digest),
+        ):
+            await tx.execute(
+                "INSERT INTO mkb_generation_artifacts "
+                "(generation_artifact_uuid,team_uuid,artifact_type,task_uuid,execution_uuid,schema_key,schema_version,"
+                "schema_digest,logical_handle,media_type,size_bytes,content_digest,validation_disposition,"
+                "validation_report_ref,validation_report_digest,created_at,payload_extra) "
+                "VALUES (?,?,?,?,?,'lsrag.construction.default','v1',?,?,'application/json',?,?,'full_valid',?,?,?,'{}')",
+                (
+                    artifact_uuid,
+                    ids["team_uuid"],
+                    artifact_type,
+                    ids["task_uuid"],
+                    ids["execution_uuid"],
+                    schema_digest,
+                    handle,
+                    1,
+                    digest,
+                    validation_ref,
+                    validation_digest,
+                    now,
+                ),
+            )
+            await tx.execute(
+                "INSERT INTO mkb_generation_pointers "
+                "(team_uuid,execution_uuid,artifact_type,current_generation_artifact_uuid,updated_at,payload_extra) "
+                "VALUES (?,?,?,?,?,'{}')",
+                (ids["team_uuid"], ids["execution_uuid"], artifact_type, artifact_uuid, now),
+            )
+        await tx.execute(
+            "INSERT INTO mkb_outbox "
+            "(outbox_id,team_uuid,kind,payload_json,payload_digest,dedupe_key,status,available_at,created_at,updated_at,payload_extra) "
+            "VALUES (?,?, 'vectorize_construct',?,?,?,?,?,?,?,'{}')",
+            (
+                uuid7(),
+                ids["team_uuid"],
+                json.dumps(payload, sort_keys=True, separators=(",", ":")),
+                stable_digest(payload),
+                f"vectorize-construct:{stable_digest(payload)}",
+                "pending",
+                now,
+                now,
+                now,
+            ),
+        )
+    return payload, {"construction": construction_uuid, "dual": dual_uuid, "validation": validation_uuid}
+
+
+@pytest.mark.asyncio
+async def test_vectorize_construct_outbox_only_acknowledges_exact_current_package(tmp_path: Path) -> None:
+    persistence, runtime, ids = await _seed_runtime(tmp_path)
+    payload, _ = await _seed_vectorize_construct_intent(persistence, ids)
+
+    assert await runtime.dispatch_outbox_once("vectorize-intent-worker")
+    async with persistence.transaction() as tx:
+        outbox = await tx.fetchone(
+            "SELECT status FROM mkb_outbox WHERE team_uuid=? AND dedupe_key=?",
+            (ids["team_uuid"], f"vectorize-construct:{stable_digest(payload)}"),
+        )
+        vectors = await tx.fetchone("SELECT COUNT(*) AS count FROM mkb_vector_records")
+        process = await tx.fetchone(
+            "SELECT status FROM mkb_processes WHERE team_uuid=? AND execution_uuid=? AND process_key='lsrag.vectorize'",
+            (ids["team_uuid"], ids["execution_uuid"]),
+        )
+    assert outbox == {"status": "done"}
+    assert vectors == {"count": 0}
+    assert process == {"status": "ready"}
+    await persistence.close()
+
+
+@pytest.mark.asyncio
+async def test_vectorize_construct_outbox_rejects_mixed_generation_digest(tmp_path: Path) -> None:
+    persistence, runtime, ids = await _seed_runtime(tmp_path)
+    payload, _ = await _seed_vectorize_construct_intent(persistence, ids, corrupt_dual_digest=True)
+
+    with pytest.raises(MkbError, match="current full-valid generation member"):
+        await runtime.dispatch_outbox_once("vectorize-intent-worker")
+    async with persistence.transaction() as tx:
+        outbox = await tx.fetchone(
+            "SELECT status,last_error FROM mkb_outbox WHERE team_uuid=? AND dedupe_key=?",
+            (ids["team_uuid"], f"vectorize-construct:{stable_digest(payload)}"),
+        )
+    assert outbox is not None
+    assert outbox["status"] == "pending"
+    assert "generation member" in (outbox["last_error"] or "")
     await persistence.close()
 
 
