@@ -11,13 +11,16 @@ from __future__ import annotations
 import base64
 import binascii
 import json
+import re
+import sys
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from src.contracts.common.errors import MkbError
-from src.contracts.common.ids import stable_digest, validate_external_uuid
+from src.contracts.common.ids import stable_digest, uuid7, validate_external_uuid
+from src.contracts.common.time import utc_now
 from src.persistence.ports import PersistencePort
 from src.runtime.metrics import MetricRegistry
 from src.runtime.security import redact
@@ -60,6 +63,177 @@ def _payload(value: str | None) -> dict[str, Any]:
         return {"disposition": "malformed"}
     safe = redact(parsed)
     return safe if isinstance(safe, dict) else {"disposition": "malformed"}
+
+
+_DIAGNOSTIC_IDENTIFIER = re.compile(r"^[A-Za-z][A-Za-z0-9_.-]{0,127}$")
+_DIAGNOSTIC_LEVELS = frozenset({"debug", "info", "warn", "error"})
+
+
+class DiagnosticSink:
+    """Best-effort structured diagnostics with an observable failure path.
+
+    Diagnostic evidence may never decide a business outcome.  Consequently a
+    write failure is deliberately swallowed after it is made visible through
+    the closed metric catalogue and one safe stderr line.  The sink accepts no
+    arbitrary SQL or file handle and redacts before persisting.
+    """
+
+    def __init__(
+        self,
+        persistence: PersistencePort,
+        metrics: MetricRegistry,
+        *,
+        stderr: Callable[[str], None] | None = None,
+    ) -> None:
+        self._persistence = persistence
+        self._metrics = metrics
+        self._stderr = stderr or self._write_stderr
+        self._attempted = 0
+        self._missing_trace = 0
+
+    async def write(
+        self,
+        *,
+        log_code: str,
+        message: str,
+        calling_module: str,
+        log_level: str = "error",
+        team_uuid: str | None = None,
+        trace_uuid: str | None = None,
+        task_uuid: str | None = None,
+        execution_uuid: str | None = None,
+        process_uuid: str | None = None,
+        calling_worker: str = "mkb-leaf",
+        payload: dict[str, Any] | None = None,
+    ) -> bool:
+        """Persist one bounded diagnostic record, returning ``False`` on drop.
+
+        ``False`` is intentional: callers must not turn a non-authoritative
+        diagnostic failure into a second business-state transition.
+        """
+
+        safe = self._validate_entry(
+            log_code=log_code,
+            message=message,
+            calling_module=calling_module,
+            log_level=log_level,
+            team_uuid=team_uuid,
+            trace_uuid=trace_uuid,
+            task_uuid=task_uuid,
+            execution_uuid=execution_uuid,
+            process_uuid=process_uuid,
+            calling_worker=calling_worker,
+            payload=payload,
+        )
+        if safe is None:
+            self._drop("invalid_entry", log_code)
+            return False
+
+        self._attempted += 1
+        if safe["trace_uuid"] is None:
+            self._missing_trace += 1
+        self._metrics.set(
+            "mkb_diagnostic_missing_trace_ratio",
+            self._missing_trace / self._attempted,
+        )
+        try:
+            async with self._persistence.transaction() as tx:
+                await tx.execute(
+                    "INSERT INTO mkb_ops_diagnostic_logs "
+                    "(log_uuid,team_uuid,trace_uuid,task_uuid,execution_uuid,process_uuid,log_level,log_code,"
+                    "log_message,calling_module,calling_worker,payload_json,payload_digest,occurred_at,payload_extra) "
+                    "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,'{}')",
+                    (
+                        uuid7(),
+                        safe["team_uuid"],
+                        safe["trace_uuid"],
+                        safe["task_uuid"],
+                        safe["execution_uuid"],
+                        safe["process_uuid"],
+                        safe["log_level"],
+                        safe["log_code"],
+                        safe["message"],
+                        safe["calling_module"],
+                        safe["calling_worker"],
+                        safe["payload_json"],
+                        stable_digest(safe["payload"]),
+                        utc_now(),
+                    ),
+                )
+        except Exception:
+            self._drop("append_fail", safe["log_code"])
+            return False
+        return True
+
+    @staticmethod
+    def _validate_entry(
+        *,
+        log_code: str,
+        message: str,
+        calling_module: str,
+        log_level: str,
+        team_uuid: str | None,
+        trace_uuid: str | None,
+        task_uuid: str | None,
+        execution_uuid: str | None,
+        process_uuid: str | None,
+        calling_worker: str,
+        payload: dict[str, Any] | None,
+    ) -> dict[str, Any] | None:
+        if (
+            not isinstance(log_code, str)
+            or _DIAGNOSTIC_IDENTIFIER.fullmatch(log_code) is None
+            or not isinstance(calling_module, str)
+            or _DIAGNOSTIC_IDENTIFIER.fullmatch(calling_module) is None
+            or not isinstance(calling_worker, str)
+            or _DIAGNOSTIC_IDENTIFIER.fullmatch(calling_worker) is None
+            or log_level not in _DIAGNOSTIC_LEVELS
+            or not isinstance(message, str)
+        ):
+            return None
+        identifiers = (team_uuid, trace_uuid, task_uuid, execution_uuid, process_uuid)
+        if any(value is not None and (not isinstance(value, str) or len(value) > 128) for value in identifiers):
+            return None
+        safe_message = redact(message)
+        safe_payload = redact(payload or {})
+        if not isinstance(safe_message, str) or not isinstance(safe_payload, dict) or len(safe_message) > 1024:
+            return None
+        try:
+            payload_json = _json(safe_payload)
+        except (TypeError, ValueError):
+            return None
+        if len(payload_json.encode("utf-8")) > 64 * 1024:
+            return None
+        return {
+            "log_code": log_code,
+            "message": safe_message,
+            "calling_module": calling_module,
+            "calling_worker": calling_worker,
+            "log_level": log_level,
+            "team_uuid": team_uuid,
+            "trace_uuid": trace_uuid,
+            "task_uuid": task_uuid,
+            "execution_uuid": execution_uuid,
+            "process_uuid": process_uuid,
+            "payload": safe_payload,
+            "payload_json": payload_json,
+        }
+
+    def _drop(self, reason: str, log_code: object) -> None:
+        self._metrics.increment("mkb_diagnostic_drop_total", reason=reason)
+        # Never write the message, payload, IDs, or raw exception here: the
+        # fallback must itself obey S16's redaction boundary.
+        try:
+            code = log_code if isinstance(log_code, str) and _DIAGNOSTIC_IDENTIFIER.fullmatch(log_code) else "invalid"
+            self._stderr(_json({"event": "OBS_DIAG_APPEND_FAIL", "reason": reason, "log_code": code}))
+        except Exception:
+            # stderr failure is also observable without allowing diagnostics to
+            # throw into a business transaction.
+            self._metrics.increment("mkb_diagnostic_drop_total", reason="stderr_fail")
+
+    @staticmethod
+    def _write_stderr(line: str) -> None:
+        print(line, file=sys.stderr)
 
 
 class ObservabilityReadService:
@@ -289,21 +463,39 @@ class ObservabilityRetentionService:
         *,
         policy: RetentionPolicy | None = None,
         clock: Callable[[], datetime] | None = None,
+        diagnostics: DiagnosticSink | None = None,
     ) -> None:
         self._persistence = persistence
         self._metrics = metrics
         self._policy = policy or RetentionPolicy()
         self._clock = clock or (lambda: datetime.now(UTC))
+        self._diagnostics = diagnostics or DiagnosticSink(persistence, metrics)
 
     async def run_once(self) -> RetentionResult:
-        deleted: dict[str, int] = {}
-        for table, primary_key, policy_field in self._TABLES:
-            days = getattr(self._policy, policy_field)
-            cutoff = self._timestamp(self._clock() - timedelta(days=days))
-            count = await self._delete_batch(table, primary_key, cutoff)
-            deleted[table] = count
-            if count:
-                self._metrics.increment("mkb_retention_delete_rows_total", count, table=table)
+        try:
+            deleted: dict[str, int] = {}
+            for table, primary_key, policy_field in self._TABLES:
+                days = getattr(self._policy, policy_field)
+                cutoff = self._timestamp(self._clock() - timedelta(days=days))
+                count = await self._delete_batch(table, primary_key, cutoff)
+                deleted[table] = count
+                if count:
+                    self._metrics.increment("mkb_retention_delete_rows_total", count, table=table)
+        except Exception:
+            self._metrics.set("mkb_retention_job_success", 0)
+            self._metrics.increment("mkb_retention_job_fail_total")
+            await self._diagnostics.write(
+                log_code="OBS_RETENTION_JOB_FAIL",
+                message="Observability retention batch failed; no business state was changed",
+                calling_module="observability.retention",
+                log_level="error",
+            )
+            # The caller decides its retry interval.  Propagating preserves a
+            # typed failure boundary instead of silently treating retention as
+            # success; the app loop can safely retry because no business rows
+            # were touched by this service.
+            raise
+        self._metrics.set("mkb_retention_job_success", 1)
         return RetentionResult(deleted=deleted)
 
     async def _delete_batch(self, table: str, primary_key: str, cutoff: str) -> int:
@@ -325,6 +517,7 @@ class ObservabilityRetentionService:
 
 
 __all__ = [
+    "DiagnosticSink",
     "ObservabilityReadService",
     "ObservabilityRetentionService",
     "RetentionPolicy",
