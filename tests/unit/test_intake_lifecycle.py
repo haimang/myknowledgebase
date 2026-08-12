@@ -100,7 +100,7 @@ async def seeded_intake(tmp_path: Path) -> SeededIntake:
             "INSERT INTO mkb_intake_revisions "
             "(team_uuid,intake_revision_uuid,intake_item_uuid,revision_ordinal,revision_fingerprint,creation_action_key,"
             "creation_action_version,source_snapshot_uuid,created_at,payload_extra) "
-            "VALUES (?,?,?,1,?,'ingest','v1',?,?, '{}')",
+            "VALUES (?,?,?,1,?,'accept_revision','v1',?,?, '{}')",
             (team_uuid, revision_uuid, item_uuid, stable_digest({"revision": 1}), snapshot_uuid, now),
         )
         await tx.execute(
@@ -231,6 +231,71 @@ async def test_deactivate_is_logical_first_atomic_and_idempotent(seeded_intake: 
                 expected_item_revision=0,
             )
         )
+
+
+@pytest.mark.asyncio
+async def test_reactivate_restores_only_lifecycle_truth_until_a_fresh_publish(seeded_intake: SeededIntake) -> None:
+    """S04 reactivation never treats an old proof/index as newly servable."""
+
+    service = IntakeLifecycleService(seeded_intake.persistence, DomainEventWriter())
+    await service.apply(
+        IntakeLifecycleCommand(
+            team_uuid=seeded_intake.team_uuid,
+            intake_item_uuid=seeded_intake.item_uuid,
+            action="deactivate",
+            trace_uuid=seeded_intake.trace_uuid,
+            idempotency_key="before-reactivate",
+            expected_item_revision=0,
+        )
+    )
+    command = IntakeLifecycleCommand(
+        team_uuid=seeded_intake.team_uuid,
+        intake_item_uuid=seeded_intake.item_uuid,
+        action="reactivate",
+        trace_uuid=seeded_intake.trace_uuid,
+        idempotency_key="reactivate-once",
+        expected_item_revision=1,
+    )
+    result = await service.apply(command)
+    replay = await service.apply(command)
+
+    assert result.applied is True
+    assert result.before_lifecycle == "deactivated"
+    assert result.lifecycle_state == "active"
+    assert result.serving_revision_cleared is True
+    assert replay.applied is False
+    async with seeded_intake.persistence.transaction() as tx:
+        item = await tx.fetchone(
+            "SELECT lifecycle_state,serving_revision_uuid,deactivated_at,deleted_at,row_revision "
+            "FROM mkb_intake_items WHERE team_uuid=? AND intake_item_uuid=?",
+            (seeded_intake.team_uuid, seeded_intake.item_uuid),
+        )
+        pointer = await tx.fetchone(
+            "SELECT lifecycle_state FROM mkb_index_active_pointers WHERE team_uuid=? AND intake_item_uuid=?",
+            (seeded_intake.team_uuid, seeded_intake.item_uuid),
+        )
+        vector = await tx.fetchone(
+            "SELECT publication_state FROM mkb_vector_records WHERE team_uuid=? AND intake_item_uuid=?",
+            (seeded_intake.team_uuid, seeded_intake.item_uuid),
+        )
+        transitions = await tx.fetchall(
+            "SELECT before_lifecycle,after_lifecycle,action_key FROM mkb_intake_item_transitions "
+            "WHERE team_uuid=? AND intake_item_uuid=? ORDER BY occurred_at,transition_uuid",
+            (seeded_intake.team_uuid, seeded_intake.item_uuid),
+        )
+    assert item == {
+        "lifecycle_state": "active",
+        "serving_revision_uuid": None,
+        "deactivated_at": None,
+        "deleted_at": None,
+        "row_revision": 2,
+    }
+    assert pointer == {"lifecycle_state": "withdrawn"}
+    assert vector == {"publication_state": "withdrawn"}
+    assert transitions == [
+        {"before_lifecycle": "active", "after_lifecycle": "deactivated", "action_key": "deactivate"},
+        {"before_lifecycle": "deactivated", "after_lifecycle": "active", "action_key": "reactivate"},
+    ]
 
 
 @pytest.mark.asyncio
@@ -376,12 +441,12 @@ async def test_target_resolver_freezes_rebuild_metadata_and_controlled_index_sco
         IntakeUpdateMetadataPayload(
             intake_item_uuid=seeded_intake.item_uuid,
             expected_intake_revision_uuid=seeded_intake.revision_uuid,
-            semantics={"content_length": 42},
+            semantics={"context_metadata": "priority=42"},
         ),
     )
     assert metadata.target.intake_revision_uuid == seeded_intake.revision_uuid
-    assert metadata.semantics[0].semantic_key == "content_length"
-    assert metadata.semantics[0].value == 42
+    assert metadata.semantics[0].semantic_key == "context_metadata"
+    assert metadata.semantics[0].value == "priority=42"
     with pytest.raises(MkbError, match="not registered"):
         await resolver.resolve_metadata_update(
             seeded_intake.team_uuid,
@@ -395,7 +460,7 @@ async def test_target_resolver_freezes_rebuild_metadata_and_controlled_index_sco
             seeded_intake.team_uuid,
             IntakeUpdateMetadataPayload(
                 intake_item_uuid=seeded_intake.item_uuid,
-                semantics={"content_length": "forty-two"},
+                semantics={"context_metadata": 42},
             ),
         )
 
