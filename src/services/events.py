@@ -2,13 +2,14 @@
 
 from __future__ import annotations
 
+import json
 from typing import Any
 
 from src.contracts.common.errors import MkbError
 from src.contracts.common.ids import stable_digest, uuid7
 from src.contracts.common.time import utc_now
 from src.persistence.ports import UnitOfWork
-from src.runtime.security import redact
+from src.runtime.security import hash_remote_address, redact, safe_request_id
 
 
 class DomainEventWriter:
@@ -76,7 +77,8 @@ class DomainEventWriter:
         if not team_uuid or not trace_uuid:
             raise MkbError("OBS_EVENT_PAYLOAD_INVALID", "Domain events require team and trace", 422)
         safe_payload = redact(payload or {})
-        if not isinstance(safe_payload, dict) or len(summary) > 512:
+        safe_summary = redact(summary)
+        if not isinstance(safe_payload, dict) or not isinstance(safe_summary, str) or len(safe_summary) > 512:
             raise MkbError("OBS_EVENT_PAYLOAD_INVALID", "Domain event payload is invalid", 422)
         event_uuid = uuid7()
         now = utc_now()
@@ -96,9 +98,9 @@ class DomainEventWriter:
                 execution_uuid,
                 process_uuid,
                 actor_kind,
-                summary,
+                safe_summary,
                 stable_digest(safe_payload),
-                __import__("json").dumps(safe_payload, separators=(",", ":")),
+                json.dumps(safe_payload, separators=(",", ":")),
                 "mkb.domain-event.v1",
                 now,
                 now,
@@ -108,6 +110,15 @@ class DomainEventWriter:
 
 
 class SecurityAuditWriter:
+    """Write non-business admission denials without accepting sensitive data.
+
+    The writer deliberately has no dependency on Task/domain event services:
+    a failed authentication or trust-boundary decision must never create a
+    business event merely to leave an audit trail.
+    """
+
+    _ACTOR_KINDS = frozenset({"anonymous", "internal_token", "system", "operator"})
+
     async def write_denied(
         self,
         tx: UnitOfWork,
@@ -117,30 +128,49 @@ class SecurityAuditWriter:
         summary: str,
         http_status: int,
         actor_fingerprint: str | None = None,
+        actor_kind: str | None = None,
         team_uuid: str | None = None,
         trace_uuid: str | None = None,
+        request_id: str | None = None,
+        target_kind: str | None = None,
+        target_uuid: str | None = None,
+        remote_ip: str | None = None,
         payload: dict[str, Any] | None = None,
     ) -> str:
         safe_payload = redact(payload or {})
-        if not isinstance(safe_payload, dict):
+        safe_summary = redact(summary)
+        effective_actor_kind = actor_kind or ("anonymous" if actor_fingerprint is None else "internal_token")
+        if (
+            not isinstance(safe_payload, dict)
+            or not isinstance(safe_summary, str)
+            or effective_actor_kind not in self._ACTOR_KINDS
+            or len(safe_summary) > 512
+        ):
+            raise MkbError("SEC_AUDIT_WRITE_FAIL", "Security audit payload is invalid", 500)
+        encoded_payload = json.dumps(safe_payload, separators=(",", ":"))
+        if len(encoded_payload.encode("utf-8")) > 64 * 1024:
             raise MkbError("SEC_AUDIT_WRITE_FAIL", "Security audit payload is invalid", 500)
         audit_uuid = uuid7()
         await tx.execute(
             "INSERT INTO mkb_security_audit_events "
-            "(audit_uuid,team_uuid,trace_uuid,actor_kind,actor_fingerprint,action,outcome,denial_code,http_status,"
-            "summary,payload_json,payload_digest,occurred_at,payload_extra) "
-            "VALUES (?,?,?,?,? ,?,'denied',?,?,?,?,?,?,?,'{}')",
+            "(audit_uuid,team_uuid,trace_uuid,request_id,actor_kind,actor_fingerprint,action,outcome,denial_code,"
+            "http_status,target_kind,target_uuid,remote_addr_hash,summary,payload_json,payload_digest,occurred_at,"
+            "payload_extra) VALUES (?,?,?,?,?,?,?,'denied',?,?,?,?,?,?,?,?,?,'{}')",
             (
                 audit_uuid,
                 team_uuid,
                 trace_uuid,
-                "anonymous" if actor_fingerprint is None else "internal_token",
+                safe_request_id(request_id),
+                effective_actor_kind,
                 actor_fingerprint,
                 action,
                 denial_code,
                 http_status,
-                summary[:512],
-                __import__("json").dumps(safe_payload, separators=(",", ":")),
+                target_kind[:128] if target_kind else None,
+                target_uuid[:128] if target_uuid else None,
+                hash_remote_address(remote_ip),
+                safe_summary[:512],
+                encoded_payload,
                 stable_digest(safe_payload),
                 utc_now(),
             ),
