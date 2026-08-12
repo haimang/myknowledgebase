@@ -172,11 +172,14 @@ class WorkflowRuntime:
         default_max_retries: int = 3,
         default_max_recoveries: int = 3,
         retry_delay_seconds: int = 1,
+        cleanup_recovery_window_seconds: int = 60,
     ) -> None:
         if default_max_retries < 0 or default_max_recoveries < 0:
             raise ValueError("retry and recovery limits must be non-negative")
         if retry_delay_seconds < 0:
             raise ValueError("retry_delay_seconds must be non-negative")
+        if cleanup_recovery_window_seconds < 0:
+            raise ValueError("cleanup recovery window must be non-negative")
         self.persistence = persistence
         self.definition = definition
         self.readiness = readiness
@@ -184,6 +187,11 @@ class WorkflowRuntime:
         self.default_max_retries = default_max_retries
         self.default_max_recoveries = default_max_recoveries
         self.retry_delay_seconds = retry_delay_seconds
+        # A terminal row remains recoverable for this bounded interval even
+        # when all of its visible Process facts are already terminal.  The
+        # evaluator below only appends eligibility evidence; physical archive
+        # or deletion stays in the S12/S15 retention owner.
+        self.cleanup_recovery_window_seconds = cleanup_recovery_window_seconds
         active_definitions = (definition, *additional_definitions)
         self._active_workflow_keys = {candidate.workflow_key for candidate in active_definitions}
         if len(self._active_workflow_keys) != len(active_definitions):
@@ -1237,7 +1245,106 @@ class WorkflowRuntime:
             )
             for root in terminal_roots:
                 repaired += await self._repair_terminal_projection_tx(tx, root)
+            repaired += await self._evaluate_cleanup_eligibility_tx(tx)
         return repaired
+
+    async def evaluate_cleanup_eligibility_once(self, *, limit: int = 256) -> int:
+        """Append cleanup eligibility fences for safely quiescent Processes.
+
+        This is intentionally a marker-only operation.  It never deletes a
+        Process, Execution, Task, audit record, Intake fact, vector record, or
+        observability evidence.  The scanner can run repeatedly: its CAS only
+        fills a previously-null eligibility pair, preserving the first durable
+        terminal fence as historical evidence.
+        """
+
+        if not 1 <= limit <= 10_000:
+            raise ValueError("cleanup eligibility limit must be between 1 and 10000")
+        async with self.persistence.transaction() as tx:
+            return await self._evaluate_cleanup_eligibility_tx(tx, limit=limit)
+
+    async def _evaluate_cleanup_eligibility_tx(self, tx: UnitOfWork, *, limit: int = 256) -> int:
+        """Evaluate the S03 terminal-cleanup predicate from durable facts only."""
+
+        now = utc_now()
+        recovery_not_before = _add_seconds(now, -self.cleanup_recovery_window_seconds)
+        # ``mkb_outbox`` intentionally has one typed payload column rather
+        # than an execution foreign-key.  The direct execution UUID handles
+        # wakes/cancels/process scheduling; the gate join covers a durable
+        # decision payload, which carries only its decision UUID.  Done/dead
+        # deliveries are historical evidence, not pending control intent.
+        candidates = await tx.fetchall(
+            "SELECT p.*,e.trace_uuid,e.status AS execution_status,e.row_revision AS execution_row_revision,"
+            "e.terminal_summary_digest,e.summary_completed_at,e.completed_at AS execution_completed_at,"
+            "e.current_process_uuid,e.publication_proof_ref "
+            "FROM mkb_processes AS p JOIN mkb_executions AS e "
+            "ON e.team_uuid=p.team_uuid AND e.execution_uuid=p.execution_uuid "
+            "WHERE p.status IN ('succeeded','failed','cancelled') "
+            "AND p.cleanup_eligible_at IS NULL "
+            "AND e.status IN ('succeeded','failed','cancelled') "
+            "AND e.terminal_summary_digest IS NOT NULL AND e.summary_completed_at IS NOT NULL "
+            "AND e.completed_at IS NOT NULL AND e.completed_at<=? "
+            "AND e.current_process_uuid IS NULL "
+            "AND (e.status<>'succeeded' OR e.publication_proof_ref IS NOT NULL) "
+            "AND NOT EXISTS (SELECT 1 FROM mkb_processes AS active "
+            "  WHERE active.execution_uuid=e.execution_uuid "
+            "  AND active.status IN ('ready','claimed','running','retry_wait','cancelling')) "
+            "AND NOT EXISTS (SELECT 1 FROM mkb_processes AS leased "
+            "  WHERE leased.execution_uuid=e.execution_uuid "
+            "  AND leased.lease_expires_at IS NOT NULL AND leased.lease_expires_at>?) "
+            "AND NOT EXISTS ("
+            "  SELECT 1 FROM mkb_outbox AS o "
+            "  LEFT JOIN mkb_execution_gate_decisions AS d "
+            "    ON o.kind='gate_decision' AND json_extract(o.payload_json,'$.decision_uuid')=d.decision_uuid "
+            "  LEFT JOIN mkb_execution_gates AS g ON g.gate_uuid=d.gate_uuid "
+            "  WHERE o.team_uuid=e.team_uuid AND o.status IN ('pending','in_flight') "
+            "  AND (json_extract(o.payload_json,'$.execution_uuid')=e.execution_uuid OR g.execution_uuid=e.execution_uuid)"
+            ") "
+            "ORDER BY e.completed_at ASC,p.completed_at ASC,p.process_uuid ASC LIMIT ?",
+            (recovery_not_before, now, limit),
+        )
+        marked = 0
+        for process in candidates:
+            fence_digest = stable_digest(
+                {
+                    "schema_version": "mkb.process-cleanup-fence.v1",
+                    "team_uuid": process["team_uuid"],
+                    "execution_uuid": process["execution_uuid"],
+                    "process_uuid": process["process_uuid"],
+                    "process_status": process["status"],
+                    "process_fencing_generation": process["fencing_generation"],
+                    "execution_status": process["execution_status"],
+                    "execution_row_revision": process["execution_row_revision"],
+                    "terminal_summary_digest": process["terminal_summary_digest"],
+                    "summary_completed_at": process["summary_completed_at"],
+                    "execution_completed_at": process["execution_completed_at"],
+                }
+            )
+            updated = await tx.execute(
+                "UPDATE mkb_processes SET cleanup_eligible_at=?,cleanup_fence_digest=?,"
+                "row_revision=row_revision+1,updated_at=? "
+                "WHERE process_uuid=? AND cleanup_eligible_at IS NULL "
+                "AND status IN ('succeeded','failed','cancelled')",
+                (now, fence_digest, now, process["process_uuid"]),
+            )
+            if updated.rowcount != 1:
+                continue
+            marked += 1
+            await self._record_event_tx(
+                tx,
+                execution=process,
+                event_type="process.cleanup_eligible",
+                aggregate="process",
+                summary="Process met the terminal cleanup eligibility predicate",
+                process_uuid=process["process_uuid"],
+                status_before=process["status"],
+                status_after=process["status"],
+                payload={
+                    "cleanup_fence_digest": fence_digest,
+                    "recovery_window_seconds": self.cleanup_recovery_window_seconds,
+                },
+            )
+        return marked
 
     async def _repair_terminal_process_transition_tx(self, tx: UnitOfWork, execution: dict[str, Any]) -> bool:
         """Re-drive an unambiguous terminal Process route, otherwise fail loud."""

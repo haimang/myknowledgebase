@@ -105,6 +105,7 @@ async def _seed_runtime(
     tmp_path: Path,
     *,
     outcome_committer: ProcessOutcomeCommitter | None = None,
+    cleanup_recovery_window_seconds: int = 60,
 ) -> tuple[SqlitePersistence, WorkflowRuntime, dict[str, str]]:
     persistence = SqlitePersistence(tmp_path / "workflow-runtime.sqlite", Path("src/persistence/migrations"))
     await persistence.migrate()
@@ -232,6 +233,7 @@ async def _seed_runtime(
             definition,
             retry_delay_seconds=0,
             outcome_committer=outcome_committer,
+            cleanup_recovery_window_seconds=cleanup_recovery_window_seconds,
         ),
         ids,
     )
@@ -267,6 +269,81 @@ async def test_single_declarative_workflow_materializes_and_reaches_publication_
     assert counts == {"count": 10}
     assert duplicate_outbox is not None
     assert duplicate_outbox["total"] == duplicate_outbox["unique_count"]
+    await persistence.close()
+
+
+@pytest.mark.asyncio
+async def test_cleanup_eligibility_requires_quiescence_and_appends_only_fences(tmp_path: Path) -> None:
+    """S03 cleanup is an evidence marker, never an eager cascade delete."""
+
+    persistence, runtime, ids = await _seed_runtime(tmp_path, cleanup_recovery_window_seconds=0)
+    await runtime.materialize_root(ids["execution_uuid"])
+    worker = WorkflowWorker(runtime, _AlwaysSuccessfulStage())
+    for _ in range(16):
+        if not await worker.run_once("cleanup-worker"):
+            break
+
+    async with persistence.transaction() as tx:
+        execution = await tx.fetchone(
+            "SELECT status,terminal_summary_digest,summary_completed_at,current_process_uuid "
+            "FROM mkb_executions WHERE execution_uuid=?",
+            (ids["execution_uuid"],),
+        )
+        pending = await tx.fetchone(
+            "SELECT COUNT(*) AS count FROM mkb_outbox WHERE status IN ('pending','in_flight')",
+        )
+    assert execution is not None
+    assert execution["status"] == "succeeded"
+    assert execution["terminal_summary_digest"]
+    assert execution["summary_completed_at"]
+    assert execution["current_process_uuid"] is None
+    assert pending is not None and pending["count"] > 0
+
+    # Unconsumed scheduling intents are a durable recovery trigger and must
+    # keep every terminal Process ineligible.
+    assert await runtime.evaluate_cleanup_eligibility_once() == 0
+
+    for _ in range(32):
+        if not await runtime.dispatch_outbox_once("cleanup-dispatch"):
+            break
+
+    marked = await runtime.evaluate_cleanup_eligibility_once()
+    async with persistence.transaction() as tx:
+        processes = await tx.fetchone(
+            "SELECT COUNT(*) AS total,COUNT(cleanup_eligible_at) AS eligible,"
+            "COUNT(cleanup_fence_digest) AS fenced FROM mkb_processes WHERE execution_uuid=?",
+            (ids["execution_uuid"],),
+        )
+        events = await tx.fetchone(
+            "SELECT COUNT(*) AS count FROM mkb_domain_events "
+            "WHERE execution_uuid=? AND event_type='process.cleanup_eligible'",
+            (ids["execution_uuid"],),
+        )
+        fences = await tx.fetchall(
+            "SELECT process_uuid,cleanup_fence_digest FROM mkb_processes WHERE execution_uuid=? ORDER BY process_uuid",
+            (ids["execution_uuid"],),
+        )
+    assert processes is not None
+    assert marked == processes["total"]
+    assert processes["total"] == processes["eligible"] == processes["fenced"]
+    assert events == {"count": marked}
+    assert all(row["cleanup_fence_digest"] for row in fences)
+
+    # A replay cannot rewrite the terminal eligibility timestamp/fence or add
+    # duplicate evidence.
+    assert await runtime.evaluate_cleanup_eligibility_once() == 0
+    async with persistence.transaction() as tx:
+        replayed = await tx.fetchall(
+            "SELECT process_uuid,cleanup_fence_digest FROM mkb_processes WHERE execution_uuid=? ORDER BY process_uuid",
+            (ids["execution_uuid"],),
+        )
+        event_count = await tx.fetchone(
+            "SELECT COUNT(*) AS count FROM mkb_domain_events "
+            "WHERE execution_uuid=? AND event_type='process.cleanup_eligible'",
+            (ids["execution_uuid"],),
+        )
+    assert replayed == fences
+    assert event_count == {"count": marked}
     await persistence.close()
 
 
