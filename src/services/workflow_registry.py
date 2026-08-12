@@ -18,11 +18,15 @@ from src.contracts.common.time import utc_now
 from src.contracts.workflow.models import (
     WorkflowBindingSourceKind,
     WorkflowDefinition,
-    WorkflowExecutionRole,
     WorkflowStepKind,
 )
 from src.persistence.ports import PersistencePort, UnitOfWork
-from src.workflows.builtin_lsrag import BUILTIN_WORKFLOWS as BUILTIN_SINGLE_WORKFLOWS
+from src.workflows.builtin_lsrag import (
+    BUILTIN_WORKFLOWS as BUILTIN_SINGLE_WORKFLOWS,
+)
+from src.workflows.builtin_lsrag import (
+    SINGLE_SOURCE_PROFILE_WORKFLOW_KEYS,
+)
 from src.workflows.builtin_scatter import (
     BUILTIN_SCATTER_WORKFLOWS,
     SCATTER_ROOT_WORKFLOW_KEY,
@@ -71,7 +75,12 @@ class WorkflowRegistryService:
         except Exception:
             return False
 
-    async def resolve_for_source(self, purpose_key: str, source_kind: str | None = None) -> WorkflowIdentity:
+    async def resolve_for_source(
+        self,
+        purpose_key: str,
+        source_kind: str | None = None,
+        source_profile: str | None = None,
+    ) -> WorkflowIdentity:
         """Resolve a code-owned graph from immutable, typed ingress facts.
 
         This is intentionally not a public selector: the caller supplies only
@@ -82,12 +91,16 @@ class WorkflowRegistryService:
         if purpose_key == "intake.ingest" and source_kind == "registered_api":
             return await self.resolve_by_key(SCATTER_ROOT_WORKFLOW_KEY)
         if purpose_key == "intake.ingest":
-            # ``resolve`` must remain exact and fail loud if somebody registers
-            # an unowned competing single-root graph under this purpose.
-            rows = await self._resolve_rows_for_role(WorkflowExecutionRole.SINGLE_ROOT.value, purpose_key)
-            if len(rows) != 1:
-                raise MkbError("REGISTRY_NOT_FOUND", "An exact active workflow binding is required", 503)
-            return self._identity(rows[0])
+            profile = source_profile or source_kind
+            # Non-ingest Task intents deliberately reuse the canonical inline
+            # skeleton after ConfigSnapshotService freezes their own target
+            # context.  They have no source descriptor to profile-select.
+            workflow_key = SINGLE_SOURCE_PROFILE_WORKFLOW_KEYS.get(
+                profile or "inline_payload"
+            )
+            if workflow_key is None:
+                raise MkbError("REGISTRY_NOT_FOUND", "Source profile has no exact active workflow binding", 503)
+            return await self.resolve_by_key(workflow_key)
         return await self.resolve(purpose_key)
 
     async def resolve(self, purpose_key: str) -> WorkflowIdentity:
@@ -125,17 +138,6 @@ class WorkflowRegistryService:
         if len(rows) != 1:
             raise MkbError("REGISTRY_NOT_FOUND", "An exact active workflow binding is required", 503)
         return self._identity(rows[0])
-
-    async def _resolve_rows_for_role(self, execution_role: str, purpose_key: str) -> list[dict[str, Any]]:
-        async with self.persistence.transaction() as tx:
-            return await tx.fetchall(
-                "SELECT r.workflow_key,r.workflow_uuid,r.active_revision_uuid,r.execution_role,v.compiled_digest,"
-                "v.registration_fingerprint FROM mkb_workflow_registry r "
-                "JOIN mkb_workflow_revisions v ON v.workflow_revision_uuid=r.active_revision_uuid "
-                "WHERE r.purpose_key=? AND r.execution_role=? AND r.registry_status='enabled' "
-                "ORDER BY r.selector_priority ASC,r.workflow_key ASC",
-                (purpose_key, execution_role),
-            )
 
     @staticmethod
     def _identity(row: dict[str, Any]) -> WorkflowIdentity:

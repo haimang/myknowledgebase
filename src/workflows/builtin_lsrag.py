@@ -493,6 +493,135 @@ BUILTIN_SINGLE_INTAKE_LSRAG_WORKFLOW: Final[WorkflowDefinition] = WorkflowDefini
 )
 
 
+def _source_profile_workflow(
+    *,
+    workflow_key: str,
+    display_name: str,
+    acquire_process_key: str,
+    decode_process_key: str,
+    clean_process_key: str = "clean.extract.deterministic",
+) -> WorkflowDefinition:
+    """Derive one reviewed, immutable source-profile graph.
+
+    ``source_kind`` and acquisition/decode/clean capabilities are deliberately
+    not a runtime branch string.  Each source/profile has its own workflow
+    identity and compiled capability set, which ConfigSnapshotService freezes
+    before an Execution exists.  The shared LS-RAG tail stays byte-for-byte
+    declarative across profiles.
+    """
+
+    # Keep enum instances because these strict Workflow models intentionally
+    # reject stringly-typed graph declarations during bootstrap validation.
+    document = BUILTIN_SINGLE_INTAKE_LSRAG_WORKFLOW.model_dump()
+    document.update(
+        {
+            "workflow_key": workflow_key,
+            "revision_number": 1,
+            "display_name": display_name,
+            "description": (
+                f"A source-profile LS-RAG path with {acquire_process_key}, "
+                f"{decode_process_key}, and {clean_process_key}."
+            ),
+        }
+    )
+    replacements = {
+        "intake.acquire.inline": acquire_process_key,
+        "intake.decode.text_json_html": decode_process_key,
+        "clean.extract.deterministic": clean_process_key,
+    }
+    for step in document["steps"]:
+        if step["step_key"] == "acquire":
+            step["process_key"] = acquire_process_key
+        elif step["step_key"] == "decode":
+            step["process_key"] = decode_process_key
+        elif step["step_key"] == "clean":
+            step["process_key"] = clean_process_key
+    document["required_process_keys"] = [replacements.get(key, key) for key in document["required_process_keys"]]
+    return WorkflowDefinition.model_validate(document)
+
+
+SINGLE_SOURCE_PROFILE_WORKFLOW_KEYS: Final[dict[str, str]] = {
+    "inline_payload": BUILTIN_SINGLE_INTAKE_LSRAG_WORKFLOW.workflow_key,
+    "local_object": "intake.ingest.single.local-object.lsrag.v1",
+    "local_object.pdf": "intake.ingest.single.local-pdf.lsrag.v1",
+    "http_resource.static": "intake.ingest.single.http-static.lsrag.v1",
+    "http_resource.browser": "intake.ingest.single.http-browser.lsrag.v1",
+    "http_resource.pdf": "intake.ingest.single.http-pdf.lsrag.v1",
+    # Local image input has one explicit first stop: a local OCR capability.
+    # The handler fail-closes when no reviewed OCR runtime is deployed; it may
+    # never silently reinterpret binary bytes as deterministic text.
+    "local_object.image": "intake.ingest.single.local-ocr.lsrag.v1",
+}
+
+BUILTIN_LOCAL_OBJECT_INTAKE_WORKFLOW: Final[WorkflowDefinition] = _source_profile_workflow(
+    workflow_key=SINGLE_SOURCE_PROFILE_WORKFLOW_KEYS["local_object"],
+    display_name="Single local-object intake LS-RAG",
+    acquire_process_key="intake.acquire.local_object",
+    decode_process_key="intake.decode.text_json_html",
+)
+
+BUILTIN_LOCAL_PDF_INTAKE_WORKFLOW: Final[WorkflowDefinition] = _source_profile_workflow(
+    workflow_key=SINGLE_SOURCE_PROFILE_WORKFLOW_KEYS["local_object.pdf"],
+    display_name="Single local-PDF intake LS-RAG",
+    acquire_process_key="intake.acquire.local_object",
+    decode_process_key="intake.decode.pdf",
+)
+
+BUILTIN_HTTP_STATIC_INTAKE_WORKFLOW: Final[WorkflowDefinition] = _source_profile_workflow(
+    workflow_key=SINGLE_SOURCE_PROFILE_WORKFLOW_KEYS["http_resource.static"],
+    display_name="Single static-HTTP intake LS-RAG",
+    acquire_process_key="intake.acquire.http_static",
+    decode_process_key="intake.decode.text_json_html",
+)
+
+BUILTIN_HTTP_BROWSER_INTAKE_WORKFLOW: Final[WorkflowDefinition] = _source_profile_workflow(
+    workflow_key=SINGLE_SOURCE_PROFILE_WORKFLOW_KEYS["http_resource.browser"],
+    display_name="Single browser-rendered intake LS-RAG",
+    acquire_process_key="intake.acquire.http_browser",
+    decode_process_key="intake.decode.text_json_html",
+)
+
+BUILTIN_HTTP_PDF_INTAKE_WORKFLOW: Final[WorkflowDefinition] = _source_profile_workflow(
+    workflow_key=SINGLE_SOURCE_PROFILE_WORKFLOW_KEYS["http_resource.pdf"],
+    display_name="Single PDF intake LS-RAG",
+    acquire_process_key="intake.acquire.http_static",
+    decode_process_key="intake.decode.pdf",
+)
+
+BUILTIN_LOCAL_OCR_INTAKE_WORKFLOW: Final[WorkflowDefinition] = _source_profile_workflow(
+    workflow_key=SINGLE_SOURCE_PROFILE_WORKFLOW_KEYS["local_object.image"],
+    display_name="Single local-image OCR intake LS-RAG",
+    acquire_process_key="intake.acquire.local_object",
+    # OCR receives the acquired image representation directly in its handler.
+    # The decode slot remains a typed envelope coordinate, and the deployed
+    # capability currently rejects with a stable unavailability code.
+    decode_process_key="intake.decode.text_json_html",
+    clean_process_key="clean.ocr.local",
+)
+
+# Vision is registered as a reviewed, executable controlled-rejection graph
+# even though no public v1 source selector may request it.  This ensures the
+# exact capability cannot be smuggled in via payload extras, while bootstrap
+# and acceptance tests still verify its Process contract/handler boundary.
+BUILTIN_VISION_REJECTION_INTAKE_WORKFLOW: Final[WorkflowDefinition] = _source_profile_workflow(
+    workflow_key="intake.ingest.single.vision-rejected.lsrag.v1",
+    display_name="Controlled Vision intake capability refusal",
+    acquire_process_key="intake.acquire.local_object",
+    decode_process_key="intake.decode.text_json_html",
+    clean_process_key="clean.extract.vision",
+)
+
+BUILTIN_SOURCE_PROFILE_WORKFLOWS: Final[tuple[WorkflowDefinition, ...]] = (
+    BUILTIN_LOCAL_OBJECT_INTAKE_WORKFLOW,
+    BUILTIN_LOCAL_PDF_INTAKE_WORKFLOW,
+    BUILTIN_HTTP_STATIC_INTAKE_WORKFLOW,
+    BUILTIN_HTTP_BROWSER_INTAKE_WORKFLOW,
+    BUILTIN_HTTP_PDF_INTAKE_WORKFLOW,
+    BUILTIN_LOCAL_OCR_INTAKE_WORKFLOW,
+    BUILTIN_VISION_REJECTION_INTAKE_WORKFLOW,
+)
+
+
 def _historical_v1_execution_plan() -> WorkflowDefinition:
     """Return the exact pre-S09 immutable declaration for pinned executions.
 
@@ -538,12 +667,24 @@ BUILTIN_EXECUTION_COMPATIBILITY_WORKFLOWS: Final[tuple[WorkflowDefinition, ...]]
     HISTORICAL_SINGLE_INTAKE_LSRAG_WORKFLOW_V1,
 )
 
-BUILTIN_WORKFLOWS: Final[tuple[WorkflowDefinition, ...]] = (BUILTIN_SINGLE_INTAKE_LSRAG_WORKFLOW,)
+BUILTIN_WORKFLOWS: Final[tuple[WorkflowDefinition, ...]] = (
+    BUILTIN_SINGLE_INTAKE_LSRAG_WORKFLOW,
+    *BUILTIN_SOURCE_PROFILE_WORKFLOWS,
+)
 
 
 __all__ = [
     "BUILTIN_EXECUTION_COMPATIBILITY_WORKFLOWS",
+    "BUILTIN_HTTP_BROWSER_INTAKE_WORKFLOW",
+    "BUILTIN_HTTP_PDF_INTAKE_WORKFLOW",
+    "BUILTIN_HTTP_STATIC_INTAKE_WORKFLOW",
+    "BUILTIN_LOCAL_OBJECT_INTAKE_WORKFLOW",
+    "BUILTIN_LOCAL_OCR_INTAKE_WORKFLOW",
+    "BUILTIN_LOCAL_PDF_INTAKE_WORKFLOW",
     "BUILTIN_SINGLE_INTAKE_LSRAG_WORKFLOW",
+    "BUILTIN_SOURCE_PROFILE_WORKFLOWS",
+    "BUILTIN_VISION_REJECTION_INTAKE_WORKFLOW",
     "BUILTIN_WORKFLOWS",
     "HISTORICAL_SINGLE_INTAKE_LSRAG_WORKFLOW_V1",
+    "SINGLE_SOURCE_PROFILE_WORKFLOW_KEYS",
 ]

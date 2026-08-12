@@ -8,9 +8,11 @@ HTTP client opens that hop.
 
 from __future__ import annotations
 
+import hashlib
 from collections.abc import Callable
+from dataclasses import dataclass
 from typing import Any, Final
-from urllib.parse import urljoin
+from urllib.parse import urljoin, urlsplit, urlunsplit
 
 import httpcore
 import httpx
@@ -19,6 +21,101 @@ from src.contracts.common.errors import MkbError
 from src.runtime.security import EgressPolicy, EgressTarget
 
 _REDIRECT_STATUSES: Final = frozenset({301, 302, 303, 307, 308})
+
+
+def _response_media_type(value: str | None) -> str | None:
+    """Return the safe, normalized media token from an HTTP header.
+
+    Header parameters are representation metadata, not part of the durable
+    media coordinate.  Keeping only the lowercase type/subtype also prevents
+    a server-supplied boundary or charset from being copied into a Process
+    proof verbatim.
+    """
+
+    if not isinstance(value, str):
+        return None
+    candidate = value.split(";", 1)[0].strip().lower()
+    return candidate or None
+
+
+def redacted_url_identity(url: str) -> str:
+    """Return a non-echoing stable identity for an acquired URL.
+
+    A request URL can legally contain credentials in its query or a sensitive
+    opaque path.  Evidence needs to correlate redirect hops without retaining
+    that material, so only a SHA-256 commitment to the normalized no-fragment
+    URL crosses the acquisition boundary.
+    """
+
+    parsed = urlsplit(url)
+    # ``EgressPolicy`` is the authority for URL validity.  This helper is
+    # deliberately total so that it can also identify a denied/test request
+    # without accidentally echoing the original value in an exception.  Its
+    # representation mirrors the source-definition minimum: normalized
+    # scheme/host/default port, no fragment, and never userinfo.
+    try:
+        hostname = parsed.hostname
+        port = parsed.port
+    except ValueError:
+        # The resulting digest still correlates an invalid request in local
+        # diagnostics without placing its raw representation in evidence.
+        return hashlib.sha256(url.encode("utf-8", errors="surrogatepass")).hexdigest()
+    scheme = parsed.scheme.lower()
+    if hostname:
+        try:
+            host = hostname.rstrip(".").encode("idna").decode("ascii").lower()
+        except UnicodeError:
+            host = hostname.rstrip(".").lower()
+        # ``urlsplit().hostname`` deliberately removes brackets; add them
+        # back only for the canonical URI form of an IPv6 literal.
+        if ":" in host and not host.startswith("["):
+            host = f"[{host}]"
+        default_port = 443 if scheme == "https" else 80 if scheme == "http" else None
+        netloc = host if port in {None, default_port} else f"{host}:{port}"
+    else:
+        # Do not echo malformed/opaque input.  The egress fence will reject
+        # it before a real network hop, while this branch stays total for
+        # controlled test/failure evidence.
+        netloc = ""
+    normalized = urlunsplit((scheme, netloc, parsed.path or "/", parsed.query, ""))
+    return hashlib.sha256(normalized.encode("utf-8")).hexdigest()
+
+
+@dataclass(frozen=True, slots=True)
+class HttpAcquisitionResult:
+    """Bounded HTTP bytes plus the evidence safe for an S05 stage envelope.
+
+    ``final_url`` intentionally never appears in callers' durable state;
+    :meth:`evidence` exposes only its redacted identity.  The raw body remains
+    available to the immediate decode stage, where it is subject to the media
+    and encoding checks rather than being treated as a generic text string.
+    """
+
+    body: bytes
+    initial_url_identity: str
+    final_url_identity: str
+    response_media_type: str | None
+    status_code: int
+    redirect_count: int
+
+    @property
+    def content_digest(self) -> str:
+        return hashlib.sha256(self.body).hexdigest()
+
+    @property
+    def size_bytes(self) -> int:
+        return len(self.body)
+
+    def evidence(self) -> dict[str, object]:
+        return {
+            "request_url_identity": self.initial_url_identity,
+            "final_url_identity": self.final_url_identity,
+            "response_media_type": self.response_media_type,
+            "http_status": self.status_code,
+            "redirect_count": self.redirect_count,
+            "raw_byte_digest": self.content_digest,
+            "raw_byte_size": self.size_bytes,
+        }
 
 
 class PinnedNetworkBackend(httpcore.AsyncNetworkBackend):
@@ -111,9 +208,21 @@ class HttpAcquirer:
         self._on_egress_denied = on_egress_denied
 
     async def __call__(self, url: str) -> bytes:
-        """Return a response body or a safe, typed acquisition/security error."""
+        """Return response bytes for existing narrow consumers.
+
+        New S05 callers should use :meth:`acquire` so they can persist the
+        bounded evidence alongside the bytes.  Keeping this compatibility
+        wrapper avoids widening the public acquisition surface to transport
+        details.
+        """
+
+        return (await self.acquire(url)).body
+
+    async def acquire(self, url: str) -> HttpAcquisitionResult:
+        """Fetch bytes and return a redaction-safe representation witness."""
 
         current_url = url
+        initial_identity = redacted_url_identity(url)
         timeout = httpx.Timeout(self._timeout_seconds)
         for redirect_count in range(self._policy.max_redirects + 1):
             try:
@@ -159,7 +268,14 @@ class HttpAcquirer:
                                     "HTTP source response exceeds the configured size limit",
                                     413,
                                 )
-                        return bytes(body)
+                        return HttpAcquisitionResult(
+                            body=bytes(body),
+                            initial_url_identity=initial_identity,
+                            final_url_identity=redacted_url_identity(current_url),
+                            response_media_type=_response_media_type(response.headers.get("content-type")),
+                            status_code=response.status_code,
+                            redirect_count=redirect_count,
+                        )
                 except MkbError:
                     raise
                 except httpx.HTTPError as exc:
@@ -173,3 +289,6 @@ class HttpAcquirer:
     def _record_denied(self, reason: str) -> None:
         if self._on_egress_denied is not None:
             self._on_egress_denied(reason)
+
+
+__all__ = ["HttpAcquirer", "HttpAcquisitionResult", "PinnedNetworkBackend", "redacted_url_identity"]

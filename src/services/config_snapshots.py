@@ -81,7 +81,12 @@ class ConfigSnapshotService:
         """Resolve only for a new execution; callers must avoid replay work first."""
 
         source_kind = request.payload.source.source_kind if isinstance(request.payload, IntakeIngestPayload) else None
-        workflow = await self.workflows.resolve_for_source(self._workflow_purpose(request.request_intent), source_kind)
+        source_profile = self._source_profile(request)
+        workflow = await self.workflows.resolve_for_source(
+            self._workflow_purpose(request.request_intent),
+            source_kind,
+            source_profile,
+        )
         # This is the S05 admission boundary.  Do it before materializing
         # configuration or input manifests so the caller-owned body never
         # reaches a Task audit, an Execution manifest, or an outbox payload.
@@ -370,6 +375,33 @@ class ConfigSnapshotService:
         }:
             raise MkbError("workflow-intent-not-supported", "No workflow is registered for this Task intent", 422)
         return "intake.ingest"
+
+    @staticmethod
+    def _source_profile(request: TaskCreateRequest) -> str | None:
+        """Resolve a bounded code-owned S05 profile before freezing L4.
+
+        Callers choose only the strict descriptor's source kind/mode/media
+        declaration.  They cannot name a workflow or a clean capability; this
+        function maps that small typed surface to the reviewed registry key.
+        """
+
+        if not isinstance(request.payload, IntakeIngestPayload):
+            return None
+        source = request.payload.source.model_dump(mode="json")
+        source_kind = source.get("source_kind")
+        if source_kind == "http_resource":
+            mode = source.get("acquisition_mode", "static")
+            return f"http_resource.{mode}" if mode in {"static", "browser", "pdf"} else None
+        if source_kind == "local_object":
+            media_type = source.get("media_type")
+            if isinstance(media_type, str):
+                normalized_media_type = media_type.split(";", 1)[0].strip().lower()
+                if normalized_media_type == "application/pdf":
+                    return "local_object.pdf"
+                if normalized_media_type.startswith("image/"):
+                    return "local_object.image"
+            return "local_object"
+        return source_kind if isinstance(source_kind, str) else None
 
     async def _resolve_intent_context(self, request: TaskCreateRequest) -> dict[str, Any] | None:
         """Freeze all pre-existing Intake targets before a new Task UoW.

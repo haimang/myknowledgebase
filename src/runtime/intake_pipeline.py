@@ -20,8 +20,10 @@ import math
 import re
 import struct
 import time
+import unicodedata
 from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass
+from html.parser import HTMLParser
 from typing import Any
 
 from src.contracts.common.errors import MkbError
@@ -31,6 +33,7 @@ from src.contracts.inference.models import EmbeddingRequest, InferenceBinding
 from src.contracts.runtime.models import ProcessCommand, ProcessOutcome
 from src.contracts.storage.models import ObjectHandle, ObjectStat, PromoteRequest
 from src.persistence.ports import PersistencePort, UnitOfWork
+from src.runtime.http_acquisition import HttpAcquisitionResult, redacted_url_identity
 from src.runtime.inference.facade import InferenceFacade
 from src.runtime.workflow_engine import ProcessStageHandler, canonical_outcome_digest
 from src.services.artifacts import OutcomeArtifactCommitter
@@ -62,9 +65,269 @@ from src.storage.ports import ObjectStorePort
 from src.workflows.builtin_scatter import SCATTER_CHILD_WORKFLOW_KEY
 
 _SPACE = re.compile(r"\s+")
-_HTML = re.compile(r"<[^>]+>")
+_HTML_HINT = re.compile(r"<\s*(?:!doctype|html|head|body|article|main|div|p|h[1-6]|table|ul|ol|section)\b", re.I)
+_PDF_TEXT = re.compile(rb"\((?:\\.|[^\\()])*\)\s*(?:Tj|')")
+_PDF_ARRAY_TEXT = re.compile(rb"\[(.*?)\]\s*TJ", re.S)
+_PDF_LITERAL = re.compile(rb"\((?:\\.|[^\\()])*\)")
 
-HttpFetcher = Callable[[str], str | bytes | Awaitable[str | bytes]]
+HttpFetcher = Callable[[str], str | bytes | HttpAcquisitionResult | Awaitable[str | bytes | HttpAcquisitionResult]]
+BrowserFetcher = HttpFetcher
+
+
+@dataclass(frozen=True, slots=True)
+class _AcquiredContent:
+    """Immediate source representation plus safe acquisition evidence.
+
+    Stage envelopes are JSON-only, so binary representations are carried as a
+    lossless latin-1 transport string until the decode capability consumes
+    them.  The ``raw_byte_*`` values remain the authoritative byte witness.
+    """
+
+    raw_text: str
+    is_binary: bool
+    media_type: str
+    evidence: dict[str, Any]
+
+
+class _DeterministicHtmlTextExtractor(HTMLParser):
+    """Small structural HTML extractor; never use regex tag stripping."""
+
+    _IGNORED = frozenset({"script", "style", "template", "noscript", "svg", "canvas"})
+    _BLOCK = frozenset(
+        {
+            "address",
+            "article",
+            "aside",
+            "blockquote",
+            "br",
+            "div",
+            "dl",
+            "dt",
+            "dd",
+            "figcaption",
+            "figure",
+            "footer",
+            "h1",
+            "h2",
+            "h3",
+            "h4",
+            "h5",
+            "h6",
+            "header",
+            "hr",
+            "li",
+            "main",
+            "nav",
+            "ol",
+            "p",
+            "pre",
+            "section",
+            "table",
+            "td",
+            "th",
+            "tr",
+            "ul",
+        }
+    )
+
+    def __init__(self) -> None:
+        super().__init__(convert_charrefs=True)
+        self.parts: list[str] = []
+        self._ignored_depth = 0
+        self.removed_tags: dict[str, int] = {}
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        del attrs
+        normalized = tag.lower()
+        if normalized in self._IGNORED:
+            self._ignored_depth += 1
+            self.removed_tags[normalized] = self.removed_tags.get(normalized, 0) + 1
+            return
+        if not self._ignored_depth and normalized in self._BLOCK:
+            self.parts.append("\n")
+
+    def handle_startendtag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        self.handle_starttag(tag, attrs)
+        self.handle_endtag(tag)
+
+    def handle_endtag(self, tag: str) -> None:
+        normalized = tag.lower()
+        if normalized in self._IGNORED:
+            if self._ignored_depth:
+                self._ignored_depth -= 1
+            return
+        if not self._ignored_depth and normalized in self._BLOCK:
+            self.parts.append("\n")
+
+    def handle_data(self, data: str) -> None:
+        if not self._ignored_depth:
+            self.parts.append(data)
+
+
+def _canonical_text(value: str) -> str:
+    """The v1 text coordinate: UTF-8 decoded, LF and NFC normalized."""
+
+    return unicodedata.normalize("NFC", value.replace("\r\n", "\n").replace("\r", "\n"))
+
+
+def _canonical_json_text(value: str) -> str:
+    """Strict I-JSON-shaped deterministic serialization used as v1 JCS.
+
+    The implementation deliberately rejects non-finite JSON constants rather
+    than silently accepting Python's extensions.  JSON numbers are emitted by
+    CPython's deterministic encoder; the capability/version evidence makes
+    that concrete implementation part of the historical interpretation.
+    """
+
+    def reject_constant(_: str) -> object:
+        raise ValueError("non-finite JSON constants are not permitted")
+
+    try:
+        parsed = json.loads(value, parse_constant=reject_constant)
+        return json.dumps(parsed, ensure_ascii=False, sort_keys=True, separators=(",", ":"), allow_nan=False)
+    except (TypeError, ValueError, json.JSONDecodeError) as exc:
+        raise MkbError("DECODE_JSON_INVALID", "JSON representation is not canonicalizable", 422) from exc
+
+
+def _extract_html_text(value: str) -> tuple[str, dict[str, Any]]:
+    extractor = _DeterministicHtmlTextExtractor()
+    try:
+        extractor.feed(value)
+        extractor.close()
+    except Exception as exc:  # HTMLParser has a deliberately small error surface.
+        raise MkbError("CLEAN_HTML_INVALID", "HTML representation could not be structurally parsed", 422) from exc
+    clean = _SPACE.sub(" ", _canonical_text("".join(extractor.parts))).strip()
+    return clean, {
+        "parser": "stdlib.html-parser.v1",
+        "removed_tag_counts": dict(sorted(extractor.removed_tags.items())),
+    }
+
+
+def _pdf_literal_bytes(value: bytes) -> bytes:
+    """Decode the limited PDF literal-string subset used by local v1 text.
+
+    It is intentionally not a permissive PDF renderer.  Encrypted, malformed
+    or image-only PDFs therefore reach the explicit local-OCR capability
+    refusal instead of being misreported as an empty successful document.
+    """
+
+    output = bytearray()
+    index = 0
+    while index < len(value):
+        byte = value[index]
+        if byte != 0x5C:  # backslash
+            output.append(byte)
+            index += 1
+            continue
+        index += 1
+        if index >= len(value):
+            break
+        escaped = value[index]
+        mapping = {ord("n"): 0x0A, ord("r"): 0x0D, ord("t"): 0x09, ord("b"): 0x08, ord("f"): 0x0C}
+        if escaped in mapping:
+            output.append(mapping[escaped])
+            index += 1
+            continue
+        if 0x30 <= escaped <= 0x37:
+            digits = bytearray([escaped])
+            index += 1
+            while index < len(value) and len(digits) < 3 and 0x30 <= value[index] <= 0x37:
+                digits.append(value[index])
+                index += 1
+            output.append(int(digits.decode("ascii"), 8) & 0xFF)
+            continue
+        if escaped in {0x0A, 0x0D}:
+            # PDF line continuation consumes an optional paired newline.
+            if escaped == 0x0D and index + 1 < len(value) and value[index + 1] == 0x0A:
+                index += 1
+            index += 1
+            continue
+        output.append(escaped)
+        index += 1
+    return bytes(output)
+
+
+def _extract_pdf_text(value: bytes) -> tuple[str, dict[str, Any]]:
+    if not value.startswith(b"%PDF-"):
+        raise MkbError("DECODE_PDF_INVALID", "PDF acquisition did not contain a PDF signature", 422)
+    literals: list[bytes] = []
+    for match in _PDF_TEXT.finditer(value):
+        literals.append(_pdf_literal_bytes(match.group(0)[1 : match.group(0).rfind(b")")]))
+    for array_match in _PDF_ARRAY_TEXT.finditer(value):
+        for literal in _PDF_LITERAL.finditer(array_match.group(1)):
+            literals.append(_pdf_literal_bytes(literal.group(0)[1:-1]))
+    joined = b"\n".join(part for part in literals if part)
+    if not joined:
+        raise MkbError(
+            "CLEAN_OCR_CAPABILITY_UNAVAILABLE",
+            "PDF has no extractable local text layer; local OCR is not configured",
+            422,
+        )
+    try:
+        if joined.startswith((b"\xfe\xff", b"\xff\xfe")):
+            text = joined.decode("utf-16")
+        else:
+            text = joined.decode("utf-8")
+    except UnicodeDecodeError:
+        text = joined.decode("latin-1")
+    return _canonical_text(text), {
+        "decoder": "local-pdf-literal-text.v1",
+        "page_count_hint": len(re.findall(rb"/Type\s*/Page\b", value)),
+        "text_layer": "present",
+    }
+
+
+def _sniff_media_type(value: bytes) -> str:
+    if value.startswith(b"%PDF-"):
+        return "application/pdf"
+    if value.startswith(b"\x89PNG\r\n\x1a\n"):
+        return "image/png"
+    if value.startswith(b"\xff\xd8\xff"):
+        return "image/jpeg"
+    if value.startswith((b"GIF87a", b"GIF89a")):
+        return "image/gif"
+    if value.startswith(b"RIFF") and value[8:12] == b"WEBP":
+        return "image/webp"
+    try:
+        text = value.decode("utf-8-sig")
+    except UnicodeDecodeError:
+        return "application/octet-stream"
+    stripped = text.lstrip()
+    if stripped.startswith(("{", "[")):
+        try:
+            _canonical_json_text(text)
+        except MkbError:
+            pass
+        else:
+            return "application/json"
+    if _HTML_HINT.search(stripped):
+        return "text/html"
+    return "text/plain"
+
+
+def _normalized_media_type(value: object) -> str | None:
+    if not isinstance(value, str):
+        return None
+    media_type = value.split(";", 1)[0].strip().lower()
+    return media_type or None
+
+
+def _verified_media_type(*, declared: str | None, detected: str, mode: str | None = None) -> str:
+    """Choose a versioned verified type while failing closed on critical lies."""
+
+    if mode == "pdf" and detected != "application/pdf":
+        raise MkbError("ACQUISITION_MEDIA_MISMATCH", "PDF mode did not return a PDF representation", 422)
+    if declared == "application/pdf" and detected != "application/pdf":
+        raise MkbError("ACQUISITION_MEDIA_MISMATCH", "Declared PDF representation did not verify", 422)
+    if declared and declared.startswith("image/") and declared != detected:
+        raise MkbError("ACQUISITION_MEDIA_MISMATCH", "Declared image representation did not verify", 422)
+    if detected != "application/octet-stream":
+        return detected
+    return declared or detected
+
+
+def _clean_text(value: str) -> str:
+    return _SPACE.sub(" ", _canonical_text(value)).strip()
 
 
 @dataclass(frozen=True, slots=True)
@@ -93,10 +356,6 @@ def _digest_bytes(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
 
 
-def _clean_text(value: str) -> str:
-    return _SPACE.sub(" ", _HTML.sub(" ", value)).strip()
-
-
 class IntakePipeline(ProcessStageHandler):
     """Concrete handler for the built-in single-intake workflow.
 
@@ -112,6 +371,7 @@ class IntakePipeline(ProcessStageHandler):
         committer: OutcomeArtifactCommitter,
         *,
         http_fetcher: HttpFetcher | None = None,
+        browser_fetcher: BrowserFetcher | None = None,
         inference: InferenceFacade | None = None,
         live_inference: bool = False,
         lifecycle: IntakeLifecycleService | None = None,
@@ -125,6 +385,10 @@ class IntakePipeline(ProcessStageHandler):
         self._storage = storage
         self._committer = committer
         self._http_fetcher = http_fetcher
+        # Browser rendering is intentionally a distinct injected capability.
+        # Falling back to the static HTTP fetcher would fabricate rendered
+        # provenance and hide a missing browser profile from preflight.
+        self._browser_fetcher = browser_fetcher
         self._inference = inference
         self._live_inference = live_inference
         self._lifecycle = lifecycle
@@ -301,9 +565,15 @@ class IntakePipeline(ProcessStageHandler):
             return await self._passthrough(command, state)
         dispatch = {
             "intake.acquire.inline": self._acquire,
+            "intake.acquire.local_object": self._acquire,
+            "intake.acquire.http_static": self._acquire,
+            "intake.acquire.http_browser": self._acquire,
             "intake.acquire.registered_api": self._acquire,
             "intake.decode.text_json_html": self._decode,
+            "intake.decode.pdf": self._decode,
             "clean.extract.deterministic": self._clean,
+            "clean.ocr.local": self._clean,
+            "clean.extract.vision": self._clean,
             "clean.map.registered_api": self._clean_registered_api,
             "intake.collection.seal": self._seal,
             "intake.preflight_validate": self._preflight,
@@ -375,10 +645,11 @@ class IntakePipeline(ProcessStageHandler):
             raise MkbError("SOURCE_EXTERNAL_KEY_INVALID", "Source external_key is required", 422)
         if source_kind == "registered_api":
             return await self._acquire_registered_api_collection(command, descriptor)
-        if command.process_key != "intake.acquire.inline":
+        expected_capability = self._expected_acquisition_capability(descriptor)
+        if command.process_key != expected_capability:
             raise MkbError("ACQUISITION_CAPABILITY_MISMATCH", "Source kind does not match the bound acquisition capability", 409)
-        raw_text, media_type = await self._acquire_content(command, descriptor)
-        if not raw_text.strip():
+        acquired = await self._acquire_content(command, descriptor)
+        if not acquired.is_binary and not acquired.raw_text.strip():
             raise MkbError("ACQUISITION_EMPTY", "Source acquisition returned no content", 422)
         now = utc_now()
         next_state = {
@@ -390,9 +661,19 @@ class IntakePipeline(ProcessStageHandler):
             "source_kind": source_kind,
             "external_key": external_key.strip(),
             "normalized_external_key": external_key.strip().casefold(),
-            "raw_text": raw_text,
-            "raw_digest": stable_digest({"media_type": media_type, "text": raw_text}),
-            "media_type": media_type,
+            "raw_text": acquired.raw_text,
+            "raw_binary_transport": acquired.is_binary,
+            # Existing Intake/S04 artifact coordinates use this representation
+            # digest.  Preserve it for historical workflow compatibility while
+            # retaining the independently auditable raw-byte digest below.
+            "raw_digest": stable_digest({"media_type": acquired.media_type, "text": acquired.raw_text}),
+            "raw_byte_digest": acquired.evidence["raw_byte_digest"],
+            "raw_byte_size": acquired.evidence["raw_byte_size"],
+            "declared_media_type": acquired.evidence["declared_media_type"],
+            "detected_media_type": acquired.evidence["detected_media_type"],
+            "media_type": acquired.media_type,
+            "acquisition_capability": acquired.evidence["acquisition_capability"],
+            "acquisition_evidence": acquired.evidence,
             "require_human_review": bool(descriptor.get("require_human_review", False)),
             "intake_source_uuid": uuid7(),
             "candidate_set_uuid": uuid7(),
@@ -409,9 +690,13 @@ class IntakePipeline(ProcessStageHandler):
             {
                 "acquisition_evidence": {
                     "source_kind": source_kind,
-                    "media_type": media_type,
+                    "acquisition_capability": acquired.evidence["acquisition_capability"],
+                    "declared_media_type": acquired.evidence["declared_media_type"],
+                    "detected_media_type": acquired.evidence["detected_media_type"],
+                    "verified_media_type": acquired.media_type,
                     "content_digest": next_state["raw_digest"],
-                    "byte_count": len(raw_text.encode("utf-8")),
+                    "byte_count": acquired.evidence["raw_byte_size"],
+                    "evidence": acquired.evidence,
                 }
             },
         )
@@ -443,6 +728,21 @@ class IntakePipeline(ProcessStageHandler):
             )
 
         return material, {}, callback
+
+    @staticmethod
+    def _expected_acquisition_capability(descriptor: Mapping[str, Any]) -> str:
+        source_kind = descriptor.get("source_kind")
+        if source_kind == "inline_payload":
+            return "intake.acquire.inline"
+        if source_kind == "local_object":
+            return "intake.acquire.local_object"
+        if source_kind == "http_resource":
+            mode = descriptor.get("acquisition_mode", "static")
+            if mode == "browser":
+                return "intake.acquire.http_browser"
+            if mode in {"static", "pdf"}:
+                return "intake.acquire.http_static"
+        raise MkbError("ACQUISITION_CAPABILITY_MISMATCH", "Source profile has no registered acquisition capability", 409)
 
     async def _acquire_registered_api_collection(
         self, command: ProcessCommand, descriptor: Mapping[str, Any]
@@ -482,14 +782,15 @@ class IntakePipeline(ProcessStageHandler):
             if normalized_key in seen_keys:
                 raise MkbError("ACQUISITION_RECORD_DUPLICATE", "Registered API member external_key is duplicated", 422)
             seen_keys.add(normalized_key)
+            canonical_content = _canonical_text(content)
             members.append(
                 {
                     "member_ordinal": ordinal,
                     "external_key": member_key.strip(),
                     "normalized_external_key": normalized_key,
-                    "raw_text": content,
-                    "raw_digest": stable_digest({"media_type": media_type.strip(), "text": content}),
-                    "media_type": media_type.strip(),
+                    "raw_text": canonical_content,
+                    "raw_digest": stable_digest({"media_type": media_type.strip(), "text": canonical_content}),
+                    "media_type": _normalized_media_type(media_type) or "text/plain",
                     "title": record.get("title") if isinstance(record.get("title"), str) else None,
                     "require_human_review": bool(record.get("require_human_review", False)),
                     "intake_item_uuid": uuid7(),
@@ -513,6 +814,21 @@ class IntakePipeline(ProcessStageHandler):
                 ],
             }
         )
+        collection_byte_count = sum(len(member["raw_text"].encode("utf-8")) for member in members)
+        acquisition_evidence = {
+            "schema_version": "mkb.acquisition-evidence.v1",
+            "source_kind": "registered_api",
+            "acquisition_capability": "intake.acquire.registered_api",
+            "acquisition_mode": "registered_api",
+            "member_count": len(members),
+            "raw_byte_digest": raw_digest,
+            "raw_byte_size": collection_byte_count,
+            "declared_media_type": "application/json",
+            "detected_media_type": "application/json",
+            "verified_media_type": "application/json",
+            "completeness_evidence": "caller_frozen_records.v1",
+            "budget_verdict": "within_registered_api_member_budget",
+        }
         next_state = {
             "request_intent": "intake.ingest",
             "operation_mode": "scatter_root",
@@ -525,6 +841,8 @@ class IntakePipeline(ProcessStageHandler):
             "normalized_external_key": root_external_key.casefold(),
             "collection_members": members,
             "raw_digest": raw_digest,
+            "acquisition_capability": "intake.acquire.registered_api",
+            "acquisition_evidence": acquisition_evidence,
             "require_human_review": bool(descriptor.get("require_human_review", False))
             or any(member["require_human_review"] for member in members),
             "intake_source_uuid": uuid7(),
@@ -540,10 +858,12 @@ class IntakePipeline(ProcessStageHandler):
             {
                 "acquisition_evidence": {
                     "source_kind": "registered_api",
+                    "acquisition_capability": "intake.acquire.registered_api",
                     "member_count": len(members),
                     "content_digest": raw_digest,
-                    "byte_count": sum(len(member["raw_text"].encode("utf-8")) for member in members),
+                    "byte_count": collection_byte_count,
                     "completeness": "complete",
+                    "evidence": acquisition_evidence,
                 }
             },
         )
@@ -1883,8 +2203,16 @@ class IntakePipeline(ProcessStageHandler):
             raise MkbError("INTAKE_REBUILD_INPUT_INVALID", "Frozen clean artifact failed its digest fence", 409)
         return text
 
-    async def _acquire_content(self, command: ProcessCommand, descriptor: Mapping[str, Any]) -> tuple[str, str]:
-        source_kind = descriptor["source_kind"]
+    async def _acquire_content(self, command: ProcessCommand, descriptor: Mapping[str, Any]) -> _AcquiredContent:
+        """Acquire one representation with immutable, redaction-safe evidence.
+
+        The source descriptor chooses only a registered kind/profile.  It can
+        never inject headers, paths, browser options, or an OCR/Vision model.
+        The returned evidence is deliberately compact enough for a stage
+        envelope, while raw bytes remain behind the object/HTTP boundary.
+        """
+
+        source_kind = descriptor.get("source_kind")
         if source_kind == "inline_payload":
             # The public inline body was staged at Task admission.  A Process
             # must never recover it from an Audit or immutable input manifest;
@@ -1907,43 +2235,155 @@ class IntakePipeline(ProcessStageHandler):
             data = await self._storage.read_verified(command.team_uuid, ObjectHandle(value=handle))
             if len(data) != size_bytes or _digest_bytes(data) != content_digest:
                 raise MkbError("ACQUISITION_INGRESS_FENCE", "Inline ingress bytes failed their frozen fence", 409)
-            try:
-                return data.decode("utf-8"), str(descriptor.get("media_type") or "text/plain")
-            except UnicodeDecodeError as exc:
-                # ConfigSnapshotService only stages UTF-8 text, but retain a
-                # typed fence so an object-store corruption cannot become an
-                # opaque worker exception.
-                raise MkbError("ACQUISITION_DECODE_UNSUPPORTED", "Inline ingress is not UTF-8 text", 422) from exc
+            return self._representation_from_bytes(
+                data,
+                declared_media_type=_normalized_media_type(descriptor.get("media_type")) or "text/plain",
+                capability="intake.acquire.inline",
+                source_kind="inline_payload",
+                mode="staged_inline",
+                extra_evidence={"logical_handle_digest": stable_digest({"handle": handle})},
+            )
         if source_kind == "local_object":
             handle = descriptor.get("logical_handle")
             if not isinstance(handle, str):
                 raise MkbError("ACQUISITION_HANDLE_INVALID", "Local object handle is required", 422)
             data = await self._storage.read_verified(command.team_uuid, ObjectHandle(value=handle))
-            try:
-                return data.decode("utf-8"), str(descriptor.get("media_type") or "text/plain")
-            except UnicodeDecodeError as exc:
-                raise MkbError("ACQUISITION_DECODE_UNSUPPORTED", "Local object is not UTF-8 text", 422) from exc
+            return self._representation_from_bytes(
+                data,
+                declared_media_type=_normalized_media_type(descriptor.get("media_type")),
+                capability="intake.acquire.local_object",
+                source_kind="local_object",
+                mode="logical_object",
+                extra_evidence={"logical_handle_digest": stable_digest({"handle": handle})},
+            )
         if source_kind == "registered_api":
             records = descriptor.get("records")
             if not isinstance(records, list):
                 raise MkbError("ACQUISITION_RECORDS_REQUIRED", "Registered API records are required", 422)
-            return "\n".join(_json(record) for record in records), "application/json"
-        if self._http_fetcher is None:
-            raise MkbError("ACQUISITION_HTTP_UNAVAILABLE", "HTTP acquisition is not configured", 503)
+            data = canonical_json(records)
+            return self._representation_from_bytes(
+                data,
+                declared_media_type="application/json",
+                capability="intake.acquire.registered_api",
+                source_kind="registered_api",
+                mode="registered_api",
+                extra_evidence={"member_count": len(records), "exhaustion_proof": "caller_frozen_records.v1"},
+            )
+        if source_kind != "http_resource":
+            raise MkbError("SOURCE_KIND_INVALID", "Source kind is not registered", 422)
         url = descriptor.get("url")
-        if not isinstance(url, str):
+        if not isinstance(url, str) or not url.strip():
             raise MkbError("ACQUISITION_URL_INVALID", "HTTP source URL is required", 422)
-        result = self._http_fetcher(url)
+        mode = descriptor.get("acquisition_mode", "static")
+        if mode not in {"static", "browser", "pdf"}:
+            raise MkbError("ACQUISITION_MODE_INVALID", "HTTP acquisition mode is not registered", 422)
+        if mode == "browser":
+            fetcher = self._browser_fetcher
+            capability = "intake.acquire.http_browser"
+            if fetcher is None:
+                raise MkbError(
+                    "ACQUISITION_BROWSER_CAPABILITY_UNAVAILABLE",
+                    "Browser acquisition is not configured for this deployment",
+                    503,
+                )
+        else:
+            fetcher = self._http_fetcher
+            capability = "intake.acquire.http_static"
+            if fetcher is None:
+                raise MkbError("ACQUISITION_HTTP_UNAVAILABLE", "HTTP acquisition is not configured", 503)
+        # ``HttpAcquirer`` exposes its evidence-aware method without making
+        # that transport type a public descriptor dependency.  Narrow mocked
+        # callables retain the simple callable seam used by focused tests.
+        acquire = getattr(fetcher, "acquire", None)
+        result = acquire(url) if callable(acquire) else fetcher(url)
         if inspect.isawaitable(result):
             result = await result
-        if isinstance(result, bytes):
-            try:
-                result = result.decode("utf-8")
-            except UnicodeDecodeError as exc:
-                raise MkbError("ACQUISITION_DECODE_UNSUPPORTED", "HTTP response is not UTF-8 text", 422) from exc
-        if not isinstance(result, str):
+        http_evidence: dict[str, Any]
+        if isinstance(result, HttpAcquisitionResult):
+            data = result.body
+            http_evidence = result.evidence()
+            declared = result.response_media_type
+        elif isinstance(result, str):
+            data = result.encode("utf-8")
+            declared = None
+            http_evidence = {
+                "request_url_identity": redacted_url_identity(url),
+                "final_url_identity": redacted_url_identity(url),
+                "response_media_type": None,
+                "http_status": None,
+                "redirect_count": None,
+                "transport_profile": "injected-fetcher.v1",
+            }
+        elif isinstance(result, bytes):
+            data = result
+            declared = None
+            http_evidence = {
+                "request_url_identity": redacted_url_identity(url),
+                "final_url_identity": redacted_url_identity(url),
+                "response_media_type": None,
+                "http_status": None,
+                "redirect_count": None,
+                "transport_profile": "injected-fetcher.v1",
+            }
+        else:
             raise MkbError("ACQUISITION_RESPONSE_INVALID", "HTTP acquisition returned invalid content", 502)
-        return result, "text/html" if descriptor.get("acquisition_mode") == "browser" else "text/plain"
+        return self._representation_from_bytes(
+            data,
+            declared_media_type=declared,
+            capability=capability,
+            source_kind="http_resource",
+            mode=mode,
+            extra_evidence={
+                **http_evidence,
+                "representation_kind": "rendered" if mode == "browser" else "transferred",
+                "browser_profile": "injected-browser-renderer.v1" if mode == "browser" else None,
+            },
+        )
+
+    @staticmethod
+    def _representation_from_bytes(
+        data: bytes,
+        *,
+        declared_media_type: str | None,
+        capability: str,
+        source_kind: str,
+        mode: str,
+        extra_evidence: Mapping[str, Any] | None = None,
+    ) -> _AcquiredContent:
+        """Classify bounded bytes without pretending media metadata is truth."""
+
+        declared = _normalized_media_type(declared_media_type)
+        detected = _sniff_media_type(data)
+        verified = _verified_media_type(declared=declared, detected=detected, mode=mode)
+        binary = verified == "application/pdf" or verified.startswith("image/")
+        if binary:
+            raw_text = data.decode("latin-1")
+            encoding = {"label": "binary", "bom": False, "replacement_count": 0}
+        else:
+            try:
+                raw_text = data.decode("utf-8-sig")
+            except UnicodeDecodeError as exc:
+                raise MkbError("ACQUISITION_DECODE_UNSUPPORTED", "Representation is not supported UTF-8 text", 422) from exc
+            encoding = {
+                "label": "utf-8",
+                "bom": data.startswith(b"\xef\xbb\xbf"),
+                "replacement_count": 0,
+            }
+        evidence = {
+            "schema_version": "mkb.acquisition-evidence.v1",
+            "source_kind": source_kind,
+            "acquisition_capability": capability,
+            "acquisition_mode": mode,
+            "declared_media_type": declared,
+            "detected_media_type": detected,
+            "verified_media_type": verified,
+            "raw_byte_digest": _digest_bytes(data),
+            "raw_byte_size": len(data),
+            "encoding": encoding,
+            "budget_verdict": "within_configured_acquisition_budget",
+            **dict(extra_evidence or {}),
+        }
+        return _AcquiredContent(raw_text=raw_text, is_binary=binary, media_type=verified, evidence=evidence)
 
     async def _decode(
         self, command: ProcessCommand, state: dict[str, Any]
@@ -1951,24 +2391,72 @@ class IntakePipeline(ProcessStageHandler):
         raw = state.get("raw_text")
         if not isinstance(raw, str):
             raise MkbError("PIPELINE_INPUT_INVALID", "Acquisition evidence has no textual payload", 422)
-        decoded = raw
-        if state.get("media_type") == "application/json":
-            try:
-                decoded = json.dumps(json.loads(raw), ensure_ascii=False, sort_keys=True)
-            except json.JSONDecodeError:
-                # A registered source can legally provide text-shaped JSON
-                # records; preservation is safer than silently discarding it.
-                decoded = raw
+        media_type = state.get("media_type")
+        if not isinstance(media_type, str) or not media_type:
+            raise MkbError("ACQUISITION_EVIDENCE_INVALID", "Verified media type is unavailable", 422)
+        expected_decode = "intake.decode.pdf" if media_type == "application/pdf" else "intake.decode.text_json_html"
+        if command.process_key != expected_decode:
+            raise MkbError("DECODE_CAPABILITY_MISMATCH", "Source representation does not match the bound decoder", 409)
+        binary = bool(state.get("raw_binary_transport"))
+        decode_evidence: dict[str, Any]
+        if binary:
+            raw_bytes = raw.encode("latin-1")
+            if media_type == "application/pdf":
+                decoded, decode_evidence = _extract_pdf_text(raw_bytes)
+                decode_evidence = {
+                    **decode_evidence,
+                    "decode_capability": "intake.decode.pdf",
+                    "input_raw_byte_digest": state.get("raw_byte_digest"),
+                }
+            elif media_type.startswith("image/"):
+                # There is intentionally no text manufactured from image
+                # bytes.  The OCR/Vision profile needs only this bounded
+                # image-evidence coordinate before its exact clean Process
+                # runs and reports its configured/unavailable disposition.
+                decoded = ""
+                decode_evidence = {
+                    "decode_capability": "intake.decode.text_json_html",
+                    "canonicalizer": "binary-image-evidence.v1",
+                    "input_raw_byte_digest": state.get("raw_byte_digest"),
+                    "representation_kind": "image_evidence",
+                    "verified_media_type": media_type,
+                }
+            else:
+                raise MkbError("ACQUISITION_DECODE_UNSUPPORTED", "Binary representation has no registered decoder", 422)
+        elif media_type == "application/json":
+            decoded = _canonical_json_text(raw)
+            decode_evidence = {
+                "decode_capability": "intake.decode.text_json_html",
+                "canonicalizer": "jcs.i-json.v1",
+                "input_raw_byte_digest": state.get("raw_byte_digest"),
+            }
+        elif media_type in {"text/plain", "text/html"} or media_type.startswith("text/"):
+            decoded = _canonical_text(raw)
+            decode_evidence = {
+                "decode_capability": "intake.decode.text_json_html",
+                "canonicalizer": "utf8-lf-nfc.v1",
+                "input_raw_byte_digest": state.get("raw_byte_digest"),
+            }
+        else:
+            raise MkbError("ACQUISITION_DECODE_UNSUPPORTED", "Verified media type has no registered decoder", 422)
         next_state = dict(state)
         next_state["decoded_text"] = decoded
-        next_state["decoded_digest"] = stable_digest({"text": decoded, "media_type": state.get("media_type")})
+        next_state["decoded_digest"] = stable_digest(
+            {
+                "canonicalizer": decode_evidence["decode_capability"],
+                "media_type": media_type,
+                "text": decoded,
+            }
+        )
+        next_state["decode_evidence"] = decode_evidence
         material = self._material(
             command,
             next_state,
             {
                 "decoded_representation": {
                     "content_digest": next_state["decoded_digest"],
-                    "media_type": state.get("media_type"),
+                    "media_type": media_type,
+                    "evidence": decode_evidence,
                 }
             },
         )
@@ -1981,19 +2469,53 @@ class IntakePipeline(ProcessStageHandler):
     async def _clean(
         self, command: ProcessCommand, state: dict[str, Any]
     ) -> tuple[_StageMaterial, dict[str, Any], Callable[[UnitOfWork, Mapping[str, str]], Awaitable[None]]]:
+        media_type = state.get("media_type")
+        if command.process_key in {"clean.ocr.local", "clean.extract.vision"} and (
+            not isinstance(media_type, str) or not media_type.startswith("image/")
+        ):
+            raise MkbError("CLEAN_CAPABILITY_MISMATCH", "Image clean capability requires image evidence", 409)
+        if command.process_key == "clean.extract.deterministic" and isinstance(media_type, str) and media_type.startswith("image/"):
+            raise MkbError("CLEAN_CAPABILITY_MISMATCH", "Image representation requires an image clean capability", 409)
+        if command.process_key == "clean.ocr.local":
+            raise MkbError(
+                "CLEAN_OCR_CAPABILITY_UNAVAILABLE",
+                "Local OCR is not configured for this deployment",
+                503,
+            )
+        if command.process_key == "clean.extract.vision":
+            raise MkbError(
+                "CLEAN_VISION_CAPABILITY_UNAVAILABLE",
+                "Vision clean is not configured for this deployment",
+                503,
+            )
         decoded = state.get("decoded_text")
         if not isinstance(decoded, str):
             raise MkbError("PIPELINE_INPUT_INVALID", "Decoded representation is unavailable", 422)
-        clean = _clean_text(decoded)
+        if media_type == "text/html":
+            clean, clean_evidence = _extract_html_text(decoded)
+        else:
+            clean = _clean_text(decoded)
+            clean_evidence = {"parser": "deterministic-text-normalizer.v1", "removed_tag_counts": {}}
         if not clean:
             raise MkbError("CLEAN_EMPTY", "Cleaning produced no admissible text", 422)
         next_state = dict(state)
         next_state["clean_text"] = clean
         next_state["clean_digest"] = stable_digest({"text": clean})
+        next_state["clean_evidence"] = {
+            "clean_capability": "clean.extract.deterministic",
+            "input_decoded_digest": state.get("decoded_digest"),
+            **clean_evidence,
+        }
         material = self._material(
             command,
             next_state,
-            {"clean_candidate": {"content_digest": next_state["clean_digest"], "char_count": len(clean)}},
+            {
+                "clean_candidate": {
+                    "content_digest": next_state["clean_digest"],
+                    "char_count": len(clean),
+                    "evidence": next_state["clean_evidence"],
+                }
+            },
         )
 
         async def callback(tx: UnitOfWork, refs: Mapping[str, str]) -> None:
@@ -2018,12 +2540,21 @@ class IntakePipeline(ProcessStageHandler):
             raw_text = raw_member.get("raw_text")
             if not isinstance(raw_text, str):
                 raise MkbError("SCATTER_MEMBER_INVALID", "Registered API member content is unavailable", 422)
-            clean_text = _clean_text(raw_text)
+            if raw_member.get("media_type") == "text/html":
+                clean_text, clean_evidence = _extract_html_text(raw_text)
+            else:
+                clean_text = _clean_text(raw_text)
+                clean_evidence = {"parser": "deterministic-text-normalizer.v1", "removed_tag_counts": {}}
             if not clean_text:
                 raise MkbError("CLEAN_EMPTY", "Registered API member cleaning produced no admissible text", 422)
             member = dict(raw_member)
             member["clean_text"] = clean_text
             member["clean_digest"] = stable_digest({"text": clean_text})
+            member["clean_evidence"] = {
+                "clean_capability": "clean.map.registered_api",
+                "input_raw_digest": member["raw_digest"],
+                **clean_evidence,
+            }
             clean_members.append(member)
         candidate_root_digest = stable_digest(
             {
@@ -2112,7 +2643,12 @@ class IntakePipeline(ProcessStageHandler):
                     command.process_uuid,
                     command.fencing_generation,
                     source["source_kind_definition_digest"],
-                    stable_digest({"process_key": "intake.acquire.inline"}),
+                    stable_digest(
+                        {
+                            "process_key": state.get("acquisition_capability", "intake.acquire.inline"),
+                            "evidence": state.get("raw_byte_digest"),
+                        }
+                    ),
                     stable_digest({"binding": command.binding_digest}),
                     state["normalized_external_key"],
                     state["raw_digest"],
@@ -2204,7 +2740,12 @@ class IntakePipeline(ProcessStageHandler):
                     command.process_uuid,
                     command.fencing_generation,
                     source["source_kind_definition_digest"],
-                    stable_digest({"process_key": "intake.acquire.registered_api"}),
+                    stable_digest(
+                        {
+                            "process_key": state.get("acquisition_capability", "intake.acquire.registered_api"),
+                            "evidence": state.get("raw_digest"),
+                        }
+                    ),
                     stable_digest({"binding": command.binding_digest}),
                     state["normalized_external_key"],
                     state["raw_digest"],
@@ -2247,6 +2788,7 @@ class IntakePipeline(ProcessStageHandler):
     ) -> tuple[_StageMaterial, dict[str, Any], Callable[[UnitOfWork, Mapping[str, str]], Awaitable[None]]]:
         if state.get("operation_mode") == "scatter_root":
             return await self._preflight_registered_api_collection(command, state)
+        checks = self._validate_single_preflight_evidence(state)
         clean = state.get("clean_text")
         if not isinstance(clean, str) or not clean.strip():
             admission = "rejected"
@@ -2265,9 +2807,13 @@ class IntakePipeline(ProcessStageHandler):
             next_state,
             {
                 "preflight_outcome": {
+                    "validator_key": "mkb.intake.preflight.deterministic",
+                    "validator_version": "v1",
+                    "check_set_version": "s05-evidence-completeness.v1",
                     "admission_result": admission,
                     "reason": reason,
                     "candidate_root_digest": state.get("candidate_root_digest"),
+                    "checks": checks,
                 }
             },
         )
@@ -2289,12 +2835,116 @@ class IntakePipeline(ProcessStageHandler):
 
         return material, {"admission_result": admission}, callback
 
+    @staticmethod
+    def _validate_single_preflight_evidence(state: Mapping[str, Any]) -> list[dict[str, str]]:
+        """Validate frozen evidence only; this must never acquire or clean."""
+
+        source = state.get("source")
+        evidence = state.get("acquisition_evidence")
+        decode = state.get("decode_evidence")
+        clean = state.get("clean_evidence")
+        source_kind = state.get("source_kind")
+        if not isinstance(source, Mapping) or not isinstance(evidence, Mapping):
+            raise MkbError("PREFLIGHT_EVIDENCE_INVALID", "Acquisition evidence is unavailable", 422)
+        mode = source.get("acquisition_mode", "staged_inline") if source_kind == "http_resource" else None
+        expected_capability = {
+            "inline_payload": "intake.acquire.inline",
+            "local_object": "intake.acquire.local_object",
+            "http_resource": "intake.acquire.http_browser" if mode == "browser" else "intake.acquire.http_static",
+        }.get(source_kind)
+        if expected_capability is None or evidence.get("acquisition_capability") != expected_capability:
+            raise MkbError("PREFLIGHT_BINDING_INVALID", "Frozen acquisition capability does not match the source profile", 409)
+        digest = evidence.get("raw_byte_digest")
+        size = evidence.get("raw_byte_size")
+        if (
+            evidence.get("schema_version") != "mkb.acquisition-evidence.v1"
+            or evidence.get("source_kind") != source_kind
+            or not isinstance(digest, str)
+            or len(digest) != 64
+            or isinstance(size, bool)
+            or not isinstance(size, int)
+            or size < 1
+            or evidence.get("verified_media_type") != state.get("media_type")
+        ):
+            raise MkbError("PREFLIGHT_EVIDENCE_INVALID", "Frozen acquisition representation evidence is incomplete", 422)
+        if source_kind == "http_resource":
+            if not all(isinstance(evidence.get(key), str) and evidence[key] for key in ("request_url_identity", "final_url_identity")):
+                raise MkbError("PREFLIGHT_EVIDENCE_INVALID", "HTTP acquisition identity evidence is incomplete", 422)
+            if mode == "browser" and (
+                evidence.get("representation_kind") != "rendered"
+                or not isinstance(evidence.get("browser_profile"), str)
+            ):
+                raise MkbError("PREFLIGHT_EVIDENCE_INVALID", "Browser acquisition lacks rendered evidence", 422)
+        expected_decode = "intake.decode.pdf" if state.get("media_type") == "application/pdf" else "intake.decode.text_json_html"
+        if not isinstance(decode, Mapping) or decode.get("decode_capability") != expected_decode:
+            raise MkbError("PREFLIGHT_EVIDENCE_INVALID", "Decode evidence is unavailable", 422)
+        decoded = state.get("decoded_text")
+        decoded_digest = state.get("decoded_digest")
+        if (
+            not isinstance(decoded, str)
+            or not isinstance(decoded_digest, str)
+            or decoded_digest
+            != stable_digest(
+                {
+                    "canonicalizer": expected_decode,
+                    "media_type": state.get("media_type"),
+                    "text": decoded,
+                }
+            )
+        ):
+            raise MkbError("PREFLIGHT_EVIDENCE_INVALID", "Decoded representation failed its frozen digest fence", 409)
+        if not isinstance(clean, Mapping) or clean.get("clean_capability") != "clean.extract.deterministic":
+            raise MkbError("PREFLIGHT_EVIDENCE_INVALID", "Clean evidence is unavailable", 422)
+        clean_text = state.get("clean_text")
+        clean_digest = state.get("clean_digest")
+        if (
+            clean.get("input_decoded_digest") != decoded_digest
+            or not isinstance(clean_text, str)
+            or not isinstance(clean_digest, str)
+            or clean_digest != stable_digest({"text": clean_text})
+        ):
+            raise MkbError("PREFLIGHT_EVIDENCE_INVALID", "Clean evidence does not bind the decoded representation", 409)
+        root_digest = state.get("candidate_root_digest")
+        if (
+            not isinstance(root_digest, str)
+            or root_digest
+            != stable_digest(
+                {
+                    "external_key": state.get("normalized_external_key"),
+                    "clean_digest": clean_digest,
+                }
+            )
+        ):
+            raise MkbError("PREFLIGHT_EVIDENCE_INVALID", "Candidate set is not sealed", 422)
+        return [
+            {"key": "binding_matches_source_profile", "result": "passed"},
+            {"key": "acquisition_representation_complete", "result": "passed"},
+            {"key": "decode_clean_lineage_complete", "result": "passed"},
+            {"key": "candidate_set_complete", "result": "passed"},
+        ]
+
     async def _preflight_registered_api_collection(
         self, command: ProcessCommand, state: dict[str, Any]
     ) -> tuple[_StageMaterial, dict[str, Any], Callable[[UnitOfWork, Mapping[str, str]], Awaitable[None]]]:
         members = state.get("collection_members")
+        evidence = state.get("acquisition_evidence")
         if not isinstance(members, list) or not isinstance(state.get("candidate_root_digest"), str):
             raise MkbError("SCATTER_STATE_INVALID", "Collection preflight lacks a sealed candidate set", 422)
+        if (
+            not isinstance(evidence, Mapping)
+            or evidence.get("acquisition_capability") != "intake.acquire.registered_api"
+            or evidence.get("completeness_evidence") != "caller_frozen_records.v1"
+            or evidence.get("member_count") != len(members)
+        ):
+            raise MkbError("PREFLIGHT_EVIDENCE_INVALID", "Registered API acquisition evidence is incomplete", 422)
+        if any(
+            not isinstance(member, Mapping)
+            or member.get("member_ordinal") != ordinal
+            or not isinstance(member.get("clean_text"), str)
+            or not isinstance(member.get("clean_digest"), str)
+            for ordinal, member in enumerate(members)
+        ):
+            raise MkbError("PREFLIGHT_EVIDENCE_INVALID", "Registered API member evidence is incomplete", 422)
         if bool(state.get("require_human_review")):
             admission = "human_review_required"
             reason = "source_or_member_requires_human_review"
@@ -2309,10 +2959,18 @@ class IntakePipeline(ProcessStageHandler):
             next_state,
             {
                 "preflight_outcome": {
+                    "validator_key": "mkb.intake.preflight.deterministic",
+                    "validator_version": "v1",
+                    "check_set_version": "s05-evidence-completeness.v1",
                     "admission_result": admission,
                     "reason": reason,
                     "candidate_root_digest": state["candidate_root_digest"],
                     "member_count": len(members),
+                    "checks": [
+                        {"key": "registered_api_binding", "result": "passed"},
+                        {"key": "registered_api_completeness", "result": "passed"},
+                        {"key": "registered_api_member_lineage", "result": "passed"},
+                    ],
                 }
             },
         )
