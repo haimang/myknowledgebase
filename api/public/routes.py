@@ -7,6 +7,11 @@ import json
 from fastapi import APIRouter, Request, Response
 
 from api.dependencies import BusinessToken, Ready
+from src.contracts.api.generation import (
+    GenerationArtifactPage,
+    GenerationArtifactPointerPage,
+    GenerationArtifactView,
+)
 from src.contracts.api.models import (
     ExpectedRevisionRequest,
     parse_retrieval_request,
@@ -18,6 +23,7 @@ from src.contracts.api.models import (
 )
 from src.contracts.common.errors import MkbError
 from src.contracts.common.ids import validate_external_uuid
+from src.services.generation_read import GenerationArtifactReadService
 
 router = APIRouter(prefix="/v1", tags=["tasks"])
 
@@ -28,6 +34,10 @@ def _team_path(team_uuid: str) -> str:
 
 def _task_path(task_uuid: str) -> str:
     return validate_external_uuid(task_uuid, field="task_uuid")
+
+
+def _generation_artifact_path(generation_artifact_uuid: str) -> str:
+    return validate_external_uuid(generation_artifact_uuid, field="generation_artifact_uuid")
 
 
 @router.post("/teams", status_code=201)
@@ -198,6 +208,77 @@ async def task_result(request: Request, team_uuid: str, task_uuid: str, token: B
     del token
     result, status = await request.app.state.container.tasks.result(_team_path(team_uuid), _task_path(task_uuid))
     return Response(content=__import__("json").dumps(result), media_type="application/json", status_code=status)
+
+
+@router.get("/teams/{team_uuid}/tasks/{task_uuid}/generation-artifacts")
+async def list_generation_artifacts(
+    request: Request,
+    team_uuid: str,
+    task_uuid: str,
+    token: BusinessToken,
+    artifact_type: str | None = None,
+    validation_disposition: str | None = None,
+    generation: int | None = None,
+    limit: int = 50,
+    cursor: str | None = None,
+) -> GenerationArtifactPage:
+    """Read immutable Task-owned history without addressing runtime identities."""
+
+    del token
+    service = GenerationArtifactReadService(request.app.state.container.persistence)
+    items, next_cursor = await service.list_artifacts(
+        _team_path(team_uuid),
+        _task_path(task_uuid),
+        artifact_type=artifact_type,
+        validation_disposition=validation_disposition,
+        generation=generation,
+        limit=limit,
+        cursor=cursor,
+    )
+    return GenerationArtifactPage.model_validate({"items": items, "next_cursor": next_cursor})
+
+
+@router.get("/teams/{team_uuid}/tasks/{task_uuid}/generation-artifacts/{generation_artifact_uuid}")
+async def get_generation_artifact(
+    request: Request,
+    team_uuid: str,
+    task_uuid: str,
+    generation_artifact_uuid: str,
+    token: BusinessToken,
+) -> GenerationArtifactView:
+    del token
+    service = GenerationArtifactReadService(request.app.state.container.persistence)
+    return await service.get_artifact(
+        _team_path(team_uuid),
+        _task_path(task_uuid),
+        _generation_artifact_path(generation_artifact_uuid),
+    )
+
+
+@router.get("/teams/{team_uuid}/tasks/{task_uuid}/generation-artifact-pointers")
+async def list_generation_artifact_pointers(
+    request: Request,
+    team_uuid: str,
+    task_uuid: str,
+    token: BusinessToken,
+    artifact_type: str | None = None,
+    generation: int | None = None,
+    limit: int = 50,
+    cursor: str | None = None,
+) -> GenerationArtifactPointerPage:
+    """Read current full-valid pointer selections through their owning Task."""
+
+    del token
+    service = GenerationArtifactReadService(request.app.state.container.persistence)
+    items, next_cursor = await service.list_pointers(
+        _team_path(team_uuid),
+        _task_path(task_uuid),
+        artifact_type=artifact_type,
+        generation=generation,
+        limit=limit,
+        cursor=cursor,
+    )
+    return GenerationArtifactPointerPage.model_validate({"items": items, "next_cursor": next_cursor})
 
 
 @router.post("/teams/{team_uuid}/retrieval:search")
