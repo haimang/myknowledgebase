@@ -117,9 +117,50 @@ class IntakeCoreMixin:
                 )
                 return provisional.model_copy(update={"outcome_digest": canonical_outcome_digest(provisional)})
             except MkbError as exc:
-                return self._failed(command, exc.code, exc.message)
+                return self._outcome_from_error(command, exc)
             except (TypeError, ValueError, json.JSONDecodeError):
                 return self._failed(command, "PIPELINE_INPUT_INVALID", "Stage input is invalid")
+
+    # Transient transport / capacity failures may auto-retry the same Process.
+    # Closed code set only. Permanent capability / config gaps stay terminal
+    # ``failed`` (e.g. *_INFERENCE_UNAVAILABLE = "not configured", OCR missing,
+    # registry absent) so max_retries is not exhausted on a misconfiguration
+    # (D01-T027). Do not classify by HTTP status alone.
+    _RECOVERABLE_ERROR_CODES = frozenset(
+        {
+            "VECTORIZE_INFERENCE_FAILED",
+            "GENERATION_INFERENCE_FAILED",
+            "VECTORIZE_CONFIG_SNAPSHOT_UNAVAILABLE",
+            "INFERENCE_TRANSPORT_RETRYABLE",
+            "not-ready",
+        }
+    )
+
+    @classmethod
+    def _is_recoverable_error(cls, exc: MkbError) -> bool:
+        return exc.code in cls._RECOVERABLE_ERROR_CODES
+
+    @classmethod
+    def _outcome_from_error(cls, command: ProcessCommand, exc: MkbError) -> ProcessOutcome:
+        if cls._is_recoverable_error(exc):
+            return cls._retryable_failure(command, exc.code, exc.message)
+        return cls._failed(command, exc.code, exc.message)
+
+    @staticmethod
+    def _retryable_failure(command: ProcessCommand, code: str, message: str) -> ProcessOutcome:
+        provisional = ProcessOutcome(
+            schema_version="mkb.process-outcome.v1",
+            team_uuid=command.team_uuid,
+            task_uuid=command.task_uuid,
+            execution_uuid=command.execution_uuid,
+            process_uuid=command.process_uuid,
+            fencing_generation=command.fencing_generation,
+            disposition="retryable_failure",
+            outcome_digest="0" * 64,
+            error_code=code[:128],
+            error_message=message[:512],
+        )
+        return provisional.model_copy(update={"outcome_digest": canonical_outcome_digest(provisional)})
 
     @staticmethod
     def _failed(command: ProcessCommand, code: str, message: str) -> ProcessOutcome:

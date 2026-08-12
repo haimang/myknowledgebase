@@ -227,7 +227,10 @@ class TaskViewsMixin:
                 "active": row["active_child_count"],
                 "succeeded": row["succeeded_child_count"],
                 "failed": row["failed_child_count"],
-                "cancelled": row["cancelled_process_count"],
+                # Child-execution axis only (D01 review R3).
+                "cancelled": int(row["cancelled_child_count"] or 0)
+                if row["cancelled_child_count"] is not None
+                else 0,
             },
             "result_ref": row["result_ref"],
             "proof_ref": row["publication_proof_ref"],

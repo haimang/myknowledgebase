@@ -253,11 +253,19 @@ class WorkflowCoreMixin:
                     (now, now, execution["execution_uuid"]),
                 )
             if execution["root_execution_uuid"] == execution["execution_uuid"]:
-                await tx.execute(
-                    "UPDATE mkb_tasks SET status='running',started_at=COALESCE(started_at,?),"
-                    "row_revision=row_revision+1,updated_at=? "
-                    "WHERE team_uuid=? AND task_uuid=? AND current_root_execution_uuid=? AND status='queued'",
-                    (now, now, execution["team_uuid"], execution["task_uuid"], execution["execution_uuid"]),
+                # Single owned projection path (D01 review R2).
+                from src.contracts.common.models import TaskStatus
+                from src.runtime.task.task_projection import project_task_status_tx
+                from src.services.events import DomainEventWriter
+
+                await project_task_status_tx(
+                    tx,
+                    team_uuid=execution["team_uuid"],
+                    task_uuid=execution["task_uuid"],
+                    target=TaskStatus.RUNNING,
+                    events=DomainEventWriter(),
+                    trace_uuid=execution.get("trace_uuid"),
+                    current_root_execution_uuid=execution["execution_uuid"],
                 )
             await self._record_event_tx(
                 tx,
@@ -550,8 +558,8 @@ class WorkflowCoreMixin:
             # perturb the root control CAS revision after a Gate target has
             # frozen it; otherwise an innocent child-count refresh makes a
             # still-open human Gate spuriously stale.
-            "failed_child_count=?,updated_at=? WHERE execution_uuid=?",
-            (total, active, succeeded, failed, now, root_execution_uuid),
+            "failed_child_count=?,cancelled_child_count=?,updated_at=? WHERE execution_uuid=?",
+            (total, active, succeeded, failed, cancelled, now, root_execution_uuid),
         )
         await tx.execute(
             "UPDATE mkb_tasks SET cnt_total=?,cnt_required=?,cnt_active=?,cnt_succeeded=?,cnt_failed=?,"

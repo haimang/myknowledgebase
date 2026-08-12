@@ -376,28 +376,27 @@ class WorkflowRepairMixin:
             (utc_now(), root["execution_uuid"]),
         )
         changed += int(bool(cleared.rowcount))
+        from src.contracts.common.models import TaskStatus
+        from src.runtime.task.task_projection import project_task_status_tx
+        from src.services.events import DomainEventWriter
+
         task_status = {
-            ExecutionStatus.SUCCEEDED.value: "succeeded",
-            ExecutionStatus.FAILED.value: "failed",
-            ExecutionStatus.CANCELLED.value: "cancelled",
+            ExecutionStatus.SUCCEEDED.value: TaskStatus.SUCCEEDED,
+            ExecutionStatus.FAILED.value: TaskStatus.FAILED,
+            ExecutionStatus.CANCELLED.value: TaskStatus.CANCELLED,
         }[root["status"]]
-        projected = await tx.execute(
-            "UPDATE mkb_tasks SET status=?,result_ref=?,proof_ref=?,error_code=?,error_message=?,"
-            "completed_at=COALESCE(completed_at,?),row_revision=row_revision+1,updated_at=? "
-            "WHERE team_uuid=? AND task_uuid=? AND current_root_execution_uuid=? "
-            "AND status NOT IN ('succeeded','failed','cancelled')",
-            (
-                task_status,
-                root.get("result_ref"),
-                root.get("publication_proof_ref"),
-                root.get("final_error_code"),
-                root.get("final_error_message"),
-                root.get("completed_at") or utc_now(),
-                utc_now(),
-                root["team_uuid"],
-                root["task_uuid"],
-                root["execution_uuid"],
-            ),
+        projected = await project_task_status_tx(
+            tx,
+            team_uuid=root["team_uuid"],
+            task_uuid=root["task_uuid"],
+            target=task_status,
+            events=DomainEventWriter(),
+            trace_uuid=root.get("trace_uuid"),
+            current_root_execution_uuid=root["execution_uuid"],
+            result_ref=root.get("result_ref"),
+            proof_ref=root.get("publication_proof_ref"),
+            error_code=root.get("final_error_code"),
+            error_message=root.get("final_error_message"),
         )
-        changed += int(bool(projected.rowcount))
+        changed += int(bool(projected))
         return changed

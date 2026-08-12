@@ -243,19 +243,23 @@ class WorkflowMaterializeMixin:
         )
         if existing is not None:
             return False
+        root_execution_uuid = execution.get("root_execution_uuid") or execution["execution_uuid"]
+        if not root_execution_uuid:
+            raise MkbError("execution-root-missing", "Execution lacks a durable root lineage pointer", 503)
         inserted = await tx.execute(
             "INSERT INTO mkb_processes "
-            "(process_uuid,team_uuid,execution_uuid,task_uuid,workflow_step_uuid,step_key,process_key,"
+            "(process_uuid,team_uuid,execution_uuid,task_uuid,root_execution_uuid,workflow_step_uuid,step_key,process_key,"
             "process_contract_version,materialization_key,route_decision_digest,requiredness,process_spec_digest,"
             "input_manifest_ref,input_manifest_digest,control_snapshot_ref,config_snapshot_ref,config_snapshot_digest,"
             "proof_kind,status,row_revision,available_at,priority_rank,deadline_at,fencing_generation,max_retries,max_recoveries,"
             "backoff_policy_json,created_at,updated_at,payload_extra) "
-            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
             (
                 process_uuid,
                 execution["team_uuid"],
                 execution["execution_uuid"],
                 execution["task_uuid"],
+                root_execution_uuid,
                 step_row["workflow_step_uuid"],
                 step.step_key,
                 step.process_key,

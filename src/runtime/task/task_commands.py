@@ -382,50 +382,23 @@ class TaskCommandsMixin:
         error_code: str | None = None,
         error_message: str | None = None,
     ) -> bool:
-        """Internal state owner: successful terminal transition requires a proof."""
+        """Internal state owner: successful terminal transition requires a proof.
 
-        row = await self._get_row(tx, team_uuid, task_uuid)
-        if row["current_generation"] != expected_generation:
-            return False
-        if target == TaskStatus.SUCCEEDED and not proof_ref:
-            raise MkbError("task-proof-missing", "Task cannot succeed without a durable publication proof", 409)
-        if row["status"] == "cancelling" and target == TaskStatus.SUCCEEDED:
-            return False
-        if target == TaskStatus.RUNNING and row["status"] != "queued":
-            return False
-        if target in {TaskStatus.SUCCEEDED, TaskStatus.FAILED} and row["status"] != "running":
-            return False
-        if target == TaskStatus.CANCELLED and row["status"] != "cancelling":
-            return False
-        now = utc_now()
-        completed = (
-            now if target in {TaskStatus.SUCCEEDED, TaskStatus.FAILED, TaskStatus.CANCELLED} else row["completed_at"]
-        )
-        await tx.execute(
-            "UPDATE mkb_tasks SET status=?,result_ref=?,proof_ref=?,error_code=?,error_message=?,started_at=COALESCE(started_at,?),"
-            "completed_at=?,row_revision=row_revision+1,updated_at=? WHERE team_uuid=? AND task_uuid=? AND current_generation=?",
-            (
-                target.value,
-                result_ref,
-                proof_ref,
-                error_code,
-                error_message,
-                now if target == TaskStatus.RUNNING else None,
-                completed,
-                now,
-                team_uuid,
-                task_uuid,
-                expected_generation,
-            ),
-        )
-        await self.events.write(
+        Delegates to :func:`project_task_status_tx` so command tests and the
+        workflow runtime share one success-wins projection contract.
+        """
+
+        from src.runtime.task.task_projection import project_task_status_tx
+
+        return await project_task_status_tx(
             tx,
             team_uuid=team_uuid,
-            trace_uuid=row["trace_uuid"],
-            event_type="task.status_changed",
-            aggregate="task",
-            summary=f"Task transitioned to {target.value}",
             task_uuid=task_uuid,
-            payload={"status": target.value, "generation": expected_generation},
+            target=target,
+            events=self.events,
+            expected_generation=expected_generation,
+            result_ref=result_ref,
+            proof_ref=proof_ref,
+            error_code=error_code,
+            error_message=error_message,
         )
-        return True

@@ -568,31 +568,31 @@ class WorkflowOutcomeMixin:
         error_code: str | None,
         error_message: str | None,
     ) -> None:
+        """Project Task terminal status through the single owned helper (R2)."""
+
         if execution["root_execution_uuid"] != execution["execution_uuid"]:
             return
-        now = utc_now()
+        from src.contracts.common.models import TaskStatus
+        from src.runtime.task.task_projection import project_task_status_tx
+        from src.services.events import DomainEventWriter
+
         task_status = {
-            ExecutionStatus.SUCCEEDED.value: "succeeded",
-            ExecutionStatus.FAILED.value: "failed",
-            ExecutionStatus.CANCELLED.value: "cancelled",
+            ExecutionStatus.SUCCEEDED.value: TaskStatus.SUCCEEDED,
+            ExecutionStatus.FAILED.value: TaskStatus.FAILED,
+            ExecutionStatus.CANCELLED.value: TaskStatus.CANCELLED,
         }[status]
-        await tx.execute(
-            "UPDATE mkb_tasks SET status=?,result_ref=?,proof_ref=?,error_code=?,error_message=?,completed_at=?,"
-            "row_revision=row_revision+1,updated_at=? "
-            "WHERE team_uuid=? AND task_uuid=? AND current_root_execution_uuid=? "
-            "AND status NOT IN ('succeeded','failed','cancelled')",
-            (
-                task_status,
-                None if source_process is None else source_process.get("output_manifest_ref"),
-                None if source_process is None else source_process.get("proof_ref"),
-                error_code,
-                error_message,
-                now,
-                now,
-                execution["team_uuid"],
-                execution["task_uuid"],
-                execution["execution_uuid"],
-            ),
+        await project_task_status_tx(
+            tx,
+            team_uuid=execution["team_uuid"],
+            task_uuid=execution["task_uuid"],
+            target=task_status,
+            events=DomainEventWriter(),
+            trace_uuid=execution.get("trace_uuid"),
+            current_root_execution_uuid=execution["execution_uuid"],
+            result_ref=None if source_process is None else source_process.get("output_manifest_ref"),
+            proof_ref=None if source_process is None else source_process.get("proof_ref"),
+            error_code=error_code,
+            error_message=error_message,
         )
 
 
@@ -670,10 +670,19 @@ class WorkflowOutcomeMixin:
                 "WHERE execution_uuid=? AND status='open'",
                 (now, row["execution_uuid"]),
             )
+            # R4: idle Processes pass through cancelling then terminal in this UoW
+            # so observers never see a durable cancel path that skips cancelling.
+            await tx.execute(
+                "UPDATE mkb_processes SET status='cancelling',fencing_generation=fencing_generation+1,"
+                "row_revision=row_revision+1,updated_at=? "
+                "WHERE execution_uuid=? AND status IN ('ready','retry_wait')",
+                (now, row["execution_uuid"]),
+            )
             await tx.execute(
                 "UPDATE mkb_processes SET status='cancelled',completed_at=?,claim_token_hash=NULL,lease_owner=NULL,"
                 "lease_expires_at=NULL,heartbeat_at=NULL,row_revision=row_revision+1,updated_at=? "
-                "WHERE execution_uuid=? AND status IN ('ready','retry_wait')",
+                "WHERE execution_uuid=? AND status='cancelling' AND lease_owner IS NULL "
+                "AND claim_token_hash IS NULL",
                 (now, now, row["execution_uuid"]),
             )
             await tx.execute(
