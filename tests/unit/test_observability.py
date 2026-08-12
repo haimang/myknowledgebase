@@ -7,6 +7,7 @@ from pathlib import Path
 
 import pytest
 
+from src.contracts.common.errors import MkbError
 from src.contracts.common.ids import stable_digest, uuid7
 from src.contracts.common.time import utc_now
 from src.persistence.sqlite_port import SqlitePersistence
@@ -86,10 +87,12 @@ async def test_operator_reads_are_team_scoped_cursor_bounded_and_redacted(tmp_pa
         assert "should-not-leak" not in rendered
         assert "[REDACTED]" in rendered
         assert "foreign event" not in rendered
-        with pytest.raises(Exception):
+        with pytest.raises(MkbError) as invalid_limit:
             await reader.timeline_by_trace(team_uuid, trace_uuid, limit=201)
-        with pytest.raises(Exception):
+        assert invalid_limit.value.code == "OBS_TIMELINE_QUERY_FAIL"
+        with pytest.raises(MkbError) as invalid_cursor:
             await reader.timeline_by_trace(team_uuid, trace_uuid, limit=1, cursor="malformed")
+        assert invalid_cursor.value.code == "OBS_TIMELINE_QUERY_FAIL"
     finally:
         await persistence.close()
 

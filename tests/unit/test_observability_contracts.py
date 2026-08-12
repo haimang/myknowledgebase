@@ -8,6 +8,7 @@ from pathlib import Path
 
 import pytest
 
+from src.contracts.common.errors import MkbError
 from src.contracts.common.ids import stable_digest, uuid7
 from src.contracts.common.time import utc_now
 from src.persistence.sqlite_port import SqlitePersistence
@@ -141,6 +142,18 @@ class _BrokenPersistence:
 
 
 @pytest.mark.asyncio
+async def test_operator_read_failures_are_typed_and_non_echoing() -> None:
+    reader = ObservabilityReadService(_BrokenPersistence())  # type: ignore[arg-type]
+
+    with pytest.raises(MkbError) as result:
+        await reader.timeline_by_trace(uuid7(), uuid7())
+
+    assert result.value.code == "OBS_TIMELINE_QUERY_FAIL"
+    assert result.value.status_code == 503
+    assert "diagnostic store unavailable" not in result.value.message
+
+
+@pytest.mark.asyncio
 async def test_diagnostic_sink_failure_is_best_effort_but_visible() -> None:
     metrics = default_metrics()
     stderr_lines: list[str] = []
@@ -175,8 +188,10 @@ async def test_retention_failure_is_counted_and_diagnosed_without_business_mutat
         sink = DiagnosticSink(persistence, metrics, stderr=lambda _line: None)
         retention = _FailingRetention(persistence, metrics, diagnostics=sink)
 
-        with pytest.raises(RuntimeError, match="retention backend unavailable"):
+        with pytest.raises(MkbError) as failed:
             await retention.run_once()
+        assert failed.value.code == "OBS_RETENTION_JOB_FAIL"
+        assert "retention backend unavailable" not in failed.value.message
 
         rendered = metrics.render()
         assert "mkb_retention_job_success 0" in rendered

@@ -291,15 +291,20 @@ class ObservabilityReadService:
         if cursor_row is not None:
             boundary_sql = " AND (occurred_at<? OR (occurred_at=? AND event_uuid<?))"
             boundary_params = (cursor_row["occurred_at"], cursor_row["occurred_at"], cursor_row["row_uuid"])
-        async with self._persistence.transaction() as tx:
-            rows = await tx.fetchall(
-                "SELECT event_uuid,trace_uuid,event_type,aggregate,severity,task_uuid,execution_uuid,process_uuid,"
-                "subject_kind,subject_uuid,actor_kind,summary,payload_digest,occurred_at,recorded_at "
-                "FROM mkb_domain_events "
-                f"WHERE team_uuid=? AND {predicate}{boundary_sql} "
-                "ORDER BY occurred_at DESC,event_uuid DESC LIMIT ?",
-                (team_uuid, *predicate_params, *boundary_params, limit + 1),
-            )
+        try:
+            async with self._persistence.transaction() as tx:
+                rows = await tx.fetchall(
+                    "SELECT event_uuid,trace_uuid,event_type,aggregate,severity,task_uuid,execution_uuid,process_uuid,"
+                    "subject_kind,subject_uuid,actor_kind,summary,payload_digest,occurred_at,recorded_at "
+                    "FROM mkb_domain_events "
+                    f"WHERE team_uuid=? AND {predicate}{boundary_sql} "
+                    "ORDER BY occurred_at DESC,event_uuid DESC LIMIT ?",
+                    (team_uuid, *predicate_params, *boundary_params, limit + 1),
+                )
+        except MkbError:
+            raise
+        except Exception as exc:
+            raise MkbError("OBS_TIMELINE_QUERY_FAIL", "Observability timeline is unavailable", 503) from exc
         page = rows[:limit]
         next_cursor = None
         if len(rows) > limit and page:
@@ -354,13 +359,18 @@ class ObservabilityReadService:
         if cursor_row is not None:
             clauses.append("(updated_at<? OR (updated_at=? AND outbox_id<?))")
             params.extend((cursor_row["occurred_at"], cursor_row["occurred_at"], cursor_row["row_uuid"]))
-        async with self._persistence.transaction() as tx:
-            rows = await tx.fetchall(
-                "SELECT outbox_id,team_uuid,kind,status,attempts,last_error,created_at,updated_at FROM mkb_outbox WHERE "
-                + " AND ".join(clauses)
-                + " ORDER BY updated_at DESC,outbox_id DESC LIMIT ?",
-                (*params, limit + 1),
-            )
+        try:
+            async with self._persistence.transaction() as tx:
+                rows = await tx.fetchall(
+                    "SELECT outbox_id,team_uuid,kind,status,attempts,last_error,created_at,updated_at FROM mkb_outbox WHERE "
+                    + " AND ".join(clauses)
+                    + " ORDER BY updated_at DESC,outbox_id DESC LIMIT ?",
+                    (*params, limit + 1),
+                )
+        except MkbError:
+            raise
+        except Exception as exc:
+            raise MkbError("OBS_TIMELINE_QUERY_FAIL", "Observability dead-letter view is unavailable", 503) from exc
         page = rows[:limit]
         next_cursor = None
         if len(rows) > limit and page:
@@ -399,14 +409,19 @@ class ObservabilityReadService:
         if cursor_row is not None:
             boundary_sql = " AND (occurred_at<? OR (occurred_at=? AND audit_uuid<?))"
             params = (*params, cursor_row["occurred_at"], cursor_row["occurred_at"], cursor_row["row_uuid"])
-        async with self._persistence.transaction() as tx:
-            rows = await tx.fetchall(
-                "SELECT audit_uuid,trace_uuid,actor_kind,action,outcome,denial_code,http_status,target_kind,target_uuid,"
-                "summary,payload_json,occurred_at FROM mkb_security_audit_events WHERE team_uuid=?"
-                + boundary_sql
-                + " ORDER BY occurred_at DESC,audit_uuid DESC LIMIT ?",
-                (*params, limit + 1),
-            )
+        try:
+            async with self._persistence.transaction() as tx:
+                rows = await tx.fetchall(
+                    "SELECT audit_uuid,trace_uuid,actor_kind,action,outcome,denial_code,http_status,target_kind,target_uuid,"
+                    "summary,payload_json,occurred_at FROM mkb_security_audit_events WHERE team_uuid=?"
+                    + boundary_sql
+                    + " ORDER BY occurred_at DESC,audit_uuid DESC LIMIT ?",
+                    (*params, limit + 1),
+                )
+        except MkbError:
+            raise
+        except Exception as exc:
+            raise MkbError("OBS_TIMELINE_QUERY_FAIL", "Observability audit view is unavailable", 503) from exc
         page = rows[:limit]
         next_cursor = None
         if len(rows) > limit and page:
@@ -490,7 +505,7 @@ class ObservabilityRetentionService:
                 deleted[table] = count
                 if count:
                     self._metrics.increment("mkb_retention_delete_rows_total", count, table=table)
-        except Exception:
+        except Exception as exc:
             self._metrics.set("mkb_retention_job_success", 0)
             self._metrics.increment("mkb_retention_job_fail_total")
             await self._diagnostics.write(
@@ -499,11 +514,11 @@ class ObservabilityRetentionService:
                 calling_module="observability.retention",
                 log_level="error",
             )
-            # The caller decides its retry interval.  Propagating preserves a
-            # typed failure boundary instead of silently treating retention as
-            # success; the app loop can safely retry because no business rows
-            # were touched by this service.
-            raise
+            # The caller decides its retry interval.  A safe typed error keeps
+            # a manual/internal invocation observable without leaking a driver
+            # message; the app loop can retry because no business rows were
+            # touched by this service.
+            raise MkbError("OBS_RETENTION_JOB_FAIL", "Observability retention batch failed", 503) from exc
         self._metrics.set("mkb_retention_job_success", 1)
         return RetentionResult(deleted=deleted)
 
