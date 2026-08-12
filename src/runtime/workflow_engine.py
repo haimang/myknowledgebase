@@ -165,6 +165,7 @@ class WorkflowRuntime:
         persistence: PersistencePort,
         definition: WorkflowDefinition,
         *,
+        additional_definitions: tuple[WorkflowDefinition, ...] = (),
         compatibility_definitions: tuple[WorkflowDefinition, ...] = (),
         readiness: ReadinessProbe | Callable[[], Awaitable[bool]] | None = None,
         outcome_committer: ProcessOutcomeCommitter | None = None,
@@ -183,10 +184,14 @@ class WorkflowRuntime:
         self.default_max_retries = default_max_retries
         self.default_max_recoveries = default_max_recoveries
         self.retry_delay_seconds = retry_delay_seconds
+        active_definitions = (definition, *additional_definitions)
+        self._active_workflow_keys = {candidate.workflow_key for candidate in active_definitions}
+        if len(self._active_workflow_keys) != len(active_definitions):
+            raise ValueError("active workflow definitions must have distinct workflow_key values")
         self._plans_by_compiled_digest: dict[str, WorkflowDefinition] = {}
-        for candidate in (*compatibility_definitions, definition):
-            if candidate.workflow_key != definition.workflow_key:
-                raise ValueError("compatibility definitions must share the loaded workflow_key")
+        for candidate in (*compatibility_definitions, *active_definitions):
+            if candidate.workflow_key not in self._active_workflow_keys:
+                raise ValueError("compatibility definition must belong to an active workflow key")
             compiled_digest = _compiled_workflow_digest(candidate)
             existing = self._plans_by_compiled_digest.get(compiled_digest)
             if existing is not None and existing != candidate:
@@ -207,14 +212,36 @@ class WorkflowRuntime:
             if execution["status"] == ExecutionStatus.CANCELLING.value:
                 await self._converge_cancellation_tx(tx, execution)
                 return False
+            if execution["status"] == ExecutionStatus.WAITING.value:
+                if execution.get("waiting_reason") == "scatter_children":
+                    changed = await self._maybe_converge_scatter_root_tx(tx, execution)
+                    await self._refresh_execution_counts_tx(tx, execution["execution_uuid"])
+                    return changed
+                # Other typed waits (notably human review and retry) may only
+                # be resumed by their own bounded transition, never by a
+                # duplicate root wake replay.
+                return False
             plan = await self._assert_execution_binding(tx, execution)
+            task = await tx.fetchone(
+                "SELECT request_intent FROM mkb_tasks WHERE team_uuid=? AND task_uuid=?",
+                (execution["team_uuid"], execution["task_uuid"]),
+            )
+            if task is None or not isinstance(task.get("request_intent"), str):
+                await self._fail_execution_integrity_tx(
+                    tx,
+                    execution,
+                    "workflow-task-intent-missing",
+                    "Execution has no durable Task intent for static route selection",
+                )
+                return False
+            route_context = {"request_intent": task["request_intent"]}
             start = next(step for step in plan.steps if step.step_kind is WorkflowStepKind.START)
             decision = self._route_decision(
                 plan=plan,
                 execution=execution,
                 source_step_key=start.step_key,
                 selector=WorkflowOutcomeSelector.ALWAYS,
-                route_context={},
+                route_context=route_context,
             )
             if not decision["routes"]:
                 await self._fail_execution_integrity_tx(
@@ -227,7 +254,7 @@ class WorkflowRuntime:
                 execution=execution,
                 decision=decision,
                 source_process=None,
-                route_context={},
+                route_context=route_context,
                 terminal_error=None,
             )
             await self._refresh_execution_counts_tx(tx, execution["execution_uuid"])
@@ -721,35 +748,13 @@ class WorkflowRuntime:
     async def request_cancellation(self, execution_uuid: str) -> bool:
         """Propagate an accepted Execution cancellation without inventing success."""
 
-        now = utc_now()
         async with self.persistence.transaction() as tx:
             execution = await self._execution(tx, execution_uuid)
             if execution["status"] in _TERMINAL_EXECUTION_STATUSES:
                 return False
-            if execution["status"] != ExecutionStatus.CANCELLING.value:
-                await tx.execute(
-                    "UPDATE mkb_executions SET status='cancelling',cancel_requested_at=COALESCE(cancel_requested_at,?),"
-                    "row_revision=row_revision+1,updated_at=? WHERE execution_uuid=? AND status NOT IN ('succeeded','failed','cancelled')",
-                    (now, now, execution_uuid),
-                )
-                execution = await self._execution(tx, execution_uuid)
-            # Non-running work owns no external side effect and can converge in
-            # the same transaction.  A running/claimed worker is first fenced
-            # and left cancelling until its lease has closed.
-            await tx.execute(
-                "UPDATE mkb_processes SET status='cancelled',completed_at=?,claim_token_hash=NULL,lease_owner=NULL,"
-                "lease_expires_at=NULL,heartbeat_at=NULL,row_revision=row_revision+1,updated_at=? "
-                "WHERE execution_uuid=? AND status IN ('ready','retry_wait')",
-                (now, now, execution_uuid),
-            )
-            await tx.execute(
-                "UPDATE mkb_processes SET status='cancelling',fencing_generation=fencing_generation+1,"
-                "row_revision=row_revision+1,updated_at=? "
-                "WHERE execution_uuid=? AND status IN ('claimed','running')",
-                (now, execution_uuid),
-            )
-            await self._converge_cancellation_tx(tx, execution)
-            await self._refresh_execution_counts_tx(tx, execution_uuid)
+            root = await self._execution(tx, execution["root_execution_uuid"])
+            await self._cancel_execution_tree_tx(tx, root, include_root=True)
+            await self._refresh_execution_counts_tx(tx, root["execution_uuid"])
             return True
 
     async def resolve_gate(
@@ -826,7 +831,7 @@ class WorkflowRuntime:
             )
             if updated.rowcount != 1:
                 raise ConflictError("gate-revision-conflict", "Execution Gate changed during decision")
-            control = self._control_step(plan)
+            control = self._control_step(plan, gate["gate_kind"])
             if action == "approve":
                 await tx.execute(
                     "UPDATE mkb_executions SET status='ready',waiting_reason=NULL,waiting_ref=NULL,next_wake_at=NULL,"
@@ -917,9 +922,7 @@ class WorkflowRuntime:
             if execution["status"] in _TERMINAL_EXECUTION_STATUSES:
                 return False
             plan = await self._assert_execution_binding(tx, execution)
-            control = self._control_step(plan)
-            if decision["gate_kind"] != control.control_key:
-                raise MkbError("gate-control-mismatch", "Gate does not belong to the bound workflow control step", 409)
+            control = self._control_step(plan, decision["gate_kind"])
             if decision["action"] == "approve":
                 if execution["status"] not in {ExecutionStatus.RUNNING.value, ExecutionStatus.READY.value}:
                     raise ConflictError(
@@ -1038,11 +1041,281 @@ class WorkflowRuntime:
         return True
 
     async def repair_once(self) -> int:
-        """Run bounded semantic recovery; repeated calls are idempotent."""
+        """Run bounded semantic recovery; repeated calls are idempotent.
 
-        promoted = await self.promote_due_retries()
-        recovered = await self.recover_expired_leases()
-        return promoted + recovered
+        The database is the scheduling truth.  This scanner only rebuilds
+        legal Engine intents from that truth; it never invents a route,
+        approval, child denominator, or publication proof from queue/log
+        state.  Ambiguous terminal-route or waiting rows fail closed.
+        """
+
+        repaired = await self.promote_due_retries()
+        repaired += await self.recover_expired_leases()
+        async with self.persistence.transaction() as tx:
+            # Gate decisions are immutable causal truth.  Re-delivering the
+            # decision invokes the same bounded resume path and is safer than
+            # waking a review-gated root as though it were a fresh start.
+            decisions = await tx.fetchall(
+                "SELECT d.decision_uuid,d.team_uuid FROM mkb_execution_gate_decisions AS d "
+                "JOIN mkb_execution_gates AS g ON g.gate_uuid=d.gate_uuid "
+                "WHERE (d.action='approve' AND g.status='released') OR (d.action='reject' AND g.status='rejected')",
+            )
+            for decision in decisions:
+                before = await tx.fetchone(
+                    "SELECT outbox_id FROM mkb_outbox WHERE team_uuid=? AND dedupe_key IN (?,?)",
+                    (
+                        decision["team_uuid"],
+                        f"gate-decision:{decision['decision_uuid']}",
+                        f"repair-gate-decision:{decision['decision_uuid']}",
+                    ),
+                )
+                if before is None:
+                    await self._enqueue_tx(
+                        tx,
+                        decision["team_uuid"],
+                        "gate_decision",
+                        {"decision_uuid": decision["decision_uuid"]},
+                        f"repair-gate-decision:{decision['decision_uuid']}",
+                    )
+                    repaired += 1
+
+            # A root cancellation may have been committed before its cancel
+            # outbox delivery.  Continue the same recursive fence path here.
+            cancelling_roots = await tx.fetchall(
+                "SELECT * FROM mkb_executions WHERE execution_uuid=root_execution_uuid "
+                "AND status='cancelling' ORDER BY execution_uuid",
+            )
+            for root in cancelling_roots:
+                repaired += await self._cancel_execution_tree_tx(tx, root, include_root=True)
+
+            ready_processes = await tx.fetchall(
+                "SELECT p.process_uuid,p.execution_uuid,p.team_uuid,p.fencing_generation FROM mkb_processes AS p "
+                "JOIN mkb_executions AS e ON e.execution_uuid=p.execution_uuid "
+                "WHERE p.status='ready' AND e.status NOT IN ('succeeded','failed','cancelled','cancelling') "
+                "ORDER BY p.process_uuid",
+            )
+            for process in ready_processes:
+                dedupe = f"repair-wake-process:{process['process_uuid']}:{process['fencing_generation']}"
+                exists = await tx.fetchone(
+                    "SELECT outbox_id FROM mkb_outbox WHERE team_uuid=? AND dedupe_key=?",
+                    (process["team_uuid"], dedupe),
+                )
+                if exists is None:
+                    await self._enqueue_tx(
+                        tx,
+                        process["team_uuid"],
+                        "wake_process",
+                        {"execution_uuid": process["execution_uuid"], "process_uuid": process["process_uuid"]},
+                        dedupe,
+                    )
+                    repaired += 1
+
+            # Materialized child Executions have no Process until their first
+            # start route is interpreted.  Never include durable_prerequisite
+            # rows here: root review approval is their only release authority.
+            ready_executions = await tx.fetchall(
+                "SELECT e.execution_uuid,e.team_uuid,e.task_uuid,e.generation,e.manifest_revision FROM mkb_executions AS e "
+                "WHERE e.status IN ('created','ready') AND e.status NOT IN ('succeeded','failed','cancelled','cancelling') "
+                "AND NOT EXISTS (SELECT 1 FROM mkb_processes AS p WHERE p.execution_uuid=e.execution_uuid "
+                " AND p.status IN ('ready','claimed','running','retry_wait','cancelling')) "
+                "ORDER BY e.execution_uuid",
+            )
+            for execution in ready_executions:
+                dedupe = f"repair-wake-execution:{execution['execution_uuid']}:{execution['manifest_revision']}"
+                exists = await tx.fetchone(
+                    "SELECT outbox_id FROM mkb_outbox WHERE team_uuid=? AND dedupe_key=?",
+                    (execution["team_uuid"], dedupe),
+                )
+                if exists is None:
+                    await self._enqueue_tx(
+                        tx,
+                        execution["team_uuid"],
+                        "wake_execution",
+                        {
+                            "execution_uuid": execution["execution_uuid"],
+                            "task_uuid": execution["task_uuid"],
+                            "generation": execution["generation"],
+                        },
+                        dedupe,
+                    )
+                    repaired += 1
+
+            stalled = await tx.fetchall(
+                "SELECT e.*,p.status AS process_status,p.process_uuid AS stalled_process_uuid "
+                "FROM mkb_executions AS e JOIN mkb_processes AS p ON p.process_uuid=e.current_process_uuid "
+                "WHERE e.status NOT IN ('waiting','cancelling','succeeded','failed','cancelled') "
+                "AND p.status IN ('succeeded','failed','cancelled') "
+                # A committed Gate decision is the only safe route context
+                # for its preceding guarded accept process.  Its durable
+                # decision outbox is repaired above; re-evaluating the old
+                # branch with an empty context would fail a valid review.
+                "AND NOT EXISTS (SELECT 1 FROM mkb_execution_gates AS g "
+                " JOIN mkb_execution_gate_decisions AS d ON d.gate_uuid=g.gate_uuid "
+                " WHERE g.execution_uuid=e.execution_uuid) "
+                "ORDER BY e.execution_uuid",
+            )
+            for execution in stalled:
+                repaired += int(await self._repair_terminal_process_transition_tx(tx, execution))
+
+            waits = await tx.fetchall(
+                "SELECT * FROM mkb_executions WHERE status='waiting' ORDER BY execution_uuid",
+            )
+            for execution in waits:
+                reason = execution.get("waiting_reason")
+                if reason == "scatter_children":
+                    repaired += int(await self._maybe_converge_scatter_root_tx(tx, execution))
+                    continue
+                if reason == "durable_prerequisite":
+                    parent_uuid = execution.get("parent_execution_uuid")
+                    parent = (
+                        await self._execution(tx, parent_uuid)
+                        if isinstance(parent_uuid, str) and parent_uuid
+                        else None
+                    )
+                    if (
+                        execution.get("execution_role") == "scatter_child"
+                        and parent is not None
+                        and parent.get("execution_role") == "scatter_root"
+                        and execution.get("waiting_ref")
+                    ):
+                        if parent["status"] in _TERMINAL_EXECUTION_STATUSES:
+                            await self._cancel_execution_tree_tx(tx, parent, include_root=False)
+                            repaired += 1
+                        # An open root Gate or a committed decision that will
+                        # be replayed above are both valid; do not wake child.
+                        continue
+                    await self._fail_execution_integrity_tx(
+                        tx,
+                        execution,
+                        "waiting-prerequisite-invalid",
+                        "Execution has an invalid durable prerequisite wait",
+                    )
+                    repaired += 1
+                    continue
+                if reason == "human_review":
+                    gate = await tx.fetchone(
+                        "SELECT gate_uuid FROM mkb_execution_gates WHERE gate_uuid=? AND execution_uuid=? AND status='open'",
+                        (execution.get("waiting_ref"), execution["execution_uuid"]),
+                    )
+                    if gate is not None:
+                        continue
+                    await self._fail_execution_integrity_tx(
+                        tx,
+                        execution,
+                        "waiting-gate-invalid",
+                        "Execution human-review wait has no current open Gate",
+                    )
+                    repaired += 1
+                    continue
+                if reason == "retry_due":
+                    process = await tx.fetchone(
+                        "SELECT process_uuid FROM mkb_processes WHERE process_uuid=? AND execution_uuid=? "
+                        "AND status='retry_wait'",
+                        (execution.get("waiting_ref"), execution["execution_uuid"]),
+                    )
+                    if process is not None:
+                        continue
+                    await self._fail_execution_integrity_tx(
+                        tx,
+                        execution,
+                        "waiting-retry-invalid",
+                        "Execution retry wait has no matching retry Process",
+                    )
+                    repaired += 1
+                    continue
+                await self._fail_execution_integrity_tx(
+                    tx,
+                    execution,
+                    "waiting-reason-invalid",
+                    "Execution waiting state has no registered durable trigger",
+                )
+                repaired += 1
+
+            terminal_roots = await tx.fetchall(
+                "SELECT * FROM mkb_executions WHERE execution_uuid=root_execution_uuid "
+                "AND status IN ('succeeded','failed','cancelled') ORDER BY execution_uuid",
+            )
+            for root in terminal_roots:
+                repaired += await self._repair_terminal_projection_tx(tx, root)
+        return repaired
+
+    async def _repair_terminal_process_transition_tx(self, tx: UnitOfWork, execution: dict[str, Any]) -> bool:
+        """Re-drive an unambiguous terminal Process route, otherwise fail loud."""
+
+        process = await self._process_with_execution(tx, execution["stalled_process_uuid"])
+        selector = {
+            ProcessStatus.SUCCEEDED.value: WorkflowOutcomeSelector.SUCCEEDED,
+            ProcessStatus.FAILED.value: WorkflowOutcomeSelector.FAILED,
+            ProcessStatus.CANCELLED.value: WorkflowOutcomeSelector.CANCELLED,
+        }[process["status"]]
+        plan = await self._assert_execution_binding(tx, execution)
+        candidates = [
+            route
+            for route in plan.routes
+            if route.from_step_key == process["step_key"] and route.outcome_selector is selector and route.guard_key is None
+        ]
+        if len(candidates) != 1:
+            await self._fail_execution_integrity_tx(
+                tx,
+                execution,
+                "repair-terminal-route-ambiguous",
+                "Terminal Process has no uniquely reconstructable route context",
+            )
+            return True
+        decision = self._route_decision(
+            plan=plan,
+            execution=execution,
+            source_step_key=process["step_key"],
+            selector=selector,
+            route_context={},
+        )
+        await self._apply_routes_tx(
+            tx,
+            plan=plan,
+            execution=execution,
+            decision=decision,
+            source_process=process,
+            route_context={},
+            terminal_error=process.get("error_code") if selector is WorkflowOutcomeSelector.FAILED else None,
+        )
+        return True
+
+    async def _repair_terminal_projection_tx(self, tx: UnitOfWork, root: dict[str, Any]) -> int:
+        """Close projection-only terminal gaps from already terminal facts."""
+
+        await self._refresh_execution_counts_tx(tx, root["execution_uuid"])
+        changed = 0
+        cleared = await tx.execute(
+            "UPDATE mkb_executions SET current_process_uuid=NULL,row_revision=row_revision+1,updated_at=? "
+            "WHERE execution_uuid=? AND current_process_uuid IS NOT NULL",
+            (utc_now(), root["execution_uuid"]),
+        )
+        changed += int(bool(cleared.rowcount))
+        task_status = {
+            ExecutionStatus.SUCCEEDED.value: "succeeded",
+            ExecutionStatus.FAILED.value: "failed",
+            ExecutionStatus.CANCELLED.value: "cancelled",
+        }[root["status"]]
+        projected = await tx.execute(
+            "UPDATE mkb_tasks SET status=?,result_ref=?,proof_ref=?,error_code=?,error_message=?,"
+            "completed_at=COALESCE(completed_at,?),row_revision=row_revision+1,updated_at=? "
+            "WHERE team_uuid=? AND task_uuid=? AND current_root_execution_uuid=? "
+            "AND status NOT IN ('succeeded','failed','cancelled')",
+            (
+                task_status,
+                root.get("result_ref"),
+                root.get("publication_proof_ref"),
+                root.get("final_error_code"),
+                root.get("final_error_message"),
+                root.get("completed_at") or utc_now(),
+                utc_now(),
+                root["team_uuid"],
+                root["task_uuid"],
+                root["execution_uuid"],
+            ),
+        )
+        changed += int(bool(projected.rowcount))
+        return changed
 
     async def _assert_ready_for_claim(self) -> None:
         if self.readiness is not None:
@@ -1089,7 +1362,7 @@ class WorkflowRuntime:
             raise MkbError("workflow-binding-missing", "Execution references a missing workflow revision", 503)
         if (
             revision["compiled_digest"] != execution["compiled_digest"]
-            or revision["workflow_key"] != self.definition.workflow_key
+            or revision["workflow_key"] not in self._active_workflow_keys
         ):
             raise MkbError(
                 "workflow-binding-mismatch", "Execution binding does not match the loaded immutable workflow", 409
@@ -1100,6 +1373,10 @@ class WorkflowRuntime:
                 "workflow-compiled-plan-unavailable",
                 "No reviewed runtime plan is available for the execution's immutable workflow revision",
                 503,
+            )
+        if plan.workflow_key != revision["workflow_key"]:
+            raise MkbError(
+                "workflow-binding-mismatch", "Execution digest resolved to a different immutable workflow key", 409
             )
         rows = await tx.fetchall(
             "SELECT workflow_step_uuid,step_key FROM mkb_workflow_steps WHERE workflow_revision_uuid=?",
@@ -1162,9 +1439,15 @@ class WorkflowRuntime:
         guard = guards.get(route.guard_key)
         if guard is None:
             raise MkbError("workflow-guard-missing", "Workflow route references an unavailable guard", 409)
-        if guard.predicate_type != "registered_admission_result" or guard.operator != "eq":
+        if guard.operator != "eq":
             raise MkbError("workflow-guard-unsupported", "Workflow guard is not supported by the bounded runtime", 409)
-        result = context.get("admission_result")
+        context_key = {
+            "registered_admission_result": "admission_result",
+            "registered_request_intent": "request_intent",
+        }.get(guard.predicate_type)
+        if context_key is None:
+            raise MkbError("workflow-guard-unsupported", "Workflow guard is not supported by the bounded runtime", 409)
+        result = context.get(context_key)
         matched = result == guard.expected_value
         results[route.guard_key] = matched
         return matched
@@ -1223,6 +1506,7 @@ class WorkflowRuntime:
             elif target.step_kind is WorkflowStepKind.CONTROL:
                 inserted = await self._enter_control_tx(
                     tx,
+                    plan=plan,
                     execution=execution,
                     step=target,
                     route_digest=decision["digest"],
@@ -1452,6 +1736,7 @@ class WorkflowRuntime:
         self,
         tx: UnitOfWork,
         *,
+        plan: WorkflowDefinition,
         execution: dict[str, Any],
         step: WorkflowStepDefinition,
         route_digest: str,
@@ -1468,6 +1753,14 @@ class WorkflowRuntime:
         transaction or the Execution fails closed.
         """
 
+        if step.control_key == "scatter_children_join":
+            return await self._enter_scatter_children_join_tx(
+                tx,
+                plan=plan,
+                execution=execution,
+                route_digest=route_digest,
+                source_process=source_process,
+            )
         if step.control_key != "human_review_gate":
             raise MkbError("workflow-control-unsupported", "Only the bounded human-review control is supported", 409)
         existing = await tx.fetchone(
@@ -1486,7 +1779,10 @@ class WorkflowRuntime:
                     "Human-review routing lacks the required admission result",
                     409,
                 )
-            evidence = await self._human_review_evidence_tx(tx, current_execution, source_process)
+            if current_execution.get("execution_role") == "scatter_root":
+                evidence = await self._scatter_human_review_evidence_tx(tx, current_execution, source_process)
+            else:
+                evidence = await self._human_review_evidence_tx(tx, current_execution, source_process)
         except MkbError as exc:
             # Missing or ambiguous evidence is an integrity failure, not a
             # reason to create an empty/placeholder target or leave a Process
@@ -1601,6 +1897,662 @@ class WorkflowRuntime:
             payload={"waiting_reason": "human_review", "waiting_ref": gate_uuid},
         )
         return True
+
+    async def _enter_scatter_children_join_tx(
+        self,
+        tx: UnitOfWork,
+        *,
+        plan: WorkflowDefinition,
+        execution: dict[str, Any],
+        route_digest: str,
+        source_process: dict[str, Any] | None,
+    ) -> bool:
+        """Enter the durable collect-all wait after acceptance committed N intents.
+
+        The expected denominator is not the current child-row count.  It is
+        the accepted Snapshot/ChangeSet required set, which the acceptance
+        transaction wrote before it made any child wake visible.
+        """
+
+        del plan
+        current = await self._execution(tx, execution["execution_uuid"])
+        if current["status"] in _TERMINAL_EXECUTION_STATUSES | {ExecutionStatus.CANCELLING.value}:
+            return False
+        task = await tx.fetchone(
+            "SELECT intake_snapshot_uuid,change_set_uuid FROM mkb_tasks "
+            "WHERE team_uuid=? AND task_uuid=? AND current_root_execution_uuid=?",
+            (current["team_uuid"], current["task_uuid"], current["execution_uuid"]),
+        )
+        if (
+            task is None
+            or not task.get("intake_snapshot_uuid")
+            or not task.get("change_set_uuid")
+            or current.get("intake_snapshot_uuid") != task["intake_snapshot_uuid"]
+        ):
+            await self._fail_execution_integrity_tx(
+                tx,
+                current,
+                "scatter-acceptance-binding-missing",
+                "Scatter join has no exact accepted Snapshot and ChangeSet binding",
+            )
+            return False
+        expected = await self._scatter_expected_members_tx(
+            tx,
+            team_uuid=current["team_uuid"],
+            snapshot_uuid=task["intake_snapshot_uuid"],
+            change_set_uuid=task["change_set_uuid"],
+        )
+        if expected is None:
+            await self._fail_execution_integrity_tx(
+                tx,
+                current,
+                "scatter-required-set-invalid",
+                "Scatter ChangeSet does not match the accepted required membership set",
+            )
+            return False
+        if not expected:
+            # A complete zero-member observation is a real business terminal,
+            # not a queue-empty heuristic.  A Gate decision/recovery can
+            # reach this control with no in-memory source Process, so resolve
+            # the immutable accepted-set Process from durable rows instead of
+            # treating that call-shape as an integrity failure.
+            terminal_proof = await self._scatter_root_terminal_proof_tx(tx, current, source_process)
+            if terminal_proof is None:
+                await self._fail_execution_integrity_tx(
+                    tx,
+                    current,
+                    "scatter-zero-proof-missing",
+                    "Zero-member Scatter Snapshot has no immutable acceptance proof",
+                )
+                return False
+            await self._terminalize_execution_tx(
+                tx,
+                current,
+                WorkflowTerminalKind.SUCCESS,
+                source_process=terminal_proof,
+                route_digest=route_digest,
+                error_code=None,
+            )
+            return True
+        await self._release_scatter_children_tx(
+            tx,
+            root=current,
+            change_set_uuid=task["change_set_uuid"],
+        )
+        now = utc_now()
+        updated = await tx.execute(
+            "UPDATE mkb_executions SET status='waiting',phase_key='fan_in',waiting_reason='scatter_children',"
+            "waiting_ref=?,next_wake_at=NULL,current_process_uuid=NULL,row_revision=row_revision+1,updated_at=? "
+            "WHERE execution_uuid=? AND status NOT IN ('succeeded','failed','cancelled','cancelling')",
+            (task["change_set_uuid"], now, current["execution_uuid"]),
+        )
+        if updated.rowcount:
+            await self._record_event_tx(
+                tx,
+                execution=current,
+                event_type="execution.waiting_entered",
+                aggregate="execution",
+                summary="Scatter root waiting for the accepted required child set",
+                process_uuid=None if source_process is None else source_process["process_uuid"],
+                status_before=current["status"],
+                status_after=ExecutionStatus.WAITING.value,
+                payload={
+                    "waiting_reason": "scatter_children",
+                    "change_set_uuid": task["change_set_uuid"],
+                    "required_member_count": len(expected),
+                    "route_decision_digest": route_digest,
+                },
+            )
+        await self._refresh_execution_counts_tx(tx, current["execution_uuid"])
+        return bool(updated.rowcount)
+
+    async def _scatter_expected_members_tx(
+        self,
+        tx: UnitOfWork,
+        *,
+        team_uuid: str,
+        snapshot_uuid: str,
+        change_set_uuid: str,
+    ) -> list[dict[str, Any]] | None:
+        """Return the immutable required denominator, or ``None`` if corrupt.
+
+        A child row is only a materialized intent.  The accepted membership
+        and ChangeSet fact pair is the authoritative fan-out/fan-in contract;
+        treating a short child list as a smaller collection would convert a
+        crash window into silent loss.
+        """
+
+        change_set = await tx.fetchone(
+            "SELECT change_set_uuid FROM mkb_intake_change_sets "
+            "WHERE team_uuid=? AND change_set_uuid=? AND intake_snapshot_uuid=?",
+            (team_uuid, change_set_uuid, snapshot_uuid),
+        )
+        if change_set is None:
+            return None
+        memberships = await tx.fetchall(
+            "SELECT member_ordinal,intake_item_uuid,observed_revision_uuid,decision_kind,required "
+            "FROM mkb_intake_snapshot_memberships WHERE team_uuid=? AND intake_snapshot_uuid=? "
+            "ORDER BY member_ordinal",
+            (team_uuid, snapshot_uuid),
+        )
+        facts = await tx.fetchall(
+            "SELECT fact_ordinal,intake_item_uuid,intake_revision_uuid FROM mkb_intake_change_set_facts "
+            "WHERE team_uuid=? AND change_set_uuid=? AND fact_kind='accept_revision' ORDER BY fact_ordinal",
+            (team_uuid, change_set_uuid),
+        )
+        expected: list[dict[str, Any]] = []
+        for membership in memberships:
+            if int(membership["required"]) != 1:
+                continue
+            if (
+                membership["decision_kind"] != "accepted"
+                or not membership.get("intake_item_uuid")
+                or not membership.get("observed_revision_uuid")
+            ):
+                return None
+            expected.append(
+                {
+                    "member_ordinal": int(membership["member_ordinal"]),
+                    "intake_item_uuid": str(membership["intake_item_uuid"]),
+                    "intake_revision_uuid": str(membership["observed_revision_uuid"]),
+                }
+            )
+        expected_facts = {
+            (member["member_ordinal"], member["intake_item_uuid"], member["intake_revision_uuid"])
+            for member in expected
+        }
+        actual_facts = {
+            (int(fact["fact_ordinal"]), str(fact["intake_item_uuid"]), str(fact["intake_revision_uuid"]))
+            for fact in facts
+            if fact.get("intake_item_uuid") and fact.get("intake_revision_uuid")
+        }
+        if len(actual_facts) != len(facts) or actual_facts != expected_facts:
+            return None
+        return expected
+
+    async def _release_scatter_children_tx(
+        self,
+        tx: UnitOfWork,
+        *,
+        root: dict[str, Any],
+        change_set_uuid: str,
+    ) -> int:
+        """Release review-gated child intents only through the declared join."""
+
+        now = utc_now()
+        rows = await tx.fetchall(
+            "SELECT * FROM mkb_executions "
+            "WHERE team_uuid=? AND parent_execution_uuid=? AND root_execution_uuid=? "
+            "AND execution_role='scatter_child' AND status='waiting' "
+            "AND waiting_reason='durable_prerequisite' AND waiting_ref=? ORDER BY execution_uuid",
+            (root["team_uuid"], root["execution_uuid"], root["execution_uuid"], change_set_uuid),
+        )
+        released = 0
+        for child in rows:
+            updated = await tx.execute(
+                "UPDATE mkb_executions SET status='ready',waiting_reason=NULL,waiting_ref=NULL,next_wake_at=NULL,"
+                "row_revision=row_revision+1,updated_at=? WHERE execution_uuid=? AND status='waiting' "
+                "AND waiting_reason='durable_prerequisite' AND waiting_ref=?",
+                (now, child["execution_uuid"], change_set_uuid),
+            )
+            if updated.rowcount != 1:
+                continue
+            released += 1
+            await self._enqueue_tx(
+                tx,
+                root["team_uuid"],
+                "wake_execution",
+                {
+                    "execution_uuid": child["execution_uuid"],
+                    "task_uuid": child["task_uuid"],
+                    "generation": child["generation"],
+                },
+                f"scatter-child-release:{child['execution_uuid']}:{change_set_uuid}",
+            )
+            await self._record_event_tx(
+                tx,
+                execution=child,
+                event_type="execution.prerequisite_released",
+                aggregate="execution",
+                summary="Scatter child released after root human-review approval",
+                status_before=ExecutionStatus.WAITING.value,
+                status_after=ExecutionStatus.READY.value,
+                payload={"change_set_uuid": change_set_uuid},
+            )
+        return released
+
+    async def _scatter_root_terminal_proof_tx(
+        self,
+        tx: UnitOfWork,
+        root: dict[str, Any],
+        source_process: dict[str, Any] | None,
+    ) -> dict[str, Any] | None:
+        """Resolve the typed accept Process used by a zero-member terminal."""
+
+        process_uuid = None if source_process is None else source_process.get("process_uuid")
+        if isinstance(process_uuid, str) and process_uuid:
+            row = await tx.fetchone(
+                "SELECT * FROM mkb_processes WHERE process_uuid=? AND team_uuid=? AND execution_uuid=? "
+                "AND status='succeeded' AND step_key='accept_snapshot' AND process_key='intake.accept_snapshot'",
+                (process_uuid, root["team_uuid"], root["execution_uuid"]),
+            )
+            if row is not None and row.get("proof_ref") and row.get("output_manifest_ref"):
+                return row
+        return await tx.fetchone(
+            "SELECT * FROM mkb_processes WHERE team_uuid=? AND execution_uuid=? "
+            "AND status='succeeded' AND step_key='accept_snapshot' AND process_key='intake.accept_snapshot' "
+            "AND proof_ref IS NOT NULL AND output_manifest_ref IS NOT NULL "
+            "ORDER BY completed_at DESC,process_uuid DESC LIMIT 1",
+            (root["team_uuid"], root["execution_uuid"]),
+        )
+
+    async def _maybe_converge_scatter_root_tx(self, tx: UnitOfWork, root: dict[str, Any]) -> bool:
+        """Collect the exact required child set after every leaf transition.
+
+        This method is intentionally also used by recovery.  It never derives
+        success from queue emptiness or from however many children happen to
+        exist: a missing, duplicated, or misbound child is an integrity
+        failure, and active siblings keep a failed child from fail-fast
+        terminalization until the collect-all denominator is terminal.
+        """
+
+        current = await self._execution(tx, root["execution_uuid"])
+        if (
+            current.get("execution_role") != "scatter_root"
+            or current["status"] != ExecutionStatus.WAITING.value
+            or current.get("waiting_reason") != "scatter_children"
+        ):
+            return False
+        task = await tx.fetchone(
+            "SELECT intake_snapshot_uuid,change_set_uuid FROM mkb_tasks "
+            "WHERE team_uuid=? AND task_uuid=? AND current_root_execution_uuid=?",
+            (current["team_uuid"], current["task_uuid"], current["execution_uuid"]),
+        )
+        if task is None or not task.get("intake_snapshot_uuid") or not task.get("change_set_uuid"):
+            await self._fail_execution_integrity_tx(
+                tx,
+                current,
+                "scatter-acceptance-binding-missing",
+                "Scatter fan-in has no exact accepted Snapshot and ChangeSet binding",
+            )
+            return True
+        expected = await self._scatter_expected_members_tx(
+            tx,
+            team_uuid=current["team_uuid"],
+            snapshot_uuid=task["intake_snapshot_uuid"],
+            change_set_uuid=task["change_set_uuid"],
+        )
+        if expected is None:
+            await self._fail_execution_integrity_tx(
+                tx,
+                current,
+                "scatter-required-set-invalid",
+                "Scatter ChangeSet does not match the accepted required membership set",
+            )
+            return True
+        if not expected:
+            # Normally handled at join entry; retain this recovery branch for
+            # a crash after the wait CAS but before its terminal summary.
+            proof = await self._scatter_root_terminal_proof_tx(tx, current, None)
+            if proof is None:
+                await self._fail_execution_integrity_tx(
+                    tx,
+                    current,
+                    "scatter-zero-proof-missing",
+                    "Zero-member Scatter Snapshot has no immutable acceptance proof",
+                )
+                return True
+            await self._terminalize_execution_tx(
+                tx,
+                current,
+                WorkflowTerminalKind.SUCCESS,
+                source_process=proof,
+                route_digest=stable_digest(
+                    {
+                        "kind": "scatter-zero-fan-in",
+                        "snapshot_uuid": task["intake_snapshot_uuid"],
+                        "change_set_uuid": task["change_set_uuid"],
+                    }
+                ),
+                error_code=None,
+            )
+            return True
+
+        change_set = await tx.fetchone(
+            "SELECT change_set_digest FROM mkb_intake_change_sets WHERE team_uuid=? AND change_set_uuid=?",
+            (current["team_uuid"], task["change_set_uuid"]),
+        )
+        if change_set is None:
+            await self._fail_execution_integrity_tx(
+                tx,
+                current,
+                "scatter-change-set-missing",
+                "Scatter fan-in ChangeSet disappeared",
+            )
+            return True
+        children = await tx.fetchall(
+            "SELECT * FROM mkb_executions WHERE team_uuid=? AND parent_execution_uuid=? "
+            "AND root_execution_uuid=? ORDER BY execution_uuid",
+            (current["team_uuid"], current["execution_uuid"], current["execution_uuid"]),
+        )
+        expected_by_item = {member["intake_item_uuid"]: member for member in expected}
+        children_by_item: dict[str, list[dict[str, Any]]] = {}
+        malformed = False
+        for child in children:
+            item_uuid = child.get("target_uuid")
+            if not isinstance(item_uuid, str) or item_uuid not in expected_by_item:
+                malformed = True
+                continue
+            children_by_item.setdefault(item_uuid, []).append(child)
+        bound_children: list[dict[str, Any]] = []
+        for item_uuid, member in expected_by_item.items():
+            rows = children_by_item.get(item_uuid, [])
+            if len(rows) != 1:
+                malformed = True
+                continue
+            child = rows[0]
+            try:
+                binding = json.loads(child.get("payload_extra") or "{}")
+            except (TypeError, json.JSONDecodeError):
+                binding = None
+            if (
+                child.get("execution_role") != "scatter_child"
+                or child.get("requiredness") != "required"
+                or child.get("target_kind") != "intake_item"
+                or child.get("intake_snapshot_uuid") != task["intake_snapshot_uuid"]
+                or not isinstance(binding, dict)
+                or binding.get("change_set_uuid") != task["change_set_uuid"]
+                or binding.get("change_set_digest") != change_set["change_set_digest"]
+                or binding.get("member_ordinal") != member["member_ordinal"]
+                or binding.get("intake_revision_uuid") != member["intake_revision_uuid"]
+            ):
+                malformed = True
+                continue
+            bound_children.append(child)
+        if malformed or len(bound_children) != len(expected):
+            await self._fail_execution_integrity_tx(
+                tx,
+                current,
+                "scatter-child-intent-invalid",
+                "Scatter child intents do not exactly cover the accepted required set",
+            )
+            return True
+
+        nonterminal = [child for child in bound_children if child["status"] not in _TERMINAL_EXECUTION_STATUSES]
+        if nonterminal:
+            return False
+        route_digest = stable_digest(
+            {
+                "kind": "scatter-fan-in.v1",
+                "snapshot_uuid": task["intake_snapshot_uuid"],
+                "change_set_uuid": task["change_set_uuid"],
+                "children": [
+                    {"execution_uuid": child["execution_uuid"], "status": child["status"]}
+                    for child in sorted(bound_children, key=lambda row: str(row["execution_uuid"]))
+                ],
+            }
+        )
+        failed = [child for child in bound_children if child["status"] == ExecutionStatus.FAILED.value]
+        cancelled = [child for child in bound_children if child["status"] == ExecutionStatus.CANCELLED.value]
+        if failed or cancelled:
+            source = await self._last_terminal_process_tx(tx, (failed or cancelled)[0]["execution_uuid"])
+            await self._terminalize_execution_tx(
+                tx,
+                current,
+                WorkflowTerminalKind.FAILURE,
+                source_process=source,
+                route_digest=route_digest,
+                error_code="scatter-required-child-failed" if failed else "scatter-required-child-cancelled",
+            )
+            return True
+
+        terminal_proofs: list[dict[str, Any]] = []
+        for child, member in zip(
+            sorted(bound_children, key=lambda row: str(row["target_uuid"])),
+            sorted(expected, key=lambda row: str(row["intake_item_uuid"])),
+            strict=True,
+        ):
+            proofs = await tx.fetchall(
+                "SELECT proof_uuid,process_uuid FROM mkb_publication_proofs WHERE team_uuid=? "
+                "AND intake_item_uuid=? AND intake_revision_uuid=? AND execution_uuid=? ORDER BY proof_uuid",
+                (
+                    current["team_uuid"],
+                    member["intake_item_uuid"],
+                    member["intake_revision_uuid"],
+                    child["execution_uuid"],
+                ),
+            )
+            if len(proofs) != 1 or not proofs[0].get("process_uuid"):
+                await self._fail_execution_integrity_tx(
+                    tx,
+                    current,
+                    "scatter-publication-proof-missing",
+                    "A succeeded required Scatter child lacks one exact publication proof",
+                )
+                return True
+            process = await tx.fetchone(
+                "SELECT * FROM mkb_processes WHERE process_uuid=? AND team_uuid=? AND execution_uuid=? "
+                "AND status='succeeded' AND step_key='validate_publication' "
+                "AND process_key='index.validate_publication'",
+                (proofs[0]["process_uuid"], current["team_uuid"], child["execution_uuid"]),
+            )
+            if (
+                process is None
+                or not process.get("proof_ref")
+                or not process.get("output_manifest_ref")
+                or child.get("publication_proof_ref") != process["proof_ref"]
+            ):
+                await self._fail_execution_integrity_tx(
+                    tx,
+                    current,
+                    "scatter-publication-proof-invalid",
+                    "A succeeded required Scatter child has no matching terminal publication evidence",
+                )
+                return True
+            terminal_proofs.append(process)
+        source = max(terminal_proofs, key=lambda row: (str(row.get("completed_at") or ""), str(row["process_uuid"])))
+        await self._terminalize_execution_tx(
+            tx,
+            current,
+            WorkflowTerminalKind.SUCCESS,
+            source_process=source,
+            route_digest=route_digest,
+            error_code=None,
+        )
+        return True
+
+    async def _last_terminal_process_tx(self, tx: UnitOfWork, execution_uuid: str) -> dict[str, Any] | None:
+        return await tx.fetchone(
+            "SELECT * FROM mkb_processes WHERE execution_uuid=? AND status IN ('succeeded','failed','cancelled') "
+            "ORDER BY completed_at DESC,process_uuid DESC LIMIT 1",
+            (execution_uuid,),
+        )
+
+    async def _scatter_human_review_evidence_tx(
+        self,
+        tx: UnitOfWork,
+        execution: dict[str, Any],
+        source_process: dict[str, Any] | None,
+    ) -> dict[str, Any]:
+        """Build a collection Gate target without pretending it is one Item.
+
+        The single-item helper intentionally rejects multiple memberships.  A
+        scatter root has one accepted collection, so its review target is
+        instead bound to the Snapshot/ChangeSet and a real member Artifact
+        (or the real collection acquisition Artifact for a legal empty set).
+        """
+
+        def invalid(message: str) -> None:
+            raise MkbError("gate-target-evidence-invalid", message, 409)
+
+        if source_process is None:
+            invalid("Scatter human-review Gate has no source Process")
+        accepted = await tx.fetchone(
+            "SELECT * FROM mkb_processes WHERE process_uuid=? AND team_uuid=? AND execution_uuid=? AND task_uuid=?",
+            (
+                source_process["process_uuid"],
+                execution["team_uuid"],
+                execution["execution_uuid"],
+                execution["task_uuid"],
+            ),
+        )
+        if (
+            accepted is None
+            or accepted["status"] != ProcessStatus.SUCCEEDED.value
+            or accepted["step_key"] != "accept_snapshot"
+            or accepted["process_key"] != "intake.accept_snapshot"
+            or not accepted.get("input_manifest_ref")
+            or not accepted.get("input_manifest_digest")
+            or not accepted.get("output_manifest_ref")
+            or not accepted.get("output_manifest_digest")
+            or not accepted.get("proof_ref")
+            or not accepted.get("proof_digest")
+        ):
+            invalid("Scatter Gate requires a succeeded accept_snapshot Process with immutable evidence")
+
+        task = await tx.fetchone(
+            "SELECT intake_snapshot_uuid,change_set_uuid FROM mkb_tasks "
+            "WHERE team_uuid=? AND task_uuid=? AND current_root_execution_uuid=?",
+            (execution["team_uuid"], execution["task_uuid"], execution["execution_uuid"]),
+        )
+        if task is None or not task.get("intake_snapshot_uuid") or not task.get("change_set_uuid"):
+            invalid("Scatter Gate has no accepted Snapshot/ChangeSet")
+        snapshot = await tx.fetchone(
+            "SELECT s.intake_source_uuid,s.intake_snapshot_uuid,c.candidate_set_uuid,cs.change_set_uuid,"
+            "cs.change_set_digest,source_def.preflight_profile_key "
+            "FROM mkb_intake_snapshots AS s "
+            "JOIN mkb_intake_change_sets AS cs ON cs.team_uuid=s.team_uuid "
+            " AND cs.intake_snapshot_uuid=s.intake_snapshot_uuid "
+            "JOIN mkb_intake_sources AS source ON source.team_uuid=s.team_uuid "
+            " AND source.intake_source_uuid=s.intake_source_uuid "
+            "JOIN mkb_source_kind_definitions AS source_def ON source_def.source_kind=source.source_kind "
+            " AND source_def.definition_version=source.source_kind_definition_version "
+            "LEFT JOIN mkb_intake_candidate_sets AS c ON c.team_uuid=s.team_uuid "
+            " AND c.accepted_snapshot_uuid=s.intake_snapshot_uuid AND c.staging_state='accepted' "
+            "WHERE s.team_uuid=? AND s.intake_snapshot_uuid=? AND s.producer_execution_uuid=? "
+            " AND s.preflight_outcome_ref=? AND s.preflight_outcome_digest=? AND cs.change_set_uuid=?",
+            (
+                execution["team_uuid"],
+                task["intake_snapshot_uuid"],
+                execution["execution_uuid"],
+                accepted["input_manifest_ref"],
+                accepted["input_manifest_digest"],
+                task["change_set_uuid"],
+            ),
+        )
+        if snapshot is None:
+            invalid("Scatter Gate Snapshot is not exactly bound to the accepted Process")
+
+        preflight_rows = await tx.fetchall(
+            "SELECT * FROM mkb_processes WHERE team_uuid=? AND execution_uuid=? AND task_uuid=? "
+            "AND step_key='preflight_validate' AND process_key='intake.preflight_validate' AND status='succeeded' "
+            "AND output_manifest_ref=? AND output_manifest_digest=? ORDER BY process_uuid",
+            (
+                execution["team_uuid"],
+                execution["execution_uuid"],
+                execution["task_uuid"],
+                accepted["input_manifest_ref"],
+                accepted["input_manifest_digest"],
+            ),
+        )
+        if len(preflight_rows) != 1 or not preflight_rows[0].get("proof_ref") or not preflight_rows[0].get("proof_digest"):
+            invalid("Scatter accepted Snapshot is not bound to one proved preflight outcome")
+        preflight = preflight_rows[0]
+
+        profile_key = snapshot.get("preflight_profile_key")
+        if not isinstance(profile_key, str) or not profile_key:
+            invalid("Scatter source has no exact preflight profile")
+        profiles = await tx.fetchall(
+            "SELECT profile_key,definition_version,check_set_digest,definition_digest "
+            "FROM mkb_preflight_profile_definitions WHERE profile_key=? ORDER BY definition_version",
+            (profile_key,),
+        )
+        if len(profiles) != 1:
+            invalid("Scatter preflight profile is missing or version-ambiguous")
+        profile = profiles[0]
+
+        members = await tx.fetchall(
+            "SELECT m.member_ordinal,a.intake_artifact_uuid,a.stored_object_uuid,a.artifact_role "
+            "FROM mkb_intake_snapshot_memberships AS m "
+            "JOIN mkb_intake_revisions AS r ON r.team_uuid=m.team_uuid "
+            " AND r.intake_revision_uuid=m.observed_revision_uuid "
+            "JOIN mkb_intake_artifacts AS a ON a.team_uuid=r.team_uuid "
+            " AND a.owner_revision_uuid=r.intake_revision_uuid AND a.artifact_role='clean_text' "
+            "WHERE m.team_uuid=? AND m.intake_snapshot_uuid=? AND m.required=1 "
+            "ORDER BY m.member_ordinal",
+            (execution["team_uuid"], snapshot["intake_snapshot_uuid"]),
+        )
+        required = await tx.fetchone(
+            "SELECT COUNT(*) AS count FROM mkb_intake_snapshot_memberships "
+            "WHERE team_uuid=? AND intake_snapshot_uuid=? AND required=1",
+            (execution["team_uuid"], snapshot["intake_snapshot_uuid"]),
+        )
+        required_count = int(required["count"]) if required is not None else 0
+        if len(members) != required_count:
+            invalid("Scatter Gate membership does not have one clean Artifact per required member")
+        if members:
+            artifact = members[0]
+            artifact_role = "clean_text"
+        else:
+            artifact = await tx.fetchone(
+                "SELECT intake_artifact_uuid,stored_object_uuid,artifact_role FROM mkb_intake_artifacts "
+                "WHERE team_uuid=? AND owner_snapshot_uuid=? AND artifact_role='raw_acquisition' "
+                "ORDER BY intake_artifact_uuid",
+                (execution["team_uuid"], snapshot["intake_snapshot_uuid"]),
+            )
+            artifact_role = "raw_acquisition"
+            if artifact is None:
+                invalid("Empty Scatter Gate has no collection acquisition Artifact")
+        artifact_object = await self._gate_evidence_object_tx(
+            tx,
+            team_uuid=execution["team_uuid"],
+            stored_object_uuid=artifact["stored_object_uuid"],
+            label="Scatter review Artifact",
+        )
+        preflight_object = await tx.fetchone(
+            "SELECT stored_object_uuid,content_digest,size_bytes FROM mkb_stored_objects "
+            "WHERE team_uuid=? AND content_digest=? AND tombstoned_at IS NULL",
+            (execution["team_uuid"], preflight["output_manifest_digest"]),
+        )
+        if preflight_object is None:
+            invalid("Scatter preflight output has no live catalogued object")
+
+        return {
+            "accept_process": {
+                "process_uuid": accepted["process_uuid"],
+                "fencing_generation": accepted["fencing_generation"],
+                "output_manifest_ref": accepted["output_manifest_ref"],
+                "output_manifest_digest": accepted["output_manifest_digest"],
+                "proof_ref": accepted["proof_ref"],
+                "proof_digest": accepted["proof_digest"],
+            },
+            "preflight_outcome": {
+                "process_uuid": preflight["process_uuid"],
+                "fencing_generation": preflight["fencing_generation"],
+                "output_manifest_ref": preflight["output_manifest_ref"],
+                "output_manifest_digest": preflight["output_manifest_digest"],
+                "proof_ref": preflight["proof_ref"],
+                "proof_digest": preflight["proof_digest"],
+                "profile_key": profile["profile_key"],
+                "profile_definition_version": profile["definition_version"],
+                "profile_definition_digest": profile["definition_digest"],
+                "check_set_digest": profile["check_set_digest"],
+            },
+            "intake_refs": {
+                "intake_source_uuid": snapshot["intake_source_uuid"],
+                "candidate_set_uuid": snapshot["candidate_set_uuid"],
+                "intake_snapshot_uuid": snapshot["intake_snapshot_uuid"],
+                "change_set_uuid": snapshot["change_set_uuid"],
+                "change_set_digest": snapshot["change_set_digest"],
+                "required_member_count": required_count,
+            },
+            "clean_artifact": {
+                "intake_artifact_uuid": artifact["intake_artifact_uuid"],
+                "content_digest": artifact_object["content_digest"],
+                "artifact_role": artifact_role,
+            },
+            "evidence_objects": (artifact_object, preflight_object),
+        }
 
     async def _human_review_evidence_tx(
         self,
@@ -1892,6 +2844,15 @@ class WorkflowRuntime:
         current = await self._execution(tx, execution["execution_uuid"])
         if current["status"] in _TERMINAL_EXECUTION_STATUSES:
             return
+        if (
+            current["root_execution_uuid"] == current["execution_uuid"]
+            and current.get("execution_role") == "scatter_root"
+            and status in {ExecutionStatus.FAILED.value, ExecutionStatus.CANCELLED.value}
+        ):
+            # A root rejection/failure may happen while review-gated children
+            # are still durable-but-unstarted.  Fence only unfinished work;
+            # proof-valid siblings stay untouched (forward-stop/no rollback).
+            await self._cancel_execution_tree_tx(tx, current, include_root=False)
         if status == ExecutionStatus.SUCCEEDED.value and source_process is None:
             await self._fail_execution_integrity_tx(
                 tx,
@@ -1959,6 +2920,7 @@ class WorkflowRuntime:
             severity="error" if status == ExecutionStatus.FAILED.value else "info",
             payload=summary,
         )
+        await self._notify_scatter_parent_terminal_tx(tx, current)
 
     async def _project_root_task_tx(
         self,
@@ -2000,6 +2962,12 @@ class WorkflowRuntime:
         self, tx: UnitOfWork, execution: dict[str, Any], error_code: str, message: str
     ) -> None:
         now = utc_now()
+        current = await self._execution(tx, execution["execution_uuid"])
+        if (
+            current["root_execution_uuid"] == current["execution_uuid"]
+            and current.get("execution_role") == "scatter_root"
+        ):
+            await self._cancel_execution_tree_tx(tx, current, include_root=False)
         updated = await tx.execute(
             "UPDATE mkb_executions SET status='failed',final_error_code=?,final_error_message=?,"
             "terminal_summary_digest=?,summary_completed_at=?,completed_at=?,current_process_uuid=NULL,"
@@ -2016,10 +2984,10 @@ class WorkflowRuntime:
             ),
         )
         if updated.rowcount:
-            await self._project_root_task_tx(tx, execution, ExecutionStatus.FAILED.value, None, error_code, message)
+            await self._project_root_task_tx(tx, current, ExecutionStatus.FAILED.value, None, error_code, message)
             await self._record_event_tx(
                 tx,
-                execution=execution,
+                execution=current,
                 event_type="execution.status_changed",
                 aggregate="execution",
                 summary="Execution failed closed on a workflow integrity violation",
@@ -2028,44 +2996,125 @@ class WorkflowRuntime:
                 severity="error",
                 payload={"error_code": error_code},
             )
+            await self._notify_scatter_parent_terminal_tx(tx, current)
+
+    async def _cancel_execution_tree_tx(
+        self,
+        tx: UnitOfWork,
+        root: dict[str, Any],
+        *,
+        include_root: bool,
+    ) -> int:
+        """Fence a root's unfinished descendants without rolling back proofs."""
+
+        if root["root_execution_uuid"] != root["execution_uuid"]:
+            raise MkbError("cancel-tree-root-invalid", "Cancellation tree root is not a root Execution", 409)
+        rows = await tx.fetchall(
+            "SELECT * FROM mkb_executions WHERE root_execution_uuid=? "
+            + ("" if include_root else "AND execution_uuid<>? ")
+            + "AND status NOT IN ('succeeded','failed','cancelled') "
+            "ORDER BY CASE WHEN parent_execution_uuid IS NULL THEN 1 ELSE 0 END,execution_uuid",
+            (root["execution_uuid"],) if include_root else (root["execution_uuid"], root["execution_uuid"]),
+        )
+        now = utc_now()
+        changed = 0
+        for row in rows:
+            transitioned = await tx.execute(
+                "UPDATE mkb_executions SET status='cancelling',cancel_requested_at=COALESCE(cancel_requested_at,?),"
+                "row_revision=row_revision+1,updated_at=? WHERE execution_uuid=? "
+                "AND status NOT IN ('succeeded','failed','cancelled','cancelling')",
+                (now, now, row["execution_uuid"]),
+            )
+            changed += int(bool(transitioned.rowcount))
+            await tx.execute(
+                "UPDATE mkb_execution_gates SET status='superseded',gate_revision=gate_revision+1,terminal_at=? "
+                "WHERE execution_uuid=? AND status='open'",
+                (now, row["execution_uuid"]),
+            )
+            await tx.execute(
+                "UPDATE mkb_processes SET status='cancelled',completed_at=?,claim_token_hash=NULL,lease_owner=NULL,"
+                "lease_expires_at=NULL,heartbeat_at=NULL,row_revision=row_revision+1,updated_at=? "
+                "WHERE execution_uuid=? AND status IN ('ready','retry_wait')",
+                (now, now, row["execution_uuid"]),
+            )
+            await tx.execute(
+                "UPDATE mkb_processes SET status='cancelling',fencing_generation=fencing_generation+1,"
+                "row_revision=row_revision+1,updated_at=? "
+                "WHERE execution_uuid=? AND status IN ('claimed','running')",
+                (now, row["execution_uuid"]),
+            )
+        # Children are ordered first.  A waiting review child has no Process
+        # and therefore converges immediately; claimed/running children retain
+        # their fence until a worker or lease recovery closes them.
+        for row in rows:
+            current = await self._execution(tx, row["execution_uuid"])
+            await self._converge_cancellation_tx(tx, current)
+        return changed
+
+    async def _notify_scatter_parent_terminal_tx(self, tx: UnitOfWork, execution: dict[str, Any]) -> None:
+        """Re-evaluate a parent from durable child terminal truth."""
+
+        parent_uuid = execution.get("parent_execution_uuid")
+        if not isinstance(parent_uuid, str) or not parent_uuid:
+            return
+        parent = await self._execution(tx, parent_uuid)
+        if parent["status"] == ExecutionStatus.CANCELLING.value:
+            await self._converge_cancellation_tx(tx, parent)
+        elif parent.get("execution_role") == "scatter_root":
+            await self._maybe_converge_scatter_root_tx(tx, parent)
 
     async def _converge_cancellation_tx(self, tx: UnitOfWork, execution: dict[str, Any]) -> bool:
-        now = utc_now()
-        active = await tx.fetchone(
-            "SELECT COUNT(*) AS count FROM mkb_processes WHERE execution_uuid=? "
-            "AND status IN ('ready','claimed','running','retry_wait','cancelling')",
-            (execution["execution_uuid"],),
-        )
-        if active is not None and active["count"]:
-            return False
         current = await self._execution(tx, execution["execution_uuid"])
         if current["status"] != ExecutionStatus.CANCELLING.value:
             return False
+        active = await tx.fetchone(
+            "SELECT COUNT(*) AS count FROM mkb_processes WHERE execution_uuid=? "
+            "AND status IN ('ready','claimed','running','retry_wait','cancelling')",
+            (current["execution_uuid"],),
+        )
+        if active is not None and active["count"]:
+            return False
+        if current["root_execution_uuid"] == current["execution_uuid"]:
+            descendants = await tx.fetchone(
+                "SELECT COUNT(*) AS count FROM mkb_executions WHERE root_execution_uuid=? AND execution_uuid<>? "
+                "AND status NOT IN ('succeeded','failed','cancelled')",
+                (current["execution_uuid"], current["execution_uuid"]),
+            )
+            if descendants is not None and descendants["count"]:
+                return False
+        now = utc_now()
         updated = await tx.execute(
-            "UPDATE mkb_executions SET status='cancelled',cancel_converged_at=?,completed_at=?,current_process_uuid=NULL,"
+            "UPDATE mkb_executions SET status='cancelled',waiting_reason=NULL,waiting_ref=NULL,next_wake_at=NULL,"
+            "cancel_converged_at=?,completed_at=?,current_process_uuid=NULL,"
             "terminal_summary_digest=?,summary_completed_at=?,row_revision=row_revision+1,updated_at=? "
             "WHERE execution_uuid=? AND status='cancelling'",
             (
                 now,
                 now,
-                stable_digest({"execution_uuid": execution["execution_uuid"], "terminal_status": "cancelled"}),
+                stable_digest({"execution_uuid": current["execution_uuid"], "terminal_status": "cancelled"}),
                 now,
                 now,
-                execution["execution_uuid"],
+                current["execution_uuid"],
             ),
         )
         if updated.rowcount:
+            if current["root_execution_uuid"] == current["execution_uuid"]:
+                # Root cancellation owns the public aggregate.  Refresh the
+                # immutable membership projection before exposing Task
+                # cancellation so stale active child counts cannot leak.
+                await self._refresh_execution_counts_tx(tx, current["execution_uuid"])
             await self._project_root_task_tx(tx, current, ExecutionStatus.CANCELLED.value, None, None, None)
             await self._record_event_tx(
                 tx,
                 execution=current,
                 event_type="execution.status_changed",
                 aggregate="execution",
-                summary="Execution cancellation converged after all Processes became terminal",
+                summary="Execution cancellation converged after all Processes and descendants became terminal",
                 status_before=ExecutionStatus.CANCELLING.value,
                 status_after=ExecutionStatus.CANCELLED.value,
                 payload={},
             )
+            await self._notify_scatter_parent_terminal_tx(tx, current)
             return True
         return False
 
@@ -2089,6 +3138,188 @@ class WorkflowRuntime:
                 by_status.get(ProcessStatus.CANCELLED.value, 0),
                 now,
                 execution_uuid,
+            ),
+        )
+        # Task progress is an Execution-membership projection, not a count of
+        # workflow steps.  A single-root intake therefore has exactly one
+        # required member, while a future scatter root can project all of its
+        # child Executions through the same query.  Keeping this update in the
+        # outcome transaction prevents the public Task view from reporting a
+        # terminal success alongside stale all-zero counters.
+        execution = await tx.fetchone(
+            "SELECT team_uuid,task_uuid,root_execution_uuid FROM mkb_executions WHERE execution_uuid=?",
+            (execution_uuid,),
+        )
+        if execution is None:
+            raise MkbError("execution-not-found", "Execution disappeared while refreshing progress", 409)
+        root = await tx.fetchone(
+            "SELECT execution_uuid,execution_role FROM mkb_executions WHERE execution_uuid=?",
+            (execution["root_execution_uuid"],),
+        )
+        if root is not None and root.get("execution_role") == "scatter_root":
+            task = await tx.fetchone(
+                "SELECT intake_snapshot_uuid,change_set_uuid FROM mkb_tasks "
+                "WHERE team_uuid=? AND task_uuid=? AND current_root_execution_uuid=?",
+                (execution["team_uuid"], execution["task_uuid"], root["execution_uuid"]),
+            )
+            if task is not None and task.get("intake_snapshot_uuid") and task.get("change_set_uuid"):
+                expected = await self._scatter_expected_members_tx(
+                    tx,
+                    team_uuid=execution["team_uuid"],
+                    snapshot_uuid=task["intake_snapshot_uuid"],
+                    change_set_uuid=task["change_set_uuid"],
+                )
+                if expected is not None:
+                    await self._refresh_scatter_task_counts_tx(
+                        tx,
+                        team_uuid=execution["team_uuid"],
+                        task_uuid=execution["task_uuid"],
+                        root_execution_uuid=root["execution_uuid"],
+                        expected=expected,
+                    )
+                    return
+        member_rows = await tx.fetchall(
+            "WITH child_count AS ("
+            "  SELECT COUNT(*) AS count FROM mkb_executions "
+            "  WHERE team_uuid=? AND task_uuid=? AND root_execution_uuid=? AND parent_execution_uuid IS NOT NULL"
+            ") "
+            "SELECT requiredness,status,COUNT(*) AS count FROM mkb_executions "
+            "WHERE team_uuid=? AND task_uuid=? AND root_execution_uuid=? "
+            "AND (parent_execution_uuid IS NOT NULL OR (SELECT count FROM child_count)=0) "
+            "GROUP BY requiredness,status",
+            (
+                execution["team_uuid"],
+                execution["task_uuid"],
+                execution["root_execution_uuid"],
+                execution["team_uuid"],
+                execution["task_uuid"],
+                execution["root_execution_uuid"],
+            ),
+        )
+        member_total = sum(int(row["count"]) for row in member_rows)
+        member_required = sum(int(row["count"]) for row in member_rows if row["requiredness"] == "required")
+        member_active = sum(
+            int(row["count"])
+            for row in member_rows
+            if row["status"]
+            in {
+                ExecutionStatus.CREATED.value,
+                ExecutionStatus.READY.value,
+                ExecutionStatus.RUNNING.value,
+                ExecutionStatus.WAITING.value,
+                ExecutionStatus.CANCELLING.value,
+            }
+        )
+        member_succeeded = sum(
+            int(row["count"]) for row in member_rows if row["status"] == ExecutionStatus.SUCCEEDED.value
+        )
+        member_failed = sum(int(row["count"]) for row in member_rows if row["status"] == ExecutionStatus.FAILED.value)
+        member_cancelled = sum(
+            int(row["count"]) for row in member_rows if row["status"] == ExecutionStatus.CANCELLED.value
+        )
+        await tx.execute(
+            "UPDATE mkb_tasks SET cnt_total=?,cnt_required=?,cnt_active=?,cnt_succeeded=?,cnt_failed=?,"
+            "cnt_cancelled=?,cnt_skipped=0,row_revision=row_revision+1,updated_at=? "
+            "WHERE team_uuid=? AND task_uuid=? AND current_root_execution_uuid=?",
+            (
+                member_total,
+                member_required,
+                member_active,
+                member_succeeded,
+                member_failed,
+                member_cancelled,
+                now,
+                execution["team_uuid"],
+                execution["task_uuid"],
+                execution["root_execution_uuid"],
+            ),
+        )
+
+    async def _refresh_scatter_task_counts_tx(
+        self,
+        tx: UnitOfWork,
+        *,
+        team_uuid: str,
+        task_uuid: str,
+        root_execution_uuid: str,
+        expected: list[dict[str, Any]],
+    ) -> None:
+        """Project counts from the accepted denominator, never child-row count."""
+
+        rows = await tx.fetchall(
+            "SELECT execution_uuid,execution_role,requiredness,target_kind,target_uuid,status,payload_extra "
+            "FROM mkb_executions WHERE team_uuid=? AND task_uuid=? AND root_execution_uuid=? "
+            "AND parent_execution_uuid=? ORDER BY execution_uuid",
+            (team_uuid, task_uuid, root_execution_uuid, root_execution_uuid),
+        )
+        expected_by_item = {member["intake_item_uuid"]: member for member in expected}
+        by_item: dict[str, list[dict[str, Any]]] = {}
+        for row in rows:
+            target_uuid = row.get("target_uuid")
+            if isinstance(target_uuid, str) and target_uuid in expected_by_item:
+                by_item.setdefault(target_uuid, []).append(row)
+        statuses: list[str] = []
+        for item_uuid, member in expected_by_item.items():
+            candidates = by_item.get(item_uuid, [])
+            if len(candidates) != 1:
+                statuses.append(ExecutionStatus.CREATED.value)
+                continue
+            candidate = candidates[0]
+            try:
+                binding = json.loads(candidate.get("payload_extra") or "{}")
+            except (TypeError, json.JSONDecodeError):
+                binding = None
+            if (
+                candidate.get("execution_role") != "scatter_child"
+                or candidate.get("requiredness") != "required"
+                or candidate.get("target_kind") != "intake_item"
+                or not isinstance(binding, dict)
+                or binding.get("intake_revision_uuid") != member["intake_revision_uuid"]
+                or binding.get("member_ordinal") != member["member_ordinal"]
+            ):
+                statuses.append(ExecutionStatus.CREATED.value)
+                continue
+            statuses.append(str(candidate["status"]))
+        total = len(expected)
+        active = sum(
+            status
+            in {
+                ExecutionStatus.CREATED.value,
+                ExecutionStatus.READY.value,
+                ExecutionStatus.RUNNING.value,
+                ExecutionStatus.WAITING.value,
+                ExecutionStatus.CANCELLING.value,
+            }
+            for status in statuses
+        )
+        succeeded = sum(status == ExecutionStatus.SUCCEEDED.value for status in statuses)
+        failed = sum(status == ExecutionStatus.FAILED.value for status in statuses)
+        cancelled = sum(status == ExecutionStatus.CANCELLED.value for status in statuses)
+        now = utc_now()
+        await tx.execute(
+            "UPDATE mkb_executions SET total_child_count=?,active_child_count=?,succeeded_child_count=?,"
+            # Progress counters are a derived projection.  They must not
+            # perturb the root control CAS revision after a Gate target has
+            # frozen it; otherwise an innocent child-count refresh makes a
+            # still-open human Gate spuriously stale.
+            "failed_child_count=?,updated_at=? WHERE execution_uuid=?",
+            (total, active, succeeded, failed, now, root_execution_uuid),
+        )
+        await tx.execute(
+            "UPDATE mkb_tasks SET cnt_total=?,cnt_required=?,cnt_active=?,cnt_succeeded=?,cnt_failed=?,"
+            "cnt_cancelled=?,cnt_skipped=0,row_revision=row_revision+1,updated_at=? "
+            "WHERE team_uuid=? AND task_uuid=? AND current_root_execution_uuid=?",
+            (
+                total,
+                total,
+                active,
+                succeeded,
+                failed,
+                cancelled,
+                now,
+                team_uuid,
+                task_uuid,
+                root_execution_uuid,
             ),
         )
 
@@ -2213,10 +3444,19 @@ class WorkflowRuntime:
             raise ConflictError("gate-action-not-allowed", "Gate action is not allowed by its frozen review target")
         return target
 
-    def _control_step(self, plan: WorkflowDefinition) -> WorkflowStepDefinition:
+    def _control_step(self, plan: WorkflowDefinition, control_key: str | None = None) -> WorkflowStepDefinition:
         controls = [step for step in plan.steps if step.step_kind is WorkflowStepKind.CONTROL]
+        if control_key is not None:
+            matches = [step for step in controls if step.control_key == control_key]
+            if len(matches) != 1:
+                raise MkbError("gate-control-mismatch", "Gate does not belong to the bound workflow control step", 409)
+            return matches[0]
         if len(controls) != 1:
-            raise MkbError("workflow-control-ambiguous", "Bounded runtime requires exactly one control step", 409)
+            raise MkbError(
+                "workflow-control-ambiguous",
+                "A control key is required when the bound workflow has multiple controls",
+                409,
+            )
         return controls[0]
 
     @staticmethod

@@ -1,0 +1,554 @@
+"""Code-owned registered-API scatter workflow declarations.
+
+The API caller can select only ``source_kind=registered_api``.  Registry
+resolution maps that bounded source kind to the scatter root below; neither a
+Task payload nor a Process input may name these workflow keys directly.
+"""
+
+from __future__ import annotations
+
+from typing import Final
+
+from src.contracts.workflow.models import (
+    WorkflowBindingDefinition,
+    WorkflowBindingSourceKind,
+    WorkflowDefinition,
+    WorkflowExecutionRole,
+    WorkflowGuardDefinition,
+    WorkflowOutcomeSelector,
+    WorkflowPhaseKey,
+    WorkflowPortDefinition,
+    WorkflowRouteDefinition,
+    WorkflowRouteKind,
+    WorkflowStepDefinition,
+    WorkflowStepKind,
+    WorkflowTerminalKind,
+    WorkflowValueType,
+)
+
+SCATTER_ROOT_WORKFLOW_KEY: Final = "intake.ingest.scatter.registered_api.lsrag.v1"
+SCATTER_CHILD_WORKFLOW_KEY: Final = "intake.ingest.scatter.child.lsrag.v1"
+
+
+def _ref(slot_name: str, schema_ref: str) -> WorkflowPortDefinition:
+    return WorkflowPortDefinition(
+        slot_name=slot_name,
+        value_type=WorkflowValueType.LOGICAL_REF,
+        schema_ref=schema_ref,
+    )
+
+
+def _process(
+    *,
+    step_key: str,
+    process_key: str,
+    phase_key: WorkflowPhaseKey,
+    proof_kind: str,
+    input_ports: list[WorkflowPortDefinition],
+    output_ports: list[WorkflowPortDefinition],
+) -> WorkflowStepDefinition:
+    return WorkflowStepDefinition(
+        step_key=step_key,
+        step_kind=WorkflowStepKind.PROCESS,
+        process_key=process_key,
+        contract_version="v1",
+        phase_key=phase_key,
+        required_proof_kind=proof_kind,
+        input_ports=input_ports,
+        output_ports=output_ports,
+    )
+
+
+def _terminal_routes(step_key: str) -> list[WorkflowRouteDefinition]:
+    return [
+        WorkflowRouteDefinition(
+            route_key=f"{step_key}.failed",
+            from_step_key=step_key,
+            to_step_key="failed",
+            route_kind=WorkflowRouteKind.TERMINAL,
+            outcome_selector=WorkflowOutcomeSelector.FAILED,
+            priority=0,
+        ),
+        WorkflowRouteDefinition(
+            route_key=f"{step_key}.cancelled",
+            from_step_key=step_key,
+            to_step_key="cancelled",
+            route_kind=WorkflowRouteKind.TERMINAL,
+            outcome_selector=WorkflowOutcomeSelector.CANCELLED,
+            priority=0,
+        ),
+    ]
+
+
+_ROOT_STEPS = [
+    WorkflowStepDefinition(step_key="start", step_kind=WorkflowStepKind.START),
+    _process(
+        step_key="acquire_registered_api",
+        process_key="intake.acquire.registered_api",
+        phase_key=WorkflowPhaseKey.RESOLVING_SOURCE,
+        proof_kind="acquisition_evidence",
+        input_ports=[_ref("source_descriptor", "mkb.intake.source-descriptor.v1")],
+        output_ports=[_ref("acquisition_evidence", "mkb.intake.acquisition-evidence.v1")],
+    ),
+    _process(
+        step_key="clean_map_registered_api",
+        process_key="clean.map.registered_api",
+        phase_key=WorkflowPhaseKey.SCATTERING,
+        proof_kind="clean_collection_evidence",
+        input_ports=[_ref("acquisition_evidence", "mkb.intake.acquisition-evidence.v1")],
+        output_ports=[_ref("clean_collection", "mkb.intake.clean-collection.v1")],
+    ),
+    _process(
+        step_key="seal_candidate_set",
+        process_key="intake.collection.seal",
+        phase_key=WorkflowPhaseKey.PREFLIGHT_ADMISSION,
+        proof_kind="candidate_set_seal_proof",
+        input_ports=[_ref("clean_collection", "mkb.intake.clean-collection.v1")],
+        output_ports=[_ref("candidate_set_seal", "mkb.intake.candidate-set-seal.v1")],
+    ),
+    _process(
+        step_key="preflight_validate",
+        process_key="intake.preflight_validate",
+        phase_key=WorkflowPhaseKey.PREFLIGHT_ADMISSION,
+        proof_kind="preflight_outcome_evidence",
+        input_ports=[
+            _ref("acquisition_evidence", "mkb.intake.acquisition-evidence.v1"),
+            _ref("candidate_set_seal", "mkb.intake.candidate-set-seal.v1"),
+            _ref("clean_collection", "mkb.intake.clean-collection.v1"),
+        ],
+        output_ports=[_ref("preflight_outcome", "mkb.intake.preflight-outcome.v1")],
+    ),
+    _process(
+        step_key="accept_snapshot",
+        process_key="intake.accept_snapshot",
+        phase_key=WorkflowPhaseKey.PREFLIGHT_ADMISSION,
+        proof_kind="acceptance_proof",
+        input_ports=[
+            _ref("candidate_set_seal", "mkb.intake.candidate-set-seal.v1"),
+            _ref("preflight_outcome", "mkb.intake.preflight-outcome.v1"),
+        ],
+        output_ports=[_ref("accepted_collection", "mkb.intake.accepted-collection.v1")],
+    ),
+    WorkflowStepDefinition(
+        step_key="human_review",
+        step_kind=WorkflowStepKind.CONTROL,
+        control_key="human_review_gate",
+        phase_key=WorkflowPhaseKey.AWAITING_HUMAN_REVIEW,
+        input_ports=[
+            _ref("accepted_collection", "mkb.intake.accepted-collection.v1"),
+            _ref("preflight_outcome", "mkb.intake.preflight-outcome.v1"),
+        ],
+        output_ports=[_ref("gate_decision", "mkb.intake.gate-decision.v1")],
+    ),
+    WorkflowStepDefinition(
+        step_key="scatter_children_join",
+        step_kind=WorkflowStepKind.CONTROL,
+        control_key="scatter_children_join",
+        phase_key=WorkflowPhaseKey.FAN_IN,
+        input_ports=[_ref("accepted_collection", "mkb.intake.accepted-collection.v1")],
+    ),
+    WorkflowStepDefinition(
+        step_key="succeeded",
+        step_kind=WorkflowStepKind.TERMINAL,
+        terminal_kind=WorkflowTerminalKind.SUCCESS,
+    ),
+    WorkflowStepDefinition(
+        step_key="failed",
+        step_kind=WorkflowStepKind.TERMINAL,
+        terminal_kind=WorkflowTerminalKind.FAILURE,
+    ),
+    WorkflowStepDefinition(
+        step_key="cancelled",
+        step_kind=WorkflowStepKind.TERMINAL,
+        terminal_kind=WorkflowTerminalKind.CANCELLED,
+    ),
+]
+
+_ROOT_ROUTES = [
+    WorkflowRouteDefinition(
+        route_key="start.to_acquire_registered_api",
+        from_step_key="start",
+        to_step_key="acquire_registered_api",
+        route_kind=WorkflowRouteKind.NORMAL,
+        outcome_selector=WorkflowOutcomeSelector.ALWAYS,
+        priority=0,
+    ),
+    WorkflowRouteDefinition(
+        route_key="acquire_registered_api.to_clean_map_registered_api",
+        from_step_key="acquire_registered_api",
+        to_step_key="clean_map_registered_api",
+        route_kind=WorkflowRouteKind.NORMAL,
+        outcome_selector=WorkflowOutcomeSelector.SUCCEEDED,
+        priority=0,
+    ),
+    WorkflowRouteDefinition(
+        route_key="clean_map_registered_api.to_seal_candidate_set",
+        from_step_key="clean_map_registered_api",
+        to_step_key="seal_candidate_set",
+        route_kind=WorkflowRouteKind.NORMAL,
+        outcome_selector=WorkflowOutcomeSelector.SUCCEEDED,
+        priority=0,
+    ),
+    WorkflowRouteDefinition(
+        route_key="seal_candidate_set.to_preflight_validate",
+        from_step_key="seal_candidate_set",
+        to_step_key="preflight_validate",
+        route_kind=WorkflowRouteKind.NORMAL,
+        outcome_selector=WorkflowOutcomeSelector.SUCCEEDED,
+        priority=0,
+    ),
+    WorkflowRouteDefinition(
+        route_key="preflight_validate.to_accept_snapshot",
+        from_step_key="preflight_validate",
+        to_step_key="accept_snapshot",
+        route_kind=WorkflowRouteKind.NORMAL,
+        outcome_selector=WorkflowOutcomeSelector.SUCCEEDED,
+        priority=0,
+    ),
+    WorkflowRouteDefinition(
+        route_key="accept_snapshot.auto_admitted",
+        from_step_key="accept_snapshot",
+        to_step_key="scatter_children_join",
+        route_kind=WorkflowRouteKind.BRANCH,
+        outcome_selector=WorkflowOutcomeSelector.SUCCEEDED,
+        priority=10,
+        guard_key="admission_auto_admitted",
+    ),
+    WorkflowRouteDefinition(
+        route_key="accept_snapshot.human_review",
+        from_step_key="accept_snapshot",
+        to_step_key="human_review",
+        route_kind=WorkflowRouteKind.BRANCH,
+        outcome_selector=WorkflowOutcomeSelector.SUCCEEDED,
+        priority=20,
+        guard_key="admission_human_review_required",
+    ),
+    WorkflowRouteDefinition(
+        route_key="accept_snapshot.rejected",
+        from_step_key="accept_snapshot",
+        to_step_key="failed",
+        route_kind=WorkflowRouteKind.TERMINAL,
+        outcome_selector=WorkflowOutcomeSelector.SUCCEEDED,
+        priority=30,
+        guard_key="admission_rejected",
+    ),
+    WorkflowRouteDefinition(
+        route_key="human_review.to_scatter_children_join",
+        from_step_key="human_review",
+        to_step_key="scatter_children_join",
+        route_kind=WorkflowRouteKind.NORMAL,
+        outcome_selector=WorkflowOutcomeSelector.SUCCEEDED,
+        priority=0,
+    ),
+    WorkflowRouteDefinition(
+        route_key="scatter_children_join.to_succeeded",
+        from_step_key="scatter_children_join",
+        to_step_key="succeeded",
+        route_kind=WorkflowRouteKind.TERMINAL,
+        outcome_selector=WorkflowOutcomeSelector.SUCCEEDED,
+        priority=0,
+    ),
+]
+for _step_key in (
+    "acquire_registered_api",
+    "clean_map_registered_api",
+    "seal_candidate_set",
+    "preflight_validate",
+    "accept_snapshot",
+    "human_review",
+    "scatter_children_join",
+):
+    _ROOT_ROUTES.extend(_terminal_routes(_step_key))
+
+_ROOT_BINDINGS = [
+    WorkflowBindingDefinition(
+        target_step_key="acquire_registered_api",
+        target_slot_name="source_descriptor",
+        source_kind=WorkflowBindingSourceKind.EXECUTION_CONTEXT,
+        source_ref_key="source_descriptor",
+    ),
+    WorkflowBindingDefinition(
+        target_step_key="clean_map_registered_api",
+        target_slot_name="acquisition_evidence",
+        source_kind=WorkflowBindingSourceKind.PRIOR_OUTPUT,
+        source_step_key="acquire_registered_api",
+        source_port_name="acquisition_evidence",
+    ),
+    WorkflowBindingDefinition(
+        target_step_key="seal_candidate_set",
+        target_slot_name="clean_collection",
+        source_kind=WorkflowBindingSourceKind.PRIOR_OUTPUT,
+        source_step_key="clean_map_registered_api",
+        source_port_name="clean_collection",
+    ),
+    WorkflowBindingDefinition(
+        target_step_key="preflight_validate",
+        target_slot_name="acquisition_evidence",
+        source_kind=WorkflowBindingSourceKind.PRIOR_OUTPUT,
+        source_step_key="acquire_registered_api",
+        source_port_name="acquisition_evidence",
+    ),
+    WorkflowBindingDefinition(
+        target_step_key="preflight_validate",
+        target_slot_name="candidate_set_seal",
+        source_kind=WorkflowBindingSourceKind.PRIOR_OUTPUT,
+        source_step_key="seal_candidate_set",
+        source_port_name="candidate_set_seal",
+    ),
+    WorkflowBindingDefinition(
+        target_step_key="preflight_validate",
+        target_slot_name="clean_collection",
+        source_kind=WorkflowBindingSourceKind.PRIOR_OUTPUT,
+        source_step_key="clean_map_registered_api",
+        source_port_name="clean_collection",
+    ),
+    WorkflowBindingDefinition(
+        target_step_key="accept_snapshot",
+        target_slot_name="candidate_set_seal",
+        source_kind=WorkflowBindingSourceKind.PRIOR_OUTPUT,
+        source_step_key="seal_candidate_set",
+        source_port_name="candidate_set_seal",
+    ),
+    WorkflowBindingDefinition(
+        target_step_key="accept_snapshot",
+        target_slot_name="preflight_outcome",
+        source_kind=WorkflowBindingSourceKind.PRIOR_OUTPUT,
+        source_step_key="preflight_validate",
+        source_port_name="preflight_outcome",
+    ),
+    WorkflowBindingDefinition(
+        target_step_key="human_review",
+        target_slot_name="accepted_collection",
+        source_kind=WorkflowBindingSourceKind.PRIOR_OUTPUT,
+        source_step_key="accept_snapshot",
+        source_port_name="accepted_collection",
+    ),
+    WorkflowBindingDefinition(
+        target_step_key="human_review",
+        target_slot_name="preflight_outcome",
+        source_kind=WorkflowBindingSourceKind.PRIOR_OUTPUT,
+        source_step_key="preflight_validate",
+        source_port_name="preflight_outcome",
+    ),
+    WorkflowBindingDefinition(
+        target_step_key="scatter_children_join",
+        target_slot_name="accepted_collection",
+        source_kind=WorkflowBindingSourceKind.PRIOR_OUTPUT,
+        source_step_key="accept_snapshot",
+        source_port_name="accepted_collection",
+    ),
+]
+
+BUILTIN_REGISTERED_API_SCATTER_ROOT_WORKFLOW: Final[WorkflowDefinition] = WorkflowDefinition(
+    schema_version="mkb.workflow-definition.v1",
+    workflow_key=SCATTER_ROOT_WORKFLOW_KEY,
+    revision_number=1,
+    domain_key="ls_rag",
+    purpose_key="intake.ingest",
+    execution_role=WorkflowExecutionRole.SCATTER_ROOT,
+    display_name="Registered API collection intake root",
+    description="Acquire, seal, accept, and collect a typed registered-API collection without caller graph selection.",
+    context_slots=[_ref("source_descriptor", "mkb.intake.source-descriptor.v1")],
+    required_process_keys=[
+        "intake.acquire.registered_api",
+        "clean.map.registered_api",
+        "intake.collection.seal",
+        "intake.preflight_validate",
+        "intake.accept_snapshot",
+    ],
+    steps=_ROOT_STEPS,
+    routes=_ROOT_ROUTES,
+    bindings=_ROOT_BINDINGS,
+    guards=[
+        WorkflowGuardDefinition(
+            guard_key="admission_auto_admitted",
+            predicate_type="registered_admission_result",
+            operator="eq",
+            expected_value="auto_admitted",
+        ),
+        WorkflowGuardDefinition(
+            guard_key="admission_human_review_required",
+            predicate_type="registered_admission_result",
+            operator="eq",
+            expected_value="human_review_required",
+        ),
+        WorkflowGuardDefinition(
+            guard_key="admission_rejected",
+            predicate_type="registered_admission_result",
+            operator="eq",
+            expected_value="rejected",
+        ),
+    ],
+)
+
+
+_CHILD_STEPS = [
+    WorkflowStepDefinition(step_key="start", step_kind=WorkflowStepKind.START),
+    _process(
+        step_key="structurize",
+        process_key="lsrag.structurize",
+        phase_key=WorkflowPhaseKey.STRUCTURIZING,
+        proof_kind="structure_proof",
+        input_ports=[_ref("accepted_intake_revision", "mkb.intake.accepted-revision.v1")],
+        output_ports=[_ref("structure_artifact", "mkb.lsrag.structure-artifact.v1")],
+    ),
+    _process(
+        step_key="construct",
+        process_key="lsrag.construct",
+        phase_key=WorkflowPhaseKey.CONSTRUCTING,
+        proof_kind="construct_to_vectorize_gate",
+        input_ports=[_ref("structure_artifact", "mkb.lsrag.structure-artifact.v1")],
+        output_ports=[_ref("construct_package", "mkb.lsrag.construct-package.v1")],
+    ),
+    _process(
+        step_key="vectorize",
+        process_key="lsrag.vectorize",
+        phase_key=WorkflowPhaseKey.VECTORIZING_INDEXING,
+        proof_kind="vectorization_proof",
+        input_ports=[_ref("construct_package", "mkb.lsrag.construct-package.v1")],
+        output_ports=[_ref("vectorization_receipt", "mkb.vector.vectorization-receipt.v1")],
+    ),
+    _process(
+        step_key="validate_publication",
+        process_key="index.validate_publication",
+        phase_key=WorkflowPhaseKey.VALIDATING_PUBLICATION,
+        proof_kind="publication_proof",
+        input_ports=[
+            _ref("accepted_intake_revision", "mkb.intake.accepted-revision.v1"),
+            _ref("vectorization_receipt", "mkb.vector.vectorization-receipt.v1"),
+        ],
+        output_ports=[_ref("publication_proof", "mkb.vector.publication-proof.v1")],
+    ),
+    WorkflowStepDefinition(
+        step_key="succeeded",
+        step_kind=WorkflowStepKind.TERMINAL,
+        terminal_kind=WorkflowTerminalKind.SUCCESS,
+    ),
+    WorkflowStepDefinition(
+        step_key="failed",
+        step_kind=WorkflowStepKind.TERMINAL,
+        terminal_kind=WorkflowTerminalKind.FAILURE,
+    ),
+    WorkflowStepDefinition(
+        step_key="cancelled",
+        step_kind=WorkflowStepKind.TERMINAL,
+        terminal_kind=WorkflowTerminalKind.CANCELLED,
+    ),
+]
+
+_CHILD_ROUTES = [
+    WorkflowRouteDefinition(
+        route_key="start.to_structurize",
+        from_step_key="start",
+        to_step_key="structurize",
+        route_kind=WorkflowRouteKind.NORMAL,
+        outcome_selector=WorkflowOutcomeSelector.ALWAYS,
+        priority=0,
+    ),
+    WorkflowRouteDefinition(
+        route_key="structurize.to_construct",
+        from_step_key="structurize",
+        to_step_key="construct",
+        route_kind=WorkflowRouteKind.NORMAL,
+        outcome_selector=WorkflowOutcomeSelector.SUCCEEDED,
+        priority=0,
+    ),
+    WorkflowRouteDefinition(
+        route_key="construct.to_vectorize",
+        from_step_key="construct",
+        to_step_key="vectorize",
+        route_kind=WorkflowRouteKind.NORMAL,
+        outcome_selector=WorkflowOutcomeSelector.SUCCEEDED,
+        priority=0,
+    ),
+    WorkflowRouteDefinition(
+        route_key="vectorize.to_validate_publication",
+        from_step_key="vectorize",
+        to_step_key="validate_publication",
+        route_kind=WorkflowRouteKind.NORMAL,
+        outcome_selector=WorkflowOutcomeSelector.SUCCEEDED,
+        priority=0,
+    ),
+    WorkflowRouteDefinition(
+        route_key="validate_publication.to_succeeded",
+        from_step_key="validate_publication",
+        to_step_key="succeeded",
+        route_kind=WorkflowRouteKind.TERMINAL,
+        outcome_selector=WorkflowOutcomeSelector.SUCCEEDED,
+        priority=0,
+    ),
+]
+for _step_key in ("structurize", "construct", "vectorize", "validate_publication"):
+    _CHILD_ROUTES.extend(_terminal_routes(_step_key))
+
+_CHILD_BINDINGS = [
+    WorkflowBindingDefinition(
+        target_step_key="structurize",
+        target_slot_name="accepted_intake_revision",
+        source_kind=WorkflowBindingSourceKind.EXECUTION_CONTEXT,
+        source_ref_key="accepted_intake_revision",
+    ),
+    WorkflowBindingDefinition(
+        target_step_key="construct",
+        target_slot_name="structure_artifact",
+        source_kind=WorkflowBindingSourceKind.PRIOR_OUTPUT,
+        source_step_key="structurize",
+        source_port_name="structure_artifact",
+    ),
+    WorkflowBindingDefinition(
+        target_step_key="vectorize",
+        target_slot_name="construct_package",
+        source_kind=WorkflowBindingSourceKind.PRIOR_OUTPUT,
+        source_step_key="construct",
+        source_port_name="construct_package",
+    ),
+    WorkflowBindingDefinition(
+        target_step_key="validate_publication",
+        target_slot_name="accepted_intake_revision",
+        source_kind=WorkflowBindingSourceKind.EXECUTION_CONTEXT,
+        source_ref_key="accepted_intake_revision",
+    ),
+    WorkflowBindingDefinition(
+        target_step_key="validate_publication",
+        target_slot_name="vectorization_receipt",
+        source_kind=WorkflowBindingSourceKind.PRIOR_OUTPUT,
+        source_step_key="vectorize",
+        source_port_name="vectorization_receipt",
+    ),
+]
+
+BUILTIN_REGISTERED_API_SCATTER_CHILD_WORKFLOW: Final[WorkflowDefinition] = WorkflowDefinition(
+    schema_version="mkb.workflow-definition.v1",
+    workflow_key=SCATTER_CHILD_WORKFLOW_KEY,
+    revision_number=1,
+    domain_key="ls_rag",
+    purpose_key="intake.ingest",
+    execution_role=WorkflowExecutionRole.SCATTER_CHILD,
+    display_name="Registered API collection member intake",
+    description="Publish one accepted registered-API member under its exact root Snapshot and ChangeSet binding.",
+    context_slots=[_ref("accepted_intake_revision", "mkb.intake.accepted-revision.v1")],
+    required_process_keys=[
+        "lsrag.structurize",
+        "lsrag.construct",
+        "lsrag.vectorize",
+        "index.validate_publication",
+    ],
+    steps=_CHILD_STEPS,
+    routes=_CHILD_ROUTES,
+    bindings=_CHILD_BINDINGS,
+)
+
+
+BUILTIN_SCATTER_WORKFLOWS: Final[tuple[WorkflowDefinition, ...]] = (
+    BUILTIN_REGISTERED_API_SCATTER_ROOT_WORKFLOW,
+    BUILTIN_REGISTERED_API_SCATTER_CHILD_WORKFLOW,
+)
+
+
+__all__ = [
+    "BUILTIN_REGISTERED_API_SCATTER_CHILD_WORKFLOW",
+    "BUILTIN_REGISTERED_API_SCATTER_ROOT_WORKFLOW",
+    "BUILTIN_SCATTER_WORKFLOWS",
+    "SCATTER_CHILD_WORKFLOW_KEY",
+    "SCATTER_ROOT_WORKFLOW_KEY",
+]
