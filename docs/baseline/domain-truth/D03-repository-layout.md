@@ -263,6 +263,7 @@ MKB_root/
 │   ├── unit/
 │   ├── e2e/
 │   └── domain/                   # HARD / golden / 跨域不变量
+├── venv/                         # Python 虚拟环境
 ├── public/                       # 对外可用静态/公开资源（非运行时 SSOT）
 └── frontend/                     # v2 预留；v1 无业务依赖
 ```
