@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import sqlite3
 import time
 from pathlib import Path
@@ -84,8 +85,15 @@ def _read_item(connection: sqlite3.Connection, team_uuid: str) -> tuple[str, str
     return row
 
 
+def _generation_object_bytes(root: Path, team_uuid: str, logical_handle: str) -> bytes:
+    """Read a local generation object through its digest-only logical handle."""
+
+    digest = logical_handle.rsplit(":", maxsplit=1)[-1]
+    return (root / "objects" / team_uuid / "sha256" / digest[:2] / digest[2:4] / digest).read_bytes()
+
+
 def test_rebuild_and_metadata_lifecycle_paths_complete_through_public_http(tmp_path: Path) -> None:
-    """Rebuild preserves canonical revisions; metadata changes append and publish one."""
+    """Metadata refresh reuses S06/source summaries and recalculates S07/S08."""
 
     database_path = tmp_path / "mkb.sqlite3"
     token = "intake-lifecycle-token"
@@ -251,3 +259,96 @@ def test_rebuild_and_metadata_lifecycle_paths_complete_through_public_http(tmp_p
             (team_uuid, latest_revision_uuid),
         ).fetchone()
         assert semantic == ("tier=gold",)
+        metadata_artifacts = [
+            {
+                "generation_artifact_uuid": row[0],
+                "artifact_type": row[1],
+                "execution_uuid": row[2],
+                "logical_handle": row[3],
+                "content_digest": row[4],
+            }
+            for row in connection.execute(
+                "SELECT generation_artifact_uuid,artifact_type,execution_uuid,logical_handle,content_digest "
+                "FROM mkb_generation_artifacts WHERE team_uuid=? AND task_uuid=? ORDER BY artifact_type",
+                (team_uuid, metadata_task_uuid),
+            )
+        ]
+        metadata_processes = {
+            row[0]
+            for row in connection.execute(
+                "SELECT process_key FROM mkb_processes WHERE team_uuid=? AND task_uuid=?",
+                (team_uuid, metadata_task_uuid),
+            )
+        }
+
+        # The metadata Task owns a fresh S07 package only.  No S06 Process or
+        # artifact may be manufactured merely because S04 semantics changed.
+        assert {artifact["artifact_type"] for artifact in metadata_artifacts} == {
+            "construction_document",
+            "dual_channel_projection",
+            "construction_validation_report",
+        }
+        assert "lsrag.structurize" not in metadata_processes
+        metadata_by_type = {artifact["artifact_type"]: artifact for artifact in metadata_artifacts}
+        metadata_construction = json.loads(
+            _generation_object_bytes(
+                tmp_path / "objects",
+                team_uuid,
+                metadata_by_type["construction_document"]["logical_handle"],
+            )
+        )
+        metadata_dual = json.loads(
+            _generation_object_bytes(
+                tmp_path / "objects",
+                team_uuid,
+                metadata_by_type["dual_channel_projection"]["logical_handle"],
+            )
+        )
+        source_structure = connection.execute(
+            "SELECT execution_uuid,generation_artifact_uuid FROM mkb_generation_artifacts "
+            "WHERE team_uuid=? AND generation_artifact_uuid=? AND artifact_type='structure_document'",
+            (team_uuid, metadata_construction["structure_generation_artifact_uuid"]),
+        ).fetchone()
+        assert source_structure is not None
+        source_projection = connection.execute(
+            "SELECT generation_artifact_uuid FROM mkb_generation_artifacts "
+            "WHERE team_uuid=? AND generation_artifact_uuid=? AND artifact_type='retrieval_block_projection'",
+            (team_uuid, metadata_construction["projection_generation_artifact_uuid"]),
+        ).fetchone()
+        assert source_projection is not None
+        source_dual = connection.execute(
+            "SELECT logical_handle FROM mkb_generation_artifacts WHERE team_uuid=? AND execution_uuid=? "
+            "AND artifact_type='dual_channel_projection'",
+            (team_uuid, source_structure[0]),
+        ).fetchone()
+        assert source_dual is not None
+        source_dual_payload = json.loads(
+            _generation_object_bytes(tmp_path / "objects", team_uuid, source_dual[0])
+        )
+        assert metadata_construction["structure_generation_artifact_uuid"] == source_structure[1]
+        assert metadata_construction["projection_generation_artifact_uuid"] == source_projection[0]
+        assert {
+            unit["unit_id"]: unit["summary"] for unit in metadata_dual["units"]
+        } == {unit["unit_id"]: unit["summary"] for unit in source_dual_payload["units"]}
+
+        source_vector_digests = {
+            (row[0], row[1]): row[2]
+            for row in connection.execute(
+                "SELECT block_or_unit_id,channel,content_digest FROM mkb_vector_records "
+                "WHERE team_uuid=? AND execution_uuid=? ORDER BY block_or_unit_id,channel",
+                (team_uuid, source_structure[0]),
+            )
+        }
+        metadata_vector_digests = {
+            (row[0], row[1]): row[2]
+            for row in connection.execute(
+                "SELECT block_or_unit_id,channel,content_digest FROM mkb_vector_records "
+                "WHERE team_uuid=? AND task_uuid=? ORDER BY block_or_unit_id,channel",
+                (team_uuid, metadata_task_uuid),
+            )
+        }
+        assert metadata_vector_digests.keys() == source_vector_digests.keys()
+        assert all(
+            metadata_vector_digests[coordinate] != source_vector_digests[coordinate]
+            for coordinate in metadata_vector_digests
+        )

@@ -9,9 +9,16 @@ from pathlib import Path
 from fastapi.testclient import TestClient
 
 from api.app import create_app
-from src.contracts.common.ids import uuid7
+from src.contracts.common.ids import stable_digest, uuid7
 from src.contracts.common.time import utc_now
-from src.contracts.inference.models import EmbeddingRequest, EmbeddingResponse
+from src.contracts.inference.models import (
+    EmbeddingRequest,
+    EmbeddingResponse,
+    StructuredGenerateRequest,
+    StructuredGenerateResponse,
+    TextGenerateRequest,
+    TextGenerateResponse,
+)
 from src.runtime.config import Settings
 
 
@@ -130,7 +137,17 @@ def test_single_intake_publishes_grounded_retrieval_context(tmp_path: Path) -> N
 
 
 class _LiveEmbeddingFixture:
-    """A binding-observant 64-D embedder used to prove frozen live Layer A."""
+    """A binding-observant facade stub for live S06/S07/S08 paths.
+
+    The production composition keeps ``InferenceFacade``; this fixture is
+    injected only for offline golden tests so transport stays local while the
+    exact frozen binding and dual invocation ledgers are still exercised.
+    """
+
+    def __init__(self) -> None:
+        self.structured_calls = 0
+        self.text_calls = 0
+        self.embed_calls = 0
 
     async def embed(self, request: EmbeddingRequest) -> EmbeddingResponse:
         binding = request.binding
@@ -138,8 +155,61 @@ class _LiveEmbeddingFixture:
         assert binding.adapter_kind == "local_vllm"
         assert binding.model_key == "qwen-vl-2b"
         assert binding.model_version == "v1"
+        self.embed_calls += 1
         vectors = [[1.0, *([0.0] * 63)] for _ in texts]
-        return EmbeddingResponse(vectors=vectors, model_key="qwen-vl-2b", model_version="v1", dimension=64)
+        return EmbeddingResponse(
+            vectors=vectors,
+            model_key="qwen-vl-2b",
+            model_version="v1",
+            dimension=64,
+            adapter_kind="local_vllm",
+            latency_ms=1,
+            request_digest=stable_digest({"capability": "embed", "n": len(texts)}),
+            invocation_uuid=uuid7(),
+        )
+
+    async def structured_generate(
+        self, request: StructuredGenerateRequest, *, validator=None
+    ) -> tuple[StructuredGenerateResponse, object | None]:
+        del validator
+        assert request.binding.capability_key == "structured_generate"
+        assert request.binding.model_key == "qwen35-a3b"
+        assert request.prompt_digest
+        assert request.json_schema_digest
+        assert request.invocation is not None
+        assert request.invocation.generation_invocation_uuid
+        self.structured_calls += 1
+        value = {"status": "ok", "stage": "structure"}
+        response = StructuredGenerateResponse(
+            text='{"status":"ok","stage":"structure"}',
+            value=value,
+            model_key=request.binding.model_key,
+            model_version=request.binding.model_version,
+            adapter_kind=request.binding.adapter_kind,
+            latency_ms=2,
+            request_digest=stable_digest({"capability": "structured_generate", "prompt": request.prompt_digest}),
+            invocation_uuid=uuid7(),
+        )
+        return response, value
+
+    async def text_generate(self, request: TextGenerateRequest) -> TextGenerateResponse:
+        assert request.binding.capability_key == "text_generate"
+        assert request.binding.model_key == "qwen35-a3b"
+        assert request.prompt_digest
+        assert request.invocation is not None
+        assert request.invocation.generation_invocation_uuid
+        self.text_calls += 1
+        # Echo a bounded summary of the original block so construction remains grounded.
+        text = request.input_text if len(request.input_text) <= 480 else f"{request.input_text[:479].rstrip()}…"
+        return TextGenerateResponse(
+            text=text,
+            model_key=request.binding.model_key,
+            model_version=request.binding.model_version,
+            adapter_kind=request.binding.adapter_kind,
+            latency_ms=2,
+            request_digest=stable_digest({"capability": "text_generate", "prompt": request.prompt_digest}),
+            invocation_uuid=uuid7(),
+        )
 
     async def rerank(self, query: str, documents: list[str]) -> list[float]:
         del query
@@ -220,6 +290,9 @@ def test_live_profile_uses_frozen_binding_for_vector_write_and_query(tmp_path: P
                 break
             time.sleep(0.02)
         assert task["status"] == "succeeded", task
+        assert fixture.structured_calls >= 1
+        assert fixture.text_calls >= 1
+        assert fixture.embed_calls >= 1
 
         search = client.post(
             f"/v1/teams/{team_uuid}/retrieval:search",
@@ -248,14 +321,18 @@ def test_live_profile_uses_frozen_binding_for_vector_write_and_query(tmp_path: P
         proof_row = connection.execute(
             "SELECT embedding_model_key,embedding_model_version,adapter_kind,dimension FROM mkb_publication_proofs"
         ).fetchone()
-        invocation_row = connection.execute(
-            "SELECT capability_key,model_key,model_version,status FROM mkb_inference_invocations"
-        ).fetchone()
+        inv_rows = connection.execute(
+            "SELECT capability_key,model_key,model_version,status,generation_invocation_uuid "
+            "FROM mkb_inference_invocations ORDER BY capability_key, model_key"
+        ).fetchall()
+        gen_rows = connection.execute(
+            "SELECT invocation_uuid,model_key,prompt_key,schema_key,input_digest,output_digest "
+            "FROM mkb_generation_invocations ORDER BY prompt_key, invocation_ordinal"
+        ).fetchall()
 
-    assert namespace_row is not None and proof_row is not None and invocation_row is not None
+    assert namespace_row is not None and proof_row is not None and inv_rows
     namespace = dict(namespace_row)
     proof = dict(proof_row)
-    invocation = dict(invocation_row)
     expected = {
         "embedding_model_key": "qwen-vl-2b",
         "embedding_model_version": "v1",
@@ -264,9 +341,23 @@ def test_live_profile_uses_frozen_binding_for_vector_write_and_query(tmp_path: P
     }
     assert namespace == expected
     assert proof == expected
-    assert invocation == {
-        "capability_key": "embed",
-        "model_key": "qwen-vl-2b",
-        "model_version": "v1",
-        "status": "succeeded",
+    capabilities = {row["capability_key"] for row in inv_rows}
+    assert "embed" in capabilities
+    assert "structured_generate" in capabilities
+    assert "text_generate" in capabilities
+    assert all(row["status"] == "succeeded" for row in inv_rows)
+    assert gen_rows, "S11 live path must write generation_invocations"
+    assert all(row["output_digest"] for row in gen_rows)
+    assert all(row["input_digest"] for row in gen_rows)
+    # Linked ledgers: every generation row has a matching inference row.
+    gen_ids = {row["invocation_uuid"] for row in gen_rows}
+    linked = {
+        row["generation_invocation_uuid"]
+        for row in inv_rows
+        if row["generation_invocation_uuid"] is not None
     }
+    assert gen_ids <= linked
+    # No prompt bodies or source text in the durable ledgers.
+    rendered = str([dict(row) for row in inv_rows] + [dict(row) for row in gen_rows])
+    assert "Live embedding preserves" not in rendered
+    assert "prompt-b-structure" not in rendered
