@@ -30,6 +30,8 @@
 
 > **D05校准声明（T-O-206）**：`vectorize_construct` outbox 意图仅在 S07 ConstructToVectorizeGate 通过后入队；S12 兑现 outbox/TX，不裁决业务门闩。prompt 正文不在 S12。
 
+> **S08校准声明（2026-08-12）**：`S08-v1.0` 拥有 vectorize 业务编排与 Outcome；S12 继续兑现 outbox claim/upsert TX 与 D04 unique。v1 **禁止** 将 `vectorize_structure` 作为可消费 kind 实现成功路径（D04 可保留名）。
+
 ---
 
 ## 1. Domain 介绍
@@ -436,7 +438,7 @@ commit → usable handle for domain
 
 ```text
 business proof/pointer committed
-  → outbox kind ∈ {vectorize_structure, vectorize_construct, …}
+  → outbox kind ∈ {vectorize_construct, …}  # v1 禁消费 vectorize_structure
   → handler: S11.embed + upsert mkb_vector_records (+ native index)
   → mark outbox done
 ```

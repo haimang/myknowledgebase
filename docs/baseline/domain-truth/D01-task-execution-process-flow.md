@@ -32,6 +32,8 @@
 
 > **S13校准声明**：`S13-v1.0` 冻结 v1 本地 `object_root` + `ObjectStorePort`、`mkbobj:v1` handle、team-scoped CAS、bytes-first、同库 catalog/ref/purpose、verify-on-read、周期 GC 与 identity readiness。本文件业务语义不变；对象 I/O 必须经 S13 Port，禁止 path/R2 key 进入契约。
 
+> **S08校准声明（2026-08-12）**：`S08-v1.0` 冻结 exact ProcessCapability **`lsrag.vectorize`**（mode=`from_construct`|`purge_generation`）与 **S09** 独立 `index.validate_publication`。本文件拓扑与 `D01-T023` 中的 coarse **`lsrag.vectorize_index` placeholder 废止为生产键**（仅历史叙述可引用）；向量单元仍 **不是** Process identity（`D01-T035`）。Publication proof 仍归 S09；embedding 成功 ≠ index publication。
+
 ## 1. Domain 介绍
 
 ### 1.1 本决策要解决的问题
@@ -100,8 +102,8 @@ Root Execution  (execution_uuid, durable)
   │     ├── Processes: exact S05 acquire → decode/clean → seal/preflight → accept
   │     ├── Process: lsrag.structurize
   │     ├── Process: lsrag.construct
-  │     ├── Process: lsrag.vectorize_index
-  │     └── Process: index.validate_publication
+  │     ├── Process: lsrag.vectorize          # S08-v1.0 exact；mode=from_construct|purge_generation
+  │     └── Process: index.validate_publication  # S09；独立于 vectorize
   │
   └── API 散射入口
         ├── Process: intake.acquire.registered_api
@@ -219,7 +221,7 @@ D01 在实现层完成，至少要求：
 | Truth ID | 冻结真相 | 来源 | 下游约束 |
 |---|---|---|---|
 | `D01-T022` | 标准 LS-RAG 的业务工序至少要能表达 intake resolve/fetch/accept、clean、structurize、construct、vectorize/index与publication validate；具体是否跳过clean由IntakeSource capability与versioned Workflow决定。 | `CODE-FACT + OWNER direction + S04` | `S03/S05-S09` 必须用RAG-specific process keys，而不是generic `process_data`。 |
-| `D01-T023` | Process必须以唯一versioned manifest identity承载RAG-specific业务边界：Intake/Clean使用S05 exact capability keys；下游目前登记`lsrag.structurize`、`lsrag.construct`、`index.validate_publication`，而`lsrag.vectorize_index`仅是等待S08/S09拆分裁决的coarse placeholder。它们都不是Task type。 | `D01-VERDICT + S03/S05-CALIBRATION` | coarse family不得作为兼容process key；S08/S09 exact key未冻结前不得自行猜值。 |
+| `D01-T023` | Process必须以唯一versioned manifest identity承载RAG-specific业务边界：Intake/Clean使用S05 exact capability keys；LS-RAG 生产链 exact keys 至少含 `lsrag.structurize`、`lsrag.construct`、**`lsrag.vectorize`（S08-v1.0）**、`index.validate_publication`（S09）。历史 coarse **`lsrag.vectorize_index` 不得作为生产 process key**。它们都不是Task type。 | `D01-VERDICT + S03/S05 + S08-v1.0` | 禁止用 embedding 成功代替 publication；禁止 vec unit 冒充 Process。 |
 | `D01-T024` | Process 成功必须由 type-specific completion guard 判定；仅收到 callback、队列为空或 `pending_count=0` 都不等于成功。 | `OWNER direction + CODE-FACT + D01-VERDICT` | 每个 Process type 需要明确 output schema、validation proof 与失败语义。 |
 | `D01-T025` | 单个IntakeItem Execution的业务成功终点是预期向量及filter metadata写入目标vector store并校验通过；proof必须绑定exact IntakeRevision并持久化到Execution summary。 | `OWNER-ORIGINATED + S04-T015/T016` | Process清理后仍能审计成功依据；latest不能冒充serving。 |
 | `D01-T026` | scatter root Execution的成功还要求accepted IntakeSnapshot/ChangeSet required set已提交，且其中所有required child Executions满足各自成功guard。 | `D01-VERDICT + S04-T024..T029` | fan-in以持久membership/required set为准，不能以当前child count猜分母。 |
@@ -369,7 +371,8 @@ source_acquisition
 | `intake.accept_snapshot` | 接受sealed CandidateSet并原子提交Snapshot/Membership/ChangeSet与child intent | accepted Snapshot/required set已提交，可重放 |
 | `lsrag.structurize` | 生成目录/逻辑分块/structured representation | structured schema、块坐标与 source coverage 校验通过 |
 | `lsrag.construct` | 单文档整包 original/summary 双通道构造（S07-v1.0） | 整包 dual-channel full-valid + construction generation refs/proof；非结构级独立成功 |
-| `lsrag.vectorize_index`（S08/S09待校准的coarse placeholder） | 当前只表示embedding到index写入的能力覆盖，不冻结是否为一个exact Process | 不能以embedding成功代替index publication proof |
+| `lsrag.vectorize`（S08-v1.0 exact） | embedding + upsert `mkb_vector_records`；mode=`from_construct`\|`purge_generation` | 不能以embedding成功代替 index publication proof（S09） |
+| ~~`lsrag.vectorize_index`~~ | **废止生产键**（原 coarse placeholder） | 不得注册为兼容 alias |
 | `index.validate_publication` | 独立验证本次发布集合 | expected/actual 集合、filter metadata、可检索性证明一致 |
 | `intake.physical_purge` | delete/retention后受控清理eligible派生数据 | scope内required substrate cleanup proofs完成 |
 
@@ -431,7 +434,7 @@ Task T
         ├── ExecutionGate G1 (conditional; no Process lease)
         ├── Process P3: lsrag.structurize
         ├── Process P4: lsrag.construct
-        ├── Process P5: lsrag.vectorize_index
+        ├── Process P5: lsrag.vectorize
         └── Process P6: index.validate_publication
 ```
 
@@ -980,3 +983,4 @@ S02-S05已经关闭Task、Workflow、Intake与clean/preflight/HITL语义；仍�
 | `D01-v1.4-cal` | `2026-08-11` | `MKB owner + Codex` | `accepted / S13-calibrated` | 接收S06-v1.0：GenerationArtifact非第四层runtime；structurize仍为Process capability；structure rebuild不改三层身份与Task/serving语义。 |
 | `D01-v1.4-cal-s12` | `2026-08-11` | `MKB owner + Codex` | `accepted / S13-calibrated` | 接收S12-v1.0：持久化兑现三层模型；不改状态机；outbox/claim为物理机制。 |
 | `D01-v1.4-cal-s13` | `2026-08-11` | `MKB owner + Codex` | `accepted / S13-calibrated` | 接收S13-v1.0：确认本地 I/O adapter 与 logical ref；G-11 closed。 |
+| `D01-v1.4-cal-s08` | `2026-08-12` | `MKB owner + Codex` | `accepted / S08-calibrated` | 接收S08-v1.0：exact `lsrag.vectorize` 取代 coarse `lsrag.vectorize_index`；publication 仍独立 S09；拓扑/T023/工序表回填。 |

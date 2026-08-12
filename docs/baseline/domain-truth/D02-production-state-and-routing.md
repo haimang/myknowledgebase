@@ -242,7 +242,7 @@ ProcessOutcome的`outcome_status=succeeded/failed/cancelled`及`retryability=ret
 | ID | 事项 | Owner domain | D02已冻结的防线 | 状态 |
 |---|---|---|---|---|
 | `D02-DR001` | Execution immutable subject与运行后accepted output binding的exact字段/DDL | S03/S04 | subject、output与pointer必须分账；不得热切一个万能target | `deferred / non-blocking` |
-| `D02-DR002` | embedding generation与index write的exact Process key/事务cutoff | S08/S09 | `vectorizing_indexing`只可作phase；未冻结前不得冒充exact capability | `deferred / non-blocking` |
+| `D02-DR002` | embedding generation与index write的exact Process key/事务cutoff | S08/S09 | `vectorizing_indexing`只可作phase；**S08-v1.0** exact=`lsrag.vectorize`；publication=`index.validate_publication`（S09） | `closed / S08-v1.0`（S09 算法余量仍归 S09） |
 | `D02-DR003` | IntakeSource `accepts_new_snapshots`的reopen权限与治理 | S04/S16 | 它是typed admission fence，不新增Source lifecycle或failed Snapshot | `deferred / non-blocking` |
 | `D02-DR004` | Membership decision及Gate action的exact持久enum/CHECK | S04/S05 | 现有语义与状态族不变；不得从prose猜DDL spelling | `deferred / non-blocking` |
 | `D02-DR005` | S06 artifact type/bundle、node/edge/anchor/block exact kind | S06 | GenerationArtifact/Schema foundation不是StateFamily；开放kind不得进入runtime contract | `closed by S06-v1.0`：`structure_document`/`retrieval_block_projection`/`structure_validation_report`；`mkb.structure_document@1` node_kind闭集；generation-local coordinates（`T-O-94..95`） |
@@ -358,7 +358,7 @@ Source descriptor
 - RequestIntent、Workflow purpose、Execution phase、Process capability、Artifact type、node kind、route kind是不同分类轴；
 - source kind固定为`inline_payload/local_object/http_resource/registered_api`时，single/scatter、browser/PDF/OCR/Vision仍是正交capability/cardinality；
 - S05已冻结exact clean/acquisition/preflight capability；S06-S09 exact kind继续由各自Spec冻结；
-- `vectorizing_indexing`可暂作Execution focus phase，不得据此推导S08/S09必须共享一个Process；
+- `vectorizing_indexing`可作Execution focus phase，**不得**据此推导 S08/S09 必须共享一个 Process；S08-v1.0=`lsrag.vectorize`，publication 独立 S09；
 - S06 node kind只描述artifact内部schema，不得决定runtime next step。
 
 ### A.6 Legacy证据边界

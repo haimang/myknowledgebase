@@ -4,11 +4,11 @@
 >
 > **文档角色**：跨规格词汇手册、命名边界与对齐登记册
 >
-> **权威输入**：D01–D04、**D05-v1.0（T-O-202..210）**、S01–S07、S11–S13
+> **权威输入**：D01–D05、S01–S08、S11–S13
 >
-> **状态**：`active / D05-v1.0 frozen calibrated`
+> **状态**：`active / S08-v1.0 calibrated`
 >
-> **版本 / 日期**：`v2.5 / 2026-08-12`
+> **版本 / 日期**：`v2.6 / 2026-08-12`
 
 ## 0. 使用规则
 
@@ -322,14 +322,19 @@ Revision 回答“来源业务事实是否改变”；build generation 回答“
 | `ConstructionSchemaDefinition` | `frozen / S07 / T-O-135` | construction contract key/version/digest | readiness 前注册 |
 | `ContentFullRecipe` | `frozen / S07 / T-O-137` | 确定性 ContentFull 配方 | S08 可重算 |
 | `ConstructMode` | `frozen / S07 / T-O-137/139` | `full_construct` \| `metadata_refresh` | 非 step-name |
-| `EmbeddingSpace` / `VectorNamespace` | `frozen concept / D04+S11；exact S08` | model/dim/metric 一致的向量空间（Layer A） | 粒度/通道不是 namespace |
-| `VectorRecord` | `frozen concept / D04；exact S08` | `mkb_vector_records` 行：坐标+channel+embedding+filters | 须绑 generation；非 Process row |
+| `EmbeddingSpace` / `VectorNamespace` | `frozen / D04+S11+S08` | model/dim/metric 一致的向量空间（Layer A） | 粒度/通道不是 namespace |
+| `VectorRecord` | `frozen / D04+S08-v1.0` | `mkb_vector_records` 行：坐标+channel+embedding+Layer B 抄写 | 须绑 generation；非 Process row |
+| `LsragVectorizeCapability` | `frozen / S08-v1.0 / T-O-221` | Process key **`lsrag.vectorize`**；mode=`from_construct`\|`purge_generation` | **废止**生产键 `lsrag.vectorize_index` |
+| `VectorizeCommand` / `VectorizeOutcome` | `frozen / S08-v1.0 / T-O-225` | typed Command + digest；成功仅 `disposition=full_valid` | 禁 outbox done 冒充成功 |
+| `VectorizeHandoffV1` | `frozen / S08-v1.0 / T-O-230` | Outcome 写证明交接包（generation/namespace/model/counts） | **非** PublicationProof |
+| `VectorizeRequiredSet` | `frozen / S08-v1.0 / T-O-222` | 应索引 unit×channel 整包二元成败；g=0 强制 | 禁 partial success |
 | `IndexGeneration` | `frozen lifecycle / exact S09` | 索引投影代次 CAS | reindex 不新建 IntakeRevision |
 | `RetrievalEligibility` | `frozen fence / exact S09-S10` | team ∩ Item lifecycle ∩ ServingRevision ∩ IndexGeneration | 不能仅由 vector 存在决定 |
 | `FinalVectorBody` | `frozen / D04` | `mkb_vector_records.embedding` F32 | 禁外置 Vectorize 作 v1 SSOT |
-| `VectorizeOutboxKind` | `frozen / D04` | `vectorize_construct` / `vectorize_structure` / `vector_purge_generation` | 单 outbox；禁 vec_process 表 |
-| `VectorSpaceIsolation` (Layer A) | `frozen / S11` | model/adapter/dim 一致性 fail-closed | 禁跨空间 ANN |
-| `BusinessRetrievalFilter` (Layer B) | `frozen / S11` | team + intake + 业务 facet | 禁用换模型模拟分区 |
+| `VectorizeOutboxKind` | `frozen / D04+S08` | 主路径 `vectorize_construct`；`vectorize_structure` **v1 forbid consumer** | 单 outbox；禁 vec_process 表 |
+| `VectorSpaceIsolation` (Layer A) | `frozen / S11+S08` | model/adapter/dim 一致性 fail-closed | 禁跨空间 ANN |
+| `BusinessRetrievalFilter` (Layer B) | `frozen / S11+S08 / T-O-229` | team + intake + **S04 已解析 facet 抄写** | S08 **零 wire map**；禁用换模型模拟分区 |
+| `FacetDefinition` / `FacetMap` | `reserved product / exact S04`（T-O-198 预留） | wire→canonical facet（如 industry-type→industry_domain） | **不在 S08 定义** |
 
 ### 4.2 S06 已冻结工作词
 
@@ -566,3 +571,4 @@ Revision 回答“来源业务事实是否改变”；build generation 回答“
 | `v1.9` | `2026-08-11` | 接收D03-v1.0与`T-O-141..159`：登记RepositoryLayout、ContractsLayer、ContractValidationError、PromptGitTree、PromptHashPointer、WorkflowDefinitionDir、RuntimeEngineDir、IntakeAdapterDir。 |
 | `v2.0` | `2026-08-11` | 接收D04-v1.0与`T-O-160..179`：登记PhysicalSchemaConstitution、MkbTableClosedSet、DomainEventLedger、OpsDiagnosticLog、SecurityAuditEvent、VectorNamespace、FinalVectorBody、VectorizeOutboxKind、NativeAnnIndex。 |
 | `v2.1` | `2026-08-12` | 接收S11-v1.0与`T-O-180..201`：InferenceRuntime/LlmAdapter/能力面/双层filter/TransportRetry/Backpressure/VectorizeDurability；MkbTableClosedSet→55。 |
+| `v2.6` | `2026-08-12` | 接收S08-v1.0与`T-O-211..230`：LsragVectorizeCapability、VectorizeCommand/Outcome/Handoff、RequiredSet；Layer B 抄写分账；vectorize_structure v1 forbid；FacetMap reserved→S04。 |

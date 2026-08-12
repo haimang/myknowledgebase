@@ -175,7 +175,7 @@ pending → designing → owner-gate → accepted → frozen
 | `05` | `S05` | Intake & Cleaning | `P1` | `accepted` | `domain-truth/S05-intake-cleaning.md` | `D01-v1.4, S01-v1.5, S02-v1.3, S03-v1.3, S04-v1.2, S12-S16` | `S05-v1.1`：四类source；typed evidence；mandatory preflight/gate；outcome/staging/runtime分账；exact capabilities |
 | `06` | `S06` | LS-RAG Structurizer | `P0` | `accepted` | `domain-truth/S06-lsrag-structurizer.md` | `D01, D02-v1.0, S03-S05, S07-S14` | `S06-v1.1`：**执行 SSOT**；E01–E10；自动路径+input freeze；generation账本；`mkb.structure_document@1`；`T-O-77..85`+`T-O-93..96`；QNA 非执行真相 |
 | `07` | `S07` | LS-RAG Constructor | `P0` | `accepted` | `domain-truth/S07-lsrag-constructor.md` | `S04, S06, S11, S13-S14` | `S07-v1.1`：**执行 SSOT**；E01–E12；整包 dual-channel；ConstructionSchema；outbox；`T-O-126..140`；QNA 非执行真相 |
-| `08` | `S08` | Embedding & Vectorization | `P0` | `pending` | `domain-truth/S08-embedding-vectorization.md` | `S07, S09, S11, S14` | 待设计 |
+| `08` | `S08` | Embedding & Vectorization | `P0` | `accepted` | `domain-truth/S08-embedding-vectorization.md` | `D05, S07, S09, S11, S12–S14, D04` | `S08-v1.0`：**执行 SSOT**；E01–E12；`T-O-211..230`；ConstructGate；整包成败；幂等 upsert；Layer B 只抄写 S04；S09 handoff；QNA 非执行真相 |
 | `09` | `S09` | Vector Index Lifecycle | `P0` | `pending` | `domain-truth/S09-vector-index.md` | `S04, S12, S14, D04` | 待设计；**最终向量落点/ANN index 存在**已由 D04 冻；S09 定 metric/topk/serving publication |
 | `10` | `S10` | LS-RAG Retrieval & Reranking | `P0` | `pending` | `domain-truth/S10-lsrag-retrieval.md` | `S04, S07-S09, S11, S14` | 待设计 |
 | `11` | `S11` | Inference Runtime & Adapters | `P0` | `accepted` | `domain-truth/S11-inference-runtime.md` | `00, D03-D04, S06-S10, S14, S16` | `S11-v1.1`：**执行 SSOT**；E01–E11；Inference≠Adapter；全本地 vLLM；双层 filter；transport/闸/幂等；`T-O-180..201`；QNA 非执行真相 |
@@ -189,7 +189,7 @@ pending → designing → owner-gate → accepted → frozen
 
 | ID | 文档 | 状态 | 用途 |
 |----|------|------|------|
-| `00` | `spec-glossary.md` | `active / v2.5` | **D05-v1.0 frozen** 词表（T-O-202..210）；promptA/B/C；粒度0/1/2；DualChannel |
+| `00` | `spec-glossary.md` | `active / v2.6` | **S08-v1.0** 词表：`lsrag.vectorize`、Handoff、RequiredSet；Layer B 抄写；FacetMap→S04 |
 | `D01` | `domain-truth/D01-task-execution-process-flow.md` | `accepted / S06-calibrated` | `D01-v1.4`：三层状态；S06 generation非第四层runtime |
 | `D02` | `domain-truth/D02-production-state-and-routing.md` | `frozen / v1.0 / S13-calibrated` | `T-O-86..92`；DR005/DR006 S06关闭；DR007 S12+S13部分关闭；generation/pointer/object physical |
 | `D03` | `domain-truth/D03-repository-layout.md` | `accepted / v1.0 / T-O-141..159` | 仓库宪法：contracts typed 唯一SSOT；prompts git+hash；intake顶级；workflows≠runtime；Port 落点 |
@@ -358,10 +358,12 @@ pending → designing → owner-gate → accepted → frozen
 
 ### 3.8 `S08` Embedding & Vectorization
 
-- **范围**：document/query embedding、model identity/revision/dimension、batch、normalization、truncation、GPU queue 和 rebuild。
-- **必须回答**：本地/外部路由、批处理、部分失败、model upgrade 和 fingerprint。
-- **关键不变量**：写入和查询必须处于相同 embedding space；不同模型/维度不得混算。
-- **完成回填**：冻结 Embedder Contract、Vectorization Record 和升级策略。
+- **状态**：`accepted / S08-v1.0`；**执行 SSOT = domain-truth only**（E01–E12）；QNA `qna-truth/S08.md` 仅证据（`T-O-211..230`）；**Round 4 waived**；全系统尚未 frozen。
+- **权威 Spec**：`docs/baseline/domain-truth/S08-embedding-vectorization.md`。
+- **定位**：ConstructToVectorizeGate 之后 document-side 向量写侧；`lsrag.vectorize` + mode；整包 required-set 成败；ContentFull 对账；有界批+渐进幂等 upsert；purge soft-delete；original HARD；Layer B **只抄写 S04**；S09 handoff。
+- **明确不做**：serving/PublicationProof；S04 facet map 产品；ANN 算法；公网 vector CRUD；vec_process/外置 Vectorize SSOT。
+- **关键不变量**：存在≠serving；outbox 非成功；半写不可 publication；S08 零 wire map。
+- **完成回填**：formal Spec 已发布；S03/S07/S09/glossary 指针可随后校准。
 
 ### 3.9 `S09` Vector Index Lifecycle
 
@@ -597,12 +599,12 @@ implementation finding
 | `00` Scope & Glossary accepted | `pending` | active v1.5；S06词汇已登记 |
 | `D01` Task/Execution/Process Flow accepted | `accepted / S06-calibrated` | D01-v1.4 + S06 generation非第四层runtime |
 | `D02` Production State Constitution & Ledger | `frozen / v1.0 / S06-calibrated` | `T-O-86..92`；S06 DR005/DR006已回填 |
-| `S01-S16` 全部 accepted | `pending` | S01–S07、S12–S13 accepted；S08–S11、S14–S16 pending |
+| `S01-S16` 全部 accepted | `pending` | S01–S08、S11–S13 accepted；S09–S10、S14–S16 pending |
 | `17` System Topology accepted | `pending` | |
 | `18` Acceptance Matrix accepted | `pending` | |
 | Owner-gate 全部 closed/deferred | `pending` | |
 | 跨 spec ID 对账完成 | `pending` | |
-| 跨 spec 状态机对账完成 | `D02 baseline + S01-S07 calibrated / S08+ ongoing` | D01/S01–S07及六StateFamily已对账；S08–S16仍须逐Spec继承 |
+| 跨 spec 状态机对账完成 | `D02 baseline + S01-S08/S11–S13 calibrated / S09+ ongoing` | D01/S01–S08及六StateFamily已对账；S09–S10/S14–S16仍须逐Spec继承 |
 | 错误、事件、版本语义对账完成 | `pending` | |
 | LS-RAG golden scenarios 冻结 | `pending` | |
 | Turso/process spike 证据完成 | `pending` | |
@@ -665,3 +667,10 @@ implementation finding
 | `v0.48` | `2026-08-12` | `MKB owner + Codex` | **D05-v0.3 product-core**：Owner 冻结双通道/粒度0·1·2详解与举例/g=0必向量化/construct→vectorize门闩；失败只引 D01/S03 max_retries；补 **Prompt 标定** 与 **双通道 typed 详例**；glossary v2.3。 |
 | `v0.49` | `2026-08-12` | `MKB owner + Codex` | **D05-v0.4**：冻结生产三 Prompt **`promptA=Clean · promptB=Structurizer · promptC=Summarizer`**（`variant.version`+DB hash）；Clean 纳入生产链锚定；glossary v2.4。 |
 | `v0.50` | `2026-08-12` | `MKB owner + Codex` | **冻结 D05-v1.0**（`T-O-202..210`）；glossary v2.5；S03/S05/S06/S07/S11 D05-calibrated；promptA/B/C 生产链与 ConstructToVectorizeGate 回填。 |
+| `v0.51` | `2026-08-12` | `MKB owner + Codex` | 启动 **S08** progressive QNA `qna-truth/S08.md v0.1`：pre-round `T-O-211..220`；legacy-family 四路考古；Round 1 Q1–Q3 open；S08 → `designing`。 |
+| `v0.52` | `2026-08-12` | `MKB owner + Codex` | S08 Round 1 冻结 `T-O-221..224`（含原文 detach/reattach）；中场评估 I；Round 2 Q4–Q6 open；QNA v0.2。 |
+| `v0.53` | `2026-08-12` | `MKB owner + Codex` | S08 QNA **v0.3**：Q4–Q6 推荐/Reasoning 业内 reference 升级（Outbox、幂等 upsert、soft-delete、reindex、pre-embed filter）+ 外链索引。 |
+| `v0.54` | `2026-08-12` | `MKB owner + Codex` | S08 Round 2 冻结 `T-O-225..227`；中场评估 II；Round 3 Q7–Q9 open；QNA v0.4。 |
+| `v0.55` | `2026-08-12` | `MKB owner + Codex` | S08 Round 3 冻结 `T-O-228..230`（Q8=执行写面 only，不覆盖 S04）；Mid III；**Round 4 waived**；QNA v1.0 locked 待 formal Spec。 |
+| `v0.56` | `2026-08-12` | `MKB owner + Codex` | 发布 **S08-v1.0** formal Spec（`T-O-211..230`）；domain-truth 唯一执行 SSOT；S08 accepted；QNA 降为证据层。 |
+| `v0.57` | `2026-08-12` | `MKB owner + Codex` | **S08 全族回填**：D01/S03 废止 `lsrag.vectorize_index`；S07/S11/S12/D02/D04/D05 校准；glossary v2.6；冲突扫描闭环。 |

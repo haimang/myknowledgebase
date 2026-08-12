@@ -672,7 +672,7 @@ CREATE UNIQUE INDEX ux_restart_full_tgt_gen
 |---|---|
 | `outbox_id` | PK（UUIDv7） |
 | `team_uuid` | NOT NULL |
-| `kind` | NOT NULL（如 `wake_process`,`vectorize_structure`,`vectorize_construct`,`intake_schedule_child`,`gate_resume`,…） |
+| `kind` | NOT NULL（如 `wake_process`,`vectorize_construct`,`vector_purge_generation?`,`intake_schedule_child`,`gate_resume`,…）；**`vectorize_structure` 名可保留，v1 禁止消费**（S08-T003 / D05） |
 | `topic` | NULL（可选细分） |
 | `payload_json` | NOT NULL（**typed 经 contracts 校验后的 JSON**；禁非法体入队 T-O-153） |
 | `payload_digest` | NOT NULL |
@@ -1349,7 +1349,8 @@ S10/S09:
 
 ```text
 TX business (TX-06 etc):
-  proof + pointers + outbox(kind=vectorize_structure|vectorize_construct, dedupe_key, payload=exact generation refs)
+  proof + pointers + outbox(kind=vectorize_construct, dedupe_key, payload=exact generation refs)
+  # vectorize_structure: reserved name / v1 forbid consumer (S08-v1.0)
   + domain_event(generation.artifact_accepted|...)
 commit
 
@@ -1735,7 +1736,7 @@ MKB (已冻方向 T-O-107/110):
 | S09 | ANN/serving；model 围栏 |
 | S11 | catalog/binding/invocation 语义；Inference≠Adapter |
 | S15 | retention/alert/export |
-| S08 | embed 写 records 的 model/dim/adapter 一致 |
+| S08 | **S08-v1.0**：`lsrag.vectorize` 写 records；model/dim/adapter 一致；Layer B 抄写 S04；v1 禁消费 vectorize_structure |
 | D03 | `data/database/` 落点 |
 | 实现 | architecture tests：表前缀、禁混空间、禁第二 outbox |
 
@@ -1874,7 +1875,7 @@ GROUP BY channel, embedding_model;
 
 | kind | 载荷最小 | 消费效果 |
 |---|---|---|
-| `vectorize_structure` | team + structure/projection generation refs + digests | upsert structure 通道向量 |
-| `vectorize_construct` | team + construct generation refs + digests | upsert construct/dual-channel 向量 |
-| `vector_purge_generation` | team + generation_artifact_uuid | soft-delete 该 generation 向量 |
+| `vectorize_construct` | team + construct generation refs + digests | **v1 主路径**：upsert dual-channel 向量（S08） |
+| `vector_purge_generation` | team + generation_artifact_uuid | soft-delete 该 generation 向量（对齐 S08 purge mode） |
+| `vectorize_structure` | （保留名） | **v1 forbid consumer**（S08-T003）；不得实现成功路径 |
 | （其它 wake 类） | 见 S03/S12 | 非本附录展开 |

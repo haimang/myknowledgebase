@@ -28,6 +28,8 @@
 
 > **D05校准声明（T-O-207/208）**：S11 **不**拥有 promptA/B/C 产品语义（正文 D03/S14；绑定 S05/S06/S07）。transport 退避 **不计入** Process `retry_count`；叶失败上报与 max_retries **归 S03**。vectorize 编排与 ConstructToVectorizeGate **归 S07/S08**；本文仅 embed 门面与幂等写路径。
 
+> **S08校准声明（2026-08-12）**：`S08-v1.0` 拥有 `lsrag.vectorize` 编排、required-set 成败、records upsert 业务证明与 Layer B **抄写**；S11 继续只提供 `embed` + transport/闸 + Layer A 校验。E09 成功路径中的 outbox claim/`vectorize_*` 编排 **以 S08 为准**；S11-E09 描述的是 **可与 S08 对齐的幂等写辅助合同**，**不**另立第二 vectorize 编排真相。`vectorize_structure` 为 D04 kind 保留名；**v1 禁止消费**（S08-T003）。
+
 ---
 
 ## 1. Domain 介绍
@@ -300,14 +302,14 @@ D04: catalog / bindings / invocations / (S08) vector_records
 **执行台账 — 成功路径**：
 
 ```text
-1. claim outbox kind∈{vectorize_structure,vectorize_construct,...}
-2. load embed input via generation/object (禁止 content_full 常驻向量表)
-3. Inference.embed (E04–E07)
-4. UnitOfWork:
-     upsert mkb_vector_records (幂等键见 D04)
+1. （S08 编排）claim outbox kind∈{vectorize_construct,...}；v1 **禁**消费 vectorize_structure
+2. load embed input via generation/object + ContentFullRecipe 对账（禁止 content_full 常驻向量表）
+3. Inference.embed (E04–E07) — **S11 边界**
+4. UnitOfWork（S08/S12）:
+     upsert mkb_vector_records (幂等键见 D04；Layer B 抄写 S04)
      insert mkb_inference_invocations succeeded
      optional domain_event
-5. mark outbox done
+5. mark outbox done；**业务成功 = S08 ProcessOutcome full_valid**，非 outbox done
 ```
 
 **失败矩阵**：
@@ -364,7 +366,7 @@ Remote 未启用 **不**单独导致默认就绪失败。
 |---|---|
 | S03 | 只消费 Outcome retryability；内环 attempt 不计 retry_count；lease 须覆盖或 heartbeat |
 | S06/S07 | 只调 structured/text_generate；成功后自管 generation CAS |
-| S08 | 只调 embed；负责 outbox vectorize 与 records 写；遵守 E09 |
+| S08 | **拥有** vectorize 编排与 records 写证明；只调 embed；Layer A 服从本文；E09 为幂等辅助对齐 |
 | S10 | 调 embed(query)+rerank；强制 Layer A/B |
 | S14 | 产品 registry；v1 code-owned bootstrap 即可 |
 | S15 | 指标/retention 数值 |

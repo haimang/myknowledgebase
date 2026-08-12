@@ -693,8 +693,8 @@ MKB contracts + **promptB** 正文须等价约束 **0/1/2 三层**（短文 prof
 | S05 | **promptA** 绑定 clean.*；variant 覆盖 web/document/vision… |
 | S06 | **promptB** + schema 产 g=0/1/2；强制 full-document；summary 不进 kernel |
 | S07 | **promptC** 填 Summary；双通道完备；g=0；合法后 outbox vectorize |
-| S08 | 扇出双通道；g=0 必候选；失败走 S03 Outcome/max_retries；**非** promptA/B/C |
-| S09 | PublicationProof |
+| S08 | **S08-v1.0** exact `lsrag.vectorize`；扇出双通道；g=0 必候选；失败走 S03 Outcome/max_retries；**非** promptA/B/C |
+| S09 | PublicationProof（独立于 vectorize） |
 | S10 | Traceback + ContextTier；Result 分账 |
 | S14 | 登记 promptA/B/C identity→path→hash |
 | S03 | 唯一 max_retries / 上卷权威；Command digest 含 prompt_ref |
@@ -705,7 +705,7 @@ MKB contracts + **promptB** 正文须等价约束 **0/1/2 三层**（短文 prof
 
 **`FROZEN / owner-gated / D05-v1.0`**：`T-O-202..210` 已锁定；S05–S10/S14 必须服从并回填；全系统 truth layer 仍待其余域闭合后统一 frozen。
 
-开放（不阻塞本冻结）：S08 exact capability key 拆分；`granularity` 是否晋升 D04 列；S14 物理 registry 实现。
+开放（不阻塞本冻结）：~~S08 exact capability key 拆分~~ → **已由 S08-v1.0 关闭**（`lsrag.vectorize`）；`granularity` 是否晋升 D04 列；S14 物理 registry 实现；S04 FacetMap formal。
 
 ---
 
@@ -715,3 +715,4 @@ MKB contracts + **promptB** 正文须等价约束 **0/1/2 三层**（短文 prof
 |---|---|---|---|
 | v0.1–v0.4 | 2026-08-12 | drafts → product-core | 考古、六节骨架、Owner 裁决、promptA/B/C |
 | **D05-v1.0** | **2026-08-12** | **`frozen / owner-gated`** | 正式冻结 `T-O-202..210`；glossary/index 回填；S 系校准入口 |
+| D05-v1.0-cal-s08 | 2026-08-12 | frozen / S08-calibrated | S08-v1.0 关闭 capability 拆分开放项；下游表回填 `lsrag.vectorize` |
