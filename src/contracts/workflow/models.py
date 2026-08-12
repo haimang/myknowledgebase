@@ -235,8 +235,10 @@ class WorkflowRouteDefinition(StrictModel):
             raise ValueError("join routes require a non-none join_mode")
         if self.route_kind is not WorkflowRouteKind.JOIN and self.join_mode is not WorkflowJoinMode.NONE:
             raise ValueError("only join routes may declare a join_mode")
-        if self.outcome_selector is WorkflowOutcomeSelector.ALWAYS and self.guard_key is not None:
-            raise ValueError("an always route cannot have a guard")
+        # A start route may use a registered, bounded guard to select one of
+        # several statically declared command paths.  It is still an
+        # ``always`` outcome because no Process outcome exists before the
+        # first step; the guard is a fixed selector, not an expression surface.
         return self
 
 
@@ -244,10 +246,28 @@ class WorkflowGuardDefinition(StrictModel):
     """A bounded, registered admission guard with no free expression surface."""
 
     guard_key: WorkflowKey
-    predicate_type: Literal["registered_admission_result"]
+    predicate_type: Literal["registered_admission_result", "registered_request_intent"]
     operator: Literal["eq"]
-    expected_value: Literal["auto_admitted", "human_review_required", "rejected"]
+    expected_value: Annotated[str, Field(min_length=1, max_length=128)]
     failure_disposition: Literal["route_false"] = "route_false"
+
+    @model_validator(mode="after")
+    def validate_registered_value(self) -> WorkflowGuardDefinition:
+        allowed = {
+            "registered_admission_result": {"auto_admitted", "human_review_required", "rejected"},
+            "registered_request_intent": {
+                "intake.ingest",
+                "intake.rebuild",
+                "intake.update_metadata",
+                "intake.deactivate",
+                "intake.reactivate",
+                "intake.delete",
+                "index.rebuild",
+            },
+        }
+        if self.expected_value not in allowed[self.predicate_type]:
+            raise ValueError("guard expected_value is not registered for its predicate")
+        return self
 
 
 class WorkflowBindingDefinition(StrictModel):
@@ -353,6 +373,7 @@ class WorkflowDefinition(StrictModel):
         adjacency: dict[str, set[str]] = defaultdict(set)
         selector_priorities: set[tuple[str, WorkflowOutcomeSelector, int]] = set()
         referenced_guards: set[str] = set()
+        start_key = next(step.step_key for step in steps_by_key.values() if step.step_kind is WorkflowStepKind.START)
         for route in self.routes:
             if route.from_step_key not in steps_by_key or route.to_step_key not in steps_by_key:
                 raise ValueError("routes must reference steps from the same workflow definition")
@@ -369,6 +390,12 @@ class WorkflowDefinition(StrictModel):
             target_is_terminal = steps_by_key[route.to_step_key].step_kind is WorkflowStepKind.TERMINAL
             if (route.route_kind is WorkflowRouteKind.TERMINAL) != target_is_terminal:
                 raise ValueError("terminal routes must target a terminal step, and only terminal routes may do so")
+            if (
+                route.outcome_selector is WorkflowOutcomeSelector.ALWAYS
+                and route.guard_key is not None
+                and route.from_step_key != start_key
+            ):
+                raise ValueError("only a start route may guard an always selector")
             if route.guard_key is not None:
                 if route.guard_key not in guards_by_key:
                     raise ValueError("route guard_key must reference a registered guard")
