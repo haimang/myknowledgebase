@@ -123,13 +123,48 @@ class HttpSourceDescriptor(PayloadExtraModel):
     require_human_review: bool = False
 
 
+class RegisteredApiRecord(StrictModel):
+    """One member of a registered-API collection observation.
+
+    A collection root identifies the connector/source namespace, while every
+    member must carry its own stable external key.  Keeping this as a strict
+    public model prevents the previous untyped ``dict`` payload from quietly
+    collapsing a collection into one synthetic document or inventing a member
+    identity at runtime.
+    """
+
+    external_key: Annotated[str, Field(min_length=1, max_length=1024)]
+    content: Annotated[str, Field(min_length=1, max_length=8 * 1024 * 1024)]
+    media_type: Annotated[str, Field(min_length=1, max_length=255)] = "text/plain"
+    title: Annotated[str | None, Field(max_length=1024)] = None
+    require_human_review: bool = False
+
+    @field_validator("external_key")
+    @classmethod
+    def validate_external_key(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("external_key must not be blank")
+        return value
+
+
 class RegisteredApiSourceDescriptor(PayloadExtraModel):
     source_kind: Literal["registered_api"]
     external_key: Annotated[str, Field(min_length=1, max_length=1024)]
     connector_key: Annotated[str, Field(pattern=r"^[a-z][a-z0-9_.-]{0,127}$")]
-    records: list[dict[str, Any]] | None = Field(default=None, max_length=10_000)
+    records: list[RegisteredApiRecord] = Field(default_factory=list, max_length=10_000)
     pagination_key: Annotated[str | None, Field(max_length=1024)] = None
     require_human_review: bool = False
+
+    @model_validator(mode="after")
+    def validate_member_keys(self) -> RegisteredApiSourceDescriptor:
+        # Match the durable per-source Item namespace.  The acquisition
+        # boundary case-folds trimmed member keys, so accepting only an exact
+        # Python duplicate here would defer a public-contract conflict into a
+        # worker retry.
+        keys = [record.external_key.strip().casefold() for record in self.records]
+        if len(keys) != len(set(keys)):
+            raise ValueError("registered_api records must have unique external_key values")
+        return self
 
 
 SourceDescriptor = Annotated[
@@ -200,6 +235,7 @@ _PAYLOAD_MODEL: dict[str, type[StrictModel]] = {
     "intake.rebuild": IntakeRebuildPayload,
     "intake.update_metadata": IntakeUpdateMetadataPayload,
     "intake.deactivate": IntakeLifecyclePayload,
+    "intake.reactivate": IntakeLifecyclePayload,
     "intake.delete": IntakeLifecyclePayload,
     "index.rebuild": IndexRebuildPayload,
 }
@@ -215,6 +251,7 @@ class TaskCreateRequest(PayloadExtraModel):
         "intake.rebuild",
         "intake.update_metadata",
         "intake.deactivate",
+        "intake.reactivate",
         "intake.delete",
         "index.rebuild",
     ]
@@ -224,6 +261,11 @@ class TaskCreateRequest(PayloadExtraModel):
     deadline_at: str | None = None
     payload: TaskPayload
     audit: TaskAudit
+    # Explicit L3 wire bag (not payload_extra).  Shape is deliberately a plain
+    # mapping so allowlist/forbidden-key denials raise CONFIG_OVERRIDE_REJECTED
+    # with a security audit in ConfigSnapshotService, rather than a generic
+    # task-schema-invalid from extra=forbid (S14-A07/A08/T017).
+    overrides: dict[str, Any] | None = None
 
     @field_validator("deadline_at")
     @classmethod
@@ -235,6 +277,23 @@ class TaskCreateRequest(PayloadExtraModel):
         if not _UTC_RFC3339.fullmatch(value):
             raise ValueError("deadline_at must be RFC3339 UTC")
         return normalize_rfc3339(value, field="deadline_at")
+
+    @field_validator("overrides")
+    @classmethod
+    def validate_overrides_bag(cls, value: dict[str, Any] | None) -> dict[str, Any] | None:
+        """Accept only a JSON object; key policy is owned by S14 materialize."""
+
+        if value is None:
+            return None
+        if not isinstance(value, dict) or not all(isinstance(key, str) and key for key in value):
+            raise ValueError("overrides must be a JSON object with string keys")
+        try:
+            encoded = __import__("json").dumps(value, ensure_ascii=False, allow_nan=False)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("overrides must contain JSON values") from exc
+        if len(encoded.encode("utf-8")) > 16 * 1024:
+            raise ValueError("overrides exceeds 16KiB")
+        return value
 
     @model_validator(mode="before")
     @classmethod
@@ -300,6 +359,20 @@ class GateDecisionRequest(PayloadExtraModel):
     action: Literal["approve", "reject", "reclean"]
     idempotency_key: Annotated[str, Field(min_length=1, max_length=256)]
     reason: Annotated[str | None, Field(max_length=2048)] = None
+
+    @model_validator(mode="after")
+    def validate_safe_decision_evidence(self) -> GateDecisionRequest:
+        """Keep optional human evidence safe to persist and echo nowhere by default.
+
+        The authenticated token is the v1 actor evidence.  ``payload_extra``
+        may carry non-authoritative supporting evidence, but it must never
+        become a route, identity, secret, or host-path side channel.
+        """
+
+        assert_safe_public_data(self.payload_extra)
+        if self.reason is not None:
+            assert_safe_public_data(self.reason)
+        return self
 
 
 class RetrievalFilter(StrictModel):

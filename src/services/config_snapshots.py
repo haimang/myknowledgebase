@@ -8,10 +8,13 @@ partially visible Execution or mutable configuration alias.
 
 from __future__ import annotations
 
+import hashlib
 import tomllib
 import unicodedata
 from dataclasses import dataclass
 from typing import Any
+
+import yaml
 
 from src.contracts.api.models import (
     IndexRebuildPayload,
@@ -27,9 +30,44 @@ from src.contracts.common.ids import canonical_json, sha256_bytes, stable_digest
 from src.contracts.storage.models import ObjectStat, PromoteRequest
 from src.persistence.ports import PersistencePort, UnitOfWork
 from src.runtime.config import Settings
+from src.services.events import SecurityAuditWriter
 from src.services.intake_lifecycle import IntakeTargetResolver
 from src.services.workflow_registry import WorkflowIdentity, WorkflowRegistryService
 from src.storage.ports import ObjectStorePort
+
+# Caps re-checked at materialize time (S14-A10).  The DTO bounds are the first
+# fence; these are the product caps frozen into L4 digests.
+_OVERRIDE_CAPS: dict[str, int] = {
+    "batch_size": 64,
+    "top_k": 50,
+    "return_k": 50,
+    "recall_k": 100,
+    "pack_budget": 32_000,
+}
+_REGISTERED_PROFILES = frozenset({"clean.web.v1", "clean.document.v1", "clean.default.v1"})
+# Keys that must never be accepted even if a future DTO loosens extra=forbid.
+_FORBIDDEN_OVERRIDE_KEYS = frozenset(
+    {
+        "model_key",
+        "model_version",
+        "prompt_key",
+        "prompt_version",
+        "schema_key",
+        "schema_version",
+        "adapter_kind",
+        "dimension",
+        "workflow_key",
+        "workflow_revision_uuid",
+        "secret",
+        "api_key",
+        "token",
+        "absolute_path",
+        "path",
+        "flag",
+        "feature_flag",
+        "feature_flags",
+    }
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -48,6 +86,8 @@ class PreparedExecutionInputs:
     inline_ingress: ObjectStat | None
     audit_envelope: dict[str, Any]
     intent_context: dict[str, Any] | None = None
+    # Body-free S14 override audit payload for the Task create UoW event.
+    override_applied: dict[str, Any] | None = None
 
     @property
     def config_snapshot_ref(self) -> str:
@@ -59,7 +99,7 @@ class PreparedExecutionInputs:
 
 
 class ConfigSnapshotService:
-    """Resolve L0/L1/L2 into one deterministic, object-backed L4 snapshot."""
+    """Resolve L0/L1/L2/L3 into one deterministic, object-backed L4 snapshot."""
 
     REQUIRED_CAPABILITIES = ("embed", "structured_generate", "text_generate")
 
@@ -70,12 +110,14 @@ class ConfigSnapshotService:
         workflows: WorkflowRegistryService,
         settings: Settings,
         targets: IntakeTargetResolver | None = None,
+        security_audit: SecurityAuditWriter | None = None,
     ) -> None:
         self.persistence = persistence
         self.storage = storage
         self.workflows = workflows
         self.settings = settings
         self.targets = targets or IntakeTargetResolver(persistence)
+        self.security_audit = security_audit or SecurityAuditWriter()
 
     async def prepare(self, request: TaskCreateRequest) -> PreparedExecutionInputs:
         """Resolve only for a new execution; callers must avoid replay work first."""
@@ -116,6 +158,15 @@ class ConfigSnapshotService:
             if model is None or not isinstance(model.get("default_dimension"), int) or model["default_dimension"] < 1:
                 raise MkbError("CONFIG_CONFLICT", "Live embed binding has no valid registered dimension", 503)
             bindings["embed"] = {**embed, "dimension": model["default_dimension"]}
+        flag_bundle, flag_bundle_digest = self._load_flag_bundle()
+        try:
+            semantic_overrides, ops_overrides, override_digest, semantic_knobs = self._resolve_overrides(
+                request.overrides
+            )
+        except MkbError as exc:
+            if exc.code == "CONFIG_OVERRIDE_REJECTED":
+                await self._audit_override_rejected(request, exc)
+            raise
         materials = {
             "schema_version": "mkb.config-snapshot.v1",
             "l0": l0,
@@ -130,6 +181,16 @@ class ConfigSnapshotService:
                 "inference_vllm_base_url": self.settings.inference_vllm_base_url,
                 "inference_mode": "live" if self.settings.live_inference else "deterministic",
             },
+            # L3 semantic overrides only.  Ops-only knobs (dry_run/debug_trace)
+            # must not enter materials hashed into config_snapshot_digest /
+            # domain_binding_digest (S14-A17); they are audit-only.
+            "l3": {
+                "overrides": semantic_overrides,
+                "override_digest": override_digest,
+            },
+            "flag_bundle": flag_bundle,
+            "flag_bundle_digest": flag_bundle_digest,
+            "semantic_knobs": semantic_knobs,
             "workflow": {
                 "workflow_key": workflow.workflow_key,
                 "workflow_uuid": workflow.workflow_uuid,
@@ -167,13 +228,31 @@ class ConfigSnapshotService:
         )
         if input_manifest.sha256 != stable_digest(input_manifest_body):
             raise MkbError("SNAPSHOT_INCONSISTENT", "Input manifest digest is inconsistent", 503)
+        # Semantic knobs + override_digest enter the binding identity; ops-only
+        # security.*/obs.* knobs never do (S14-T019 / T030).
         domain_binding_digest = stable_digest(
             {
                 "config_snapshot_digest": config_snapshot.sha256,
                 "workflow_compiled_digest": workflow.compiled_digest,
                 "request_intent": request.request_intent,
+                "override_digest": override_digest,
+                "semantic_knobs": semantic_knobs,
+                "flag_bundle_digest": flag_bundle_digest,
             }
         )
+        override_applied = None
+        if semantic_overrides or ops_overrides:
+            # Audit records both semantic and ops keys; only semantic keys
+            # participated in override_digest / L4 materials above.
+            override_applied = {
+                "override_keys": sorted({*semantic_overrides, *ops_overrides}),
+                "override_digest": override_digest,
+                "ops_override_keys": sorted(ops_overrides),
+                "actor_origin": "task.create",
+                "team_uuid": request.team_uuid,
+                "task_uuid": request.task_uuid,
+                "result": "applied",
+            }
         return PreparedExecutionInputs(
             workflow=workflow,
             config_snapshot=config_snapshot,
@@ -184,6 +263,7 @@ class ConfigSnapshotService:
             inline_ingress=inline_ingress,
             audit_envelope=audit_envelope,
             intent_context=intent_context,
+            override_applied=override_applied,
         )
 
     async def catalog_for_execution(
@@ -490,6 +570,128 @@ class ConfigSnapshotService:
             "dimension": 64,
             "binding_digest": stable_digest(body),
         }
+
+    def _load_flag_bundle(self) -> tuple[dict[str, bool], str]:
+        """Load the checked-in default-OFF feature flag bundle (S14-T037)."""
+
+        path = self.settings.config_root / "feature_flags.yaml"
+        try:
+            raw_bytes = path.read_bytes()
+            raw = yaml.safe_load(raw_bytes.decode("utf-8"))
+        except (OSError, UnicodeDecodeError, yaml.YAMLError) as exc:
+            raise MkbError("CONFIG_MISSING", "Feature flag bundle is unavailable", 503) from exc
+        if not isinstance(raw, dict):
+            raise MkbError("CONFIG_CONFLICT", "Feature flag bundle must be a mapping", 503)
+        flags_raw = raw.get("flags", {})
+        if not isinstance(flags_raw, dict):
+            raise MkbError("CONFIG_CONFLICT", "Feature flag bundle flags must be a mapping", 503)
+        flags: dict[str, bool] = {}
+        for key, value in flags_raw.items():
+            if not isinstance(key, str) or not key:
+                raise MkbError("CONFIG_CONFLICT", "Feature flag names must be non-empty strings", 503)
+            if not isinstance(value, bool):
+                raise MkbError("CONFIG_CONFLICT", "Feature flag values must be booleans", 503)
+            flags[key] = value
+        # Default-OFF product rule: materialize fails closed if any checked-in
+        # flag is unexpectedly true without an explicit owner ceremony.
+        if any(flags.values()):
+            raise MkbError("CONFIG_CONFLICT", "v1 feature flags must default OFF", 503)
+        digest = hashlib.sha256(raw_bytes).hexdigest()
+        return flags, digest
+
+    def _resolve_overrides(
+        self, overrides: dict[str, Any] | None
+    ) -> tuple[dict[str, Any], dict[str, Any], str | None, dict[str, Any]]:
+        """Apply the S14 allowlist, caps, and semantic/ops split.
+
+        Returns ``(semantic_overrides, ops_overrides, override_digest, semantic_knobs)``.
+        Ops-only keys never enter ``override_digest`` (S14-A17).
+        """
+
+        if overrides is None:
+            return {}, {}, None, self._default_semantic_knobs()
+        if not isinstance(overrides, dict):
+            raise MkbError("CONFIG_OVERRIDE_REJECTED", "Override bag must be a JSON object", 422)
+        raw = {str(key): value for key, value in overrides.items() if value is not None}
+        for key in raw:
+            if key in _FORBIDDEN_OVERRIDE_KEYS or key.startswith("security.") or key.startswith("obs."):
+                raise MkbError("CONFIG_OVERRIDE_REJECTED", f"Override key is not allowlisted: {key}", 422)
+        semantic_applied: dict[str, Any] = {}
+        ops_applied: dict[str, Any] = {}
+        if "profile_id" in raw:
+            profile_id = raw["profile_id"]
+            if not isinstance(profile_id, str) or profile_id not in _REGISTERED_PROFILES:
+                raise MkbError("CONFIG_OVERRIDE_REJECTED", "profile_id is not registered", 422)
+            semantic_applied["profile_id"] = profile_id
+        for key, cap in _OVERRIDE_CAPS.items():
+            if key not in raw:
+                continue
+            value = raw[key]
+            if not isinstance(value, int) or isinstance(value, bool) or value < 1 or value > cap:
+                raise MkbError("CONFIG_OVERRIDE_REJECTED", f"Override {key} exceeds cap or is invalid", 422)
+            semantic_applied[key] = value
+        for key in ("dry_run", "debug_trace"):
+            if key in raw:
+                if not isinstance(raw[key], bool):
+                    raise MkbError("CONFIG_OVERRIDE_REJECTED", f"Override {key} must be boolean", 422)
+                ops_applied[key] = raw[key]
+        allowed = set(_OVERRIDE_CAPS) | {"profile_id", "dry_run", "debug_trace"}
+        unknown = set(raw) - allowed
+        if unknown:
+            raise MkbError(
+                "CONFIG_OVERRIDE_REJECTED",
+                f"Override key is not allowlisted: {sorted(unknown)[0]}",
+                422,
+            )
+        # Semantic-only digest: ops knobs must not change binding identity.
+        override_digest = stable_digest(semantic_applied) if semantic_applied else None
+        semantic = self._default_semantic_knobs()
+        for key in ("profile_id", "batch_size", "top_k", "return_k", "recall_k", "pack_budget"):
+            if key in semantic_applied:
+                semantic[key] = semantic_applied[key]
+        return semantic_applied, ops_applied, override_digest, semantic
+
+    @staticmethod
+    def _default_semantic_knobs() -> dict[str, Any]:
+        return {
+            "profile_id": "clean.default.v1",
+            "batch_size": 16,
+            "top_k": 20,
+            "return_k": 10,
+            "recall_k": 40,
+            "pack_budget": 8_000,
+        }
+
+    async def _audit_override_rejected(self, request: TaskCreateRequest, exc: MkbError) -> None:
+        """Write the sole security-audit sink for an L3 denial (S14-T017)."""
+
+        override_keys: list[str] = []
+        if request.overrides is not None:
+            override_keys = sorted(str(key) for key in request.overrides if request.overrides[key] is not None)
+        try:
+            async with self.persistence.transaction() as tx:
+                await self.security_audit.write_denied(
+                    tx,
+                    action="config.override_denied",
+                    denial_code="CONFIG_OVERRIDE_REJECTED",
+                    summary="Task override rejected by allowlist",
+                    http_status=422,
+                    actor_kind="internal_token",
+                    team_uuid=request.team_uuid,
+                    trace_uuid=request.trace_uuid,
+                    target_kind="task",
+                    target_uuid=request.task_uuid,
+                    payload={
+                        "override_keys": override_keys,
+                        "override_digest": stable_digest({"keys": override_keys}),
+                        "actor_origin": "task.create",
+                        "result": "rejected",
+                        "error_code": exc.code,
+                    },
+                )
+        except Exception:
+            # Admission path audit failure is itself a hard fail-closed signal.
+            raise MkbError("SEC_AUDIT_WRITE_FAIL", "Security audit could not record override denial", 500) from exc
 
     @staticmethod
     def _now() -> str:

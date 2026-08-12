@@ -1,0 +1,7 @@
+# S14 feature-flag bundle. Checked-in defaults are OFF.
+# Materialized into L4 as flag_bundle_digest; never a remote SSOT.
+schema_version: mkb.feature-flags.v1
+flags:
+  experimental_rerank_v2: false
+  experimental_summary_regeneration: false
+  experimental_live_generation_debug: false

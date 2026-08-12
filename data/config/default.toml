@@ -16,14 +16,17 @@ generate_model = "qwen35-a3b"
 [storage]
 max_object_bytes = 268435456
 
+[workflow]
+# A terminal Process stays recoverable briefly before the runtime records an
+# append-only cleanup eligibility fence. Physical retention is separate.
+cleanup_recovery_window_seconds = 60
+
+[index_retirement]
+# The duration is frozen into each S09 cleanup intent at cutover; changing
+# this checked-in default affects only later promotions.
+grace_seconds = 3600
+scan_interval_seconds = 600
+scan_batch_size = 100
+
 [security]
 metrics_require_token = false
-*** Add File: /mnt/usb/workspace/myknowledgebase/data/prompts/prompt-a-clean-v1.md
-Normalize the supplied intake content without adding facts. Preserve provenance and return
-plain text suitable for deterministic preflight checks.
-*** Add File: /mnt/usb/workspace/myknowledgebase/data/prompts/prompt-b-structure-v1.md
-Produce a faithful structured representation of the supplied cleaned content. Keep original
-anchors and coverage evidence. Do not use summaries as kernel truth.
-*** Add File: /mnt/usb/workspace/myknowledgebase/data/prompts/prompt-c-summary-v1.md
-Summarize one construction unit without changing the corresponding original text. The summary
-is a retrieval channel, not a replacement for the original evidence.

@@ -26,6 +26,11 @@ class Settings(BaseSettings):
     prompt_root_path: Path | None = None
     config_root_path: Path | None = None
     inference_vllm_base_url: str = "http://127.0.0.1:668"
+    # Model credentials are mounted/injected outside L0/L1/L4.  The runtime
+    # keeps only this logical slot and reads its current value from the
+    # explicitly configured secret file during composition.
+    inference_secret_slot: str | None = None
+    inference_secret_file: Path | None = None
     inference_probe_enabled: bool = False
     live_inference: bool = False
     inference_max_in_flight: int = Field(default=8, ge=1, le=256)
@@ -44,6 +49,22 @@ class Settings(BaseSettings):
     object_gc_grace_seconds: int = Field(default=24 * 60 * 60, ge=1, le=365 * 24 * 60 * 60)
     object_gc_interval_seconds: int = Field(default=10 * 60, ge=1, le=24 * 60 * 60)
     object_gc_batch_size: int = Field(default=100, ge=1, le=10_000)
+    # Terminal Process rows are marked eligible only after this recovery
+    # window.  The marker is append-only evidence; S12/S15 still own actual
+    # archive/delete retention policy.
+    workflow_cleanup_recovery_window_seconds: int = Field(default=60, ge=0, le=24 * 60 * 60)
+    # S09 generations are retired asynchronously after an immutable grace
+    # deadline.  These are operational cadence values only; the deadline is
+    # copied into the durable cleanup intent at the cutover fence.
+    index_retirement_enabled: bool = True
+    index_retirement_grace_seconds: int = Field(default=60 * 60, ge=1, le=365 * 24 * 60 * 60)
+    index_retirement_interval_seconds: int = Field(default=10 * 60, ge=1, le=24 * 60 * 60)
+    index_retirement_batch_size: int = Field(default=100, ge=1, le=10_000)
+    obs_retention_domain_events_days: int = Field(default=90, ge=1, le=36_500)
+    obs_retention_diagnostic_logs_days: int = Field(default=14, ge=1, le=36_500)
+    obs_retention_security_audit_days: int = Field(default=180, ge=1, le=36_500)
+    obs_retention_interval_seconds: int = Field(default=60 * 60, ge=1, le=24 * 60 * 60)
+    obs_retention_batch_size: int = Field(default=1_000, ge=1, le=10_000)
 
     @property
     def resolved_database_path(self) -> Path:
