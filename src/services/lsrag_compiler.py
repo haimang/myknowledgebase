@@ -358,7 +358,19 @@ class LsragContractCompiler:
                 if leaf.content_digest != _text_digest(anchored):
                     _fail("STRUCTURE_ANCHOR_DIGEST", "Content leaf digest does not match its anchor")
                 spans.append(leaf.source_anchor)
-        if not spans or min(span.start_byte for span in spans) != 0 or max(span.end_byte for span in spans) != len(clean_text.encode("utf-8")):
+        # The content leaves are the authoritative partition of the admitted
+        # clean bytes.  Checking only min/max would accept a tree that skips
+        # or duplicates bytes in the middle, which makes later reattachment
+        # ambiguous.  Preserve tree reading order rather than normalising it:
+        # an out-of-order candidate is invalid kernel output, not something a
+        # worker may silently repair.
+        expected_start = 0
+        for span in spans:
+            _span_text(clean_text, span.start_byte, span.end_byte)
+            if span.start_byte != expected_start or span.end_byte <= span.start_byte:
+                _fail("STRUCTURE_COVERAGE_INVALID", "Content leaf anchors must be an ordered, gap-free clean-byte partition")
+            expected_start = span.end_byte
+        if not spans or expected_start != len(clean_text.encode("utf-8")):
             _fail("STRUCTURE_COVERAGE_INVALID", "Content leaf anchors must cover the selected clean artifact")
         block_ids: set[str] = set()
         granularities: set[int] = set()
@@ -369,7 +381,14 @@ class LsragContractCompiler:
             granularities.add(block.granularity)
             if any(node_id not in ids for node_id in block.source_node_refs):
                 _fail("STRUCTURE_PROJECTION_NODE", "Projection block references an unknown structure node")
-            original = "".join(_span_text(clean_text, span.start_byte, span.end_byte) for span in block.ordered_source_spans)
+            previous_end = -1
+            pieces: list[str] = []
+            for span in block.ordered_source_spans:
+                if span.start_byte < previous_end or span.end_byte <= span.start_byte:
+                    _fail("STRUCTURE_PROJECTION_ORDER", "Projection source spans must be ordered and non-overlapping")
+                pieces.append(_span_text(clean_text, span.start_byte, span.end_byte))
+                previous_end = span.end_byte
+            original = "".join(pieces)
             if original != block.original_text or block.original_digest != _text_digest(original):
                 _fail("STRUCTURE_PROJECTION_ORIGINAL", "Projection original body is not an anchored clean slice")
         if granularities != {0, 1, 2} or not any(block.granularity == 0 and block.original_text.strip() for block in projection.blocks):

@@ -78,6 +78,45 @@ def test_structure_rejects_cross_generation_projection_and_anchor_tampering() ->
         compiler.validate_structure(document=partial_structure, projection=partial_projection, clean_text=clean)
 
 
+def test_structure_rejects_gapped_or_overlapping_content_coverage_and_unordered_projection_spans() -> None:
+    compiler, structure, projection, clean = _compiled()
+    first_end = len("第一段 ".encode())
+    second_start = len("第一段 evidence。\n\nSe".encode())
+    second_end = len(clean.encode("utf-8"))
+    first = replace(
+        structure.nodes[1],
+        source_anchor=TextSpan(0, first_end),
+        content_digest=stable_digest({"text": clean[:4]}),
+        subtree_digest=stable_digest({"text": clean[:4]}),
+    )
+    second_text = clean.encode("utf-8")[second_start:second_end].decode("utf-8")
+    second = replace(
+        first,
+        node_id="node-0002",
+        sibling_ordinal=1,
+        reading_ordinal=2,
+        source_anchor=TextSpan(second_start, second_end),
+        content_digest=stable_digest({"text": second_text}),
+        subtree_digest=stable_digest({"text": second_text}),
+    )
+    gapped = replace(structure, nodes=(structure.nodes[0], first, second))
+    gapped_projection = replace(projection, structure_document_digest=structure_document_digest(gapped))
+    with pytest.raises(MkbError, match="STRUCTURE_COVERAGE_INVALID"):
+        compiler.validate_structure(document=gapped, projection=gapped_projection, clean_text=clean)
+
+    end = len(clean.encode("utf-8"))
+    reversed_text = clean.encode("utf-8")[first_end:end].decode("utf-8") + clean.encode("utf-8")[:first_end].decode("utf-8")
+    reversed_block = replace(
+        projection.blocks[0],
+        ordered_source_spans=(TextSpan(first_end, end), TextSpan(0, first_end)),
+        original_text=reversed_text,
+        original_digest=stable_digest({"text": reversed_text}),
+    )
+    unordered_projection = replace(projection, blocks=(reversed_block, *projection.blocks[1:]))
+    with pytest.raises(MkbError, match="STRUCTURE_PROJECTION_ORDER"):
+        compiler.validate_structure(document=structure, projection=unordered_projection, clean_text=clean)
+
+
 def test_constructs_full_valid_dual_channels_and_required_vector_units() -> None:
     compiler, structure, projection, clean = _compiled()
     summaries = {block.block_id: f"Summary for {block.block_id}" for block in projection.blocks}
