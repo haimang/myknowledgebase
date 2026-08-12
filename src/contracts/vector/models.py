@@ -111,6 +111,10 @@ class RetrievalResult(StrictModel):
     filters_echo: dict[str, str]
     inflation_root_content: str | None = None
     inflation_root_content_ref: str | None = None
+    # An inflated parent/root is a separate, generation-scoped evidence
+    # coordinate.  Reusing the focus coordinate here would falsely label a
+    # document root as the matched fragment in a packed context.
+    inflation_root_coordinate: GenerationScopedCoordinate | None = None
     inflation_status: Literal["not_requested", "attached", "missing", "truncated", "skipped"] = "not_requested"
 
     @model_validator(mode="after")
@@ -125,11 +129,22 @@ class RetrievalResult(StrictModel):
                 "payload_content_ref": self.payload_content_ref,
                 "inflation_root_content": self.inflation_root_content,
                 "inflation_root_content_ref": self.inflation_root_content_ref,
+                "inflation_root_coordinate": (
+                    None if self.inflation_root_coordinate is None else self.inflation_root_coordinate.model_dump()
+                ),
                 "coordinate": self.coordinate.model_dump(),
                 "generation_refs": self.generation_refs.model_dump(),
                 "filters_echo": self.filters_echo,
             }
         )
+        if self.inflation_status in {"attached", "truncated"}:
+            if self.inflation_root_coordinate is None:
+                raise ValueError("an attached inflation root requires its coordinate")
+            if (
+                self.inflation_root_coordinate.granularity != 0
+                or self.inflation_root_coordinate.channel != "original"
+            ):
+                raise ValueError("an inflation root must be a g=0 original coordinate")
         return self
 
 

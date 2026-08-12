@@ -99,6 +99,26 @@ class MismatchedEmbedder:
         return EmbeddingResponse(vectors=[[1.0]], model_key="other-model", model_version="v1", dimension=1)
 
 
+class FixedLayerAEmbedder:
+    async def embed(self, request: object) -> EmbeddingResponse:
+        del request
+        return EmbeddingResponse(vectors=[[1.0, 0.0]], model_key="model", model_version="v1", dimension=2)
+
+
+class AdapterMismatchedEmbedder:
+    async def embed(self, request: object) -> object:
+        del request
+
+        class Response:
+            vectors = [[1.0, 0.0]]
+            model_key = "model"
+            model_version = "v1"
+            dimension = 2
+            adapter_kind = "remote_gemini"
+
+        return Response()
+
+
 @pytest.fixture
 async def retrieval_db(tmp_path: Path) -> SqlitePersistence:
     persistence = SqlitePersistence(tmp_path / "mkb.db", Path("src/persistence/migrations"))
@@ -309,6 +329,53 @@ async def test_dual_fence_requires_named_proof_and_active_pointer(retrieval_db: 
     assert incomplete_proof["disposition"] == "empty"
 
 
+async def test_dual_fence_rejects_an_incomplete_or_injected_proof_record_set(
+    retrieval_db: SqlitePersistence,
+) -> None:
+    """A proof count must describe the live set, not just be self-consistent."""
+
+    connection = retrieval_db._connect()
+    connection.execute(
+        """INSERT INTO mkb_vector_records
+        (vector_record_uuid,team_uuid,namespace_uuid,generation_artifact_uuid,generation_artifact_type,
+         block_or_unit_id,channel,intake_source_uuid,intake_item_uuid,intake_revision_uuid,
+         content_digest,source_handle,embedding_model,embedding_model_key,embedding_model_version,
+         adapter_kind,dimension,embedding,publication_state,index_generation,embedded_at,created_at,updated_at)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+        (
+            "123e4567-e89b-42d3-a456-426614174019",
+            TEAM,
+            NAMESPACE,
+            GENERATION,
+            "dual_channel_projection",
+            "g1:unproven",
+            "original",
+            SOURCE,
+            ITEM,
+            REVISION,
+            "b" * 64,
+            "mkbobj:v1:body",
+            "model",
+            "model",
+            "v1",
+            "local_vllm",
+            2,
+            struct.pack("<2f", 0.1, 0.2),
+            "indexed",
+            1,
+            NOW,
+            NOW,
+            NOW,
+        ),
+    )
+    connection.commit()
+
+    result = await RetrievalService(retrieval_db).search({"team_uuid": TEAM, "query": "revenue"})
+
+    assert result["disposition"] == "empty"
+    assert result["diagnostics"]["empty_reason"] == "no_hit"
+
+
 async def test_injected_eligibility_port_is_batched_and_fail_closed(retrieval_db: SqlitePersistence) -> None:
     eligibility = RejectingEligibility()
     result = await RetrievalService(retrieval_db, eligibility_port=eligibility).search(
@@ -381,6 +448,14 @@ async def test_unknown_filter_and_invalid_rank_policy_fail_loudly(retrieval_db: 
         await service.search({"team_uuid": TEAM, "query": "x", "index_generation": 999})
     assert forbidden.value.code == "RETRIEVE_SCHEMA_FORBIDDEN_FIELD"
 
+    with pytest.raises(MkbError) as malformed_schema:
+        await service.search({"schema_version": "mkb.retrieval.v0", "team_uuid": TEAM, "query": "x"})
+    assert malformed_schema.value.code == "RETRIEVE_SCHEMA_INVALID"
+
+    with pytest.raises(MkbError) as invalid_source_kind:
+        await service.search({"team_uuid": TEAM, "query": "x", "filters": {"source_kind": "unregistered"}})
+    assert invalid_source_kind.value.code == "RETRIEVE_FILTER_INVALID"
+
 
 async def test_successful_rerank_retains_ann_score(retrieval_db: SqlitePersistence) -> None:
     result = await RetrievalService(retrieval_db, FixedReranker(), body_port=FixtureBodies()).search(
@@ -420,6 +495,81 @@ async def test_live_embed_layer_a_mismatch_fails_closed(retrieval_db: SqlitePers
     assert mismatch.value.code == "RETRIEVE_SPACE_LAYER_A_MISMATCH"
 
 
+async def test_live_embed_adapter_layer_a_mismatch_fails_closed(retrieval_db: SqlitePersistence) -> None:
+    connection = retrieval_db._connect()
+    connection.execute(
+        """INSERT INTO mkb_adapter_bindings
+        (binding_uuid,capability_key,adapter_kind,model_key,model_version,priority,enabled,binding_digest,created_at,updated_at)
+        VALUES (?,?,?,?,?,?,?,?,?,?)""",
+        (
+            "123e4567-e89b-42d3-a456-426614174022",
+            "embed",
+            "local_vllm",
+            "model",
+            "v1",
+            10,
+            1,
+            "f" * 64,
+            NOW,
+            NOW,
+        ),
+    )
+    connection.commit()
+
+    with pytest.raises(MkbError) as mismatch:
+        await RetrievalService(retrieval_db, AdapterMismatchedEmbedder(), live_inference=True).search(
+            {"team_uuid": TEAM, "query": "revenue"}
+        )
+    assert mismatch.value.code == "RETRIEVE_SPACE_LAYER_A_MISMATCH"
+
+
+async def test_local_exact_search_respects_the_controlled_namespace_metric(retrieval_db: SqlitePersistence) -> None:
+    """The local profile must not silently use cosine for an l2 namespace."""
+
+    connection = retrieval_db._connect()
+    connection.execute("UPDATE mkb_vector_namespaces SET distance_metric='l2' WHERE namespace_uuid=?", (NAMESPACE,))
+    connection.execute(
+        "UPDATE mkb_vector_records SET embedding=? WHERE vector_record_uuid=?",
+        (struct.pack("<2f", 10.0, 0.0), "123e4567-e89b-42d3-a456-426614174011"),
+    )
+    connection.execute(
+        "UPDATE mkb_vector_records SET embedding=? WHERE vector_record_uuid=?",
+        (struct.pack("<2f", 0.5, 0.5), "123e4567-e89b-42d3-a456-426614174014"),
+    )
+    connection.execute(
+        """INSERT INTO mkb_adapter_bindings
+        (binding_uuid,capability_key,adapter_kind,model_key,model_version,priority,enabled,binding_digest,created_at,updated_at)
+        VALUES (?,?,?,?,?,?,?,?,?,?)""",
+        (
+            "123e4567-e89b-42d3-a456-426614174021",
+            "embed",
+            "local_vllm",
+            "model",
+            "v1",
+            10,
+            1,
+            "f" * 64,
+            NOW,
+            NOW,
+        ),
+    )
+    connection.commit()
+
+    result = await RetrievalService(
+        retrieval_db,
+        FixedLayerAEmbedder(),
+        live_inference=True,
+        rerank_enabled=False,
+    ).search(
+        {"team_uuid": TEAM, "query": "revenue", "filters": {"channel": "original"}, "return_k": 1, "recall_k": 3}
+    )
+
+    assert result["disposition"] == "ok"
+    # Cosine would prefer [10, 0]; controlled l2 correctly prefers [0.5, .5].
+    assert result["results"][0]["coordinate"]["unit_id"] == "g1:revenue-alt"
+    assert result["results"][0]["ann_score"] > 0.5
+
+
 async def test_pack_is_bounded_and_marks_truncation(retrieval_db: SqlitePersistence) -> None:
     result = await RetrievalService(retrieval_db, body_port=FixtureBodies(), pack_max_hits=1).search(
         {"team_uuid": TEAM, "query": "revenue", "include_pack": True}
@@ -428,3 +578,28 @@ async def test_pack_is_bounded_and_marks_truncation(retrieval_db: SqlitePersiste
     assert result["pack"]["pack_hit_count"] == 1
     assert result["pack"]["truncated"] is True
     assert result["diagnostics"]["pack_truncated"] is True
+    assert result["results"][0]["inflation_root_coordinate"]["unit_id"] == "g0:root"
+    root_segment = next(segment for segment in result["pack"]["segments"] if segment["tier"] == "document_root")
+    assert root_segment["coordinate"]["generation_artifact_uuid"] == GENERATION
+    assert root_segment["coordinate"]["unit_id"] == "g0:root"
+
+
+async def test_g0_result_packs_as_a_document_root(retrieval_db: SqlitePersistence) -> None:
+    def root_only_scorer(**kwargs: object) -> dict[str, float]:
+        rows = kwargs["candidates"]
+        assert isinstance(rows, list)
+        return {
+            str(row["vector_record_uuid"]): 1.0
+            for row in rows
+            if row["block_or_unit_id"] == "g0:root"
+        }
+
+    result = await RetrievalService(
+        retrieval_db,
+        candidate_scorer=root_only_scorer,
+        body_port=FixtureBodies(),
+        rerank_enabled=False,
+    ).search({"team_uuid": TEAM, "query": "revenue", "return_k": 1, "recall_k": 1})
+
+    assert result["results"][0]["granularity"] == 0
+    assert result["pack"]["segments"][0]["tier"] == "document_root"

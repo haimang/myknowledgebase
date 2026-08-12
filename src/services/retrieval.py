@@ -22,6 +22,7 @@ from typing import Any, Protocol
 
 from src.contracts.api.models import RetrievalRequest
 from src.contracts.common.errors import MkbError
+from src.contracts.common.ids import validate_external_uuid
 from src.contracts.common.models import assert_safe_public_data
 from src.contracts.inference.models import EmbeddingRequest, InferenceBinding
 from src.contracts.vector.models import (
@@ -39,6 +40,8 @@ from src.runtime.inference.facade import InferenceFacade
 from src.services.deterministic_embedding import deterministic_embedding
 
 _FILTER_KEYS = frozenset({"intake_item_uuid", "source_kind", "channel"})
+_SOURCE_KINDS = frozenset({"inline_payload", "local_object", "http_resource", "registered_api"})
+_DISTANCE_METRICS = frozenset({"cosine", "l2", "inner_product"})
 _REQUEST_KEYS = frozenset(
     {
         "schema_version",
@@ -73,10 +76,37 @@ _GRANULARITY_PATTERNS = (
     re.compile(r"^(?:granularity[=_:-]?)?([012])(?:[._:/-]|$)", re.IGNORECASE),
 )
 _TOKEN = re.compile(r"[\w\u4e00-\u9fff]+", re.UNICODE)
+# A durable proof is a complete-set assertion, not merely a permissive label
+# on whichever rows happen to be returned by an ANN scan.  Both candidate
+# reads below apply this predicate so a deleted or injected active row cannot
+# make a partial generation appear publishable.
+_PROOF_COMPLETE_SET_PREDICATE = (
+    "proof.actual_count=(SELECT COUNT(*) FROM mkb_vector_records AS proof_record "
+    "WHERE proof_record.team_uuid=proof.team_uuid "
+    "AND proof_record.intake_item_uuid=proof.intake_item_uuid "
+    "AND proof_record.intake_revision_uuid=proof.intake_revision_uuid "
+    "AND proof_record.namespace_uuid=proof.namespace_uuid "
+    "AND proof_record.generation_artifact_uuid=proof.generation_artifact_uuid "
+    "AND proof_record.generation_artifact_type=proof.generation_artifact_type "
+    "AND proof_record.embedding_model=proof.embedding_model "
+    "AND proof_record.embedding_model_key=proof.embedding_model_key "
+    "AND proof_record.embedding_model_version=proof.embedding_model_version "
+    "AND proof_record.adapter_kind=proof.adapter_kind "
+    "AND proof_record.dimension=proof.dimension "
+    "AND proof_record.index_generation=proof.index_generation "
+    "AND proof_record.deleted_at IS NULL "
+    "AND proof_record.publication_state='indexed')"
+)
 
 
 class CandidateScorer(Protocol):
-    """Optional deterministic/ANN scoring seam for non-live test profiles."""
+    """Optional deterministic/ANN scoring seam for non-live test profiles.
+
+    Scores supplied by this seam must already be a finite, higher-is-better
+    relevance score in the selected namespace metric.  The local exact profile
+    below performs that normalization itself, including for controlled ``l2``
+    namespaces.
+    """
 
     def __call__(
         self,
@@ -169,6 +199,12 @@ class RetrievalService:
             raise ValueError("retrieval limits must be positive")
         if inflation_max_roots < 0 or inflation_per_root_max_chars < 1 or candidate_scan_limit < max_topk:
             raise ValueError("invalid retrieval bounded-scan configuration")
+        try:
+            normalized_default_threshold = float(default_score_threshold)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("default_score_threshold must be finite") from exc
+        if not math.isfinite(normalized_default_threshold):
+            raise ValueError("default_score_threshold must be finite")
         self._persistence = persistence
         self._inference = inference
         self._body_port = body_port
@@ -177,7 +213,7 @@ class RetrievalService:
         self._live_inference = live_inference
         self._rerank_enabled = rerank_enabled
         self._max_topk = max_topk
-        self._default_score_threshold = float(default_score_threshold)
+        self._default_score_threshold = normalized_default_threshold
         self._pack_max_hits = pack_max_hits
         self._pack_max_chars = pack_max_chars
         self._inflation_max_roots = inflation_max_roots
@@ -287,6 +323,8 @@ class RetrievalService:
 
     def _normalise_request(self, request: RetrievalRequest | Mapping[str, Any] | Any) -> _SearchInput:
         if isinstance(request, Mapping):
+            if not all(isinstance(key, str) for key in request):
+                raise MkbError("RETRIEVE_SCHEMA_INVALID", "retrieval request field names are invalid", 422)
             supplied_keys = {str(key) for key in request}
             forbidden = supplied_keys & _FORBIDDEN_REQUEST_KEYS
             if forbidden:
@@ -304,18 +342,30 @@ class RetrievalService:
                     422,
                     {"keys": sorted(unknown)},
                 )
+            schema_version = self._request_value(request, "schema_version")
+            if schema_version is not None and schema_version != "mkb.retrieval.v1":
+                raise MkbError("RETRIEVE_SCHEMA_INVALID", "unsupported retrieval schema version", 422)
         team_uuid = self._request_value(request, "team_uuid")
         raw_query = self._request_value(request, "query")
         if not isinstance(team_uuid, str) or not team_uuid.strip():
             raise MkbError("RETRIEVE_SCHEMA_TEAM_REQUIRED", "team_uuid is required for retrieval", 422)
+        try:
+            team_uuid = validate_external_uuid(team_uuid, field="team_uuid")
+        except Exception as exc:
+            raise MkbError("RETRIEVE_SCHEMA_TEAM_REQUIRED", "team_uuid is required for retrieval", 422) from exc
         if not isinstance(raw_query, str):
             raise MkbError("RETRIEVE_SCHEMA_QUERY_INVALID", "query must be a string", 422)
+        if len(raw_query) > 8192:
+            raise MkbError("RETRIEVE_SCHEMA_INVALID", "query exceeds the v1 size limit", 422)
 
         # ``top_k`` remains a transitional API input; the S10 name is
-        # ``return_k``.  A supplied return_k always wins.
+        # ``return_k``.  Supplying both is ambiguous and therefore rejected.
         raw_return_k = self._request_value(request, "return_k")
+        raw_top_k = self._request_value(request, "top_k")
+        if raw_return_k is not None and raw_top_k is not None:
+            raise MkbError("RETRIEVE_TOPK_INVALID", "use return_k instead of top_k", 422)
         if raw_return_k is None:
-            raw_return_k = self._request_value(request, "top_k")
+            raw_return_k = raw_top_k
         return_k = 10 if raw_return_k is None else self._as_positive_int(raw_return_k, "return_k")
         raw_recall_k = self._request_value(request, "recall_k")
         recall_k = 20 if raw_recall_k is None else self._as_positive_int(raw_recall_k, "recall_k")
@@ -344,8 +394,15 @@ class RetrievalService:
             namespace_key = "default"
         if namespace_key is not None and (not isinstance(namespace_key, str) or not namespace_key.strip()):
             raise MkbError("RETRIEVE_SCHEMA_NAMESPACE_INVALID", "namespace_key must be a non-empty string", 422)
+        if isinstance(namespace_key, str) and len(namespace_key) > 256:
+            raise MkbError("RETRIEVE_SCHEMA_NAMESPACE_INVALID", "namespace_key exceeds the v1 size limit", 422)
         if namespace_uuid is not None and (not isinstance(namespace_uuid, str) or not namespace_uuid.strip()):
             raise MkbError("RETRIEVE_SCHEMA_NAMESPACE_INVALID", "namespace_uuid must be a non-empty string", 422)
+        if namespace_uuid is not None:
+            try:
+                namespace_uuid = validate_external_uuid(namespace_uuid, field="namespace_uuid")
+            except Exception as exc:
+                raise MkbError("RETRIEVE_SCHEMA_NAMESPACE_INVALID", "namespace_uuid is invalid", 422) from exc
         if namespace_key is not None and namespace_uuid is not None:
             raise MkbError("RETRIEVE_SCHEMA_NAMESPACE_INVALID", "only one namespace selector may be supplied", 422)
 
@@ -395,6 +452,8 @@ class RetrievalService:
             raw_filters = raw_filters.model_dump(exclude_none=True)
         if not isinstance(raw_filters, Mapping):
             raise MkbError("RETRIEVE_FILTER_INVALID", "filters must be an object", 422)
+        if not all(isinstance(key, str) for key in raw_filters):
+            raise MkbError("RETRIEVE_FILTER_INVALID", "retrieval filter keys are invalid", 422)
         unknown = set(raw_filters) - _FILTER_KEYS
         if unknown:
             raise MkbError(
@@ -409,6 +468,13 @@ class RetrievalService:
                 continue
             if not isinstance(value, str) or not value:
                 raise MkbError("RETRIEVE_FILTER_INVALID", f"filter {key} must be a non-empty string", 422)
+            if key == "intake_item_uuid":
+                try:
+                    value = validate_external_uuid(value, field="intake_item_uuid")
+                except Exception as exc:
+                    raise MkbError("RETRIEVE_FILTER_INVALID", "intake_item_uuid filter is invalid", 422) from exc
+            if key == "source_kind" and value not in _SOURCE_KINDS:
+                raise MkbError("RETRIEVE_FILTER_INVALID", "source_kind is not registered", 422)
             if key == "channel" and value not in {"original", "summary"}:
                 raise MkbError("RETRIEVE_FILTER_INVALID", "channel must be original or summary", 422)
             filters[str(key)] = value
@@ -421,22 +487,33 @@ class RetrievalService:
     async def _resolve_namespace(self, tx: UnitOfWork, query: _SearchInput) -> dict[str, Any]:
         if query.namespace_uuid is not None:
             row = await tx.fetchone(
-                "SELECT namespace_uuid,team_uuid,namespace_key,embedding_model_key,embedding_model_version,"
+                "SELECT namespace_uuid,team_uuid,namespace_key,embedding_model,embedding_model_key,embedding_model_version,"
                 "adapter_kind,dimension,distance_metric FROM mkb_vector_namespaces "
                 "WHERE team_uuid=? AND namespace_uuid=? AND status='active' AND deleted_at IS NULL",
                 (query.team_uuid, query.namespace_uuid),
             )
         else:
             row = await tx.fetchone(
-                "SELECT namespace_uuid,team_uuid,namespace_key,embedding_model_key,embedding_model_version,"
+                "SELECT namespace_uuid,team_uuid,namespace_key,embedding_model,embedding_model_key,embedding_model_version,"
                 "adapter_kind,dimension,distance_metric FROM mkb_vector_namespaces "
                 "WHERE team_uuid=? AND namespace_key=? AND status='active' AND deleted_at IS NULL",
                 (query.team_uuid, query.namespace_key),
             )
         if row is None:
             raise MkbError("RETRIEVE_SPACE_NAMESPACE_UNKNOWN", "active retrieval namespace was not found", 404)
-        if int(row["dimension"]) < 1:
+        try:
+            dimension = int(row["dimension"])
+        except (TypeError, ValueError) as exc:
+            raise MkbError("RETRIEVE_SPACE_INVALID", "namespace has an invalid embedding dimension", 503) from exc
+        if isinstance(row["dimension"], bool) or dimension < 1:
             raise MkbError("RETRIEVE_SPACE_INVALID", "namespace has an invalid embedding dimension", 503)
+        if any(
+            not isinstance(row[field], str) or not row[field]
+            for field in ("embedding_model", "embedding_model_key", "embedding_model_version", "adapter_kind")
+        ):
+            raise MkbError("RETRIEVE_SPACE_INVALID", "namespace has an invalid Layer A", 503)
+        if row["distance_metric"] not in _DISTANCE_METRICS:
+            raise MkbError("RETRIEVE_SPACE_METRIC_INVALID", "namespace has an unsupported distance metric", 503)
         return row
 
     async def _resolve_embed_binding(
@@ -478,9 +555,11 @@ class RetrievalService:
             raise MkbError("RETRIEVE_INFERENCE_EMBED_FAILED", "query embedding failed", 503) from exc
         except Exception as exc:
             raise MkbError("RETRIEVE_INFERENCE_EMBED_FAILED", "query embedding failed", 503) from exc
+        response_adapter_kind = getattr(response, "adapter_kind", None)
         if (
             response.model_key != namespace["embedding_model_key"]
             or response.model_version != namespace["embedding_model_version"]
+            or (response_adapter_kind is not None and response_adapter_kind != namespace["adapter_kind"])
             or response.dimension != int(namespace["dimension"])
             or len(response.vectors) != 1
             or len(response.vectors[0]) != int(namespace["dimension"])
@@ -538,6 +617,7 @@ class RetrievalService:
             "proof.index_generation=r.index_generation",
             "proof.expected_count=proof.actual_count",
             "proof.actual_count=proof.matched_count",
+            _PROOF_COMPLETE_SET_PREDICATE,
             "generation.artifact_type=r.generation_artifact_type",
             "generation.validation_disposition='full_valid'",
             "item.lifecycle_state='active'",  # S04 batch-eligibility native fence
@@ -630,10 +710,12 @@ class RetrievalService:
         for row in rows:
             if query_embedding is not None:
                 try:
-                    score = self._cosine(
-                        query_embedding, self._decode_embedding(row["embedding"], int(row["dimension"]))
+                    score = self._embedding_score(
+                        str(namespace["distance_metric"]),
+                        query_embedding,
+                        self._decode_embedding(row["embedding"], int(row["dimension"])),
                     )
-                except (TypeError, ValueError, struct.error):
+                except (OverflowError, TypeError, ValueError, struct.error):
                     invalid_vector_count += 1
                     continue
             elif scores is not None:
@@ -660,33 +742,70 @@ class RetrievalService:
 
     @staticmethod
     def _decode_embedding(value: Any, dimension: int) -> list[float]:
+        if isinstance(dimension, bool) or not isinstance(dimension, int) or dimension < 1:
+            raise ValueError("invalid vector dimension")
         if isinstance(value, memoryview):
             value = value.tobytes()
         if isinstance(value, bytes | bytearray):
             if len(value) != dimension * 4:
                 raise ValueError("invalid vector byte length")
-            return list(struct.unpack(f"<{dimension}f", value))
-        if isinstance(value, str):
+            decoded = list(struct.unpack(f"<{dimension}f", value))
+        elif isinstance(value, str):
             parsed = json.loads(value)
             if not isinstance(parsed, list) or len(parsed) != dimension:
                 raise ValueError("invalid vector JSON")
-            return [float(item) for item in parsed]
-        if isinstance(value, Sequence):
+            decoded = [float(item) for item in parsed]
+        elif isinstance(value, Sequence):
             if len(value) != dimension:
                 raise ValueError("invalid vector sequence")
-            return [float(item) for item in value]
-        raise ValueError("unsupported vector representation")
+            decoded = [float(item) for item in value]
+        else:
+            raise ValueError("unsupported vector representation")
+        if not all(math.isfinite(item) for item in decoded):
+            raise ValueError("vector has a non-finite component")
+        return decoded
+
+    @staticmethod
+    def _embedding_score(metric: str, left: Sequence[float], right: Sequence[float]) -> float:
+        """Return a finite, higher-is-better score for the frozen metric.
+
+        ``l2`` is converted to inverse Euclidean distance so S10's common
+        descending rank policy and default threshold of ``0.0`` remain valid
+        without silently changing the namespace's metric to cosine.
+        """
+
+        if metric == "cosine":
+            return RetrievalService._cosine(left, right)
+        if len(left) != len(right):
+            raise ValueError("embedding dimensions differ")
+        if metric == "inner_product":
+            score = math.fsum(a * b for a, b in zip(left, right, strict=True))
+        elif metric == "l2":
+            squared_distance = math.fsum((a - b) * (a - b) for a, b in zip(left, right, strict=True))
+            if squared_distance < 0 or not math.isfinite(squared_distance):
+                raise ValueError("invalid l2 distance")
+            score = 1.0 / (1.0 + math.sqrt(squared_distance))
+        else:
+            raise ValueError("unsupported distance metric")
+        if not math.isfinite(score):
+            raise ValueError("invalid metric score")
+        return score
 
     @staticmethod
     def _cosine(left: Sequence[float], right: Sequence[float]) -> float:
         if len(left) != len(right):
             raise ValueError("embedding dimensions differ")
-        dot = sum(a * b for a, b in zip(left, right, strict=True))
-        left_norm = math.sqrt(sum(value * value for value in left))
-        right_norm = math.sqrt(sum(value * value for value in right))
+        dot = math.fsum(a * b for a, b in zip(left, right, strict=True))
+        left_norm = math.sqrt(math.fsum(value * value for value in left))
+        right_norm = math.sqrt(math.fsum(value * value for value in right))
+        if not all(math.isfinite(value) for value in (dot, left_norm, right_norm)):
+            raise ValueError("invalid cosine score")
         if left_norm == 0 or right_norm == 0:
             return 0.0
-        return dot / (left_norm * right_norm)
+        score = dot / (left_norm * right_norm)
+        if not math.isfinite(score):
+            raise ValueError("invalid cosine score")
+        return score
 
     @staticmethod
     def _candidate_search_text(row: Mapping[str, Any]) -> str:
@@ -827,6 +946,9 @@ class RetrievalService:
             "  AND proof.index_generation=r.index_generation "
             "  AND proof.expected_count=proof.actual_count "
             "  AND proof.actual_count=proof.matched_count "
+            "  AND "
+            + _PROOF_COMPLETE_SET_PREDICATE
+            + " "
             "  AND generation.artifact_type=r.generation_artifact_type "
             "  AND generation.validation_disposition='full_valid' "
             "  AND item.lifecycle_state='active' AND item.deleted_at IS NULL "
@@ -1088,7 +1210,21 @@ class RetrievalService:
             if not material.available:
                 item.result.inflation_status = "missing"
                 continue
+            root_granularity = material.granularity
+            if root_granularity is None:
+                root_granularity = self._infer_granularity(root["block_or_unit_id"])
+            if root_granularity != 0:
+                # An artifact body that contradicts the g=0 vector coordinate
+                # is not safe to pass off as document-level context.
+                item.result.inflation_status = "missing"
+                continue
             attached_generations.add(generation)
+            item.result.inflation_root_coordinate = GenerationScopedCoordinate(
+                generation_artifact_uuid=generation,
+                unit_id=str(root["block_or_unit_id"]),
+                granularity=0,
+                channel="original",
+            )
             content = material.content
             if content is not None and len(content) > self._inflation_per_root_max_chars:
                 item.result.inflation_root_content = content[: self._inflation_per_root_max_chars]
@@ -1152,7 +1288,7 @@ class RetrievalService:
                 truncated = True
                 break
             focus, focus_chars, focus_truncated = self._pack_segment(
-                tier="focus_fragment",
+                tier="document_root" if result.granularity == 0 else "focus_fragment",
                 coordinate=result.coordinate,
                 content=result.payload_content,
                 content_ref=result.payload_content_ref,
@@ -1168,7 +1304,13 @@ class RetrievalService:
                 text_parts.append(focus.content)
             truncated = truncated or focus_truncated
             if result.inflation_status in {"attached", "truncated"}:
-                root_coordinate = result.coordinate.model_copy(update={"channel": "original", "granularity": 0})
+                root_coordinate = result.inflation_root_coordinate
+                if root_coordinate is None:
+                    # A root without its own coordinate would create false
+                    # provenance in the context pack.  Preserve the result,
+                    # but make the omitted enhancement observable.
+                    truncated = True
+                    continue
                 root, root_chars, root_truncated = self._pack_segment(
                     tier="document_root",
                     coordinate=root_coordinate,
