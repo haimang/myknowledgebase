@@ -11,7 +11,7 @@ import sqlite3
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from src.persistence.migration_runner import (
     apply_migrations,
@@ -41,9 +41,18 @@ class SqliteUnitOfWork:
 class SqlitePersistence:
     """One in-process write authority guarded by an asyncio lock."""
 
-    def __init__(self, database_path: Path, migration_directory: Path) -> None:
+    def __init__(
+        self,
+        database_path: Path,
+        migration_directory: Path,
+        *,
+        vector_backend: Literal["deterministic_exact", "native_ann"] = "deterministic_exact",
+    ) -> None:
+        if vector_backend not in {"deterministic_exact", "native_ann"}:
+            raise ValueError("vector_backend is unsupported")
         self.database_path = database_path
         self.migration_directory = migration_directory
+        self.vector_backend = vector_backend
         self._write_lock = asyncio.Lock()
         self._connection: sqlite3.Connection | None = None
 
@@ -81,16 +90,27 @@ class SqlitePersistence:
 
     async def readiness(self) -> dict[str, bool]:
         try:
-            connection = self._connect()
-            migrations = discover_migrations(self.migration_directory)
-            schema_ok = await asyncio.to_thread(verify_migrations, connection, migrations)
-            # The portable local profile transparently performs relational vector
-            # scans. Production requires the native-vector Turso capability.
+            # SQLite exposes one connection to this single-writer profile.
+            # Readiness verification touches that connection too, so it must
+            # share the transaction lock; otherwise concurrent claims can race
+            # a PRAGMA/schema query against BEGIN IMMEDIATE and falsely fence
+            # healthy work as not-ready.
+            async with self._write_lock:
+                connection = self._connect()
+                migrations = discover_migrations(self.migration_directory)
+                schema_ok = await asyncio.to_thread(verify_migrations, connection, migrations)
+                vector_ready = self._vector_backend_ready(connection)
+            # ``native_vector`` is the fixed S15 component name.  It reports
+            # readiness of the explicitly selected vector-serving backend, not
+            # an inference from a similarly named SQLite B-tree.  The local
+            # deterministic backend is an intentional exact-scan profile;
+            # deployments that select native ANN fail closed here unless a
+            # native adapter owns the probe.
             return {
                 "db_primary": True,
                 "schema_migration": schema_ok,
                 "concurrent_writes": True,
-                "native_vector": True,
+                "native_vector": vector_ready,
             }
         except Exception:
             return {
@@ -99,6 +119,21 @@ class SqlitePersistence:
                 "concurrent_writes": False,
                 "native_vector": False,
             }
+
+    def _vector_backend_ready(self, connection: sqlite3.Connection) -> bool:
+        if self.vector_backend == "deterministic_exact":
+            # RetrievalService owns this portable exact-vector scan.  Its
+            # readiness is an explicit deployment declaration, never evidence
+            # that the compatibility `embedding` B-tree is ANN-capable.
+            return True
+
+        # This adapter is backed by Python's stock sqlite3 driver.  The schema
+        # deliberately creates a compatibility index with the same name used
+        # by libSQL, so index-name presence is insufficient evidence.  Native
+        # vector/ANN deployments must use their provider adapter and probe its
+        # vector operation there; stock SQLite must remain not-ready.
+        del connection
+        return False
 
     async def close(self) -> None:
         if self._connection is not None:
