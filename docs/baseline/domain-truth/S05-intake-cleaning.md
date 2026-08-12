@@ -31,7 +31,13 @@
 
 > **D02状态校准声明**：D02-v1.0已镜像CandidateSet与ExecutionGate状态、相关正交Outcome及`T-O-86..92`校准纪律；本版不改变四类source、capability surface、mandatory preflight、allowlist或ExecutionGate语义。Acquisition result、CandidateSet staging、PreflightOutcome、ExecutionGate和Execution status继续分账；S05 exact capability key是S03 manifest identity，早期coarse process family不构成alias。clean curation与mass-scatter discard/loss归S05/S06/S02，gate action exact enum归S05/S12；它们是下游设计而非D02 owner-gate，不进入S05-v1.1。
 
+> **S06校准声明**：`S06-v1.0`消费 exact admitted clean Artifact + Revision，不重新 fetch/clean，不写 Intake lifecycle。v1 完整 clean curation / inspection 编辑闭环 **不因 S06 扩展为生产主路径**（`T-O-93`）；S05 既有 Gate 最小面可保留。S06 ProcessCommand materialize 后 selected clean 冻结；S05 不得在 S06 retry 中热切 binding。S06 success 不替代 S04 serving。
+
+> **S12校准声明**：`S12-v1.0` 兑现 Gate decision 原子事务（TX-08）、outbox resume、binding 持久化；不新增 S05 状态机。
+
 ---
+
+> **S13校准声明**：`S13-v1.0` 冻结 v1 本地 `object_root` + `ObjectStorePort`、`mkbobj:v1` handle、team-scoped CAS、bytes-first、同库 catalog/ref/purpose、verify-on-read、周期 GC 与 identity readiness。本文件业务语义不变；对象 I/O 必须经 S13 Port，禁止 path/R2 key 进入契约。
 
 ## 1. Domain 介绍
 
@@ -853,7 +859,8 @@ S05 definitions/capabilities
 
 | 下游 | 必须承接、但不由S05冒充冻结的内容 |
 |---|---|
-| `S06-S09` | clean Artifact→Block/Construction/Embedding/Index exact contract与publication proof |
+| `S06` | clean Artifact→structure_document/projection exact contract（已由S06-v1.0冻结） |
+| `S07-S09` | Construction/Embedding/Index exact contract与publication proof |
 | `S11/S14` | model/prompt/provider registry、fallback、cost与determinism policy |
 | `S12` | 四组职责的exact Turso DDL/index/transaction/outbox/repair与capacity benchmark |
 | `S13` | local logical handle/backend/atomic write、staging/orphan/reference-protected GC |
@@ -874,3 +881,6 @@ S05 以严格、确定、可复验的source与clean contract把任意外部输�
 |---|---|---|---|---|
 | `S05-v1.0` | `2026-07-16` | `MKB owner + Codex` | `accepted` | 吸收Q1-Q10与`T-O-49..76`最终修订；冻结四类source kind、typed input/output、canonicalization/CandidateSet、mandatory preflight、最小allowlist/validator、ExecutionGate/ReviewTarget/Decision、exact binding、四窗口recovery与greenfield ReferenceAnchor边界。 |
 | `S05-v1.1` | `2026-07-18` | `MKB owner + Codex` | `accepted / D02-state-calibrated` | 保持S05 truth与v1 scope不变；分离Acquisition result、CandidateSet staging、PreflightOutcome、Gate与Execution状态；明确S05 exact capability key优先于早期coarse family；修正CandidateSet合法边表述，curation/loss policy按D02-v1.0移交S05/S06/S02。 |
+| `S05-v1.1-cal` | `2026-08-11` | `MKB owner + Codex` | `accepted / S13-calibrated` | 接收S06-v1.0：S06消费admitted clean且input digest后冻结；完整clean curation产品不因S06扩为v1主路径；Gate最小面可保留。 |
+| `S05-v1.1-cal-s12` | `2026-08-11` | `MKB owner + Codex` | `accepted / S13-calibrated` | 接收S12-v1.0：TX-08/outbox；S05语义不变。 |
+| `S05-v1.1-cal-s13` | `2026-08-11` | `MKB owner + Codex` | `accepted / S13-calibrated` | 接收S13-v1.0：staging port/handle/gate evidence 引用保护落地。 |

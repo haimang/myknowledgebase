@@ -6,7 +6,7 @@
 > **文档状态**：`accepted / D01+S02+S04+S05+D02-state-calibrated`（S01域内真相已获owner接受，并已按runtime、Task、Intake、clean/preflight/HITL与状态族边界完成校准；全系统truth layer尚未frozen）
 > **Truth 版本**：`S01-v1.5`
 > **日期**：`2026-07-18`
-> **权威输入**：Owner-gated Q1–Q26、`D01-v1.4`、`S02-v1.3`、`S03-v1.3`、`S04-v1.2`、`S05-v1.1`、S06已冻结`T-O-77..85`、`03-nano/workers/skill-core`代码事实与`legacy-family/` reference anchors
+> **权威输入**：Owner-gated Q1–Q26、`D01-v1.4`、`S02-v1.3`、`S03-v1.3`、`S04-v1.2`、`S05-v1.1`、`S06-v1.0`、`03-nano/workers/skill-core`代码事实与`legacy-family/` reference anchors
 > **上游索引**：`docs/baseline/spec-index.md`
 > **上游架构真相**：`docs/baseline/domain-truth/D01-task-execution-process-flow.md`（`D01-v1.4`）
 > **下游消费者**：`S02` Task API、`S03` Workflow、`S04` Intake Asset Lifecycle、`S12` Persistence、`S15` Observability、`S16` Security、跨系统拓扑 `17`
@@ -23,7 +23,13 @@
 
 > **v1.5 状态校准声明**：本版接收D02-v1.0对既有冻结事实的共有域镜像及`T-O-86..92`校准纪律，不改变S01公共Contract。上游可见状态仍只有S02 Task六态；`action_required`、result readiness、TaskItem outcome、soft-delete visibility、Execution phase/waiting、Process retry与Intake lifecycle全部是正交事实。S01不新增公共状态、URI或权限，也不允许caller利用任一projection反向推进内部状态。
 
+> **S06校准声明**：`S06-v1.0`允许 Task-scoped **只读** generation-artifacts / pointers 投影（`T-O-79`）；不开放 Execution/Process 写面、不开放用户 generation 精修产品路径。Generation 历史不是 Task 状态机。
+
+> **S12校准声明**：`S12-v1.0` 兑现 Task+Audit 原子创建（TX-01）与 team-scoped 持久化；公共 Contract 不暴露 SQL/Turso。
+
 ---
+
+> **S13校准声明**：`S13-v1.0` 冻结 v1 本地 `object_root` + `ObjectStorePort`、`mkbobj:v1` handle、team-scoped CAS、bytes-first、同库 catalog/ref/purpose、verify-on-read、周期 GC 与 identity readiness。本文件业务语义不变；对象 I/O 必须经 S13 Port，禁止 path/R2 key 进入契约。
 
 ## 1. Domain 介绍
 
@@ -856,3 +862,6 @@ S01 的 contract 已接受，但实现尚未开始；下列事项仍需对应 sp
 | `S01-v1.3` | `2026-07-15` | `MKB owner + Codex` | `accepted / D01+S02+S04-calibrated` | 接收S04-v1.0：将document.* intents/document_uuid与Source/Document/Version资源口径校准为intake.*、intake_item_uuid和五类Intake identities；single/scatter改以Snapshot/Membership/ChangeSet表达，rebuild不创建IntakeRevision。 |
 | `S01-v1.4` | `2026-07-16` | `MKB owner + Codex` | `accepted / D01+S02+S04+S05-calibrated` | 接收S05-v1.0：登记mandatory preflight为内部Process capability；human review为Execution-owned gate；Task polling增加bounded action_required/read/decision语义面但继续禁止外部Execution/Process写；补充gate supporting truth、authority和验收边界。 |
 | `S01-v1.5` | `2026-07-18` | `MKB owner + Codex` | `accepted / D02-state-calibrated` | 不改变MKB Contract或状态enum；明确Task status、result readiness、TaskItem outcome、action_required与soft-delete正交，继续禁止caller把Execution/Process/phase/Gate/Intake状态写回公共Task面。 |
+| `S01-v1.5-cal` | `2026-08-11` | `MKB owner + Codex` | `accepted / S06-calibrated` | 接收S06-v1.0：Task-scoped generation只读投影；无generation写面/精修产品。 |
+| `S01-v1.5-cal-s12` | `2026-08-11` | `MKB owner + Codex` | `accepted / S13-calibrated` | 接收S12-v1.0：Task+Audit原子与team持久化由S12兑现。 |
+| `S01-cal-s13` | `2026-08-11` | `MKB owner + Codex` | `accepted / S13-calibrated` | 接收S13-v1.0：无公网 object API；payload 禁正文/path。 |

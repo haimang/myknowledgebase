@@ -14,7 +14,7 @@
 >
 > **冻结来源**：`qna-truth/D02.md v1.0`；`T-O-86..92`
 >
-> **权威输入**：`D01-v1.4`、`S01-v1.5`、`S02-v1.3`、`S03-v1.3`、`S04-v1.2`、`S05-v1.1`、S06 `T-O-77..85`
+> **权威输入**：`D01-v1.4`、`S01-v1.5`、`S02-v1.3`、`S03-v1.3`、`S04-v1.2`、`S05-v1.1`、`S06-v1.0`、`S12-v1.0`（`T-O-97..110`）
 >
 > **词汇权威**：`spec-glossary.md v1.4`
 >
@@ -123,6 +123,8 @@ durable Intake/S06/S09 truth survives runtime cleanup
 - D02以“共有域”为名替下游冻结业务算法、kind全集、API或DDL。
 
 ---
+
+> **S13校准声明**：`S13-v1.0` 冻结 v1 本地 `object_root` + `ObjectStorePort`、`mkbobj:v1` handle、team-scoped CAS、bytes-first、同库 catalog/ref/purpose、verify-on-read、周期 GC 与 identity readiness。本文件业务语义不变；对象 I/O 必须经 S13 Port，禁止 path/R2 key 进入契约。
 
 ## 1. Domain State Ledger（规范）
 
@@ -243,9 +245,9 @@ ProcessOutcome的`outcome_status=succeeded/failed/cancelled`及`retryability=ret
 | `D02-DR002` | embedding generation与index write的exact Process key/事务cutoff | S08/S09 | `vectorizing_indexing`只可作phase；未冻结前不得冒充exact capability | `deferred / non-blocking` |
 | `D02-DR003` | IntakeSource `accepts_new_snapshots`的reopen权限与治理 | S04/S16 | 它是typed admission fence，不新增Source lifecycle或failed Snapshot | `deferred / non-blocking` |
 | `D02-DR004` | Membership decision及Gate action的exact持久enum/CHECK | S04/S05 | 现有语义与状态族不变；不得从prose猜DDL spelling | `deferred / non-blocking` |
-| `D02-DR005` | S06 artifact type/bundle、node/edge/anchor/block exact kind | S06 | GenerationArtifact/Schema foundation不是StateFamily；开放kind不得进入runtime contract | `handoff / D02 hold released` |
-| `D02-DR006` | clean curation、mass-scatter discard/loss、user generation retry | S05/S06/S02 | 必须复用现有六StateFamily与causal new Task/Execution；不得原位编辑RAG artifact | `handoff / non-blocking` |
-| `D02-DR007` | S12-S15物理表、retention、recovery扫描与运营实现 | S12-S15 | 物理事实不得成为业务状态SSOT；恢复只依赖durable truth/fence/outbox | `deferred / non-blocking` |
+| `D02-DR005` | S06 artifact type/bundle、node/edge/anchor/block exact kind | S06 | GenerationArtifact/Schema foundation不是StateFamily；开放kind不得进入runtime contract | `closed by S06-v1.0`：`structure_document`/`retrieval_block_projection`/`structure_validation_report`；`mkb.structure_document@1` node_kind闭集；generation-local coordinates（`T-O-94..95`） |
+| `D02-DR006` | clean curation、mass-scatter discard/loss、user generation retry | S05/S06/S02 | 必须复用现有六StateFamily与causal new Task/Execution；不得原位编辑RAG artifact | `closed for S06 v1`：完整HITL/用户generation精修 out-of-scope（`T-O-93/96`）；mass-scatter loss仍归Workflow requiredness；未来HITL须reopen |
+| `D02-DR007` | S12-S15物理表、retention、recovery扫描与运营实现 | S12-S15 | 物理事实不得成为业务状态SSOT；恢复只依赖durable truth/fence/outbox | `partial / S12+S13-v1.0`：关系主库+对象local CAS/ref/GC/readiness已冻；S14-S15数值/runbook与R2仍defer |
 
 D02-v1.0不存在未关闭的D02宪法冲突。上表是明确的下游责任移交，不是待D02继续提问的owner-gate。
 
@@ -271,12 +273,14 @@ D02不冻结某一业务域的next-step算法。相关下游Truth层决定其Wor
 
 ### 3.2 S06门处理
 
-D02此前对S06 Q4-Q6设置的“等待共有状态宪法与ledger协议”前置门，随D02-v1.0冻结而解除。该解除只表示：
+D02此前对S06 Q4-Q6设置的前置门已随D02-v1.0解除；**S06-v1.0** 已冻结并回填本ledger：
 
-- S06可以从`T-O-93`继续；
-- S06必须复用六StateFamily和本ledger的state-vs-fact边界；
-- S06 artifact/node/curation/retry具体答案仍归S06/S02/S05/S08-S09，不由D02代答；
-- 原Q4-Q6草稿必须基于D02-v1.0重新收紧，不能恢复被退回的混合问题。
+- GenerationArtifact / Invocation / per-type current pointer 仍为正交 typed facts，非 StateFamily；
+- 自动生产路径 + Command/input digest freeze（`T-O-93`）；
+- structure_document 树 + anchors + generation-local coordinates + 分账 projection（`T-O-94`）；
+- 首版 concrete schema 随 Spec bootstrap（`T-O-95`）；
+- 唯一 accepted + 仅自动 retry；用户 generation 精修 defer（`T-O-96`）；
+- 完整 HITL 不在 S06 v1；不得新增 reviewing 类 StateFamily。
 
 ### 3.3 后续共同校准流程
 
@@ -413,9 +417,11 @@ Source descriptor
 | `domain-truth/S03-workflow-engine.md v1.3` | Execution/Process exact状态、phase/reason、claim/retry/recovery |
 | `domain-truth/S04-intake-asset-lifecycle.md v1.2` | IntakeItem lifecycle、CandidateSet acceptance、pointers/cleanup |
 | `domain-truth/S05-intake-cleaning.md v1.1` | Candidate producer、PreflightOutcome与ExecutionGate |
-| `qna-truth/S06.md v0.7` | S06 `T-O-77..85`及D02 hold解除后的handoff |
-| `spec-glossary.md v1.4` | canonical状态与正交事实词汇 |
-| `spec-index.md v0.24` | baseline编排、状态与freeze checklist |
+| `qna-truth/S06.md v0.9` | S06 Q1–Q6 / `T-O-77..85`、`T-O-93..96` |
+| `domain-truth/S06-lsrag-structurizer.md v1.0` | S06 正式 Spec：generation 账本、structure contract、自动路径 |
+| `domain-truth/S12-turso-persistence.md v1.0` | S12 正式 Spec：单主库、TX/outbox/claim、CW+vector |
+| `spec-glossary.md` | canonical状态与正交事实词汇 |
+| `spec-index.md` | baseline编排、状态与freeze checklist |
 
 ### 6.2 修订历史
 
@@ -425,3 +431,6 @@ Source descriptor
 | `D02-v0.2` | `2026-07-18` | `MKB owner + Codex` | `calibration applied / not frozen` | 完成D01-v1.4、S01-v1.5、S02-v1.3、S03-v1.3、S04-v1.2、S05-v1.1及S06-v0.6状态边界回填。 |
 | `D02-v0.3` | `2026-07-19` | `MKB owner + Codex` | `Round 1 Truth frozen / Round 2 gate` | 冻结`T-O-86..89`：共有域宪法、六StateFamily、下游执行cutoff与Truth镜像义务。 |
 | `D02-v1.0` | `2026-08-10` | `MKB owner + Codex` | `frozen` | Owner要求直接收口；冻结`T-O-90..92`，采用四层结构、六项镜像块与双向漂移协议；将剩余问题移交下游、waive Round 3并关闭D02 campaign。 |
+| `D02-v1.0-cal` | `2026-08-11` | `MKB owner + Codex` | `frozen / S06-calibrated` | 回填S06-v1.0：关闭DR005/DR006中S06可决部分；§3.2记录generation/pointer/structure contract；不改变六StateFamily。 |
+| `D02-v1.0-cal-s12` | `2026-08-11` | `MKB owner + Codex` | `frozen / S12-calibrated` | 回填S12-v1.0：物理机制服务六StateFamily；vector/outbox非SSOT；DR007部分关闭。 |
+| `D02-v1.0-cal-s13` | `2026-08-11` | `MKB owner + Codex` | `frozen / S13-calibrated` | 接收S13-v1.0：physical convergence 对象侧合同；DR007 部分关闭。 |

@@ -28,9 +28,15 @@
 
 > **S05校准声明**：S05-v1.0不增加Task状态。Execution因human gate进入`waiting`时，Task继续投影为`running`并提供bounded`action_required`；gate read/decision以Task-scoped受控subresource表达，不暴露或允许直接修改Execution/Process。Required gate rejection按既有single/scatter all-required规则归约，不增加`reviewing/partially_succeeded`状态。
 
-> **D02状态校准声明**：D02-v1.0已镜像Task六态及合法边，并冻结`T-O-86..92`；Task `status`、result readiness、TaskItem outcome、`action_required`与soft-delete visibility继续是五类正交事实。S02-v1.3不增加状态、不改变合法边，也不从D02 non-normative Appendix生成公共API；GenerationArtifact历史读取仍须在S06关闭后另行校准，当前不得借其开放Execution/Process写面。
+> **D02状态校准声明**：D02-v1.0已镜像Task六态及合法边，并冻结`T-O-86..92`；Task `status`、result readiness、TaskItem outcome、`action_required`与soft-delete visibility继续是五类正交事实。S02-v1.3不增加状态、不改变合法边，也不从D02 non-normative Appendix生成公共API。
+
+> **S06校准声明**：`S06-v1.0` 冻结 Task-scoped generation-artifacts/pointers **只读** surface（`T-O-79`）；不开放 Execution/Process 写面、不开放用户 generation 精修产品。Generation 历史与 current pointer 不是 Task 六态。配置/内容重做仍走 full retry generation 或 causal rebuild，不复活终态 tree 内多轮 accepted structure。
+
+> **S12校准声明**：`S12-v1.0` 兑现 Task 六态 CAS（TX-02）、Task+Audit 原子创建、restart 表持久化；不新增 Task 状态。
 
 ---
+
+> **S13校准声明**：`S13-v1.0` 冻结 v1 本地 `object_root` + `ObjectStorePort`、`mkbobj:v1` handle、team-scoped CAS、bytes-first、同库 catalog/ref/purpose、verify-on-read、周期 GC 与 identity readiness。本文件业务语义不变；对象 I/O 必须经 S13 Port，禁止 path/R2 key 进入契约。
 
 ## 1. Domain 介绍
 
@@ -756,3 +762,6 @@ S02 将 Task 固定为可轮询、可线性化、可散射聚合且可完整追�
 | `S02-v1.1` | `2026-07-15` | `MKB owner + Codex` | `accepted / S04-calibrated` | 接收S04-v1.0：TaskItems与fan-in绑定SnapshotMembership/ChangeSet；canonical link改为IntakeItem/Revision；atomic scope改为`atomic_intake_item`与`intake.rebuild`；cancel/deactivate/delete、serving proof与lineage词汇对齐。 |
 | `S02-v1.2` | `2026-07-16` | `MKB owner + Codex` | `accepted / S05-calibrated` | 接收S05-v1.0：Task六态不变；Execution waiting投影为running+action_required；新增Task-scoped gate list/get/decide语义、safe ReviewTarget projection、stale/idempotency边界与required rejection collect-all归约。 |
 | `S02-v1.3` | `2026-07-18` | `MKB owner + Codex` | `accepted / D02-state-calibrated` | 不改变六态与合法边；明确Task status、result readiness、TaskItem outcome、action_required和soft-delete五轴分账，禁止组合状态与内部Execution/Process写面；S06 artifact历史API继续由S06关闭后按公共边界校准。 |
+| `S02-v1.3-cal` | `2026-08-11` | `MKB owner + Codex` | `accepted / S06-calibrated` | 接收S06-v1.0：确认Task-scoped generation只读投影边界；generation非Task状态；用户精修defer；重做走既有retry/rebuild。 |
+| `S02-v1.3-cal-s12` | `2026-08-11` | `MKB owner + Codex` | `accepted / S13-calibrated` | 接收S12-v1.0：Task CAS/创建事务由S12兑现；状态机不变。 |
+| `S02-cal-s13` | `2026-08-11` | `MKB owner + Codex` | `accepted / S13-calibrated` | 接收S13-v1.0：无公网 object API；payload 禁正文/path。 |

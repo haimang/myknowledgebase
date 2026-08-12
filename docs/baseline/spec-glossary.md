@@ -4,11 +4,11 @@
 >
 > **文档角色**：跨规格词汇手册、命名边界与对齐登记册
 >
-> **权威输入**：D01-v1.4、S01-v1.5、S02-v1.3、S03-v1.3、S04-v1.2、S05-v1.1、S06冻结QNA `T-O-77..85`、D02-v1.0与D02 QNA `T-O-86..92`
+> **权威输入**：D01-v1.4、D02-v1.0、D03-v1.0（`T-O-141..159`）、D04-v1.1（`T-O-160..179`+S11 reopen）、S01-v1.5、S02-v1.3、S03-v1.3、S04-v1.2、S05-v1.1、S06-v1.0、S07-v1.0、**S11-v1.0（`T-O-180..201`）**、S12-v1.0、S13-v1.0
 >
-> **状态**：`active / D01-S05 state-calibrated / S06 Q1-Q3 registered / D02-v1.0 frozen and registered`
+> **状态**：`active / D01-D04+S01-S07+S11-S13 calibrated`
 >
-> **版本 / 日期**：`v1.4 / 2026-08-10`
+> **版本 / 日期**：`v2.1 / 2026-08-12`
 
 ## 0. 使用规则
 
@@ -275,28 +275,75 @@ Revision 回答“来源业务事实是否改变”；build generation 回答“
 |---|---|---|---|
 | `DerivedAsset` | `frozen category / exact types downstream` | 从exact IntakeRevision经Workflow/Process构建的长期派生对象统称；具体类型必须使用LSRagBlock、ConstructionUnit、VectorRecord等领域名 | 不等于IntakeArtifact、Process output或KnowledgeItem；重建通常创建DerivedGeneration而非IntakeRevision |
 | `ArtifactStorage` / `AssetStorage` | `pending S13` | 保存IntakeArtifact bytes及其他derived asset bytes/locators的基础设施职责名 | 不是业务identity类型；backend变化不得改变Intake UUID或logical refs |
-| `LSRagBlock` | `pending S06` | layered structured content 中带稳定坐标的块 | 必须引用 exact IntakeRevision；不是 IntakeArtifact |
-| `ConstructionUnit` | `pending S07` | original/summary 双通道及 meta fusion 的构造单元 | 从 IntakeRevision/Block 派生；exact schema 由 S07 |
-| `OriginalChannel` | `pending S07` | 检索结果最终 payload 所回溯的原始内容通道 | 引用稳定坐标和 IntakeRevision |
-| `SummaryChannel` | `pending S07` | 用于语义索引的摘要通道 | 只作索引表达；命中后回溯 OriginalChannel |
+| `StructureDocument` | `frozen / S06-v1.0 / T-O-94` | S06 一次 generation 的 original structure truth：single root typed ordered tree + anchors + proofs | 不是 IntakeArtifact；不含权威 summary |
+| `RetrievalBlockProjection` | `frozen / S06-v1.0 / T-O-94` | 从 StructureDocument 派生的检索投影；generation-scoped block coordinates | 不得反向修改 tree；S07–S10 共享坐标 |
+| `LSRagBlock` | `frozen as projection unit / S06` | RetrievalBlockProjection 内带稳定坐标的块（或兼容旧称） | 必须经 structure generation 追溯；不是 IntakeArtifact |
+| `ConstructionUnit` | `frozen / S07-v1.0 / T-O-132` | 与 S06 projection **1:1 对齐**的双通道构造单元（generation-scoped coordinate + OriginalChannel + SummaryChannel）；封装在整包 Construction artifact 内 | 不是独立 Process 成败单元；从 StructureDocument/Projection 派生 |
+| `OriginalChannel` | `frozen / S07-v1.0 / T-O-128/129` | 检索最终 payload 回溯的原文通道；payload 仅 verified clean/structure 切片 | 禁模型写 original；与 Summary 共享 generation-scoped 坐标 |
+| `SummaryChannel` | `frozen / S07-v1.0 / T-O-128/138` | 语义索引用摘要通道；命中后回溯 OriginalChannel | **不在 S06 kernel**；v1 整包 dual-channel 完备才 CAS current |
+| `ConstructionDocument` | `frozen / S07-v1.0 / T-O-135` | S07 整包 envelope artifact：S06 refs、unit 清单、meta 投影 digest、plan/alignment proof | 与 dual_channel_projection 分账 |
+| `DualChannelProjection` | `frozen / S07-v1.0 / T-O-135` | 按 coordinate 枚举 original/summary 通道记录（payload handle+digest、content_full 配方 digest） | S08 消费面；非 vec 队列表 SSOT |
+| `ConstructionSchemaDefinition` | `frozen / S07-v1.0 / T-O-135` | S07 拥有的 immutable construction contract（key/version/digest）；独立于 StructureSchema | readiness 前必须注册 |
+| `ContentFullRecipe` | `frozen / S07-v1.0 / T-O-137` | 确定性 embed 输入文本配方（channel body + S04 投影 meta 闭集头） | 非 identity；S08 可重算对账 |
+| `ConstructMode` | `frozen / S07-v1.0 / T-O-137/139` | ProcessCommand 闭集：`full_construct` \| `metadata_refresh` | 非 step-name；非第二 capability |
 | `EmbeddingSpace` | `pending S08` | model/revision/dimension/metric/normalization 一致的向量空间 | 同一 IntakeRevision 可有多个派生 generation/space |
 | `VectorRecord` | `pending S08-S09` | 与 Block/ConstructionUnit、embedding space 和 filter metadata 绑定的索引记录 | 必须引用 exact IntakeRevision；不是 Process row或 IntakeArtifact |
 | `IndexGeneration` | `frozen lifecycle / exact schema pending S09` | 一组隔离构建、验证、CAS切换、grace后失效的vector index projection代次 | reindex不创建IntakeRevision；失败继续服务旧generation |
 | `RetrievalEligibility` | `frozen fence / exact query pending S09-S10` | team、IntakeItem lifecycle、ServingRevision与IndexGeneration共同形成的查询围栏 | 不能仅由vector是否存在或Task成功决定 |
 
-### 4.1 S06 Round 1 已冻结工作词
+### 4.1 S06 已冻结工作词（S06-v1.0）
 
-| Canonical term | 成熟度 | 定义 | 当前开放边界 |
+| Canonical term | 成熟度 | 定义 | 边界 |
 |---|---|---|---|
-| `GenerationArtifact` | `frozen foundation / T-O-77..79` | S06 generation/repair/retry形成的immutable派生产物记录；不是IntakeArtifact、第四层runtime identity或serving pointer | D02已确认其不是StateFamily；exact artifact_type集合与跨type bundle一致性归S06 |
-| `GenerationInvocation` | `frozen foundation / T-O-77` | 每次模型调用的durable成本与因果记录，保存exact binding、token与结果/错误证据，即使未形成Artifact也存在 | 不是Attempt identity，不拥有claim/retry状态 |
-| `GenerationArtifactCurrentPointer` | `frozen foundation / T-O-78` | 每个`(team, execution, artifact_type)`至多一个、只指向full-valid immutable artifact的CAS selection | artifact type集合、跨pointer原子性尚未冻结 |
-| `StructureSchemaDefinition` | `frozen foundation / T-O-80..82` | S06内部注册、immutable、versioned的完整结构Contract，包含strict shape、kernel、extension与semantic validators；producer/consumer绑定exact key/version/digest | node/edge/anchor/block exact schema归S06及其消费者，不由D02代答 |
-| `DeterministicKernel` | `frozen foundation / T-O-83` | identity、binding、tree/order/coordinate、source fidelity与proof等不可由agent修补的结构真相 | exact字段随StructureSchemaDefinition冻结 |
-| `GovernedExtension` | `frozen foundation / T-O-83..84` | 只有exact schema/profile允许时才可由agent生成新immutable repair artifact并全量复验的扩展面 | v1 profile可将repair budget设为0；不等于人工精修入口 |
-| `StructureNodeKind` | `owner-directed / designing / S06-v0.7` | S06 original structure节点分类轴 | exact core/extension enum未冻结；不得与edge/anchor/block/process kind拼接 |
-| `SourceAnchorKind` | `owner-directed / designing / S06-v0.7` | structure/block回到exact clean/source evidence的grounding分类轴 | exact/approximate与coordinate contract未冻结 |
-| `RetrievalBlockKind` | `owner-directed / designing / S06-v0.7` | 从canonical original structure确定性派生的检索投影分类轴 | exact kinds与S07-S10消费contract未冻结 |
+| `GenerationArtifact` | `frozen / T-O-77..79 / S06-v1.0` | generation/repair/retry 的 immutable 派生产物记录 | 非 Intake/runtime/serving 身份；非 StateFamily |
+| `GenerationInvocation` | `frozen / T-O-77` | 每次模型调用的 durable token/因果账 | 非 Attempt |
+| `GenerationArtifactCurrentPointer` | `frozen / T-O-78 / T-O-96` | `(team, execution, artifact_type)` 唯一 full-valid CAS selection | v1 types：structure_document / retrieval_block_projection / structure_validation_report |
+| `StructureSchemaDefinition` | `frozen / T-O-80..82 / T-O-95` | 内部注册 immutable Contract；首版 key=`mkb.structure_document` version=`1` | readiness 前必须注册 |
+| `DeterministicKernel` | `frozen / T-O-83` | 不可 agent 修补的结构真相 | 见 S06-v1.0 §3.7.3 |
+| `GovernedExtension` | `frozen / T-O-83..84` | schema 声明可 repair 的扩展面 | 非 HITL 入口 |
+| `StructureNodeKind` | `frozen v1 closed set / S06-v1.0` | document/section/paragraph/list/list_item/table/table_row/table_cell/code/quote/media_ref/heading | 新 kind → 新 schema version |
+| `SourceAnchorKind` | `frozen v1 forms / S06-v1.0` | `text_span` 与/或 `element_span`（schema version 声明） | 无 anchor = kernel fail |
+| `lsrag.structurize` | `frozen capability key / S06-v1.0` | S06 首版 Process capability | S03 manifest identity |
+
+### 4.2 D03 仓库与协议层词汇（`T-O-141..159`）
+
+| Canonical term | 成熟度 | 定义 | 边界 |
+|---|---|---|---|
+| `RepositoryLayout` | `frozen / D03-v1.0 / T-O-141` | MKB 单体仓库顶级目录与模块分工宪法 | 不拥有业务状态机/DDL |
+| `ContractsLayer` / `src/contracts/` | `frozen / T-O-152` | 全系统 **typed schema 唯一 SSOT** + 强制校验层；按域分册 | 运行期只认校验后的 typed 对象；冲突以 contracts 为准 |
+| `ContractValidationError` | `frozen / T-O-153` | 消息体未通过 contracts 校验时的失败类型 | 必须抛弃消息体；禁 silent coerce |
+| `PromptGitTree` | `frozen / T-O-146` | `data/prompts/**` git 跟踪的 prompt 正文树 | 版本管理载体 |
+| `PromptHashPointer` | `frozen / T-O-155` | DB 中仅存的 prompt 内容 hash（及可选 path/key） | 禁止 DB 存第二份可漂移正文；运用时 hash 校验 |
+| `WorkflowDefinitionDir` | `frozen / T-O-143` | `src/workflows/`：声明式 Workflow 定义落点 | **不是** Runtime；禁 claim/retry |
+| `RuntimeEngineDir` | `frozen / T-O-143` | `src/runtime/`：Engine/claim/outbox/Process 推进 | 解释 Workflow 定义 |
+| `IntakeAdapterDir` | `frozen / T-O-144` | 顶级 `intake/`：多源源适配 | 非 services 内唯一落点；不写 S04 权威 identity |
+
+### 4.3 D04 物理 schema 词汇（`T-O-160..179`）
+
+| Canonical term | 成熟度 | 定义 | 边界 |
+|---|---|---|---|
+| `PhysicalSchemaConstitution` / `D04` | `frozen / D04-v1.0 / T-O-160` | Turso 主库物理表闭集、列约束、索引与只读 VIEW 宪法 | 不拥有业务状态机合法边 |
+| `MkbTableClosedSet` | `frozen / T-O-194` | v1 **55** 张 `mkb_*` required（D04-v1.1 §2.2；原 52+S11 三表） | 增减须 reopen D04 |
+| `DomainEventLedger` / `mkb_domain_events` | `frozen / T-O-166..167` | 业务变迁 append-only 时间线；**非** 状态 SSOT；与业务同 TX | 禁仅凭 event 当业务成功 |
+| `OpsDiagnosticLog` / `mkb_ops_diagnostic_logs` | `frozen / T-O-166` | 诊断级日志表（smind_logs 降维） | 非 SSOT；可 best-effort |
+| `SecurityAuditEvent` / `mkb_security_audit_events` | `frozen / T-O-177` | admission/安全拒绝审计 | 不进业务表的拒绝写此表 |
+| `VectorNamespace` / `mkb_vector_namespaces` | `frozen / T-O-169` | 向量空间头：model/dim/metric/status | records 必须引用 |
+| `FinalVectorBody` | `frozen / T-O-168` | `mkb_vector_records.embedding` native F32 为 v1 最终向量本体 | 禁 content_full；禁外置 Vectorize 作 v1 可写 SSOT |
+| `VectorizeOutboxKind` | `frozen / T-O-169` | outbox `vectorize_*` 替代 vec_process 队列 | 禁 `mkb_vec_process` |
+| `NativeAnnIndex` | `frozen / T-O-170` | 同库 ANN 索引（如 libsql_vector_idx on embedding） | 算法参数归 S09；index 存在归 D04/S12 readiness |
+
+### 4.4 S11 推理运行时词汇（`T-O-180..201`）
+
+| Canonical term | 成熟度 | 定义 | 边界 |
+|---|---|---|---|
+| `InferenceRuntime` / `src/runtime/inference/` | `frozen / S11-v1.0 / T-O-189/196` | 分能力推理门面：binding、闸、transport policy、写 invocation | **不是** adapter；不推进业务状态机 |
+| `LlmAdapter` / `src/llm_adapters/` | `frozen / T-O-182/189` | 模型供应商对接层（LocalVllm 默认；Gemini 可选） | 禁被 services 直连 |
+| `InferenceCapability` | `frozen / T-O-184/190` | `embed` / `rerank` / `structured_generate` / `text_generate` | 禁万能 run(blob) |
+| `VectorSpaceIsolation` (Layer A) | `frozen / T-O-192/197` | namespace+model+version+dim+adapter 一致 | 内部流转围栏 |
+| `BusinessRetrievalFilter` (Layer B) | `frozen / T-O-198` | team + intake 坐标 + 上游 facet（如 industry-domain） | 不替代 Layer A |
+| `TransportRetryPolicy` | `frozen / T-O-199` | 可重试类有界指数退避；不计入 Process retry_count | 禁 429 换模型 |
+| `InferenceBackpressure` | `frozen / T-O-200` | 并发闸满 → retryable 错误 | 与 claim 正交 |
+| `VectorizeDurability` | `frozen / T-O-201` | outbox + 幂等 records；可重 embed；禁丢意图；无 v1 WAL 表 | embed≠业务成功 |
 
 ---
 
@@ -340,6 +387,8 @@ Revision 回答“来源业务事实是否改变”；build generation 回答“
 - 禁止将JSON payload当作关系、状态机、路由或身份真相；JSON可以是已验证输入、IntakeArtifact表示或derived compiled view。
 - 禁止用 `latest` 暗示 `serving`，或用 `deleted` 暗示 bytes/vector 已物理清空。
 - 禁止把 `Knowledge` 作为营销性前缀提前覆盖 Intake 事实。
+- 禁止跨模块传递未通过 `src/contracts/` 校验的自由 `dict` 作为通信合同（`T-O-152/153`）。
+- 禁止在 DB 中另存可漂移的 prompt 正文副本；仅允许 hash 指针（`T-O-155`）。
 
 ---
 
@@ -389,7 +438,7 @@ Revision 回答“来源业务事实是否改变”；build generation 回答“
 |---|---|
 | Presence | 所有 MKB-owned canonical、runtime、registry、projection、staging、outbox、audit、repair 与业务 migration 表必须包含 `payload_extra` |
 | Exclusions | schema migration bookkeeping、Turso/SQLite 引擎内部表、虚拟向量表、FTS shadow 表和第三方组件私有表继承 `S01-T041` 例外 |
-| Logical type | 非空 JSON object，默认 `{}`；exact Turso type、JSON validity CHECK、size limit 和 serializer 由 S12 冻结 |
+| Logical type | 非空 JSON object，默认 `{}`；exact Turso type、JSON validity CHECK、size limit 和 serializer 由 `S12-v1.0` 冻结 |
 | Permitted use | 调试上下文、provider 非关键字段、尚在实验且不影响业务判断的扩展值 |
 | Forbidden truth | identity、FK/relation、required state、CAS/fencing、proof、auth、idempotency、route condition、indexed filter、public contract、secret、无界正文和 bytes |
 | Immutable rows | `payload_extra` 随宿主 Snapshot/Revision/Membership/definition/transition/audit row 一起不可变；修正必须追加新 truth |
@@ -398,22 +447,55 @@ Revision 回答“来源业务事实是否改变”；build generation 回答“
 | Promotion | 某 key 一旦成为必填、可查询、可路由、可授权或影响状态，必须建立正式列或 versioned SemanticDefinition/ActionDefinition，显式迁移并停止把 extra key 当业务真相 |
 | Governance | S12/S15 应统计 key/size/读取依赖；未注册 key 被 route/filter/state 读取时 fail-loud |
 
+### 7.5 Persistence 词汇（S12-v1.0）
+
+| Canonical term | 成熟度 | 定义 | 禁止误用 |
+|---|---|---|---|
+| `mkb_primary` | `frozen / S12` | 单一 Turso 业务主库逻辑名 | 第二可写业务库 |
+| `PersistencePort` / `UnitOfWork` | `frozen / S12` | domain 访问持久化的唯一合同 | domain 直连 driver |
+| `TransactionalOutbox` | `frozen / S12 / T-O-105` | 与业务同事务的 durable wake 行 | queue ACK=业务成功 |
+| `ClaimFence` | `frozen / S12 / T-O-105` | Process claim 世代/租约校验令牌 | 无 fence 写 Outcome |
+| `SchemaMigrationChain` | `frozen / S12 / T-O-106` | 单一线性 migration + checksum | 多 head / silent IF NOT EXISTS 进化 |
+| `BytesFirstRegistration` | `frozen / S12 / T-O-107` | 先不可变字节+digest，再 TX 登记 handle | row-first 假 handle |
+| `NativeVectorRecord` | `frozen / S12 T-O-110 + D04 T-O-168` | 同库派生向量行；**最终本体** `mkb_vector_records.embedding` F32 + namespaces | 存在≠serving；禁 content_full；禁外置 Vectorize 作 v1 可写 SSOT |
+| `ConcurrentWrites` | `frozen default-on / S12 / T-O-107` | Turso 默认启用的并发写能力面 | 无协调多进程写文件 |
+
+### 7.6 Object Storage 词汇（S13-v1.0）
+
+| Canonical term | 成熟度 | 定义 | 禁止误用 |
+|---|---|---|---|
+| `ObjectStorePort` | `frozen / S13` | domain 访问对象字节的唯一合同（stream/promote/verified read/stat） | domain 直连 pathlib/S3/R2 SDK |
+| `LogicalObjectHandle` / `mkbobj:v1` | `frozen / S13 / T-O-123` | opaque handle：`mkbobj:v1:<team_uuid>:<stored_object_uuid>` | 含 path/digest/bucket/key；对外公网 URL |
+| `StoredObject` | `frozen / S13` | catalog 中的 content-addressed 字节记录（team+sha256+size） | 业务 Artifact identity 本身 |
+| `ObjectReference` | `frozen / S13 / T-O-119` | owner→stored object 的 live 保护边；purpose 闭集 | 扫盘 mtime 当引用 |
+| `ObjectReferencePurpose` | `frozen closed set / S13 / T-O-121` | intake_snapshot/revision_artifact、clean_candidate、gate_evidence、generation_artifact、process_io、operator/backup_hold | 自由字符串 purpose |
+| `BytesFirstRegistration` | `frozen / S12+S13` | 先 promote 得 digest，再 TX 登记 handle/ref | row-first 假 handle |
+| `OrphanObject` | `frozen / S13` | 已 promote 但无 live ref 的 bytes；grace 后可 GC | 当作业务成功 |
+| `MissingObject` | `frozen / S13` | live ref 指向缺失/损坏 bytes；incident | 当作 orphan 静默删 |
+| `ObjectRoot` / `identity.json` | `frozen / S13 / T-O-124` | 本地 CAS 根与 deployment binding | 与 DB 解绑错挂 |
+| `TeamScopedCAS` | `frozen / S13 / T-O-118` | 仅同 team 内 digest dedup 的物理布局 | 跨 team 全局 dedup |
+
+
 ---
 
 ## 8. Cross-Spec Alignment Outcome
 
 | 权威文档 | 校准结果 | 版本 / 状态 |
 |---|---|---|
-| `domain-truth/D01-task-execution-process-flow.md` | 三层状态所有权、exact states、phase/outcome/asset分账；S05 exact intake capabilities；target/vector-index移交对应下游 | `D01-v1.4 / completed` |
-| `domain-truth/S01-skill-worker-integration.md` | Task status/readiness/items/action_required/visibility分账；仍无直接Execution/Process写面 | `S01-v1.5 / completed` |
-| `domain-truth/S02-task-api.md` | 六态不变；五轴Task查询面、gate与required rejection collect-all | `S02-v1.3 / completed` |
-| `domain-truth/S03-workflow-engine.md` | status/phase/wait/outcome/route分账；S05 exact process keys；七表/八态不变 | `S03-v1.3 / completed` |
-| `domain-truth/S04-intake-asset-lifecycle.md` | Source fence/Snapshot completeness/Item三态/staging/pointers/cleanup分账 | `S04-v1.2 / completed` |
-| `domain-truth/S05-intake-cleaning.md` | Acquisition/Preflight/Gate/Execution分账；Candidate合法边与exact capability key校准 | `S05-v1.1 / completed` |
-| `domain-truth/D02-production-state-and-routing.md` | 共有域宪法与状态ledger；六StateFamily、四层结构、六项镜像块和双向漂移协议全部冻结 | `D02-v1.0 / frozen` |
-| `qna-truth/D02.md` | `T-O-86..92`冻结；Q1-Q6完成，Round 3 waived，campaign关闭 | `D02-QNA-v1.0 / frozen` |
-| `qna-truth/S06.md` | `T-O-77..85`稳定；D02 hold已解除，Q4-Q6归S06及相关owner边界重构 | `S06-QNA-v0.7 / active reframe` |
-| `qna-truth/S02.md`、`qna-truth/S03.md` | 保留owner问答历史原词，不作为当前schema/API词汇权威 | `historical / intentionally unchanged` |
+| `domain-truth/D01-task-execution-process-flow.md` | 三层状态所有权；S12 仅物理兑现 | `D01-v1.4 / S12-calibrated` |
+| `domain-truth/S01-skill-worker-integration.md` | Task+Audit 原子由 S12 兑现 | `S01-v1.5 / S12-calibrated` |
+| `domain-truth/S02-task-api.md` | 六态 CAS 由 S12 兑现 | `S02-v1.3 / S12-calibrated` |
+| `domain-truth/S03-workflow-engine.md` | claim/outbox 物理由 S12；状态边仍 S03 | `S03-v1.3 / S12-calibrated` |
+| `domain-truth/S04-intake-asset-lifecycle.md` | TX-05 accept；vector≠lifecycle | `S04-v1.2 / S12-calibrated` |
+| `domain-truth/S05-intake-cleaning.md` | TX-08 gate decision | `S05-v1.1 / S12-calibrated` |
+| `domain-truth/S06-lsrag-structurizer.md` | TX-06 generation；bytes-first | `S06-v1.0 / S12-calibrated` |
+| `domain-truth/S12-turso-persistence.md` | 单主库、TX/outbox/claim、CW+vector、模块；object 表物理 | `S12-v1.0 / S13-calibrated` |
+| `domain-truth/S13-artifact-storage.md` | local CAS、Port、ref/GC、backup 协议 | `S13-v1.0 / accepted` |
+| `domain-truth/D02-production-state-and-routing.md` | 六 StateFamily；S12 物理非 SSOT | `D02-v1.0 / S12-calibrated` |
+| `qna-truth/S12.md` | `T-O-97..110` 全冻；无 Round 4 | `S12-QNA-v1.0 / locked` |
+| `qna-truth/S13.md` | `T-O-111..125` 全冻；无 Round 4 | `S13-QNA-v1.0 / locked` |
+| `qna-truth/S06.md` | S06 formal Spec 证据层 | `locked / S06-v1.0` |
+| `qna-truth/D02.md` | `T-O-86..92` | `frozen` |
 
 所有后续实现与Spec遵守：
 
@@ -437,3 +519,10 @@ Revision 回答“来源业务事实是否改变”；build generation 回答“
 | `v1.2` | `2026-07-18` | 记录D02-v0.2既有Truth校准输出（开放提案仍未冻结）与S06 `T-O-77..85`：登记StateFamily/ControlStatus/BusinessPhase/Outcome/Staging/Selection/Readiness等正交词汇；登记GenerationArtifact/Invocation/StructureSchemaDefinition/kernel/extension；更新D01-S05版本与S06暂停门，开放kind不标为frozen。 |
 | `v1.3` | `2026-07-19` | 接收D02 QNA Round 1 `T-O-86..89`与D02-v0.3：将StateFamily从derived升级为owner-frozen六族宪法；登记D02 State Ledger共有域角色、下游执行cutoff与Truth镜像义务；不提前冻结Q4-Q6的exact镜像块或治理协议。 |
 | `v1.4` | `2026-08-10` | 接收D02-v1.0与QNA `T-O-90..92`：冻结四层ledger结构、StateContractMirrorBlock、CitationDrift/SemanticDrift及同轮双向校准；登记D02 campaign关闭和S06 hold解除，开放S06 kind仍保持designing。 |
+| `v1.5` | `2026-08-11` | 接收S06-v1.0与`T-O-93..96`：冻结StructureDocument/RetrievalBlockProjection、generation账本、mkb.structure_document@1 node_kind闭集与anchor形态；summary仍归S07；HITL完整管线 out-of-scope。 |
+| `v1.6` | `2026-08-11` | 接收S12-v1.0与`T-O-97..110`：登记mkb_primary、UnitOfWork、Outbox、ClaimFence、migration链、bytes-first、NativeVectorRecord、ConcurrentWrites；更新D01–S06/S12 alignment。 |
+| `v1.7` | `2026-08-11` | 接收S13-v1.0与`T-O-111..125`：登记ObjectStorePort、mkbobj、StoredObject、ObjectReference/Purpose、Orphan/Missing、ObjectRoot、TeamScopedCAS；更新D01–S06/S12 alignment 为 S13-calibrated。 |
+| `v1.8` | `2026-08-11` | 接收S07-v1.0与`T-O-126..140`：冻结ConstructionUnit/OriginalChannel/SummaryChannel、ConstructionDocument/DualChannelProjection、ConstructionSchema、ContentFullRecipe、ConstructMode；整包二元成败；summary 仍不在 S06 kernel。 |
+| `v1.9` | `2026-08-11` | 接收D03-v1.0与`T-O-141..159`：登记RepositoryLayout、ContractsLayer、ContractValidationError、PromptGitTree、PromptHashPointer、WorkflowDefinitionDir、RuntimeEngineDir、IntakeAdapterDir。 |
+| `v2.0` | `2026-08-11` | 接收D04-v1.0与`T-O-160..179`：登记PhysicalSchemaConstitution、MkbTableClosedSet、DomainEventLedger、OpsDiagnosticLog、SecurityAuditEvent、VectorNamespace、FinalVectorBody、VectorizeOutboxKind、NativeAnnIndex。 |
+| `v2.1` | `2026-08-12` | 接收S11-v1.0与`T-O-180..201`：InferenceRuntime/LlmAdapter/能力面/双层filter/TransportRetry/Backpressure/VectorizeDurability；MkbTableClosedSet→55。 |

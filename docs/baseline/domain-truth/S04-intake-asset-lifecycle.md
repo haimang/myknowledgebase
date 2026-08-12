@@ -30,7 +30,15 @@
 
 > **D02状态校准声明**：D02-v1.0已镜像Item三态、CandidateSet四态及相关正交事实，并冻结`T-O-86..92`；本版不改变五类Intake identity、十表SSOT、CoreEffect、合法边或latest/serving规则。IntakeSource admission fence、Snapshot completeness、Item lifecycle、Candidate staging、Membership decision、pointer selection和physical cleanup继续分账；Membership exact `decision_kind` spelling归S04/S12，Source reopen治理归S04/S16，均按fail-closed处理并在冻结后回填D02，不从prose猜DDL。
 
+> **S06校准声明**：`S06-v1.0` structure/model/prompt rebuild **不**追加 IntakeRevision；GenerationArtifact 不是第六类 Intake identity，也不是 serving pointer。S06 success 不切换 `serving_revision`；publication 仍需 S07–S09 proof。S06 只绑定 exact accepted Revision + clean Artifact。
+
+> **S07校准声明**：`S07-v1.0` 不改写 Intake identity；filter/context **权威仍在 S04**；S07 仅 digest-locked 投影。construct rebuild **不**追加 IntakeRevision；S07 success 不切 serving。
+
+> **S12校准声明**：`S12-v1.0` 兑现 CandidateSet accept 原子事务（TX-05）、ten-table 物理存放、greenfield migration/readiness；vector 存在不定义 Item lifecycle/serving。
+
 ---
+
+> **S13校准声明**：`S13-v1.0` 冻结 v1 本地 `object_root` + `ObjectStorePort`、`mkbobj:v1` handle、team-scoped CAS、bytes-first、同库 catalog/ref/purpose、verify-on-read、周期 GC 与 identity readiness。本文件业务语义不变；对象 I/O 必须经 S13 Port，禁止 path/R2 key 进入契约。
 
 ## 1. Domain 介绍
 
@@ -705,3 +713,6 @@ S04 将所有外部输入统一提升为可审计的Intake身份、观察、集�
 | `S04-v1.0` | `2026-07-15` | `MKB owner + Codex` | `accepted` | 吸收Q1-Q9与`T-O-30..48`；冻结五类Intake identity、十表schema、semantic/action registries、IntakeCandidateSet acceptance、三态/serving CAS、large-scatter recovery、retention/reindex/purge、greenfield bootstrap/schema evolution/acceptance及ReferenceAnchor边界。 |
 | `S04-v1.1` | `2026-07-16` | `MKB owner + Codex` | `accepted / S05-calibrated` | 接收S05-v1.0：IntakeSource锁定exact SourceKindDefinition；CandidateSet补齐typed evidence/S05 binding/preflight/rejection/exhaustion contract；single/scatter acceptance后按Outcome进入auto或Execution gate；确认review state不进入Intake并补open-gate retention fence。 |
 | `S04-v1.2` | `2026-07-18` | `MKB owner + Codex` | `accepted / D02-state-calibrated` | 保持五类identity、十表、Item三态与CandidateSet合法边不变；明确Source fence、Snapshot completeness、Membership outcome、latest/serving selection和cleanup proof均非Item/runtime状态；Membership exact enum与Source reopen按D02-v1.0移交S04/S12/S16。 |
+| `S04-v1.2-cal` | `2026-08-11` | `MKB owner + Codex` | `accepted / S13-calibrated` | 接收S06-v1.0：structure rebuild不追加Revision；GenerationArtifact非Intake identity；S06 success不切serving。 |
+| `S04-v1.2-cal-s12` | `2026-08-11` | `MKB owner + Codex` | `accepted / S13-calibrated` | 接收S12-v1.0：accept事务与migration/readiness；生命周期语义不变。 |
+| `S04-v1.2-cal-s13` | `2026-08-11` | `MKB owner + Codex` | `accepted / S13-calibrated` | 接收S13-v1.0：Artifact bytes/orphan/cleanup proof substrate。 |

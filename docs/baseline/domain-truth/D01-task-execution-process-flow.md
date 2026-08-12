@@ -3,14 +3,14 @@
 > **项目**：`myknowledgebase`（MKB）
 > **Domain / 子系统**：跨 `D2 / S02-S03` 的任务与执行基础模型
 > **文档性质**：`specification / domain-truth / cross-domain decision`
-> **文档状态**：`accepted architecture direction / S02-S05+D02-state-calibrated`（三层切分由 owner 主动提出；Task lifecycle/API、Intake truth、clean/preflight/HITL与跨域状态族已回流）
+> **文档状态**：`accepted architecture direction / S02-S06+D02-state-calibrated`（三层切分由 owner 主动提出；Task lifecycle/API、Intake truth、clean/preflight/HITL、S06 generation与跨域状态族已回流）
 > **Truth 版本**：`D01-v1.4`
-> **日期**：`2026-07-18`
+> **日期**：`2026-08-11`
 > **作者归属**：`MKB owner` 主动提出切分；`Codex` 负责代码复核、规范化表达与 architecture verdict
 > **形成初稿的权威输入**：Owner 对 `task_uuid / execution_uuid / process_uuid` 的直接裁决、`S01-v1.3`、`S02-v1.1`、`S03-v1.1`、`S04-v1.0`、`S05-v1.0`、`legacy-family/` 的 reference-anchor 生产事实；当前回流版本见D02状态校准声明与修订历史
 > **上游索引**：`docs/baseline/spec-index.md`
 > **上游真相**：`docs/baseline/domain-truth/S01-skill-worker-integration.md`
-> **下游消费者**：`S02` Task API、`S03` Workflow Engine、`S04-S05` Intake/Scatter、`S08-S09` Vector、`S12` Persistence、`S15` Observability、跨系统拓扑 `17`
+> **下游消费者**：`S02` Task API、`S03` Workflow Engine、`S04-S06` Intake/Scatter/Structurizer、`S07-S09` LS-RAG/Vector、`S12` Persistence、`S15` Observability、跨系统拓扑 `17`
 
 > **Origin 声明**：`Task / Execution / Process` 三层切分不是 Codex 从 legacy-family 推导出的命名，也不是对 legacy `job/process` 表的改名复制。它是 **MKB owner 在 S02 讨论中主动提出的重构方案**。本文只负责把 owner 原始裁决整理为可实现、可验收、可回填的 Domain Truth，并以 legacy 的生产代码验证该方案是否覆盖真实故障面。
 
@@ -22,9 +22,15 @@
 
 > **D02 状态校准声明**：D02-v1.0将已经由S02-S05冻结的状态事实镜像为共有域ledger，并冻结`T-O-86..92`，不改变D01三层运行语义。Task/Execution/Process分别继续拥有S02六态、S03 Execution八态与S03 Process八态；phase、Outcome、waiting reason、Task result readiness、TaskItem outcome、Intake lifecycle、CandidateSet staging和ExecutionGate不得合并为第四套runtime状态。S03-v1.3已依据S05-v1.1确认exact capability key是唯一manifest identity；Execution subject/accepted output物理字段归S03/S04/S12，S08/S09 vector/index职责归S08/S09，均为D02-v1.0下游移交而非D02开放门。
 
+> **S06 回流声明**：`S06-v1.0` 不增加第四层运行身份。GenerationArtifact / Invocation / per-type current pointer 是 Execution 作用域内的派生 generation 事实，不是 Task/Execution/Process 状态机。`lsrag.structurize` 仍是 Process capability；S06 success 不单独决定 Task 或 serving。structure rebuild 不制造 IntakeRevision，也不复活终态 Execution。
+
+> **S12 回流声明**：`S12-v1.0` 不增加运行身份。Task/Execution/Process 状态机语义仍由 D01/S02/S03 拥有；S12 仅兑现单主库事务、claim/fence、outbox 后置 wake 与 TX 矩阵。queue/文件/向量均不得成为执行 SSOT。
+
 > **约束级别**：本文中的“必须 / 禁止 / 仅允许”是后续设计与实现的强制约束；“应当”是 D01 verdict 的默认约束，若要偏离必须 reopen D01；“建议 / 可以”不冻结具体实现。本文明确标为“交由 S02/S03 冻结”的状态名、字段名或算法，不得被误读为已定 DDL。
 
 ---
+
+> **S13校准声明**：`S13-v1.0` 冻结 v1 本地 `object_root` + `ObjectStorePort`、`mkbobj:v1` handle、team-scoped CAS、bytes-first、同库 catalog/ref/purpose、verify-on-read、周期 GC 与 identity readiness。本文件业务语义不变；对象 I/O 必须经 S13 Port，禁止 path/R2 key 进入契约。
 
 ## 1. Domain 介绍
 
@@ -362,7 +368,7 @@ source_acquisition
 | `intake.preflight_validate` | 以exact code-owned validator只读校验frozen acquisition/collection/clean evidence | typed`passed|blocked` Outcome与ordered check evidence已提交；runtime错误走Process retry/failed |
 | `intake.accept_snapshot` | 接受sealed CandidateSet并原子提交Snapshot/Membership/ChangeSet与child intent | accepted Snapshot/required set已提交，可重放 |
 | `lsrag.structurize` | 生成目录/逻辑分块/structured representation | structured schema、块坐标与 source coverage 校验通过 |
-| `lsrag.construct` | 生成 layered 内容、summary/original 双通道与 vector-ready units | layered/vector-ready schema、引用和 channel 完整性通过 |
+| `lsrag.construct` | 单文档整包 original/summary 双通道构造（S07-v1.0） | 整包 dual-channel full-valid + construction generation refs/proof；非结构级独立成功 |
 | `lsrag.vectorize_index`（S08/S09待校准的coarse placeholder） | 当前只表示embedding到index写入的能力覆盖，不冻结是否为一个exact Process | 不能以embedding成功代替index publication proof |
 | `index.validate_publication` | 独立验证本次发布集合 | expected/actual 集合、filter metadata、可检索性证明一致 |
 | `intake.physical_purge` | delete/retention后受控清理eligible派生数据 | scope内required substrate cleanup proofs完成 |
@@ -971,3 +977,6 @@ S02-S05已经关闭Task、Workflow、Intake与clean/preflight/HITL语义；仍�
 | `D01-v1.2` | `2026-07-15` | `MKB owner + Codex` | `accepted / S02+S04-calibrated` | 接收S04-v1.0：将Source/Document/Version/manifest资源口径校准为IntakeSource/Snapshot/Item/Revision/Membership；确认Intake不是第四层runtime identity，single/scatter fan-in改以accepted Snapshot/ChangeSet为分母，rebuild不创建Revision。 |
 | `D01-v1.3` | `2026-07-16` | `MKB owner + Codex` | `accepted / S02+S04+S05-calibrated` | 接收S05-v1.0：Preflight归统一Process capability；human review归Execution waiting gate且不新增runtime identity；Execution锁定S05 binding；single/scatter加入preflight、gate和same-Execution resume；修正Execution无retrying状态并更新未决下游边界。 |
 | `D01-v1.4` | `2026-07-18` | `MKB owner + Codex` | `accepted / D02-state-calibrated` | 依据S02-S05已冻结事实完成状态族校准：Task/Execution/Process exact states与phase/outcome/readiness/Intake/Gate分账；以S05 exact capability keys取代早期coarse intake process示例；将Process compaction旧词校准为terminal-summary/cleanup-eligibility；Execution target与S08/S09职责按D02-v1.0明确移交对应下游，不扩大v1。 |
+| `D01-v1.4-cal` | `2026-08-11` | `MKB owner + Codex` | `accepted / S13-calibrated` | 接收S06-v1.0：GenerationArtifact非第四层runtime；structurize仍为Process capability；structure rebuild不改三层身份与Task/serving语义。 |
+| `D01-v1.4-cal-s12` | `2026-08-11` | `MKB owner + Codex` | `accepted / S13-calibrated` | 接收S12-v1.0：持久化兑现三层模型；不改状态机；outbox/claim为物理机制。 |
+| `D01-v1.4-cal-s13` | `2026-08-11` | `MKB owner + Codex` | `accepted / S13-calibrated` | 接收S13-v1.0：确认本地 I/O adapter 与 logical ref；G-11 closed。 |

@@ -14,7 +14,7 @@
 >
 > **Truth 版本**：`S03-v1.3`
 >
-> **上游权威输入**：`D01-v1.4`、`S01-v1.5`、`S02-v1.3`、`S04-v1.2`、`S05-v1.1`、冻结的`qna-truth/S03.md v1.0`（Q1–Q9 / `T-O-12..29`）及S06已冻结`T-O-77..85`
+> **上游权威输入**：`D01-v1.4`、`S01-v1.5`、`S02-v1.3`、`S04-v1.2`、`S05-v1.1`、`S06-v1.0`、冻结的`qna-truth/S03.md v1.0`（Q1–Q9 / `T-O-12..29`）
 >
 > **事实证据**：`legacy-family/` 中 SMCP、Workflow editor/compiler、Clean/RAG Dispatcher、Process tracking、restart 与 atomic scatter 生产实现
 >
@@ -30,7 +30,15 @@
 
 > **D02状态校准声明**：D02-v1.0已镜像Execution/Process八态、合法边与正交事实，并冻结`T-O-86..92`；本版不改变Workflow七表、retry/cancel/recovery或phase registry。状态、phase、waiting reason、ProcessOutcome、route decision和资产状态严格分账；S05 exact intake capability key取代S03早期coarse intake key作为实际manifest identity。Execution ingress subject与acceptance后exact output的物理字段归S03/S04/S12，embedding与index工序拆分归S08/S09；二者是D02下游移交，不再等待D02裁决。
 
+> **S06校准声明**：`S06-v1.0`冻结`lsrag.structurize`业务contract、ProcessCommand+input digest冻结、GenerationArtifact/pointer（非StateFamily）与仅自动retry收敛。S03继续独占Process八态/claim/fence/max-retries与route；S06 leaf只返回ProcessOutcome+generation refs/proof。phase `structurizing`仍只是业务坐标。meta-only/index rebuild跳过structurize须用typed route与exact structure generation ref，禁止step-name字符串匹配。完整HITL不因S06进入S03新状态。
+
+> **S12校准声明**：`S12-v1.0` 兑现 claim/fence/lease、transactional outbox、先commit后wake、七表+executions/processes 物理存放与单一migration；Concurrent Writes 默认启用服务并发claim。S03仍拥有状态边与recovery语义；S12不定义route。
+
+> **S11校准声明**：`S11-v1.0` 冻结 Inference≠Adapter、transport 有界退避（**不计入** Process `retry_count`）、`INFERENCE_BACKPRESSURE`（retryable，与 claim 正交）、禁 silent 换模型。S03 继续拥有 max-retries/retry_wait 账本与 Outcome `retryability` 消费；工序叶调用模型必须经 `runtime.inference`，不得直连 adapter。
+
 ---
+
+> **S13校准声明**：`S13-v1.0` 冻结 v1 本地 `object_root` + `ObjectStorePort`、`mkbobj:v1` handle、team-scoped CAS、bytes-first、同库 catalog/ref/purpose、verify-on-read、周期 GC 与 identity readiness。本文件业务语义不变；对象 I/O 必须经 S13 Port，禁止 path/R2 key 进入契约。
 
 ## 1. Domain 介绍
 
@@ -438,7 +446,7 @@ v1 operator allowlist 至少包含：`eq/ne/lt/lte/gt/gte/exists/not_exists/in_r
 | `intake.preflight_validate` | 以exact PreflightValidator只读校验frozen acquisition/collection/clean evidence | `passed|blocked` Outcome、ordered check evidence与binding digest完整；runtime错误不伪装blocked |
 | `intake.accept_snapshot` | 调用S04 acceptance提交Snapshot/Membership/ChangeSet | accepted Snapshot/required set durable，可重放；truth仍归S04 |
 | `lsrag.structurize` | 结构化/逻辑分块 | exact S06 schema、coverage/coordinates 合法 |
-| `lsrag.construct` | layered/vector-ready 内容构建 | summary/original channels 与引用完整；exact contract归S07 |
+| `lsrag.construct` | 整包 original/summary 双通道构造（S07-v1.0） | 整包 dual-channel full-valid + generation refs/proof；exact contract 归 S07；mode=`full_construct`\|`metadata_refresh` |
 | `lsrag.vectorize_index`（coarse downstream placeholder） | 覆盖embedding与index写入需求 | embedding成功不能代替index publication；是否拆Process由S08/S09冻结 |
 | `index.validate_publication` | 独立验证发布集合 | expected/actual、filter、检索 proof 一致 |
 | `intake.update_metadata` | 更新Intake semantic metadata/filter | versioned semantic/proof完整，必要时追加IntakeRevision |
@@ -1227,3 +1235,6 @@ S03 将 legacy 已验证的声明式 Workflow 与 Process 解耦原理，重建�
 | `S03-v1.1` | `2026-07-15` | `MKB owner + Codex` | `accepted / S04-calibrated` | 接收S04-v1.0：resource bindings与single/scatter targets改为Intake identities；fan-out/fan-in改以Snapshot/ChangeSet为分母；publication/cleanup绑定ServingRevision与Intake asset fence；ProcessCapabilityManifest和BindingSource词义去歧义。 |
 | `S03-v1.2` | `2026-07-16` | `MKB owner + Codex` | `accepted / S05-calibrated` | 接收S05-v1.0：增加preflight leaf capability；Execution waiting reason登记human_review+gate ref；锁定S05 domain binding且resume不热切；single/scatter加入preflight/gate顺序；四个crash窗口纳入统一semantic repair，Workflow七表与runtime exact states不变。 |
 | `S03-v1.3` | `2026-07-18` | `MKB owner + Codex` | `accepted / D02-state-calibrated` | 保持Workflow七表、Execution/Process八态与合法边不变；明确status/phase/wait reason/Outcome/route evidence分账；以S05 exact intake capability keys取代早期coarse process key；校准single ingress subject与acceptance后exact binding叙事，target字段与S08/S09 process粒度按D02-v1.0移交对应下游。 |
+| `S03-v1.3-cal` | `2026-08-11` | `MKB owner + Codex` | `accepted / S13-calibrated` | 接收S06-v1.0：`lsrag.structurize` leaf contract、input digest冻结、generation非状态机、仅自动retry；typed route跳过structurize须用generation ref。 |
+| `S03-v1.3-cal-s12` | `2026-08-11` | `MKB owner + Codex` | `accepted / S13-calibrated` | 接收S12-v1.0：outbox/claim/TX物理兑现；状态机与七表职责不变。 |
+| `S03-v1.3-cal-s13` | `2026-08-11` | `MKB owner + Codex` | `accepted / S13-calibrated` | 接收S13-v1.0：binding 仅 logical handle；禁 absolute path。 |
