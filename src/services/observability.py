@@ -293,8 +293,9 @@ class ObservabilityReadService:
             boundary_params = (cursor_row["occurred_at"], cursor_row["occurred_at"], cursor_row["row_uuid"])
         async with self._persistence.transaction() as tx:
             rows = await tx.fetchall(
-                "SELECT event_uuid,event_type,aggregate,severity,task_uuid,execution_uuid,process_uuid,actor_kind,"
-                "summary,payload_json,occurred_at,recorded_at FROM mkb_domain_events "
+                "SELECT event_uuid,trace_uuid,event_type,aggregate,severity,task_uuid,execution_uuid,process_uuid,"
+                "subject_kind,subject_uuid,actor_kind,summary,payload_digest,occurred_at,recorded_at "
+                "FROM mkb_domain_events "
                 f"WHERE team_uuid=? AND {predicate}{boundary_sql} "
                 "ORDER BY occurred_at DESC,event_uuid DESC LIMIT ?",
                 (team_uuid, *predicate_params, *boundary_params, limit + 1),
@@ -317,15 +318,21 @@ class ObservabilityReadService:
         # They are intentionally absent from the caller-facing Task API.
         return {
             "event_uuid": row["event_uuid"],
+            "trace_uuid": row["trace_uuid"],
             "event_type": row["event_type"],
             "aggregate": row["aggregate"],
             "severity": row["severity"],
             "task_uuid": row["task_uuid"],
             "execution_uuid": row["execution_uuid"],
             "process_uuid": row["process_uuid"],
+            "subject_kind": row["subject_kind"],
+            "subject_uuid": row["subject_uuid"],
             "actor_kind": row["actor_kind"],
             "summary": redact(row["summary"]),
-            "payload": _payload(row["payload_json"]),
+            # The default operator projection deliberately returns only the
+            # immutable digest.  Full event payload requires a separately
+            # governed debug surface and is not part of the v1 read port.
+            "payload_digest": row["payload_digest"],
             "occurred_at": row["occurred_at"],
             "recorded_at": row["recorded_at"],
         }
@@ -349,7 +356,7 @@ class ObservabilityReadService:
             params.extend((cursor_row["occurred_at"], cursor_row["occurred_at"], cursor_row["row_uuid"]))
         async with self._persistence.transaction() as tx:
             rows = await tx.fetchall(
-                "SELECT outbox_id,kind,attempts,last_error,created_at,updated_at FROM mkb_outbox WHERE "
+                "SELECT outbox_id,team_uuid,kind,status,attempts,last_error,created_at,updated_at FROM mkb_outbox WHERE "
                 + " AND ".join(clauses)
                 + " ORDER BY updated_at DESC,outbox_id DESC LIMIT ?",
                 (*params, limit + 1),
@@ -367,7 +374,9 @@ class ObservabilityReadService:
         return [
             {
                 "outbox_id": row["outbox_id"],
+                "team_uuid": row["team_uuid"],
                 "kind": row["kind"],
+                "status": row["status"],
                 "attempts": row["attempts"],
                 "last_error": redact(row["last_error"] or ""),
                 "created_at": row["created_at"],

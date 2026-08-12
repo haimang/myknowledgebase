@@ -118,7 +118,13 @@ async def _seed_runtime(
         "workflow_uuid": uuid7(),
         "workflow_revision_uuid": uuid7(),
     }
-    compiled_digest = stable_digest(definition.model_dump(mode="json"))
+    compiled_digest = stable_digest(
+        {
+            "compiler": "mkb.workflow-compiler.v1",
+            "definition": definition.model_dump(mode="json"),
+            "capability_registry": sorted(definition.required_process_keys),
+        }
+    )
     config_digest = stable_digest({"config": "test"})
     async with persistence.transaction() as tx:
         await tx.execute(

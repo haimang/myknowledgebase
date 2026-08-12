@@ -130,6 +130,26 @@ def canonical_outcome_digest(outcome: ProcessOutcome) -> str:
     return stable_digest(material)
 
 
+def _compiled_workflow_digest(definition: WorkflowDefinition) -> str:
+    """Match the registry compiler digest for an immutable static plan.
+
+    The registry is the durable binding authority; this calculation only
+    selects a reviewed in-process interpreter for an already-bound revision.
+    Keeping the exact compiler envelope here ensures an old execution cannot
+    silently fall through to the active definition merely because its step
+    names happen to overlap.
+    """
+
+    canonical = definition.model_dump(mode="json")
+    return stable_digest(
+        {
+            "compiler": "mkb.workflow-compiler.v1",
+            "definition": canonical,
+            "capability_registry": sorted(definition.required_process_keys),
+        }
+    )
+
+
 class WorkflowRuntime:
     """State machine and durable scheduler for one immutable workflow revision.
 
@@ -145,6 +165,7 @@ class WorkflowRuntime:
         persistence: PersistencePort,
         definition: WorkflowDefinition,
         *,
+        compatibility_definitions: tuple[WorkflowDefinition, ...] = (),
         readiness: ReadinessProbe | Callable[[], Awaitable[bool]] | None = None,
         outcome_committer: ProcessOutcomeCommitter | None = None,
         default_max_retries: int = 3,
@@ -162,13 +183,15 @@ class WorkflowRuntime:
         self.default_max_retries = default_max_retries
         self.default_max_recoveries = default_max_recoveries
         self.retry_delay_seconds = retry_delay_seconds
-        self._steps = {step.step_key: step for step in definition.steps}
-        self._routes_by_source: dict[str, list[WorkflowRouteDefinition]] = {}
-        for route in definition.routes:
-            self._routes_by_source.setdefault(route.from_step_key, []).append(route)
-        for routes in self._routes_by_source.values():
-            routes.sort(key=lambda route: route.priority)
-        self._guards = {guard.guard_key: guard for guard in definition.guards}
+        self._plans_by_compiled_digest: dict[str, WorkflowDefinition] = {}
+        for candidate in (*compatibility_definitions, definition):
+            if candidate.workflow_key != definition.workflow_key:
+                raise ValueError("compatibility definitions must share the loaded workflow_key")
+            compiled_digest = _compiled_workflow_digest(candidate)
+            existing = self._plans_by_compiled_digest.get(compiled_digest)
+            if existing is not None and existing != candidate:
+                raise ValueError("different compatibility definitions share a compiled digest")
+            self._plans_by_compiled_digest[compiled_digest] = candidate
 
     async def materialize_root(self, execution_uuid: str) -> bool:
         """Materialize the start route exactly once and enqueue its durable wake.
@@ -184,9 +207,10 @@ class WorkflowRuntime:
             if execution["status"] == ExecutionStatus.CANCELLING.value:
                 await self._converge_cancellation_tx(tx, execution)
                 return False
-            await self._assert_execution_binding(tx, execution)
-            start = next(step for step in self.definition.steps if step.step_kind is WorkflowStepKind.START)
+            plan = await self._assert_execution_binding(tx, execution)
+            start = next(step for step in plan.steps if step.step_kind is WorkflowStepKind.START)
             decision = self._route_decision(
+                plan=plan,
                 execution=execution,
                 source_step_key=start.step_key,
                 selector=WorkflowOutcomeSelector.ALWAYS,
@@ -199,6 +223,7 @@ class WorkflowRuntime:
                 return False
             changed = await self._apply_routes_tx(
                 tx,
+                plan=plan,
                 execution=execution,
                 decision=decision,
                 source_process=None,
@@ -225,7 +250,8 @@ class WorkflowRuntime:
         claim_token_hash = stable_digest({"claim_token": claim_token})
         async with self.persistence.transaction() as tx:
             candidate = await tx.fetchone(
-                "SELECT p.*, e.trace_uuid, e.status AS execution_status, e.domain_binding_digest "
+                "SELECT p.*, e.trace_uuid, e.status AS execution_status, e.domain_binding_digest,"
+                "e.workflow_uuid,e.workflow_revision_uuid,e.compiled_digest "
                 "FROM mkb_processes AS p JOIN mkb_executions AS e "
                 "ON e.execution_uuid=p.execution_uuid AND e.team_uuid=p.team_uuid "
                 "JOIN mkb_tasks AS t ON t.team_uuid=p.team_uuid AND t.task_uuid=p.task_uuid "
@@ -238,6 +264,11 @@ class WorkflowRuntime:
             )
             if candidate is None:
                 return None
+            # Do not lease a side-effecting Process unless its immutable
+            # revision has a reviewed interpreter in this deployment.  This
+            # closes the gap where an old Execution could be claimed under a
+            # newer graph and only fail after the handler had already run.
+            await self._assert_execution_binding(tx, candidate)
             if candidate["deadline_at"] is not None and candidate["deadline_at"] < now:
                 await self._fail_process_tx(
                     tx,
@@ -759,6 +790,7 @@ class WorkflowRuntime:
                 )
             target = await self._gate_target_for_action_tx(tx, gate_uuid, action)
             execution = await self._execution(tx, gate["execution_uuid"])
+            plan = await self._assert_execution_binding(tx, execution)
             if execution["status"] != ExecutionStatus.WAITING.value or execution["waiting_ref"] != gate_uuid:
                 raise ConflictError("gate-execution-conflict", "Gate is not the current durable execution wait")
             decision_digest = stable_digest(
@@ -794,7 +826,7 @@ class WorkflowRuntime:
             )
             if updated.rowcount != 1:
                 raise ConflictError("gate-revision-conflict", "Execution Gate changed during decision")
-            control = self._control_step()
+            control = self._control_step(plan)
             if action == "approve":
                 await tx.execute(
                     "UPDATE mkb_executions SET status='ready',waiting_reason=NULL,waiting_ref=NULL,next_wake_at=NULL,"
@@ -803,6 +835,7 @@ class WorkflowRuntime:
                 )
                 updated_execution = await self._execution(tx, execution["execution_uuid"])
                 decision = self._route_decision(
+                    plan=plan,
                     execution=updated_execution,
                     source_step_key=control.step_key,
                     selector=WorkflowOutcomeSelector.SUCCEEDED,
@@ -810,6 +843,7 @@ class WorkflowRuntime:
                 )
                 await self._apply_routes_tx(
                     tx,
+                    plan=plan,
                     execution=updated_execution,
                     decision=decision,
                     source_process=None,
@@ -818,6 +852,7 @@ class WorkflowRuntime:
                 )
             elif action == "reject":
                 decision = self._route_decision(
+                    plan=plan,
                     execution=execution,
                     source_step_key=control.step_key,
                     selector=WorkflowOutcomeSelector.FAILED,
@@ -825,6 +860,7 @@ class WorkflowRuntime:
                 )
                 await self._apply_routes_tx(
                     tx,
+                    plan=plan,
                     execution=execution,
                     decision=decision,
                     source_process=None,
@@ -880,7 +916,8 @@ class WorkflowRuntime:
             execution = await self._execution(tx, decision["execution_uuid"])
             if execution["status"] in _TERMINAL_EXECUTION_STATUSES:
                 return False
-            control = self._control_step()
+            plan = await self._assert_execution_binding(tx, execution)
+            control = self._control_step(plan)
             if decision["gate_kind"] != control.control_key:
                 raise MkbError("gate-control-mismatch", "Gate does not belong to the bound workflow control step", 409)
             if decision["action"] == "approve":
@@ -908,6 +945,7 @@ class WorkflowRuntime:
                     "gate-action-route-unavailable", "No declared reclean route exists for this workflow", 409
                 )
             decision_result = self._route_decision(
+                plan=plan,
                 execution=execution,
                 source_step_key=control.step_key,
                 selector=selector,
@@ -915,6 +953,7 @@ class WorkflowRuntime:
             )
             changed = await self._apply_routes_tx(
                 tx,
+                plan=plan,
                 execution=execution,
                 decision=decision_result,
                 source_process=None,
@@ -1031,7 +1070,15 @@ class WorkflowRuntime:
             raise NotFoundError("process-not-found", "Process was not found")
         return row
 
-    async def _assert_execution_binding(self, tx: UnitOfWork, execution: dict[str, Any]) -> None:
+    async def _assert_execution_binding(self, tx: UnitOfWork, execution: dict[str, Any]) -> WorkflowDefinition:
+        """Return the exact static plan pinned by an Execution's digest.
+
+        Registry revision rows are immutable, but the active revision may move
+        while an outbox wake or Process lease for an older execution remains
+        outstanding.  Resolve the execution's stored digest against reviewed
+        compatibility declarations, never against the currently active graph.
+        """
+
         revision = await tx.fetchone(
             "SELECT r.workflow_revision_uuid,r.compiled_digest,w.workflow_key FROM mkb_workflow_revisions AS r "
             "JOIN mkb_workflow_registry AS w ON w.workflow_uuid=r.workflow_uuid "
@@ -1047,32 +1094,44 @@ class WorkflowRuntime:
             raise MkbError(
                 "workflow-binding-mismatch", "Execution binding does not match the loaded immutable workflow", 409
             )
+        plan = self._plans_by_compiled_digest.get(str(execution["compiled_digest"]))
+        if plan is None:
+            raise MkbError(
+                "workflow-compiled-plan-unavailable",
+                "No reviewed runtime plan is available for the execution's immutable workflow revision",
+                503,
+            )
         rows = await tx.fetchall(
             "SELECT workflow_step_uuid,step_key FROM mkb_workflow_steps WHERE workflow_revision_uuid=?",
             (execution["workflow_revision_uuid"],),
         )
         persisted = {row["step_key"] for row in rows}
-        declared = set(self._steps)
+        declared = {step.step_key for step in plan.steps}
         if persisted != declared:
             raise MkbError(
                 "workflow-step-registry-mismatch", "Workflow revision steps do not match the loaded declaration", 409
             )
+        return plan
 
     def _route_decision(
         self,
         *,
+        plan: WorkflowDefinition,
         execution: dict[str, Any],
         source_step_key: str,
         selector: WorkflowOutcomeSelector,
         route_context: dict[str, Any],
     ) -> dict[str, Any]:
         candidates = [
-            route for route in self._routes_by_source.get(source_step_key, []) if route.outcome_selector is selector
+            route
+            for route in plan.routes
+            if route.from_step_key == source_step_key and route.outcome_selector is selector
         ]
+        candidates.sort(key=lambda route: route.priority)
         selected: list[WorkflowRouteDefinition] = []
         guard_results: dict[str, bool] = {}
         for route in candidates:
-            matched = self._guard_matches(route, route_context, guard_results)
+            matched = self._guard_matches(plan, route, route_context, guard_results)
             if not matched:
                 continue
             selected.append(route)
@@ -1080,7 +1139,7 @@ class WorkflowRuntime:
             if route.route_kind.value != "fan_out":
                 break
         payload = {
-            "workflow_key": self.definition.workflow_key,
+            "workflow_key": plan.workflow_key,
             "workflow_revision_uuid": execution["workflow_revision_uuid"],
             "execution_uuid": execution["execution_uuid"],
             "source_step_key": source_step_key,
@@ -1092,13 +1151,17 @@ class WorkflowRuntime:
 
     def _guard_matches(
         self,
+        plan: WorkflowDefinition,
         route: WorkflowRouteDefinition,
         context: dict[str, Any],
         results: dict[str, bool],
     ) -> bool:
         if route.guard_key is None:
             return True
-        guard = self._guards[route.guard_key]
+        guards = {guard.guard_key: guard for guard in plan.guards}
+        guard = guards.get(route.guard_key)
+        if guard is None:
+            raise MkbError("workflow-guard-missing", "Workflow route references an unavailable guard", 409)
         if guard.predicate_type != "registered_admission_result" or guard.operator != "eq":
             raise MkbError("workflow-guard-unsupported", "Workflow guard is not supported by the bounded runtime", 409)
         result = context.get("admission_result")
@@ -1110,6 +1173,7 @@ class WorkflowRuntime:
         self,
         tx: UnitOfWork,
         *,
+        plan: WorkflowDefinition,
         execution: dict[str, Any],
         decision: dict[str, Any],
         source_process: dict[str, Any] | None,
@@ -1127,7 +1191,16 @@ class WorkflowRuntime:
             return False
         changed = False
         for route in routes:
-            target = self._steps[route.to_step_key]
+            steps = {step.step_key: step for step in plan.steps}
+            target = steps.get(route.to_step_key)
+            if target is None:
+                await self._fail_execution_integrity_tx(
+                    tx,
+                    execution,
+                    "workflow-target-missing",
+                    "A route targeted a step absent from the immutable execution plan",
+                )
+                continue
             if target.step_kind is WorkflowStepKind.TERMINAL:
                 await self._terminalize_execution_tx(
                     tx,
@@ -1141,6 +1214,7 @@ class WorkflowRuntime:
             elif target.step_kind is WorkflowStepKind.PROCESS:
                 inserted = await self._materialize_process_tx(
                     tx,
+                    plan=plan,
                     execution=execution,
                     step=target,
                     route_digest=decision["digest"],
@@ -1178,6 +1252,7 @@ class WorkflowRuntime:
         self,
         tx: UnitOfWork,
         *,
+        plan: WorkflowDefinition,
         execution: dict[str, Any],
         step: WorkflowStepDefinition,
         route_digest: str,
@@ -1188,7 +1263,7 @@ class WorkflowRuntime:
         )
         if step_row is None:
             raise MkbError("workflow-step-missing", "Bound workflow step is absent from the registry", 503)
-        input_manifest, input_ref, input_object_digest = await self._input_manifest_tx(tx, execution, step)
+        input_manifest, input_ref, input_object_digest = await self._input_manifest_tx(tx, plan, execution, step)
         input_binding_digest = stable_digest(input_manifest)
         materialization_key = stable_digest(
             {
@@ -1305,7 +1380,7 @@ class WorkflowRuntime:
         return bool(inserted.rowcount)
 
     async def _input_manifest_tx(
-        self, tx: UnitOfWork, execution: dict[str, Any], step: WorkflowStepDefinition
+        self, tx: UnitOfWork, plan: WorkflowDefinition, execution: dict[str, Any], step: WorkflowStepDefinition
     ) -> tuple[dict[str, Any], str, str]:
         """Return the declared wiring plus a real immutable input object.
 
@@ -1321,7 +1396,7 @@ class WorkflowRuntime:
         primary_ref: str | None = None
         primary_digest: str | None = None
         primary_completed_at = ""
-        for binding in self.definition.bindings:
+        for binding in plan.bindings:
             if binding.target_step_key != step.step_key:
                 continue
             source: dict[str, Any] = {"kind": binding.source_kind.value}
@@ -1738,7 +1813,9 @@ class WorkflowRuntime:
         route_context: dict[str, Any],
         terminal_error: str | None,
     ) -> None:
+        plan = await self._assert_execution_binding(tx, execution)
         decision = self._route_decision(
+            plan=plan,
             execution=execution,
             source_step_key=process["step_key"],
             selector=selector,
@@ -1746,6 +1823,7 @@ class WorkflowRuntime:
         )
         await self._apply_routes_tx(
             tx,
+            plan=plan,
             execution=execution,
             decision=decision,
             source_process=process,
@@ -2135,8 +2213,8 @@ class WorkflowRuntime:
             raise ConflictError("gate-action-not-allowed", "Gate action is not allowed by its frozen review target")
         return target
 
-    def _control_step(self) -> WorkflowStepDefinition:
-        controls = [step for step in self.definition.steps if step.step_kind is WorkflowStepKind.CONTROL]
+    def _control_step(self, plan: WorkflowDefinition) -> WorkflowStepDefinition:
+        controls = [step for step in plan.steps if step.step_kind is WorkflowStepKind.CONTROL]
         if len(controls) != 1:
             raise MkbError("workflow-control-ambiguous", "Bounded runtime requires exactly one control step", 409)
         return controls[0]

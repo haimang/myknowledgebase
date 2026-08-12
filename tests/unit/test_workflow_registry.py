@@ -9,7 +9,10 @@ import pytest
 from src.contracts.workflow.models import WorkflowDefinition
 from src.persistence.sqlite_port import SqlitePersistence
 from src.services.workflow_registry import WorkflowRegistryService
-from src.workflows.builtin_lsrag import BUILTIN_SINGLE_INTAKE_LSRAG_WORKFLOW
+from src.workflows.builtin_lsrag import (
+    BUILTIN_SINGLE_INTAKE_LSRAG_WORKFLOW,
+    HISTORICAL_SINGLE_INTAKE_LSRAG_WORKFLOW_V1,
+)
 
 
 def _v1_before_index_rebuild() -> WorkflowDefinition:
@@ -21,27 +24,7 @@ def _v1_before_index_rebuild() -> WorkflowDefinition:
     the independently schedulable ``index.rebuild`` Process.
     """
 
-    # The contracts are strict, so retain enum instances rather than the JSON
-    # strings a transport payload would contain.
-    document = BUILTIN_SINGLE_INTAKE_LSRAG_WORKFLOW.model_dump()
-    document["revision_number"] = 1
-    document["context_slots"] = [
-        slot for slot in document["context_slots"] if slot["slot_name"] != "index_rebuild_scope"
-    ]
-    document["required_process_keys"] = [key for key in document["required_process_keys"] if key != "index.rebuild"]
-    document["steps"] = [step for step in document["steps"] if step["step_key"] != "index_rebuild"]
-    document["routes"] = [
-        route
-        for route in document["routes"]
-        if route["from_step_key"] != "index_rebuild"
-        and route["to_step_key"] != "index_rebuild"
-        and route["guard_key"] != "request_intent_index_rebuild"
-    ]
-    document["bindings"] = [
-        binding for binding in document["bindings"] if binding["target_step_key"] != "index_rebuild"
-    ]
-    document["guards"] = [guard for guard in document["guards"] if guard["guard_key"] != "request_intent_index_rebuild"]
-    return WorkflowDefinition.model_validate(document)
+    return HISTORICAL_SINGLE_INTAKE_LSRAG_WORKFLOW_V1
 
 
 @pytest.mark.asyncio
