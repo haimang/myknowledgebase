@@ -55,6 +55,12 @@ _ACTIVE_PROCESS_STATUSES = {
     ProcessStatus.RETRY_WAIT.value,
     ProcessStatus.CANCELLING.value,
 }
+_TASK_PRIORITY_RANK = {
+    "low": 100,
+    "normal": 200,
+    "high": 300,
+    "urgent": 400,
+}
 
 
 @runtime_checkable
@@ -1654,6 +1660,20 @@ class WorkflowRuntime:
         )
         if step_row is None:
             raise MkbError("workflow-step-missing", "Bound workflow step is absent from the registry", 503)
+        # Runtime controls are copied from the Task's immutable create-time
+        # scheduling contract into every durable Process.  Claim ordering and
+        # latest-claim-time enforcement operate on Process rows, so merely
+        # retaining these values on the public Task projection would be a
+        # cosmetic deadline/priority implementation.
+        task = await tx.fetchone(
+            "SELECT priority,deadline_at FROM mkb_tasks WHERE team_uuid=? AND task_uuid=?",
+            (execution["team_uuid"], execution["task_uuid"]),
+        )
+        if task is None:
+            raise MkbError("workflow-task-missing", "Execution has no owning Task scheduling contract", 409)
+        priority_rank = _TASK_PRIORITY_RANK.get(task["priority"])
+        if priority_rank is None:
+            raise MkbError("workflow-task-priority-invalid", "Task priority is outside the closed scheduling set", 409)
         input_manifest, input_ref, input_object_digest = await self._input_manifest_tx(tx, plan, execution, step)
         input_binding_digest = stable_digest(input_manifest)
         materialization_key = stable_digest(
@@ -1677,6 +1697,8 @@ class WorkflowRuntime:
                 "input_binding_digest": input_binding_digest,
                 "config_snapshot_digest": execution["config_snapshot_digest"],
                 "route_decision_digest": route_digest,
+                "priority": task["priority"],
+                "deadline_at": task["deadline_at"],
             }
         )
         now = utc_now()
@@ -1697,9 +1719,9 @@ class WorkflowRuntime:
             "(process_uuid,team_uuid,execution_uuid,task_uuid,workflow_step_uuid,step_key,process_key,"
             "process_contract_version,materialization_key,route_decision_digest,requiredness,process_spec_digest,"
             "input_manifest_ref,input_manifest_digest,control_snapshot_ref,config_snapshot_ref,config_snapshot_digest,"
-            "proof_kind,status,row_revision,available_at,priority_rank,fencing_generation,max_retries,max_recoveries,"
+            "proof_kind,status,row_revision,available_at,priority_rank,deadline_at,fencing_generation,max_retries,max_recoveries,"
             "backoff_policy_json,created_at,updated_at,payload_extra) "
-            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
             (
                 process_uuid,
                 execution["team_uuid"],
@@ -1722,7 +1744,8 @@ class WorkflowRuntime:
                 ProcessStatus.READY.value,
                 0,
                 now,
-                0,
+                priority_rank,
+                task["deadline_at"],
                 0,
                 self.default_max_retries,
                 self.default_max_recoveries,

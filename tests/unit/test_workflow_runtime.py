@@ -273,6 +273,26 @@ async def test_single_declarative_workflow_materializes_and_reaches_publication_
 
 
 @pytest.mark.asyncio
+async def test_materialized_processes_copy_task_priority_and_latest_claim_deadline(tmp_path: Path) -> None:
+    persistence, runtime, ids = await _seed_runtime(tmp_path)
+    deadline_at = "2099-01-01T00:00:00.000Z"
+    async with persistence.transaction() as tx:
+        await tx.execute(
+            "UPDATE mkb_tasks SET priority='urgent',deadline_at=? WHERE team_uuid=? AND task_uuid=?",
+            (deadline_at, ids["team_uuid"], ids["task_uuid"]),
+        )
+
+    assert await runtime.materialize_root(ids["execution_uuid"])
+    async with persistence.transaction() as tx:
+        process = await tx.fetchone(
+            "SELECT priority_rank,deadline_at FROM mkb_processes WHERE execution_uuid=?",
+            (ids["execution_uuid"],),
+        )
+    assert process == {"priority_rank": 400, "deadline_at": deadline_at}
+    await persistence.close()
+
+
+@pytest.mark.asyncio
 async def test_cleanup_eligibility_requires_quiescence_and_appends_only_fences(tmp_path: Path) -> None:
     """S03 cleanup is an evidence marker, never an eager cascade delete."""
 
