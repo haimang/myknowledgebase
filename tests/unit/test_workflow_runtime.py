@@ -83,6 +83,24 @@ class _RejectingOutcomeCommitter:
         raise MkbError("catalogue-ref-invalid", "Output catalogue refused the promoted reference", 409)
 
 
+class _ExplodingOutcomeCommitter:
+    async def validate_and_commit(
+        self,
+        tx: UnitOfWork,
+        command: ProcessCommand,
+        outcome: ProcessOutcome,
+    ) -> None:
+        del tx, command, outcome
+        raise RuntimeError("database adapter interrupted")
+
+
+class _StaleFenceStage(_AlwaysSuccessfulStage):
+    async def run(self, command: ProcessCommand) -> ProcessOutcome:
+        outcome = await super().run(command)
+        stale = outcome.model_copy(update={"fencing_generation": command.fencing_generation + 1})
+        return stale.model_copy(update={"outcome_digest": canonical_outcome_digest(stale)})
+
+
 async def _seed_runtime(
     tmp_path: Path,
     *,
@@ -309,6 +327,80 @@ async def test_rejecting_outcome_committer_leaves_current_fenced_process_running
         "fencing_generation": claim.command.fencing_generation,
         "accepted_outcome_digest": None,
     }
+    await persistence.close()
+
+
+@pytest.mark.asyncio
+async def test_worker_commits_typed_outcome_callback_error_as_terminal_failure(tmp_path: Path) -> None:
+    """A typed callback rejection must not strand the claimed Process lease."""
+
+    persistence, runtime, ids = await _seed_runtime(tmp_path, outcome_committer=_RejectingOutcomeCommitter())
+    await runtime.materialize_root(ids["execution_uuid"])
+
+    assert await WorkflowWorker(runtime, _AlwaysSuccessfulStage()).run_once("catalogue-reject-worker")
+
+    async with persistence.transaction() as tx:
+        process = await tx.fetchone(
+            "SELECT status,error_code,failure_disposition,lease_owner FROM mkb_processes WHERE execution_uuid=?",
+            (ids["execution_uuid"],),
+        )
+        execution = await tx.fetchone(
+            "SELECT status,final_error_code FROM mkb_executions WHERE execution_uuid=?",
+            (ids["execution_uuid"],),
+        )
+        task = await tx.fetchone(
+            "SELECT status,error_code FROM mkb_tasks WHERE team_uuid=? AND task_uuid=?",
+            (ids["team_uuid"], ids["task_uuid"]),
+        )
+    assert process == {
+        "status": "failed",
+        "error_code": "catalogue-ref-invalid",
+        "failure_disposition": "non-retryable",
+        "lease_owner": None,
+    }
+    assert execution == {"status": "failed", "final_error_code": "catalogue-ref-invalid"}
+    assert task == {"status": "failed", "error_code": "catalogue-ref-invalid"}
+    await persistence.close()
+
+
+@pytest.mark.asyncio
+async def test_worker_retries_unexpected_outcome_callback_error(tmp_path: Path) -> None:
+    persistence, runtime, ids = await _seed_runtime(tmp_path, outcome_committer=_ExplodingOutcomeCommitter())
+    await runtime.materialize_root(ids["execution_uuid"])
+
+    assert await WorkflowWorker(runtime, _AlwaysSuccessfulStage()).run_once("catalogue-exception-worker")
+
+    async with persistence.transaction() as tx:
+        process = await tx.fetchone(
+            "SELECT status,retry_count,error_code,error_message,failure_disposition,lease_owner "
+            "FROM mkb_processes WHERE execution_uuid=?",
+            (ids["execution_uuid"],),
+        )
+    assert process == {
+        "status": "retry_wait",
+        "retry_count": 1,
+        "error_code": "outcome-commit-exception",
+        "error_message": "Outcome commit raised an unexpected error",
+        "failure_disposition": "retryable",
+        "lease_owner": None,
+    }
+    await persistence.close()
+
+
+@pytest.mark.asyncio
+async def test_worker_preserves_stale_outcome_conflict_fence(tmp_path: Path) -> None:
+    persistence, runtime, ids = await _seed_runtime(tmp_path)
+    await runtime.materialize_root(ids["execution_uuid"])
+
+    with pytest.raises(ConflictError, match="stale-process-fence"):
+        await WorkflowWorker(runtime, _StaleFenceStage()).run_once("stale-fence-worker")
+
+    async with persistence.transaction() as tx:
+        process = await tx.fetchone(
+            "SELECT status,error_code,lease_owner FROM mkb_processes WHERE execution_uuid=?",
+            (ids["execution_uuid"],),
+        )
+    assert process == {"status": "running", "error_code": None, "lease_owner": "stale-fence-worker"}
     await persistence.close()
 
 
