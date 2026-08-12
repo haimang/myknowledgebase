@@ -164,7 +164,7 @@ class SummaryPlan:
     plan_digest: str
 
 
-def content_full(*, body: str, metadata_headers: Mapping[str, str] | None = None, recipe_version: str = "mkb.content_full.v1") -> str:
+def content_full(*, body: str, metadata_headers: Mapping[str, str] | None = None, recipe_version: str = "content_full.v1") -> str:
     """Materialize the S07/S08 re-computable text recipe.
 
     Only a closed, caller-projected metadata mapping is accepted.  This helper
@@ -172,7 +172,7 @@ def content_full(*, body: str, metadata_headers: Mapping[str, str] | None = None
     renders already-authorized display context.
     """
 
-    if recipe_version != "mkb.content_full.v1":
+    if recipe_version != "content_full.v1":
         _fail("CONSTRUCT_RECIPE_UNSUPPORTED", "The content_full recipe version is unsupported")
     if not isinstance(body, str):
         _fail("CONSTRUCT_KERNEL_BODY_INVALID", "Channel body must be UTF-8 text")
@@ -404,7 +404,7 @@ class LsragContractCompiler:
         dual_channel_generation_artifact_uuid: str | None = None,
         summaries_by_block_id: Mapping[str, str],
         metadata_headers: Mapping[str, str] | None = None,
-        recipe_version: str = "mkb.content_full.v1",
+        recipe_version: str = "content_full.v1",
     ) -> tuple[ConstructionDocument, DualChannelProjection]:
         self.validate_structure(document=structure, projection=projection, clean_text=clean_text)
         dual_channel_generation_artifact_uuid = dual_channel_generation_artifact_uuid or f"{construction_generation_artifact_uuid}:dual"

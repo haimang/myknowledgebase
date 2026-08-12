@@ -37,6 +37,21 @@ from src.services.artifacts import OutcomeArtifactCommitter
 from src.services.deterministic_embedding import deterministic_embedding
 from src.services.index_retirement import IndexGenerationRetirementService
 from src.services.intake_lifecycle import IntakeLifecycleCommand, IntakeLifecycleService, IntakePublicationCommand
+from src.services.lsrag_compiler import (
+    ConstructionDocument,
+    DualChannelProjection,
+    LsragContractCompiler,
+    RetrievalBlockProjection,
+    StructureDocument,
+    construction_document_digest,
+    construction_payload,
+    deterministic_summaries,
+    dual_channel_payload,
+    projection_digest,
+    retrieval_projection_payload,
+    structure_document_digest,
+    structure_payload,
+)
 from src.services.scatter_intake import (
     ScatterAcceptanceWriter,
     ScatterChildWorkflowBinding,
@@ -59,6 +74,15 @@ class _StageMaterial:
     envelope: dict[str, Any]
     output_bytes: bytes
     proof_bytes: bytes
+
+
+@dataclass(frozen=True, slots=True)
+class _GenerationArtifactMaterial:
+    """One independently promoted immutable S06/S07 generation member."""
+
+    artifact_uuid: str
+    artifact_type: str
+    stat: ObjectStat
 
 
 def _json(value: Any) -> str:
@@ -3385,159 +3409,583 @@ class IntakePipeline(ProcessStageHandler):
             ),
         )
 
+    @staticmethod
+    def _generation_state_text(state: Mapping[str, Any], key: str, error_code: str) -> str:
+        value = state.get(key)
+        if not isinstance(value, str) or not value:
+            raise MkbError(error_code, f"Generation state is missing {key}", 409)
+        return value
+
+    def _generation_clean_text(self, state: Mapping[str, Any], *, error_code: str) -> str:
+        clean = self._generation_state_text(state, "clean_text", error_code)
+        declared = self._generation_state_text(state, "clean_digest", error_code)
+        if stable_digest({"text": clean}) != declared:
+            raise MkbError(error_code, "Selected clean text no longer matches its frozen digest", 409)
+        return clean
+
+    async def _promote_generation_member(
+        self,
+        command: ProcessCommand,
+        *,
+        artifact_uuid: str,
+        artifact_type: str,
+        payload: Mapping[str, Any],
+    ) -> _GenerationArtifactMaterial:
+        """Promote one generation member before the outcome transaction.
+
+        Each S06/S07 artifact has its own bytes and own ledger row.  Promotion
+        can therefore leave a harmless orphan when a later process fence loses;
+        only the callback below makes a member business-visible.
+        """
+
+        declared_uuid = payload.get("generation_artifact_uuid")
+        if declared_uuid != artifact_uuid:
+            raise MkbError("GENERATION_ARTIFACT_BINDING", "Generation payload identity does not match its ledger key", 422)
+        stat = await self._storage.promote(
+            canonical_json(dict(payload)),
+            PromoteRequest(team_uuid=command.team_uuid, purpose="generation_artifact", media_type="application/json"),
+        )
+        return _GenerationArtifactMaterial(artifact_uuid=artifact_uuid, artifact_type=artifact_type, stat=stat)
+
+    @staticmethod
+    def _generation_asset_receipt(
+        asset: _GenerationArtifactMaterial,
+        semantic_digest: str | None = None,
+    ) -> dict[str, Any]:
+        receipt: dict[str, Any] = {
+            "generation_artifact_uuid": asset.artifact_uuid,
+            "artifact_type": asset.artifact_type,
+            "logical_handle": asset.stat.handle.value,
+            "content_digest": asset.stat.sha256,
+            "size_bytes": asset.stat.size_bytes,
+        }
+        if semantic_digest is not None:
+            receipt["semantic_digest"] = semantic_digest
+        return receipt
+
+    @staticmethod
+    def _structure_validation_report_payload(
+        *,
+        validation_artifact_uuid: str,
+        structure: StructureDocument,
+        projection: RetrievalBlockProjection,
+    ) -> dict[str, Any]:
+        structure_digest = structure_document_digest(structure)
+        projection_value_digest = projection_digest(projection)
+        return {
+            "schema_version": "mkb.structure-validation-report.v1",
+            "generation_artifact_uuid": validation_artifact_uuid,
+            "disposition": "full_valid",
+            "structure_generation_artifact_uuid": structure.generation_artifact_uuid,
+            "structure_document_digest": structure_digest,
+            "retrieval_block_projection_generation_artifact_uuid": projection.generation_artifact_uuid,
+            "retrieval_block_projection_digest": projection_value_digest,
+            "proof_digest": stable_digest(
+                {
+                    "structure_document_digest": structure_digest,
+                    "retrieval_block_projection_digest": projection_value_digest,
+                    "disposition": "full_valid",
+                }
+            ),
+        }
+
+    @staticmethod
+    def _construction_validation_report_payload(
+        *,
+        validation_artifact_uuid: str,
+        construction: ConstructionDocument,
+        dual: DualChannelProjection,
+    ) -> dict[str, Any]:
+        construction_digest = construction_document_digest(construction)
+        return {
+            "schema_version": "mkb.construction-validation-report.v1",
+            "generation_artifact_uuid": validation_artifact_uuid,
+            "disposition": "full_valid",
+            "construction_generation_artifact_uuid": construction.generation_artifact_uuid,
+            "construction_document_digest": construction_digest,
+            "dual_channel_generation_artifact_uuid": dual.generation_artifact_uuid,
+            "dual_channel_proof_digest": dual.proof_digest,
+            "proof_digest": stable_digest(
+                {
+                    "construction_document_digest": construction_digest,
+                    "dual_channel_generation_artifact_uuid": dual.generation_artifact_uuid,
+                    "dual_channel_proof_digest": dual.proof_digest,
+                    "disposition": "full_valid",
+                }
+            ),
+        }
+
+    async def _read_frozen_generation_asset(
+        self,
+        command: ProcessCommand,
+        state: Mapping[str, Any],
+        *,
+        artifact_uuid_key: str,
+        logical_handle_key: str,
+        content_digest_key: str,
+        size_bytes_key: str,
+        error_code: str,
+    ) -> bytes:
+        artifact_uuid = self._generation_state_text(state, artifact_uuid_key, error_code)
+        logical_handle = self._generation_state_text(state, logical_handle_key, error_code)
+        digest = self._generation_state_text(state, content_digest_key, error_code)
+        size = state.get(size_bytes_key)
+        if isinstance(size, bool) or not isinstance(size, int) or size < 0:
+            raise MkbError(error_code, "Generation artifact has an invalid declared size", 409)
+        try:
+            data = await self._storage.read_verified(command.team_uuid, ObjectHandle(value=logical_handle))
+        except (TypeError, ValueError) as exc:
+            raise MkbError(error_code, "Generation artifact handle is invalid", 409) from exc
+        if len(data) != size or _digest_bytes(data) != digest:
+            raise MkbError(error_code, "Generation artifact bytes no longer match their frozen receipt", 409)
+        # The UUID is checked here as an inexpensive binder before a caller
+        # compares the full canonical payload it expects from the compiler.
+        try:
+            decoded = json.loads(data)
+        except (TypeError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+            raise MkbError(error_code, "Generation artifact is not deterministic JSON", 409) from exc
+        if not isinstance(decoded, dict) or decoded.get("generation_artifact_uuid") != artifact_uuid:
+            raise MkbError(error_code, "Generation artifact identity does not match its frozen receipt", 409)
+        return data
+
+    async def _assert_generation_members(
+        self,
+        command: ProcessCommand,
+        state: Mapping[str, Any],
+        members: tuple[tuple[str, str, str, str, str], ...],
+        *,
+        error_code: str,
+    ) -> None:
+        async with self._persistence.transaction() as tx:
+            await self._assert_generation_members_tx(tx, command, state, members, error_code=error_code)
+
+    async def _assert_generation_members_tx(
+        self,
+        tx: UnitOfWork,
+        command: ProcessCommand,
+        state: Mapping[str, Any],
+        members: tuple[tuple[str, str, str, str, str], ...],
+        *,
+        error_code: str,
+    ) -> None:
+        """Recheck exact current artifacts, not merely a stage-envelope hint."""
+
+        for artifact_type, uuid_key, handle_key, digest_key, size_key in members:
+            artifact_uuid = self._generation_state_text(state, uuid_key, error_code)
+            handle = self._generation_state_text(state, handle_key, error_code)
+            digest = self._generation_state_text(state, digest_key, error_code)
+            size = state.get(size_key)
+            if isinstance(size, bool) or not isinstance(size, int) or size < 0:
+                raise MkbError(error_code, "Generation artifact size receipt is invalid", 409)
+            artifact = await tx.fetchone(
+                "SELECT logical_handle,content_digest,size_bytes,validation_disposition,execution_uuid,task_uuid "
+                "FROM mkb_generation_artifacts WHERE team_uuid=? AND generation_artifact_uuid=? AND artifact_type=?",
+                (command.team_uuid, artifact_uuid, artifact_type),
+            )
+            if (
+                artifact is None
+                or artifact["logical_handle"] != handle
+                or artifact["content_digest"] != digest
+                or artifact["size_bytes"] != size
+                or artifact["validation_disposition"] != "full_valid"
+                or artifact["execution_uuid"] != command.execution_uuid
+                or artifact["task_uuid"] != command.task_uuid
+            ):
+                raise MkbError(error_code, "Generation artifact ledger no longer matches the frozen handoff", 409)
+            pointer = await tx.fetchone(
+                "SELECT current_generation_artifact_uuid FROM mkb_generation_pointers "
+                "WHERE team_uuid=? AND execution_uuid=? AND artifact_type=?",
+                (command.team_uuid, command.execution_uuid, artifact_type),
+            )
+            if pointer is None or pointer["current_generation_artifact_uuid"] != artifact_uuid:
+                raise MkbError(error_code, "Generation artifact is no longer the accepted current member", 409)
+
+    async def _reconstruct_structure_contract(
+        self,
+        command: ProcessCommand,
+        state: Mapping[str, Any],
+    ) -> tuple[LsragContractCompiler, StructureDocument, RetrievalBlockProjection]:
+        """Load and re-prove the exact S06 handoff before construction."""
+
+        clean = self._generation_clean_text(state, error_code="CONSTRUCT_BINDING_CLEAN_DIGEST")
+        clean_artifact_uuid = self._generation_state_text(state, "clean_artifact_uuid", "CONSTRUCT_BINDING_CLEAN_ARTIFACT")
+        structure_uuid = self._generation_state_text(state, "structure_artifact_uuid", "CONSTRUCT_BINDING_STRUCTURE_MISSING")
+        projection_uuid = self._generation_state_text(
+            state, "retrieval_block_projection_artifact_uuid", "CONSTRUCT_BINDING_PROJECTION_MISSING"
+        )
+        compiler = LsragContractCompiler()
+        structure, projection = compiler.structurize(
+            clean_text=clean,
+            generation_artifact_uuid=structure_uuid,
+            projection_generation_artifact_uuid=projection_uuid,
+            clean_artifact_uuid=clean_artifact_uuid,
+            clean_digest=state["clean_digest"],
+        )
+        expected_structure = canonical_json(structure_payload(structure))
+        expected_projection = canonical_json(retrieval_projection_payload(projection))
+        structure_data = await self._read_frozen_generation_asset(
+            command,
+            state,
+            artifact_uuid_key="structure_artifact_uuid",
+            logical_handle_key="structure_artifact_ref",
+            content_digest_key="structure_artifact_content_digest",
+            size_bytes_key="structure_artifact_size_bytes",
+            error_code="CONSTRUCT_BINDING_STRUCTURE_DIGEST",
+        )
+        projection_data = await self._read_frozen_generation_asset(
+            command,
+            state,
+            artifact_uuid_key="retrieval_block_projection_artifact_uuid",
+            logical_handle_key="retrieval_block_projection_ref",
+            content_digest_key="retrieval_block_projection_content_digest",
+            size_bytes_key="retrieval_block_projection_size_bytes",
+            error_code="CONSTRUCT_BINDING_PROJECTION_DIGEST",
+        )
+        if structure_data != expected_structure or projection_data != expected_projection:
+            raise MkbError("CONSTRUCT_BINDING_DIGEST", "Structure/projection bytes do not match their generation-local contract", 409)
+        if (
+            state.get("structure_document_digest") != structure_document_digest(structure)
+            or state.get("retrieval_block_projection_digest") != projection_digest(projection)
+        ):
+            raise MkbError("CONSTRUCT_BINDING_DIGEST", "Structure/projection semantic digests do not match the frozen handoff", 409)
+        await self._assert_generation_members(
+            command,
+            state,
+            self._structure_generation_members(),
+            error_code="CONSTRUCT_BINDING_CURRENT",
+        )
+        return compiler, structure, projection
+
+    async def _reconstruct_construct_contract(
+        self,
+        command: ProcessCommand,
+        state: Mapping[str, Any],
+    ) -> tuple[LsragContractCompiler, ConstructionDocument, DualChannelProjection]:
+        """Load and re-prove the exact full-valid S07 handoff before S08."""
+
+        compiler, structure, projection = await self._reconstruct_structure_contract(command, state)
+        construction_uuid = self._generation_state_text(
+            state, "construction_artifact_uuid", "CONSTRUCT_TO_VECTORIZE_GATE"
+        )
+        dual_uuid = self._generation_state_text(state, "dual_channel_artifact_uuid", "CONSTRUCT_TO_VECTORIZE_GATE")
+        construction, dual = compiler.construct(
+            structure=structure,
+            projection=projection,
+            clean_text=self._generation_clean_text(state, error_code="CONSTRUCT_TO_VECTORIZE_GATE"),
+            construction_generation_artifact_uuid=construction_uuid,
+            dual_channel_generation_artifact_uuid=dual_uuid,
+            summaries_by_block_id=deterministic_summaries(projection),
+        )
+        construction_data = await self._read_frozen_generation_asset(
+            command,
+            state,
+            artifact_uuid_key="construction_artifact_uuid",
+            logical_handle_key="construction_artifact_ref",
+            content_digest_key="construction_artifact_content_digest",
+            size_bytes_key="construction_artifact_size_bytes",
+            error_code="CONSTRUCT_TO_VECTORIZE_GATE",
+        )
+        dual_data = await self._read_frozen_generation_asset(
+            command,
+            state,
+            artifact_uuid_key="dual_channel_artifact_uuid",
+            logical_handle_key="dual_channel_artifact_ref",
+            content_digest_key="dual_channel_artifact_content_digest",
+            size_bytes_key="dual_channel_artifact_size_bytes",
+            error_code="CONSTRUCT_TO_VECTORIZE_GATE",
+        )
+        if construction_data != canonical_json(construction_payload(construction)) or dual_data != canonical_json(dual_channel_payload(dual)):
+            raise MkbError("CONSTRUCT_TO_VECTORIZE_GATE", "Construct bytes do not match the exact full-valid generation", 409)
+        if state.get("construction_document_digest") != construction_document_digest(construction):
+            raise MkbError("CONSTRUCT_TO_VECTORIZE_GATE", "Construction semantic digest does not match the frozen handoff", 409)
+        return compiler, construction, dual
+
+    @staticmethod
+    def _structure_generation_members() -> tuple[tuple[str, str, str, str, str], ...]:
+        return (
+            (
+                "structure_document",
+                "structure_artifact_uuid",
+                "structure_artifact_ref",
+                "structure_artifact_content_digest",
+                "structure_artifact_size_bytes",
+            ),
+            (
+                "retrieval_block_projection",
+                "retrieval_block_projection_artifact_uuid",
+                "retrieval_block_projection_ref",
+                "retrieval_block_projection_content_digest",
+                "retrieval_block_projection_size_bytes",
+            ),
+            (
+                "structure_validation_report",
+                "structure_validation_artifact_uuid",
+                "structure_validation_artifact_ref",
+                "structure_validation_artifact_content_digest",
+                "structure_validation_artifact_size_bytes",
+            ),
+        )
+
+    @classmethod
+    def _construction_generation_members(cls) -> tuple[tuple[str, str, str, str, str], ...]:
+        return cls._structure_generation_members() + (
+            (
+                "construction_document",
+                "construction_artifact_uuid",
+                "construction_artifact_ref",
+                "construction_artifact_content_digest",
+                "construction_artifact_size_bytes",
+            ),
+            (
+                "dual_channel_projection",
+                "dual_channel_artifact_uuid",
+                "dual_channel_artifact_ref",
+                "dual_channel_artifact_content_digest",
+                "dual_channel_artifact_size_bytes",
+            ),
+            (
+                "construction_validation_report",
+                "construction_validation_artifact_uuid",
+                "construction_validation_artifact_ref",
+                "construction_validation_artifact_content_digest",
+                "construction_validation_artifact_size_bytes",
+            ),
+        )
+
+    async def _assert_construct_to_vectorize_gate(self, command: ProcessCommand, state: Mapping[str, Any]) -> None:
+        await self._assert_generation_members(
+            command,
+            state,
+            self._construction_generation_members(),
+            error_code="CONSTRUCT_TO_VECTORIZE_GATE",
+        )
+
+    async def _assert_construct_to_vectorize_gate_tx(
+        self,
+        tx: UnitOfWork,
+        command: ProcessCommand,
+        state: Mapping[str, Any],
+    ) -> None:
+        await self._assert_generation_members_tx(
+            tx,
+            command,
+            state,
+            self._construction_generation_members(),
+            error_code="CONSTRUCT_TO_VECTORIZE_GATE",
+        )
+
     async def _structurize(
         self, command: ProcessCommand, state: dict[str, Any]
     ) -> tuple[_StageMaterial, dict[str, Any], Callable[[UnitOfWork, Mapping[str, str]], Awaitable[None]]]:
-        clean = state.get("clean_text")
-        if not isinstance(clean, str) or not clean:
-            raise MkbError("PIPELINE_INPUT_INVALID", "Accepted revision has no clean content", 422)
-        unit_id = stable_digest({"revision": state.get("intake_revision_uuid"), "clean": state.get("clean_digest")})[
-            :24
-        ]
-        structure_document = {
-            "schema_version": "mkb.structure-document.v1",
-            "schema_key": "lsrag.structure.default",
-            "schema_version_key": "v1",
-            "units": [
-                {
-                    "unit_id": unit_id,
-                    "granularity": 0,
-                    "text": clean,
-                    "char_count": len(clean),
-                }
-            ],
-        }
+        clean = self._generation_clean_text(state, error_code="STRUCTURE_BINDING_CLEAN_DIGEST")
+        clean_artifact_uuid = self._generation_state_text(state, "clean_artifact_uuid", "STRUCTURE_BINDING_CLEAN_ARTIFACT")
+        structure_artifact_uuid = uuid7()
+        projection_artifact_uuid = uuid7()
+        validation_artifact_uuid = uuid7()
+        compiler = LsragContractCompiler()
+        structure, projection = compiler.structurize(
+            clean_text=clean,
+            generation_artifact_uuid=structure_artifact_uuid,
+            projection_generation_artifact_uuid=projection_artifact_uuid,
+            clean_artifact_uuid=clean_artifact_uuid,
+            clean_digest=state["clean_digest"],
+        )
+        structure_semantic_digest = structure_document_digest(structure)
+        projection_semantic_digest = projection_digest(projection)
+        structure_asset = await self._promote_generation_member(
+            command,
+            artifact_uuid=structure_artifact_uuid,
+            artifact_type="structure_document",
+            payload=structure_payload(structure),
+        )
+        projection_asset = await self._promote_generation_member(
+            command,
+            artifact_uuid=projection_artifact_uuid,
+            artifact_type="retrieval_block_projection",
+            payload=retrieval_projection_payload(projection),
+        )
+        validation_asset = await self._promote_generation_member(
+            command,
+            artifact_uuid=validation_artifact_uuid,
+            artifact_type="structure_validation_report",
+            payload=self._structure_validation_report_payload(
+                validation_artifact_uuid=validation_artifact_uuid,
+                structure=structure,
+                projection=projection,
+            ),
+        )
         next_state = dict(state)
-        next_state["unit_id"] = unit_id
-        next_state["structure_artifact_uuid"] = uuid7()
-        next_state["structure_validation_artifact_uuid"] = uuid7()
-        material = self._material(command, next_state, {"structure_artifact": structure_document})
-        output_digest = _digest_bytes(material.output_bytes)
-        output_size = len(material.output_bytes)
+        next_state.update(
+            {
+                "structure_artifact_uuid": structure_artifact_uuid,
+                "structure_artifact_ref": structure_asset.stat.handle.value,
+                "structure_artifact_content_digest": structure_asset.stat.sha256,
+                "structure_artifact_size_bytes": structure_asset.stat.size_bytes,
+                "structure_document_digest": structure_semantic_digest,
+                "retrieval_block_projection_artifact_uuid": projection_artifact_uuid,
+                "retrieval_block_projection_ref": projection_asset.stat.handle.value,
+                "retrieval_block_projection_content_digest": projection_asset.stat.sha256,
+                "retrieval_block_projection_size_bytes": projection_asset.stat.size_bytes,
+                "retrieval_block_projection_digest": projection_semantic_digest,
+                "structure_validation_artifact_uuid": validation_artifact_uuid,
+                "structure_validation_artifact_ref": validation_asset.stat.handle.value,
+                "structure_validation_artifact_content_digest": validation_asset.stat.sha256,
+                "structure_validation_artifact_size_bytes": validation_asset.stat.size_bytes,
+            }
+        )
+        material = self._material(
+            command,
+            next_state,
+            {
+                "structure_artifact": {
+                    "structure_document": self._generation_asset_receipt(structure_asset, structure_semantic_digest),
+                    "retrieval_block_projection": self._generation_asset_receipt(
+                        projection_asset, projection_semantic_digest
+                    ),
+                    "validation_report": self._generation_asset_receipt(validation_asset),
+                }
+            },
+        )
 
         async def callback(tx: UnitOfWork, refs: Mapping[str, str]) -> None:
-            stored_object_uuid = await self._require_stored_object(tx, command.team_uuid, output_digest, output_size)
             schema = await tx.fetchone(
                 "SELECT schema_digest FROM mkb_structure_schema_definitions "
                 "WHERE schema_key='lsrag.structure.default' AND schema_version='v1'"
             )
             if schema is None:
                 raise MkbError("REGISTRY_NOT_FOUND", "Structure schema definition is unavailable", 503)
-            await self._insert_generation_artifact(
-                tx,
-                command=command,
-                artifact_uuid=next_state["structure_artifact_uuid"],
-                artifact_type="structure_document",
-                stored_object_uuid=stored_object_uuid,
-                logical_handle=refs["output_ref"],
-                content_digest=output_digest,
-                size_bytes=output_size,
-                intake_item_uuid=state["intake_item_uuid"],
-                intake_revision_uuid=state["intake_revision_uuid"],
-                clean_artifact_uuid=state["clean_artifact_uuid"],
-                clean_artifact_digest=state["clean_digest"],
-                schema_key="lsrag.structure.default",
-                schema_version="v1",
-                schema_digest=schema["schema_digest"],
-                proof_ref=refs["proof_ref"],
-                proof_digest=refs["proof_digest"],
-            )
-            await self._insert_generation_artifact(
-                tx,
-                command=command,
-                artifact_uuid=next_state["structure_validation_artifact_uuid"],
-                artifact_type="structure_validation_report",
-                stored_object_uuid=stored_object_uuid,
-                logical_handle=refs["output_ref"],
-                content_digest=output_digest,
-                size_bytes=output_size,
-                intake_item_uuid=state["intake_item_uuid"],
-                intake_revision_uuid=state["intake_revision_uuid"],
-                clean_artifact_uuid=state["clean_artifact_uuid"],
-                clean_artifact_digest=state["clean_digest"],
-                schema_key="lsrag.structure.default",
-                schema_version="v1",
-                schema_digest=schema["schema_digest"],
-                proof_ref=refs["proof_ref"],
-                proof_digest=refs["proof_digest"],
-                ordinal=1,
-            )
-            await self._advance_generation_pointer(
-                tx,
-                command=command,
-                artifact_type="structure_document",
-                artifact_uuid=next_state["structure_artifact_uuid"],
-            )
-            await self._reference_object(
-                tx,
-                team_uuid=command.team_uuid,
-                stored_object_uuid=stored_object_uuid,
-                purpose="generation_artifact",
-                owner_kind="generation_artifact",
-                owner_uuid=next_state["structure_artifact_uuid"],
-                digest=output_digest,
-                size=output_size,
-            )
+            for asset in (structure_asset, projection_asset, validation_asset):
+                stored_object_uuid = await self._catalog_generation_object(tx, command.team_uuid, asset.stat)
+                await self._insert_generation_artifact(
+                    tx,
+                    command=command,
+                    artifact_uuid=asset.artifact_uuid,
+                    artifact_type=asset.artifact_type,
+                    stored_object_uuid=stored_object_uuid,
+                    logical_handle=asset.stat.handle.value,
+                    content_digest=asset.stat.sha256,
+                    size_bytes=asset.stat.size_bytes,
+                    intake_item_uuid=state["intake_item_uuid"],
+                    intake_revision_uuid=state["intake_revision_uuid"],
+                    clean_artifact_uuid=clean_artifact_uuid,
+                    clean_artifact_digest=state["clean_digest"],
+                    schema_key="lsrag.structure.default",
+                    schema_version="v1",
+                    schema_digest=schema["schema_digest"],
+                    validation_report_ref=validation_asset.stat.handle.value,
+                    validation_report_digest=validation_asset.stat.sha256,
+                    proof_ref=refs["proof_ref"],
+                    proof_digest=refs["proof_digest"],
+                )
+                await self._reference_object(
+                    tx,
+                    team_uuid=command.team_uuid,
+                    stored_object_uuid=stored_object_uuid,
+                    purpose="generation_artifact",
+                    owner_kind="generation_artifact",
+                    owner_uuid=asset.artifact_uuid,
+                    digest=asset.stat.sha256,
+                    size=asset.stat.size_bytes,
+                )
+            for asset in (structure_asset, projection_asset, validation_asset):
+                await self._advance_generation_pointer(
+                    tx,
+                    command=command,
+                    artifact_type=asset.artifact_type,
+                    artifact_uuid=asset.artifact_uuid,
+                )
 
         return material, {}, callback
 
     async def _construct(
         self, command: ProcessCommand, state: dict[str, Any]
     ) -> tuple[_StageMaterial, dict[str, Any], Callable[[UnitOfWork, Mapping[str, str]], Awaitable[None]]]:
-        clean = state.get("clean_text")
-        unit_id = state.get("unit_id")
-        if not isinstance(clean, str) or not isinstance(unit_id, str):
-            raise MkbError("PIPELINE_INPUT_INVALID", "Structure artifact is unavailable", 422)
-        summary = clean if len(clean) <= 480 else f"{clean[:477].rstrip()}..."
-        dual_channel = {
-            "schema_version": "mkb.dual-channel-projection.v1",
-            "recipe_version": "content_full.v1",
-            "units": [
-                {
-                    "unit_id": unit_id,
-                    "granularity": 0,
-                    "original": clean,
-                    "summary": summary,
-                    "original_digest": stable_digest({"text": clean}),
-                    "summary_digest": stable_digest({"text": summary}),
-                }
-            ],
-        }
+        compiler, structure, projection = await self._reconstruct_structure_contract(command, state)
+        construction_artifact_uuid = uuid7()
+        dual_channel_artifact_uuid = uuid7()
+        validation_artifact_uuid = uuid7()
+        construction, dual = compiler.construct(
+            structure=structure,
+            projection=projection,
+            clean_text=self._generation_clean_text(state, error_code="CONSTRUCT_BINDING_CLEAN_DIGEST"),
+            construction_generation_artifact_uuid=construction_artifact_uuid,
+            dual_channel_generation_artifact_uuid=dual_channel_artifact_uuid,
+            summaries_by_block_id=deterministic_summaries(projection),
+        )
+        construction_semantic_digest = construction_document_digest(construction)
+        construction_asset = await self._promote_generation_member(
+            command,
+            artifact_uuid=construction_artifact_uuid,
+            artifact_type="construction_document",
+            payload=construction_payload(construction),
+        )
+        dual_asset = await self._promote_generation_member(
+            command,
+            artifact_uuid=dual_channel_artifact_uuid,
+            artifact_type="dual_channel_projection",
+            payload=dual_channel_payload(dual),
+        )
+        validation_asset = await self._promote_generation_member(
+            command,
+            artifact_uuid=validation_artifact_uuid,
+            artifact_type="construction_validation_report",
+            payload=self._construction_validation_report_payload(
+                validation_artifact_uuid=validation_artifact_uuid,
+                construction=construction,
+                dual=dual,
+            ),
+        )
         next_state = dict(state)
-        next_state["construction_artifact_uuid"] = uuid7()
-        next_state["dual_channel_artifact_uuid"] = uuid7()
-        next_state["construction_validation_artifact_uuid"] = uuid7()
-        next_state["dual_channel"] = dual_channel
+        next_state.update(
+            {
+                "construction_artifact_uuid": construction_artifact_uuid,
+                "construction_artifact_ref": construction_asset.stat.handle.value,
+                "construction_artifact_content_digest": construction_asset.stat.sha256,
+                "construction_artifact_size_bytes": construction_asset.stat.size_bytes,
+                "construction_document_digest": construction_semantic_digest,
+                "dual_channel_artifact_uuid": dual_channel_artifact_uuid,
+                "dual_channel_artifact_ref": dual_asset.stat.handle.value,
+                "dual_channel_artifact_content_digest": dual_asset.stat.sha256,
+                "dual_channel_artifact_size_bytes": dual_asset.stat.size_bytes,
+                "construction_validation_artifact_uuid": validation_artifact_uuid,
+                "construction_validation_artifact_ref": validation_asset.stat.handle.value,
+                "construction_validation_artifact_content_digest": validation_asset.stat.sha256,
+                "construction_validation_artifact_size_bytes": validation_asset.stat.size_bytes,
+            }
+        )
         material = self._material(
             command,
             next_state,
-            {"construct_package": {"content_full": True, "dual_channel": dual_channel}},
+            {
+                "construct_package": {
+                    "content_full": True,
+                    "construction_document": self._generation_asset_receipt(
+                        construction_asset, construction_semantic_digest
+                    ),
+                    "dual_channel_projection": self._generation_asset_receipt(dual_asset),
+                    "validation_report": self._generation_asset_receipt(validation_asset),
+                }
+            },
         )
-        output_digest = _digest_bytes(material.output_bytes)
-        output_size = len(material.output_bytes)
 
         async def callback(tx: UnitOfWork, refs: Mapping[str, str]) -> None:
-            stored_object_uuid = await self._require_stored_object(tx, command.team_uuid, output_digest, output_size)
             schema = await tx.fetchone(
                 "SELECT schema_digest FROM mkb_construction_schema_definitions "
                 "WHERE schema_key='lsrag.construction.default' AND schema_version='v1'"
             )
             if schema is None:
                 raise MkbError("REGISTRY_NOT_FOUND", "Construction schema definition is unavailable", 503)
-            for ordinal, artifact_uuid, artifact_type in (
-                (0, next_state["construction_artifact_uuid"], "construction_document"),
-                (1, next_state["dual_channel_artifact_uuid"], "dual_channel_projection"),
-                (2, next_state["construction_validation_artifact_uuid"], "construction_validation_report"),
-            ):
+            for asset in (construction_asset, dual_asset, validation_asset):
+                stored_object_uuid = await self._catalog_generation_object(tx, command.team_uuid, asset.stat)
                 await self._insert_generation_artifact(
                     tx,
                     command=command,
-                    artifact_uuid=artifact_uuid,
-                    artifact_type=artifact_type,
+                    artifact_uuid=asset.artifact_uuid,
+                    artifact_type=asset.artifact_type,
                     stored_object_uuid=stored_object_uuid,
-                    logical_handle=refs["output_ref"],
-                    content_digest=output_digest,
-                    size_bytes=output_size,
+                    logical_handle=asset.stat.handle.value,
+                    content_digest=asset.stat.sha256,
+                    size_bytes=asset.stat.size_bytes,
                     intake_item_uuid=state["intake_item_uuid"],
                     intake_revision_uuid=state["intake_revision_uuid"],
                     clean_artifact_uuid=state["clean_artifact_uuid"],
@@ -3545,29 +3993,58 @@ class IntakePipeline(ProcessStageHandler):
                     schema_key="lsrag.construction.default",
                     schema_version="v1",
                     schema_digest=schema["schema_digest"],
+                    validation_report_ref=validation_asset.stat.handle.value,
+                    validation_report_digest=validation_asset.stat.sha256,
                     proof_ref=refs["proof_ref"],
                     proof_digest=refs["proof_digest"],
-                    ordinal=ordinal,
                 )
-            for artifact_type, artifact_uuid in (
-                ("construction_document", next_state["construction_artifact_uuid"]),
-                ("dual_channel_projection", next_state["dual_channel_artifact_uuid"]),
-            ):
+                await self._reference_object(
+                    tx,
+                    team_uuid=command.team_uuid,
+                    stored_object_uuid=stored_object_uuid,
+                    purpose="generation_artifact",
+                    owner_kind="generation_artifact",
+                    owner_uuid=asset.artifact_uuid,
+                    digest=asset.stat.sha256,
+                    size=asset.stat.size_bytes,
+                )
+            for asset in (construction_asset, dual_asset, validation_asset):
                 await self._advance_generation_pointer(
                     tx,
                     command=command,
-                    artifact_type=artifact_type,
-                    artifact_uuid=artifact_uuid,
+                    artifact_type=asset.artifact_type,
+                    artifact_uuid=asset.artifact_uuid,
                 )
-            await self._reference_object(
-                tx,
-                team_uuid=command.team_uuid,
-                stored_object_uuid=stored_object_uuid,
-                purpose="generation_artifact",
-                owner_kind="generation_artifact",
-                owner_uuid=next_state["dual_channel_artifact_uuid"],
-                digest=output_digest,
-                size=output_size,
+            outbox_payload = {
+                "schema_version": "mkb.vectorize-construct-intent.v1",
+                "team_uuid": command.team_uuid,
+                "task_uuid": command.task_uuid,
+                "execution_uuid": command.execution_uuid,
+                "construction_artifact_uuid": construction_artifact_uuid,
+                "construction_ref": construction_asset.stat.handle.value,
+                "construction_content_digest": construction_asset.stat.sha256,
+                "dual_channel_artifact_uuid": dual_channel_artifact_uuid,
+                "dual_channel_ref": dual_asset.stat.handle.value,
+                "dual_channel_content_digest": dual_asset.stat.sha256,
+                "construction_schema_digest": schema["schema_digest"],
+                "content_full_recipe_version": "content_full.v1",
+            }
+            now = utc_now()
+            await tx.execute(
+                "INSERT OR IGNORE INTO mkb_outbox "
+                "(outbox_id,team_uuid,kind,payload_json,payload_digest,dedupe_key,status,available_at,created_at,updated_at,payload_extra) "
+                "VALUES (?,?,?,?,?,?,'pending',?,?,?,'{}')",
+                (
+                    uuid7(),
+                    command.team_uuid,
+                    "vectorize_construct",
+                    _json(outbox_payload),
+                    stable_digest(outbox_payload),
+                    f"vectorize-construct:{stable_digest(outbox_payload)}",
+                    now,
+                    now,
+                    now,
+                ),
             )
 
         return material, {}, callback
@@ -3575,29 +4052,45 @@ class IntakePipeline(ProcessStageHandler):
     async def _vectorize(
         self, command: ProcessCommand, state: dict[str, Any]
     ) -> tuple[_StageMaterial, dict[str, Any], Callable[[UnitOfWork, Mapping[str, str]], Awaitable[None]]]:
-        dual_channel = state.get("dual_channel")
-        if not isinstance(dual_channel, dict) or not isinstance(dual_channel.get("units"), list):
-            raise MkbError("CONSTRUCT_TO_VECTORIZE_GATE", "A full dual-channel construct package is required", 409)
-        units = dual_channel["units"]
-        if len(units) != 1 or not isinstance(units[0], dict):
-            raise MkbError("CONSTRUCT_TO_VECTORIZE_GATE", "Construct package must contain one complete unit", 409)
-        unit = units[0]
-        original = unit.get("original")
-        summary = unit.get("summary")
-        unit_id = unit.get("unit_id")
-        if not all(isinstance(value, str) and value for value in (original, summary, unit_id)):
-            raise MkbError("CONSTRUCT_TO_VECTORIZE_GATE", "Construct package channels are incomplete", 409)
+        compiler, construction, dual = await self._reconstruct_construct_contract(command, state)
+        await self._assert_construct_to_vectorize_gate(command, state)
+        plan = compiler.vectorization_plan(document=construction, dual=dual)
+        if not plan.required:
+            raise MkbError("CONSTRUCT_TO_VECTORIZE_GATE", "Construct package has no required vector units", 409)
         namespace_uuid, next_generation = await self._namespace_coordinates(command.team_uuid)
         mode, frozen_layer_a = await self._embedding_profile(command)
         invocation: dict[str, Any] | None = None
+        vector_inputs = list(plan.required)
+        texts = [item.content_full for item in vector_inputs]
         if mode == "live":
-            vectors, layer_a, invocation = await self._live_embeddings(command, [original, summary], frozen_layer_a)
+            vectors, layer_a, invocation = await self._live_embeddings(command, texts, frozen_layer_a)
         else:
-            vectors = [
-                deterministic_embedding(original, dimension=int(frozen_layer_a["dimension"])),
-                deterministic_embedding(summary, dimension=int(frozen_layer_a["dimension"])),
-            ]
+            vectors = [deterministic_embedding(text, dimension=int(frozen_layer_a["dimension"])) for text in texts]
             layer_a = frozen_layer_a
+        if len(vectors) != len(vector_inputs):
+            raise MkbError("VECTORIZE_INFERENCE_FAILED", "Embedding response does not cover the required vector set", 503)
+        persisted_records: list[dict[str, Any]] = []
+        for item, vector in zip(vector_inputs, vectors, strict=True):
+            existing_uuid = await self._existing_vector_coordinate_uuid(
+                team_uuid=command.team_uuid,
+                namespace_uuid=namespace_uuid,
+                generation_artifact_uuid=state["dual_channel_artifact_uuid"],
+                unit_id=item.unit_id,
+                channel=item.channel,
+                embedding_model=layer_a["model_key"],
+            )
+            persisted_records.append(
+                {
+                    "vector_record_uuid": existing_uuid or uuid7(),
+                    "unit_id": item.unit_id,
+                    "granularity": item.granularity,
+                    "channel": item.channel,
+                    "coordinate": item.coordinate,
+                    "content": item.content_full,
+                    "content_digest": item.content_full_digest,
+                    "embedding": vector,
+                }
+            )
         next_state = dict(state)
         next_state["namespace_uuid"] = namespace_uuid
         next_state["index_generation"] = next_generation
@@ -3607,16 +4100,19 @@ class IntakePipeline(ProcessStageHandler):
             # This is metadata only: no source text, prompt body, or vector
             # coordinate is ever copied into a stage envelope.
             next_state["embedding_invocation"] = invocation
+        # Do not embed source text or vectors into a Process outcome.  The
+        # direct dual-channel generation object remains the retrieval body;
+        # this receipt carries only generation-scoped coordinates and digests.
         next_state["vector_records"] = [
             {
-                "vector_record_uuid": uuid7(),
-                "channel": channel,
-                "unit_id": unit_id,
-                "content": content,
-                "content_digest": stable_digest({"text": content}),
-                "embedding": vector,
+                "vector_record_uuid": record["vector_record_uuid"],
+                "unit_id": record["unit_id"],
+                "granularity": record["granularity"],
+                "channel": record["channel"],
+                "coordinate": record["coordinate"],
+                "content_digest": record["content_digest"],
             }
-            for channel, content, vector in (("original", original, vectors[0]), ("summary", summary, vectors[1]))
+            for record in persisted_records
         ]
         material = self._material(
             command,
@@ -3634,61 +4130,29 @@ class IntakePipeline(ProcessStageHandler):
         )
 
         async def callback(tx: UnitOfWork, refs: Mapping[str, str]) -> None:
+            del refs
+            await self._assert_construct_to_vectorize_gate_tx(tx, command, state)
             await self._ensure_namespace(tx, command.team_uuid, namespace_uuid, layer_a)
             if invocation is not None:
                 await self._record_embedding_invocation(tx, command, invocation)
-            for record in next_state["vector_records"]:
+            for record in persisted_records:
                 vector = record["embedding"]
                 blob = struct.pack(f"<{int(layer_a['dimension'])}f", *vector)
-                await tx.execute(
-                    "INSERT OR IGNORE INTO mkb_vector_records "
-                    "(vector_record_uuid,team_uuid,namespace_uuid,generation_artifact_uuid,generation_artifact_type,"
-                    "block_or_unit_id,channel,intake_source_uuid,intake_item_uuid,intake_revision_uuid,task_uuid,execution_uuid,"
-                    "content_digest,source_handle,content_char_length,embedding_model,embedding_model_key,embedding_model_version,"
-                    "adapter_kind,dimension,embedding,embedding_digest,publication_state,index_generation,embedded_at,created_at,"
-                    "updated_at,payload_extra) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'withdrawn',?,?,?,?,'{}')",
-                    (
-                        record["vector_record_uuid"],
-                        command.team_uuid,
-                        namespace_uuid,
-                        state["dual_channel_artifact_uuid"],
-                        "dual_channel_projection",
-                        record["unit_id"],
-                        record["channel"],
-                        state["intake_source_uuid"],
-                        state["intake_item_uuid"],
-                        state["intake_revision_uuid"],
-                        command.task_uuid,
-                        command.execution_uuid,
-                        record["content_digest"],
-                        refs["output_ref"],
-                        len(record["content"]),
-                        layer_a["model_key"],
-                        layer_a["model_key"],
-                        layer_a["model_version"],
-                        layer_a["adapter_kind"],
-                        layer_a["dimension"],
-                        blob,
-                        _digest_bytes(blob),
-                        next_generation,
-                        utc_now(),
-                        utc_now(),
-                        utc_now(),
-                    ),
+                vector_record_uuid = await self._upsert_vector_record_tx(
+                    tx,
+                    command=command,
+                    state=state,
+                    namespace_uuid=namespace_uuid,
+                    index_generation=next_generation,
+                    layer_a=layer_a,
+                    record=record,
+                    embedding_blob=blob,
                 )
-                await tx.execute(
-                    "INSERT OR IGNORE INTO mkb_vector_record_facets "
-                    "(facet_uuid,vector_record_uuid,team_uuid,facet_key,facet_value,definition_version,definition_digest,"
-                    "created_at,payload_extra) VALUES (?,?,?,?,?,'v1',?,?, '{}')",
-                    (
-                        uuid7(),
-                        record["vector_record_uuid"],
-                        command.team_uuid,
-                        "source_kind",
-                        state["source_kind"],
-                        stable_digest({"facet": "source_kind", "version": "v1"}),
-                        utc_now(),
-                    ),
+                await self._upsert_vector_source_kind_facet_tx(
+                    tx,
+                    team_uuid=command.team_uuid,
+                    vector_record_uuid=vector_record_uuid,
+                    source_kind=state["source_kind"],
                 )
 
         return material, {}, callback
@@ -4140,6 +4604,29 @@ class IntakePipeline(ProcessStageHandler):
         )
         return None if row is None else str(row["stored_object_uuid"])
 
+    async def _catalog_generation_object(self, tx: UnitOfWork, team_uuid: str, stat: ObjectStat) -> str:
+        """Catalog a pre-promoted S13 generation object inside the outcome UoW."""
+
+        existing = await self._stored_object_uuid(tx, team_uuid, stat.sha256, stat.size_bytes)
+        if existing is not None:
+            return existing
+        stored_object_uuid = uuid7()
+        await tx.execute(
+            "INSERT INTO mkb_stored_objects "
+            "(stored_object_uuid,team_uuid,digest_algorithm,content_digest,size_bytes,media_type,storage_backend,"
+            "created_at,payload_extra) VALUES (?,?, 'sha256',?,?,?,?,?,'{}')",
+            (
+                stored_object_uuid,
+                team_uuid,
+                stat.sha256,
+                stat.size_bytes,
+                stat.media_type or "application/json",
+                "local_fs",
+                utc_now(),
+            ),
+        )
+        return stored_object_uuid
+
     async def _require_stored_object(self, tx: UnitOfWork, team_uuid: str, digest: str, size: int) -> str:
         stored_object_uuid = await self._stored_object_uuid(tx, team_uuid, digest, size)
         if stored_object_uuid is None:
@@ -4172,6 +4659,180 @@ class IntakePipeline(ProcessStageHandler):
             (uuid7(), team_uuid, stored_object_uuid, purpose, owner_kind, owner_uuid, digest, size, utc_now()),
         )
 
+    async def _existing_vector_coordinate_uuid(
+        self,
+        *,
+        team_uuid: str,
+        namespace_uuid: str,
+        generation_artifact_uuid: str,
+        unit_id: str,
+        channel: str,
+        embedding_model: str,
+    ) -> str | None:
+        async with self._persistence.transaction() as tx:
+            row = await tx.fetchone(
+                "SELECT vector_record_uuid FROM mkb_vector_records WHERE team_uuid=? AND namespace_uuid=? "
+                "AND generation_artifact_uuid=? AND block_or_unit_id=? AND channel=? AND embedding_model=? "
+                "AND deleted_at IS NULL",
+                (team_uuid, namespace_uuid, generation_artifact_uuid, unit_id, channel, embedding_model),
+            )
+        return None if row is None else str(row["vector_record_uuid"])
+
+    async def _upsert_vector_record_tx(
+        self,
+        tx: UnitOfWork,
+        *,
+        command: ProcessCommand,
+        state: Mapping[str, Any],
+        namespace_uuid: str,
+        index_generation: int,
+        layer_a: Mapping[str, Any],
+        record: Mapping[str, Any],
+        embedding_blob: bytes,
+    ) -> str:
+        """Idempotently converge one required S08 coordinate inside the UoW."""
+
+        planned_uuid = record.get("vector_record_uuid")
+        unit_id = record.get("unit_id")
+        channel = record.get("channel")
+        content = record.get("content")
+        content_digest = record.get("content_digest")
+        if not all(isinstance(value, str) and value for value in (planned_uuid, unit_id, channel, content, content_digest)):
+            raise MkbError("VECTORIZE_INPUT_INVALID", "Vectorization record is incomplete", 422)
+        if channel not in {"original", "summary"}:
+            raise MkbError("VECTORIZE_INPUT_INVALID", "Vectorization channel is invalid", 422)
+        if stable_digest({"text": content}) != content_digest:
+            raise MkbError("VECTORIZE_CONTENT_MISMATCH", "Vectorization content digest does not match the recomputed recipe", 409)
+        artifact_uuid = self._generation_state_text(state, "dual_channel_artifact_uuid", "CONSTRUCT_TO_VECTORIZE_GATE")
+        source_handle = self._generation_state_text(state, "dual_channel_artifact_ref", "CONSTRUCT_TO_VECTORIZE_GATE")
+        existing = await tx.fetchone(
+            "SELECT vector_record_uuid FROM mkb_vector_records WHERE team_uuid=? AND namespace_uuid=? "
+            "AND generation_artifact_uuid=? AND block_or_unit_id=? AND channel=? AND embedding_model=? "
+            "AND deleted_at IS NULL",
+            (command.team_uuid, namespace_uuid, artifact_uuid, unit_id, channel, layer_a["model_key"]),
+        )
+        now = utc_now()
+        if existing is not None:
+            vector_record_uuid = str(existing["vector_record_uuid"])
+            if vector_record_uuid != planned_uuid:
+                raise MkbError("VECTORIZE_COORDINATE_FENCE", "A vector coordinate was claimed by a different replay", 409)
+            updated = await tx.execute(
+                "UPDATE mkb_vector_records SET intake_source_uuid=?,intake_item_uuid=?,intake_revision_uuid=?,task_uuid=?,"
+                "execution_uuid=?,content_digest=?,source_handle=?,content_char_length=?,embedding_model_key=?,"
+                "embedding_model_version=?,adapter_kind=?,dimension=?,embedding=?,embedding_digest=?,publication_state='withdrawn',"
+                "index_generation=?,outbox_dedupe_key=?,embedded_at=?,updated_at=? "
+                "WHERE team_uuid=? AND vector_record_uuid=? AND deleted_at IS NULL",
+                (
+                    state["intake_source_uuid"],
+                    state["intake_item_uuid"],
+                    state["intake_revision_uuid"],
+                    command.task_uuid,
+                    command.execution_uuid,
+                    content_digest,
+                    source_handle,
+                    len(content),
+                    layer_a["model_key"],
+                    layer_a["model_version"],
+                    layer_a["adapter_kind"],
+                    layer_a["dimension"],
+                    embedding_blob,
+                    _digest_bytes(embedding_blob),
+                    index_generation,
+                    stable_digest(
+                        {
+                            "generation_artifact_uuid": artifact_uuid,
+                            "unit_id": unit_id,
+                            "channel": channel,
+                            "embedding_model": layer_a["model_key"],
+                        }
+                    ),
+                    now,
+                    now,
+                    command.team_uuid,
+                    vector_record_uuid,
+                ),
+            )
+            if updated.rowcount != 1:
+                raise MkbError("VECTORIZE_COORDINATE_FENCE", "Vector coordinate changed during its fenced update", 409)
+            return vector_record_uuid
+        await tx.execute(
+            "INSERT INTO mkb_vector_records "
+            "(vector_record_uuid,team_uuid,namespace_uuid,generation_artifact_uuid,generation_artifact_type,"
+            "block_or_unit_id,channel,intake_source_uuid,intake_item_uuid,intake_revision_uuid,task_uuid,execution_uuid,"
+            "content_digest,source_handle,content_char_length,embedding_model,embedding_model_key,embedding_model_version,"
+            "adapter_kind,dimension,embedding,embedding_digest,publication_state,index_generation,outbox_dedupe_key,"
+            "embedded_at,created_at,updated_at,payload_extra) "
+            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'withdrawn',?,?,?,?,?, '{}')",
+            (
+                planned_uuid,
+                command.team_uuid,
+                namespace_uuid,
+                artifact_uuid,
+                "dual_channel_projection",
+                unit_id,
+                channel,
+                state["intake_source_uuid"],
+                state["intake_item_uuid"],
+                state["intake_revision_uuid"],
+                command.task_uuid,
+                command.execution_uuid,
+                content_digest,
+                source_handle,
+                len(content),
+                layer_a["model_key"],
+                layer_a["model_key"],
+                layer_a["model_version"],
+                layer_a["adapter_kind"],
+                layer_a["dimension"],
+                embedding_blob,
+                _digest_bytes(embedding_blob),
+                index_generation,
+                stable_digest(
+                    {
+                        "generation_artifact_uuid": artifact_uuid,
+                        "unit_id": unit_id,
+                        "channel": channel,
+                        "embedding_model": layer_a["model_key"],
+                    }
+                ),
+                now,
+                now,
+                now,
+            ),
+        )
+        return planned_uuid
+
+    async def _upsert_vector_source_kind_facet_tx(
+        self,
+        tx: UnitOfWork,
+        *,
+        team_uuid: str,
+        vector_record_uuid: str,
+        source_kind: object,
+    ) -> None:
+        if not isinstance(source_kind, str) or not source_kind:
+            raise MkbError("VECTORIZE_FILTER_BINDING", "Authoritative source kind is unavailable", 409)
+        definition_digest = stable_digest({"facet": "source_kind", "version": "v1"})
+        existing = await tx.fetchone(
+            "SELECT facet_value,definition_version,definition_digest FROM mkb_vector_record_facets "
+            "WHERE vector_record_uuid=? AND facet_key='source_kind'",
+            (vector_record_uuid,),
+        )
+        if existing is None:
+            await tx.execute(
+                "INSERT INTO mkb_vector_record_facets "
+                "(facet_uuid,vector_record_uuid,team_uuid,facet_key,facet_value,definition_version,definition_digest,"
+                "created_at,payload_extra) VALUES (?,?,?,?,?,'v1',?,?, '{}')",
+                (uuid7(), vector_record_uuid, team_uuid, "source_kind", source_kind, definition_digest, utc_now()),
+            )
+            return
+        if (
+            existing["facet_value"] != source_kind
+            or existing["definition_version"] != "v1"
+            or existing["definition_digest"] != definition_digest
+        ):
+            raise MkbError("VECTORIZE_FILTER_BINDING", "Authoritative source-kind facet conflicts with the coordinate", 409)
+
     async def _insert_generation_artifact(
         self,
         tx: UnitOfWork,
@@ -4190,6 +4851,8 @@ class IntakePipeline(ProcessStageHandler):
         schema_key: str,
         schema_version: str,
         schema_digest: str,
+        validation_report_ref: str | None,
+        validation_report_digest: str | None,
         proof_ref: str,
         proof_digest: str,
         ordinal: int = 0,
@@ -4223,8 +4886,8 @@ class IntakePipeline(ProcessStageHandler):
                 size_bytes,
                 content_digest,
                 stored_object_uuid,
-                proof_ref,
-                proof_digest,
+                validation_report_ref,
+                validation_report_digest,
                 proof_ref,
                 proof_digest,
                 utc_now(),
