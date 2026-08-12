@@ -23,6 +23,8 @@ class ProcessCommand(PayloadExtraModel):
     command_input_digest: Annotated[str, Field(pattern=r"^[0-9a-f]{64}$")]
     input_manifest_ref: Annotated[str, Field(min_length=1, max_length=1024)]
     input_manifest_digest: Annotated[str, Field(pattern=r"^[0-9a-f]{64}$")]
+    config_snapshot_ref: Annotated[str, Field(min_length=1, max_length=1024)]
+    config_snapshot_digest: Annotated[str, Field(pattern=r"^[0-9a-f]{64}$")]
     binding_digest: Annotated[str, Field(pattern=r"^[0-9a-f]{64}$")]
 
     @field_validator("team_uuid", "task_uuid", "trace_uuid", "execution_uuid", "process_uuid")
