@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+import json
+
 from fastapi import APIRouter, Request, Response
 
 from api.dependencies import BusinessToken, Ready
 from src.contracts.api.models import (
     ExpectedRevisionRequest,
-    RetrievalRequest,
+    parse_retrieval_request,
     RetryRequest,
     TaskCreateRequest,
     TaskPatchRequest,
@@ -187,12 +189,17 @@ async def task_result(request: Request, team_uuid: str, task_uuid: str, token: B
 
 @router.post("/teams/{team_uuid}/retrieval:search")
 async def retrieval_search(
-    request: Request, team_uuid: str, body: RetrievalRequest, token: BusinessToken, ready: Ready
+    request: Request, team_uuid: str, token: BusinessToken, ready: Ready
 ) -> dict[str, object]:
     """Canonical S10 route; service implementation is intentionally side-effect free."""
 
     del token, ready
     team_uuid = _team_path(team_uuid)
+    try:
+        payload = await request.json()
+    except (json.JSONDecodeError, UnicodeDecodeError) as exc:
+        raise MkbError("RETRIEVE_SCHEMA_INVALID", "Retrieval request must be valid JSON", 422) from exc
+    body = parse_retrieval_request(payload)
     if body.team_uuid != team_uuid:
         raise MkbError("team-path-mismatch", "Body team_uuid must match path", 422)
     return await request.app.state.container.retrieval.search(body)

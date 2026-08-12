@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from typing import Annotated, Any, Literal
 
-from pydantic import Field, field_validator, model_validator
+from pydantic import Field, ValidationError, field_validator, model_validator
 
+from src.contracts.common.errors import MkbError
 from src.contracts.common.ids import validate_external_uuid
 from src.contracts.common.models import (
     ErrorEnvelope,
@@ -287,13 +289,111 @@ class RetrievalRequest(StrictModel):
     schema_version: Literal["mkb.retrieval.v1"] = "mkb.retrieval.v1"
     team_uuid: str
     query: Annotated[str, Field(max_length=8192)]
-    top_k: Annotated[int, Field(ge=1, le=50)] = 8
-    filters: RetrievalFilter | None = None
+    namespace_key: Annotated[str | None, Field(min_length=1, max_length=256)] = None
+    namespace_uuid: str | None = None
+    return_k: Annotated[int | None, Field(ge=1, le=100)] = None
+    recall_k: Annotated[int | None, Field(ge=1, le=100)] = None
+    score_threshold: float | None = None
+    include_pack: bool = True
+    # ``top_k`` is accepted only as a short-lived wire compatibility alias.
+    # S10's public contract names the output bound ``return_k``.
+    top_k: Annotated[int | None, Field(ge=1, le=100)] = None
+    # A mapping alternative intentionally lets the service emit the required
+    # RETRIEVE_FILTER_INVALID code for an unregistered key, rather than letting
+    # FastAPI turn it into an untyped validation response before S10 runs.
+    filters: RetrievalFilter | dict[str, str] | None = None
 
     @field_validator("team_uuid")
     @classmethod
     def validate_team_uuid(cls, value: str) -> str:
         return _uuid(value, "team_uuid")
+
+    @field_validator("namespace_uuid")
+    @classmethod
+    def validate_namespace_uuid(cls, value: str | None) -> str | None:
+        return None if value is None else _uuid(value, "namespace_uuid")
+
+    @model_validator(mode="after")
+    def validate_retrieval_selector(self) -> RetrievalRequest:
+        if self.namespace_key is not None and self.namespace_uuid is not None:
+            raise ValueError("only one namespace selector may be supplied")
+        if self.return_k is not None and self.top_k is not None:
+            raise ValueError("use return_k instead of top_k")
+        return self
+
+
+# The public request is deliberately parsed at the API boundary rather than by
+# FastAPI's automatic model dependency.  Otherwise ``extra='forbid'`` is
+# transformed into its generic validation envelope before S10 can tell a
+# caller that a client-controlled index/vector/model field was rejected.  Keep
+# this closed set adjacent to the contract; services must still defend their
+# direct-call mapping seam independently.
+_RETRIEVAL_FORBIDDEN_FIELDS = frozenset(
+    {
+        "index_generation",
+        "raw_query_vector",
+        "query_embedding",
+        "distance_metric",
+        "embedding_model",
+        "model_override",
+        "include_answer",
+        "stream",
+    }
+)
+
+
+def parse_retrieval_request(payload: object) -> RetrievalRequest:
+    """Validate an HTTP JSON value with stable, non-echoing S10 errors.
+
+    The function intentionally exposes neither a rejected field value nor a
+    Pydantic error representation.  This prevents raw vectors, model override
+    payloads, or malformed query text from becoming an error-body side channel.
+    """
+
+    if not isinstance(payload, Mapping):
+        raise MkbError("RETRIEVE_SCHEMA_INVALID", "Retrieval request must be a JSON object", 422)
+    if not all(isinstance(key, str) for key in payload):
+        raise MkbError("RETRIEVE_SCHEMA_INVALID", "Retrieval request field names are invalid", 422)
+
+    supplied_keys = set(payload)
+    if supplied_keys & _RETRIEVAL_FORBIDDEN_FIELDS:
+        raise MkbError(
+            "RETRIEVE_SCHEMA_FORBIDDEN_FIELD",
+            "v1 retrieval does not allow client index/model/vector/answer overrides",
+            422,
+        )
+
+    unknown = supplied_keys - set(RetrievalRequest.model_fields)
+    if unknown:
+        raise MkbError("RETRIEVE_SCHEMA_UNKNOWN_FIELD", "Unknown retrieval request field", 422)
+
+    try:
+        return RetrievalRequest.model_validate(payload)
+    except ValidationError as exc:
+        raise _retrieval_validation_error(exc) from exc
+
+
+def _retrieval_validation_error(exc: ValidationError) -> MkbError:
+    """Map typed-contract violations without reflecting body contents."""
+
+    locations = {
+        str(error["loc"][0])
+        for error in exc.errors()
+        if isinstance(error.get("loc"), tuple) and error["loc"]
+    }
+    if "filters" in locations:
+        return MkbError("RETRIEVE_FILTER_INVALID", "Retrieval filters are invalid", 422)
+    if locations & {"return_k", "recall_k", "top_k"}:
+        return MkbError("RETRIEVE_TOPK_INVALID", "Retrieval rank bounds are invalid", 422)
+    if "score_threshold" in locations:
+        return MkbError("RETRIEVE_SCHEMA_THRESHOLD_INVALID", "Retrieval score threshold is invalid", 422)
+    if "include_pack" in locations:
+        return MkbError("RETRIEVE_SCHEMA_PACK_INVALID", "Retrieval pack option is invalid", 422)
+    if locations & {"namespace_key", "namespace_uuid"}:
+        return MkbError("RETRIEVE_SCHEMA_NAMESPACE_INVALID", "Retrieval namespace selector is invalid", 422)
+    if "team_uuid" in locations:
+        return MkbError("RETRIEVE_SCHEMA_TEAM_REQUIRED", "team_uuid is required for retrieval", 422)
+    return MkbError("RETRIEVE_SCHEMA_INVALID", "Retrieval request does not satisfy the v1 contract", 422)
 
 
 class TaskView(StrictModel):
@@ -328,6 +428,7 @@ __all__ = [
     "ErrorEnvelope",
     "ExpectedRevisionRequest",
     "GateDecisionRequest",
+    "parse_retrieval_request",
     "RetrievalRequest",
     "TaskCreateRequest",
     "TaskPatchRequest",

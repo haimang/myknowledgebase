@@ -6,11 +6,13 @@ from src.contracts.api.models import (
     TaskPatchRequest,
     TeamCreateRequest,
     TeamPatchRequest,
+    parse_retrieval_request,
 )
 
 __all__ = [
     "ExpectedRevisionRequest",
     "GateDecisionRequest",
+    "parse_retrieval_request",
     "RetrievalRequest",
     "TaskCreateRequest",
     "TaskPatchRequest",
