@@ -14,7 +14,11 @@ from src.contracts.common.errors import MkbError
 from src.contracts.common.ids import uuid7
 from src.contracts.storage.models import ObjectHandle, ObjectStat, PromoteRequest
 
-_HANDLE_ID = re.compile(r"^mkbobj:v1:([0-9a-f]{64})$")
+# A promoted-but-not-yet-catalogued CAS handle is scoped to its Team and digest.
+# The catalog can later expose an even more opaque stored-object handle, but
+# this pre-transaction identity is already safe to put in a Process outcome:
+# it contains no host path and cannot cross a Team's byte namespace.
+_HANDLE_ID = re.compile(r"^mkbobj:v1:([0-9a-f-]{36}):([0-9a-f]{64})$")
 
 
 class LocalObjectStore:
@@ -31,12 +35,12 @@ class LocalObjectStore:
         self._write_lock = asyncio.Lock()
         self._identity_path = self.root / "identity.json"
 
-    def _object_path(self, digest: str) -> Path:
-        return self.root / "cas" / digest[:2] / digest[2:4] / digest
+    def _object_path(self, team_uuid: str, digest: str) -> Path:
+        return self.root / "objects" / team_uuid / "sha256" / digest[:2] / digest[2:4] / digest
 
     def _ensure_root(self) -> None:
         self.root.mkdir(mode=0o700, parents=True, exist_ok=True)
-        (self.root / "cas").mkdir(mode=0o700, exist_ok=True)
+        (self.root / "objects").mkdir(mode=0o700, exist_ok=True)
         (self.root / "staging").mkdir(mode=0o700, exist_ok=True)
         if not self._identity_path.exists():
             self._identity_path.write_text(json.dumps({"identity": uuid7()}), encoding="utf-8")
@@ -67,11 +71,11 @@ class LocalObjectStore:
         if request.expected_sha256 and request.expected_sha256 != digest:
             raise MkbError("OBJECT_INTEGRITY_DIGEST", "Object digest does not match expected digest", 422)
         async with self._write_lock:
-            return await asyncio.to_thread(self._promote_sync, data, digest, request.media_type)
+            return await asyncio.to_thread(self._promote_sync, data, digest, request.team_uuid, request.media_type)
 
-    def _promote_sync(self, data: bytes, digest: str, media_type: str | None) -> ObjectStat:
+    def _promote_sync(self, data: bytes, digest: str, team_uuid: str, media_type: str | None) -> ObjectStat:
         self._ensure_root()
-        target = self._object_path(digest)
+        target = self._object_path(team_uuid, digest)
         target.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
         if target.exists():
             existing = target.read_bytes()
@@ -90,21 +94,22 @@ class LocalObjectStore:
                 if os.path.exists(temporary):
                     os.unlink(temporary)
         return ObjectStat(
-            handle=ObjectHandle(value=f"mkbobj:v1:{digest}"),
+            handle=ObjectHandle(value=f"mkbobj:v1:{team_uuid}:{digest}"),
             sha256=digest,
             size_bytes=len(data),
             media_type=media_type,
         )
 
     async def read_verified(self, team_uuid: str, handle: ObjectHandle) -> bytes:
-        del team_uuid  # Team authorization is enforced by the catalog/reference port.
         match = _HANDLE_ID.match(handle.value)
         if not match:
             raise MkbError("SEC_PATH_REJECTED", "Object handle is invalid", 422)
-        return await asyncio.to_thread(self._read_verified_sync, match.group(1))
+        if match.group(1) != team_uuid:
+            raise MkbError("OBJECT_AUTH_TEAM_MISMATCH", "Object handle belongs to a different Team", 403)
+        return await asyncio.to_thread(self._read_verified_sync, team_uuid, match.group(2))
 
-    def _read_verified_sync(self, digest: str) -> bytes:
-        path = self._object_path(digest)
+    def _read_verified_sync(self, team_uuid: str, digest: str) -> bytes:
+        path = self._object_path(team_uuid, digest)
         if not path.exists():
             raise MkbError("OBJECT_MISSING", "Object bytes are unavailable", 404)
         data = path.read_bytes()
@@ -115,11 +120,12 @@ class LocalObjectStore:
     async def delete_if_unreferenced(self, team_uuid: str, handle: ObjectHandle) -> bool:
         """Physical delete only; the caller must recheck DB reference/hold fences first."""
 
-        del team_uuid
         match = _HANDLE_ID.match(handle.value)
         if not match:
             raise MkbError("SEC_PATH_REJECTED", "Object handle is invalid", 422)
-        path = self._object_path(match.group(1))
+        if match.group(1) != team_uuid:
+            raise MkbError("OBJECT_AUTH_TEAM_MISMATCH", "Object handle belongs to a different Team", 403)
+        path = self._object_path(team_uuid, match.group(2))
         if not path.exists():
             return False
         await asyncio.to_thread(path.unlink)

@@ -14,12 +14,13 @@ from src.contracts.api.generation import (
 )
 from src.contracts.api.models import (
     ExpectedRevisionRequest,
-    parse_retrieval_request,
+    GateDecisionRequest,
     RetryRequest,
     TaskCreateRequest,
     TaskPatchRequest,
     TeamCreateRequest,
     TeamPatchRequest,
+    parse_retrieval_request,
 )
 from src.contracts.common.errors import MkbError
 from src.contracts.common.ids import validate_external_uuid
@@ -34,6 +35,18 @@ def _team_path(team_uuid: str) -> str:
 
 def _task_path(task_uuid: str) -> str:
     return validate_external_uuid(task_uuid, field="task_uuid")
+
+
+def _restart_path(restart_uuid: str) -> str:
+    return validate_external_uuid(restart_uuid, field="restart_uuid")
+
+
+def _gate_path(gate_uuid: str) -> str:
+    return validate_external_uuid(gate_uuid, field="gate_uuid")
+
+
+def _item_path(intake_item_uuid: str) -> str:
+    return validate_external_uuid(intake_item_uuid, field="intake_item_uuid")
 
 
 def _generation_artifact_path(generation_artifact_uuid: str) -> str:
@@ -281,6 +294,161 @@ async def list_generation_artifact_pointers(
     return GenerationArtifactPointerPage.model_validate({"items": items, "next_cursor": next_cursor})
 
 
+@router.get("/teams/{team_uuid}/tasks/{task_uuid}/items")
+async def task_items(
+    request: Request,
+    team_uuid: str,
+    task_uuid: str,
+    token: BusinessToken,
+    generation: int | None = None,
+    limit: int = 50,
+    cursor: str | None = None,
+) -> dict[str, object]:
+    """Bounded membership-derived scatter projection; never child executions."""
+
+    del token
+    items, next_cursor = await request.app.state.container.tasks.items(
+        _team_path(team_uuid),
+        _task_path(task_uuid),
+        generation=generation,
+        limit=limit,
+        cursor=cursor,
+    )
+    return {"items": items, "next_cursor": next_cursor}
+
+
+@router.get("/teams/{team_uuid}/tasks/{task_uuid}/generations")
+async def task_generations(
+    request: Request,
+    team_uuid: str,
+    task_uuid: str,
+    token: BusinessToken,
+    limit: int = 50,
+    cursor: str | None = None,
+) -> dict[str, object]:
+    """Read stable generation summaries without exposing their execution IDs."""
+
+    del token
+    items, next_cursor = await request.app.state.container.tasks.generations(
+        _team_path(team_uuid), _task_path(task_uuid), limit=limit, cursor=cursor
+    )
+    return {"items": items, "next_cursor": next_cursor}
+
+
+@router.get("/teams/{team_uuid}/tasks/{task_uuid}/gates")
+async def task_gates(
+    request: Request,
+    team_uuid: str,
+    task_uuid: str,
+    token: BusinessToken,
+    status: str | None = "open",
+    limit: int = 50,
+    cursor: str | None = None,
+) -> dict[str, object]:
+    del token
+    items, next_cursor = await request.app.state.container.tasks.gates(
+        _team_path(team_uuid), _task_path(task_uuid), status=status, limit=limit, cursor=cursor
+    )
+    return {"items": items, "next_cursor": next_cursor}
+
+
+@router.get("/teams/{team_uuid}/tasks/{task_uuid}/gates/{gate_uuid}")
+async def get_task_gate(
+    request: Request, team_uuid: str, task_uuid: str, gate_uuid: str, token: BusinessToken
+) -> dict[str, object]:
+    del token
+    return await request.app.state.container.tasks.gate(
+        _team_path(team_uuid), _task_path(task_uuid), _gate_path(gate_uuid)
+    )
+
+
+@router.post("/teams/{team_uuid}/tasks/{task_uuid}/gates/{gate_uuid}:decide")
+async def decide_task_gate(
+    request: Request,
+    team_uuid: str,
+    task_uuid: str,
+    gate_uuid: str,
+    body: GateDecisionRequest,
+    token: BusinessToken,
+    ready: Ready,
+) -> dict[str, object]:
+    """Commit a Task-scoped human decision; runtime advancement remains async."""
+
+    del ready
+    return await request.app.state.container.tasks.decide_gate(
+        _team_path(team_uuid),
+        _task_path(task_uuid),
+        _gate_path(gate_uuid),
+        body,
+        token,
+    )
+
+
+@router.get("/teams/{team_uuid}/task-restarts")
+async def list_task_restarts(
+    request: Request,
+    team_uuid: str,
+    token: BusinessToken,
+    restart_uuid: str | None = None,
+    source_task_uuid: str | None = None,
+    restart_task_uuid: str | None = None,
+    intake_item_uuid: str | None = None,
+    scope: str | None = None,
+    admission_outcome: str | None = None,
+    current_task_status: str | None = None,
+    requested_at_from: str | None = None,
+    requested_at_to: str | None = None,
+    limit: int = 50,
+    cursor: str | None = None,
+) -> dict[str, object]:
+    del token
+    items, next_cursor = await request.app.state.container.tasks.restarts(
+        _team_path(team_uuid),
+        restart_uuid=_restart_path(restart_uuid) if restart_uuid else None,
+        source_task_uuid=_task_path(source_task_uuid) if source_task_uuid else None,
+        restart_task_uuid=_task_path(restart_task_uuid) if restart_task_uuid else None,
+        intake_item_uuid=_item_path(intake_item_uuid) if intake_item_uuid else None,
+        scope=scope,
+        admission_outcome=admission_outcome,
+        current_task_status=current_task_status,
+        requested_at_from=requested_at_from,
+        requested_at_to=requested_at_to,
+        limit=limit,
+        cursor=cursor,
+    )
+    return {"items": items, "next_cursor": next_cursor}
+
+
+@router.get("/teams/{team_uuid}/task-restarts/{restart_uuid}")
+async def get_task_restart(
+    request: Request, team_uuid: str, restart_uuid: str, token: BusinessToken
+) -> dict[str, object]:
+    del token
+    return await request.app.state.container.tasks.restart(_team_path(team_uuid), _restart_path(restart_uuid))
+
+
+@router.get("/teams/{team_uuid}/task-lineage")
+async def task_lineage(
+    request: Request,
+    team_uuid: str,
+    token: BusinessToken,
+    restart_uuid: str | None = None,
+    task_uuid: str | None = None,
+    intake_item_uuid: str | None = None,
+    limit: int = 50,
+    cursor: str | None = None,
+) -> dict[str, object]:
+    del token
+    return await request.app.state.container.tasks.lineage(
+        _team_path(team_uuid),
+        restart_uuid=_restart_path(restart_uuid) if restart_uuid else None,
+        task_uuid=_task_path(task_uuid) if task_uuid else None,
+        intake_item_uuid=_item_path(intake_item_uuid) if intake_item_uuid else None,
+        limit=limit,
+        cursor=cursor,
+    )
+
+
 @router.post("/teams/{team_uuid}/retrieval:search")
 async def retrieval_search(
     request: Request, team_uuid: str, token: BusinessToken, ready: Ready
@@ -295,5 +463,7 @@ async def retrieval_search(
         raise MkbError("RETRIEVE_SCHEMA_INVALID", "Retrieval request must be valid JSON", 422) from exc
     body = parse_retrieval_request(payload)
     if body.team_uuid != team_uuid:
-        raise MkbError("team-path-mismatch", "Body team_uuid must match path", 422)
+        # Retrieval has its own public error taxonomy: callers must be able
+        # to distinguish an invalid search scope from a Task-write mismatch.
+        raise MkbError("RETRIEVE_SCHEMA_TEAM_MISMATCH", "Body team_uuid must match path", 422)
     return await request.app.state.container.retrieval.search(body)
