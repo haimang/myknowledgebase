@@ -34,7 +34,7 @@
 
 > **S07 分账**：S07 交付 dual-channel full_valid + outbox `vectorize_construct`；ContentFullRecipe 权威配方；S08 必须可重算对账。
 
-> **S09 分账**：存在向量行 **≠** serving；publication 独立 Process。
+> **S09 分账**：存在向量行 **≠** serving；publication 独立 Process。**`S09-v1.0` accepted**（`T-O-231..246`）：消费 Handoff；PublicationProof；ActiveIndexPointer；可服务谓词。
 
 > **S11 分账**：只经 Inference `embed`；Layer A 校验；transport 退避 **不计入** Process `retry_count`；幂等写路径与 S11-E09 对齐。
 

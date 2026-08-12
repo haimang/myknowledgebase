@@ -4,11 +4,11 @@
 >
 > **文档角色**：跨规格词汇手册、命名边界与对齐登记册
 >
-> **权威输入**：D01–D05、S01–S08、S11–S13
+> **权威输入**：D01–D05、S01–S16
 >
-> **状态**：`active / S08-v1.0 calibrated`
+> **状态**：`active / S14-S16-v1.1 calibrated / campaign-audit`
 >
-> **版本 / 日期**：`v2.6 / 2026-08-12`
+> **版本 / 日期**：`v2.8 / 2026-08-12`
 
 ## 0. 使用规则
 
@@ -296,13 +296,13 @@ Revision 回答“来源业务事实是否改变”；build generation 回答“
 | `ConstructToVectorizeGate` | `frozen / D05-v1.0` | full_valid construct + dual-channel 完备 + g=0 在场后才可 vectorize | 原料门闩 |
 | `VectorizationUnit` | `frozen / D05-v1.0` | team×coord×channel×content_full_digest×LayerA/B | 非 Process row |
 | `ContentFull` | `frozen / D05-v1.0` | Recipe 输出 embed 文本；非 identity；非向量表列 | D04 禁列 |
-| `Traceback` | `frozen / D05-v1.0` | summary 命中→同坐标 original→PayloadContent | 与 HitContent 分账 |
-| `DocumentInflation` | `frozen / D05-v1.0` | 非 g=0 命中后有界附加 FullDocument original | 预算 S10 |
+| `Traceback` | `frozen / D05 + S10-v1.0 / T-O-258` | summary 命中→同 generation-scoped original→PayloadContent；status 可观测 | 与 HitContent 分账 |
+| `DocumentInflation` | `frozen / D05 + S10-v1.0 / T-O-258/261` | 非 g=0 命中后有界附加 FullDocument original | 默认 roots=3 / 8k chars |
 | `HitContent` / `PayloadContent` | `frozen / D05-v1.0` | 命中正文 vs 交付正文 | 禁静默伪装 |
 | `TracebackStatus` | `frozen / D05-v1.0` | `not_needed\|resolved\|failed\|degraded` | 默认可观测 degraded |
-| `RetrievalResult` | `frozen / D05-v1.0` | 含 granularity、分账、traceback、context_tier | Eligibility 围栏 |
+| `RetrievalResult` | `frozen / D05 + S10-v1.0 / T-O-254/261` | 含 granularity、分账、traceback、context_tier、ann/rerank scores | Eligibility 围栏；无 raw vector |
 | `ContextTier` | `frozen / D05-v1.0` | `focus_fragment` / `document_root` / assembly | 前端多等级上下文 |
-| `PublicationProof` | `frozen / D05-v1.0` | 可检索性证明；D01 成功 guard | ≠ 向量存在 |
+| `PublicationProof` | `frozen / D05 + S09-v1.0 / T-O-242` | 类型化上线证据；`index.publication.v1`；S04 serving CAS 输入 | ≠ 向量存在；≠ Handoff；≠ `publication_state`  alone |
 | `ContextMetaProjection` | `frozen / D05-v1.0` | 叙事 meta 投影 | 非 filter SSOT |
 | `FilterMetaAuthority` | `frozen / D05-v1.0` | S04+team 过滤权威 | child 不串 parent |
 
@@ -328,8 +328,18 @@ Revision 回答“来源业务事实是否改变”；build generation 回答“
 | `VectorizeCommand` / `VectorizeOutcome` | `frozen / S08-v1.0 / T-O-225` | typed Command + digest；成功仅 `disposition=full_valid` | 禁 outbox done 冒充成功 |
 | `VectorizeHandoffV1` | `frozen / S08-v1.0 / T-O-230` | Outcome 写证明交接包（generation/namespace/model/counts） | **非** PublicationProof |
 | `VectorizeRequiredSet` | `frozen / S08-v1.0 / T-O-222` | 应索引 unit×channel 整包二元成败；g=0 强制 | 禁 partial success |
-| `IndexGeneration` | `frozen lifecycle / exact S09` | 索引投影代次 CAS | reindex 不新建 IntakeRevision |
-| `RetrievalEligibility` | `frozen fence / exact S09-S10` | team ∩ Item lifecycle ∩ ServingRevision ∩ IndexGeneration | 不能仅由 vector 存在决定 |
+| `IndexGeneration` | `frozen / S09-v1.0 / T-O-243` | `(team, item, namespace)` 单调投影代数；行级标记 + Active 路由 | reindex 不新建 IntakeRevision |
+| `ActiveIndexPointer` | `frozen / S09-v1.0 / T-O-243` | CAS 保护的 item×namespace active 代数（≈ read alias） | ≠ serving_revision / S06 current |
+| `PublicationValidPredicate` | `frozen / S09-v1.0 / T-O-244` | team∧not deleted∧indexed∧ns active∧Layer A∧active gen∧intake pins | 之后才 S04 eligibility；禁仅 ANN |
+| `IndexValidatePublication` | `frozen / S09-v1.0 / T-O-241` | Process `index.validate_publication`；Handoff binding + records 整包对账 | 禁 Handoff-only / partial |
+| `IndexRebuild` | `frozen / S09-v1.0 / T-O-243` | Process `index.rebuild`；build→validate→CAS→grace→purge old | 不创建 IntakeRevision |
+| `RetrievalEligibility` | `frozen fence / S09-S10 / T-O-249/257` | team ∩ lifecycle ∩ ServingRevision ∩ IndexGeneration ∩ publication-valid；S10 硬管道应用 | 不能仅由 vector 存在决定 |
+| `IndexTopKPolicy` | `frozen / S09-v1.0 / T-O-245` | default topK=10；hard `max_topk`（建议 100）；metric 默认 cosine | score/rerank 归 S10 |
+| `RetrievalSearchPort` | `frozen / S10-v1.0 / T-O-248` | 同步 `retrieval.search`；无 Task/Execution/Process | 非 Process capability |
+| `RetrievalBundle` | `frozen / S10-v1.0 / T-O-261/262` | disposition + results[] + pack? + diagnostics | 非 chat；无 answer v1 |
+| `RankPolicy` | `frozen / S10-v1.0 / T-O-259` | return_k=10；recall_k=20；threshold 默认 0.0；rerank ON 诚实 fallback | ≤ max_topk；禁 dummy 分 |
+| `PackView` | `frozen / S10-v1.0 / T-O-261` | 预算内 ContextTier 组装；pack_max_hits=5 / chars=12k | results[] 仍权威 |
+| `RetrieveErrorFamily` | `frozen / S10-v1.0 / T-O-262` | `RETRIEVE_*` / `RETRIEVE_DEPENDENCY_*` / 推理映射 | 禁主用 PUBLISH_* |
 | `FinalVectorBody` | `frozen / D04` | `mkb_vector_records.embedding` F32 | 禁外置 Vectorize 作 v1 SSOT |
 | `VectorizeOutboxKind` | `frozen / D04+S08` | 主路径 `vectorize_construct`；`vectorize_structure` **v1 forbid consumer** | 单 outbox；禁 vec_process 表 |
 | `VectorSpaceIsolation` (Layer A) | `frozen / S11+S08` | model/adapter/dim 一致性 fail-closed | 禁跨空间 ANN |
@@ -521,6 +531,57 @@ Revision 回答“来源业务事实是否改变”；build generation 回答“
 | `TeamScopedCAS` | `frozen / S13 / T-O-118` | 仅同 team 内 digest dedup 的物理布局 | 跨 team 全局 dedup |
 
 
+### 7.7 Config / Registry 词汇（S14-v1.1 / T-O-263..286）
+
+| Canonical term | 成熟度 | 定义 | 禁止误用 |
+|---|---|---|---|
+| `ConfigLayer` L0–L4 | `frozen / S14-v1.1 / T-O-277` | L0 git defaults → L1 profile → L2 env/topology+secret 值 → L3 allowlisted override → L4 frozen snapshot | env 改 prompt 正文/model definition_digest/schema/workflow revision |
+| `ConfigSnapshot` / L4 | `frozen / S14-v1.1` | Execution `resolve_for_new_execution` **一次**构造的不可变配置视图；Process 只读 | mid-flight 可变 bag；Process 再 merge L0–L3 |
+| `config_snapshot_digest` | `frozen / S14` | `H(canonical(L4 materials))`；域 `binding_digest` **必嵌入** | 与 domain digest「或」二选一悬空 |
+| `binding_digest` / `domain_binding_digest` | `frozen / S14+S03` | 域绑定材料规范哈希；含 config_snapshot_digest / PromptRef / model / schema / semantic knobs | 把 OpsKnob 偷偷塞进 digest |
+| `RegistryPort` | `frozen / S14` | list/get/readiness/`resolve_for_new_execution` | 公网 CUD；agent write；v1 外部 HTTP list |
+| `RegistryBootstrap` / `GreenfieldBootstrap` | `frozen / S14 / T-O-275/280` | catalog/binding/prompt 指针 **幂等灌入写权威** | S11 平行 INSERT 同表作第二 SSOT |
+| `ProvenanceEnvelope` | `frozen / S14 / T-O-282` | model+prompt+schema+params 最小可追溯字段集 | log/OTel 当唯一 SSOT；含 secret/正文/messages/向量全文 |
+| `PromptRef` | `frozen / D05+S14` | identity + content_hash（+path?） | prompt 正文；KV key；裸字符串静默透传 |
+| `flag_bundle_digest` | `frozen / S14` | feature_flags 规范哈希；默认 OFF | 远程 flag SSOT；flag 触发 auto model fallback |
+| `params_profile_id` / `params_digest` | `frozen / S14-T058` | 参数 profile 身份与 digest；空=`sha256:empty_profile_v1` | 未登记 profile 静默透传 |
+| `SemanticKnob` / `OpsKnob` | `frozen / S14 / T-O-281` | Semantic 进 binding_digest；Ops 不进；`security.*`/`obs.*` **强制 Ops** | 未知 security 前缀当 Semantic |
+| `OverrideAllowlist` | `frozen / S14 / T-O-279` | Task/Execution 可覆盖键窄表；未知键 `CONFIG_OVERRIDE_REJECTED` | 覆盖 model/prompt/schema/adapter/secret/绝对 path |
+| `CONFIG_*` | `frozen / S14 / T-O-285` | 配置/registry 错误族；digest/hash mismatch **非** transient | 用 429 掩盖 trust fail |
+
+### 7.8 Observability 词汇（S15-v1.1 / T-O-287..311）
+
+| Canonical term | 成熟度 | 定义 | 禁止误用 |
+|---|---|---|---|
+| `DomainEventLedger` / `mkb_domain_events` | `frozen / D04+S15` | 业务域事件物理表；与 mutation 同 TX | log 当唯一失败证据；event 当 CAS |
+| `DomainEventWriter` | `frozen / S15` | 经 UoW 同 TX 写 domain_events 的唯一端口 | raw SQL 旁路；未登记 `event_type` |
+| `EventTypeRegistry` | `frozen / D04+S15` | `event_type` 闭集登记（D04 表 + S15 Writer）；新增须 change-request | 各域 formal 私造 type 名 |
+| `OpsDiagnosticLog` / `mkb_ops_diagnostic_logs` | `frozen / D04+S15` | 运维诊断日志表；失败不回滚业务 | 当业务状态 SSOT |
+| `ObservabilityReadPort` | `frozen / S15 / T-O-308` | timeline/dead/audit/health/metrics 只读面；内网+token | 省略 team 的跨租户读；写面伪装 |
+| `AlertBinding` / `ALERT_*` | `frozen / S15 / T-O-304` | 必告警闭集 + runbook 字段（含 `ALERT_SEC_*`） | Task 业务 webhook 混用 |
+| `RetentionPolicy` | `frozen / S15 / T-O-302` | 三表分层天数与批 DELETE；export 失败禁删 | Process cleanup 级联删 events |
+| `DeadLetterView` | `frozen / S15 / T-O-309` | outbox dead 可查询投影 + 告警 | 第二 DLQ 业务表 SSOT；无审计 redrive |
+| `HealthAggregator` | `frozen / S15 / T-O-305` | `/ready` 组件聚合；含 `sec_token_loaded`；not ready=503 | 单一恒 ok `/health` 混充 ready |
+| `BackupScheduler` | `frozen / S15` | 唯一 cron 调 S13 backup 协议 | S13/S15 双 cron |
+| `OBS_*` | `frozen / S15 / T-O-310` | 可观测错误族；domain_events 失败 → 整 TX 失败 | silent swallow；events best-effort |
+
+### 7.9 Security 词汇（S16-v1.1 / T-O-312..336）
+
+| Canonical term | 成熟度 | 定义 | 禁止误用 |
+|---|---|---|---|
+| `InternalToken` / `ActiveTokenSet` | `frozen / S16 / T-O-327/328` | ops mint shared-secret；at-rest hash；双活≤2；重叠窗默认 24h | JWT 用户平台 claims；team API key 授权 |
+| `actor_fingerprint` | `frozen / S16` | `H(token)`；成功校验后的 actor 标识 | 明文 token 入 log/audit/DB |
+| `EndpointClass` | `frozen / S16 / T-O-329` | Business/Operator/Repair/Live/Ready/Metrics 鉴权分级 | 用户 RBAC 角色；公网匿名 metrics |
+| `AdmissionDecision` | `frozen / S16` | allow/deny + `SEC_*`；Business invalid **先于**资源读 | 当 Task 状态 |
+| `EgressPolicy` / `EgressPolicyEngine` | `frozen / S16 / T-O-332` | 出站 fail-closed；DNS→IP；redirect≤3；硬拒私网/metadata | open proxy；allowlist 绕硬拒 |
+| `SecretResolver` / `SecretSlot` | `frozen / S16 / T-O-333` | 逻辑 slot→值；env(+file)；原子激活 | catalog/git/DB 存明文 key |
+| `SupplyFence` | `frozen / S16 / T-O-335` | 仅 binding exact identity 调模型 | 请求体任意 endpoint；silent swap |
+| `SecurityAuditEvent` / `mkb_security_audit_events` | `frozen / D04+S16` | admission/安全拒绝专用表；S16 写语义 / S15 retention | 并入 domain_events；明文 secret |
+| `RedactionPolicy` | `frozen / S16-T056` | envelope/log/obs 字段脱敏规则权威；S15 sync-from | 各域私自放宽 |
+| `sec_token_loaded` | `frozen / S16+S15` | readiness 组件：ActiveTokenSet 非空 | 无 token 却 ready |
+| `SEC_*` | `frozen / S16 / T-O-336` | 安全域 typed 错误（含 rate/supply/egress） | 用业务 CAS 码掩盖 admission deny |
+
+
 ---
 
 ## 8. Cross-Spec Alignment Outcome
@@ -539,6 +600,17 @@ Revision 回答“来源业务事实是否改变”；build generation 回答“
 | `domain-truth/D02-production-state-and-routing.md` | 六 StateFamily；S12 物理非 SSOT | `D02-v1.0 / S12-calibrated` |
 | `qna-truth/S12.md` | `T-O-97..110` 全冻；无 Round 4 | `S12-QNA-v1.0 / locked` |
 | `qna-truth/S13.md` | `T-O-111..125` 全冻；无 Round 4 | `S13-QNA-v1.0 / locked` |
+| `domain-truth/S08-embedding-vectorization.md` | vectorize 写侧；RequiredSet；Layer B 抄写 | `S08-v1.0 / accepted` |
+| `domain-truth/S09-vector-index.md` | publication/ActiveIndexPointer/可服务谓词 | `S09-v1.0 / accepted` |
+| `domain-truth/S10-lsrag-retrieval.md` | dual-fence；context-only Bundle | `S10-v1.0 / accepted` |
+| `domain-truth/S11-inference-runtime.md` | resolve 权威；bootstrap 写归 S14 | `S11-v1.1 / S14-calibrated` |
+| `domain-truth/S14-config-prompt-model-registry.md` | L0–L4/registry/provenance；bootstrap 写权威 | `S14-v1.1 / accepted` |
+| `domain-truth/S15-observability-reliability.md` | retention/metric/alert/ready/operator | `S15-v1.1 / accepted` |
+| `domain-truth/S16-security-trust-boundary.md` | token/egress/audit/redaction | `S16-v1.1 / accepted` |
+| `qna-truth/S14.md` | `T-O-263..286` 证据层 | `locked / formal accepted` |
+| `qna-truth/S15.md` | `T-O-287..311` 证据层 | `locked / formal accepted` |
+| `qna-truth/S16.md` | `T-O-312..336` 证据层 | `locked / formal accepted` |
+| `qna-truth/_s14-s16-campaign-audit.md` | 全真相层战役审计 | `2026-08-12 / campaign complete` |
 | `qna-truth/S06.md` | S06 formal Spec 证据层 | `locked / S06-v1.0` |
 | `qna-truth/D02.md` | `T-O-86..92` | `frozen` |
 
@@ -572,3 +644,5 @@ Revision 回答“来源业务事实是否改变”；build generation 回答“
 | `v2.0` | `2026-08-11` | 接收D04-v1.0与`T-O-160..179`：登记PhysicalSchemaConstitution、MkbTableClosedSet、DomainEventLedger、OpsDiagnosticLog、SecurityAuditEvent、VectorNamespace、FinalVectorBody、VectorizeOutboxKind、NativeAnnIndex。 |
 | `v2.1` | `2026-08-12` | 接收S11-v1.0与`T-O-180..201`：InferenceRuntime/LlmAdapter/能力面/双层filter/TransportRetry/Backpressure/VectorizeDurability；MkbTableClosedSet→55。 |
 | `v2.6` | `2026-08-12` | 接收S08-v1.0与`T-O-211..230`：LsragVectorizeCapability、VectorizeCommand/Outcome/Handoff、RequiredSet；Layer B 抄写分账；vectorize_structure v1 forbid；FacetMap reserved→S04。 |
+| `v2.7` | `2026-08-12` | 接收 S14–S16 v1.1：登记 ConfigSnapshot/RegistryPort/ProvenanceEnvelope、ObservabilityReadPort/HealthAggregator、InternalToken/EndpointClass/EgressPolicy/SupplyFence/sec_token_loaded 等；权威输入扩至 S01–S16。 |
+| `v2.8` | `2026-08-12` | **S14–S16 战役审计**：扩展 ConfigLayer/binding_digest/OverrideAllowlist/CONFIG_*、EventTypeRegistry/OBS_*/DomainEventLedger、AdmissionDecision/actor_fingerprint/RedactionPolicy/SEC_*；alignment 补 S08–S11；同步 index v0.61。 |

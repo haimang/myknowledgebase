@@ -27,6 +27,8 @@
 > **跨文档**：不拥有状态机/ANN/prompt 正文。调用成功≠业务成功。物理表 DDL 以 D04 为准；本文钉死 **写语义与执行步骤**。
 
 > **D05校准声明（T-O-207/208）**：S11 **不**拥有 promptA/B/C 产品语义（正文 D03/S14；绑定 S05/S06/S07）。transport 退避 **不计入** Process `retry_count`；叶失败上报与 max_retries **归 S03**。vectorize 编排与 ConstructToVectorizeGate **归 S07/S08**；本文仅 embed 门面与幂等写路径。
+>
+> **S14-S16 战役校准（2026-08-12）**：catalog/binding **bootstrap 写权威 = S14 RegistryBootstrap**；**runtime resolve = S11-E03 唯一**（见 S11-E03 所有权矩阵与 `S14-T018`）；G-10 closed for v1 transport 与 S14-T005/S16 SupplyFence 一致；密钥/token/egress **不**归 S11（S16）；metric export 目录 **归 S15**。
 
 > **S08校准声明（2026-08-12）**：`S08-v1.0` 拥有 `lsrag.vectorize` 编排、required-set 成败、records upsert 业务证明与 Layer B **抄写**；S11 继续只提供 `embed` + transport/闸 + Layer A 校验。E09 成功路径中的 outbox claim/`vectorize_*` 编排 **以 S08 为准**；S11-E09 描述的是 **可与 S08 对齐的幂等写辅助合同**，**不**另立第二 vectorize 编排真相。`vectorize_structure` 为 D04 kind 保留名；**v1 禁止消费**（S08-T003）。
 
@@ -55,7 +57,7 @@ D04: catalog / bindings / invocations / (S08) vector_records
 
 ### 1.3 Scope fence
 
-**负责**：Inference 门面与能力合同；Adapter 边界；transport/闸/错误码；catalog/binding/invocation **写入语义**；Layer A 执行规则；与 Layer B 的衔接义务；readiness 探针语义。
+**负责**：Inference 门面与能力合同；Adapter 边界；transport/闸/错误码；**invocation 写入语义**；catalog/binding 的 **运行时解析（resolve）与消费**（不拥有 catalog/binding 行 bootstrap 写权威——见 S14 所有权矩阵）；Layer A 执行规则；与 Layer B 的衔接义务；`inference_binding` readiness 探针语义（transport/local 可探 + required capability enabled）。
 
 **不负责**：Process 八态与 max-retries 账本（S03）；ANN/serving（S09）；vectorize 业务编排主责（S08 消费本文）；prompt 正文（D03/S14）；DDL 形状（D04）；密钥（S16）。
 
@@ -160,27 +162,41 @@ D04: catalog / bindings / invocations / (S08) vector_records
 
 ---
 
-### 4.3 `S11-E03` — Catalog / Binding bootstrap 与解析
+### 4.3 `S11-E03` — Catalog / Binding 解析（runtime resolve）与 bootstrap 协作
 
-**真相**：S11-T005/T006/T013；T-O-193/195；D04 §3.8
+**真相**：S11-T005/T006/T013/T014；T-O-193/195；D04 §3.8；**写权威交接见 S14-T018 / S14-E05 所有权矩阵**
 
-**执行台账 — bootstrap（empty-DB / migration）**：
+#### 所有权矩阵（与 S14 双向钉死 · 唯一）
+
+| 职责 | 唯一归属 | 说明 |
+|---|---|---|
+| `mkb_model_catalog` / `mkb_adapter_bindings` **bootstrap INSERT/幂等 upsert** | **S14 RegistryBootstrap**（code-owned GreenfieldBootstrap / migration；默认 capability 清单 **协作** S11-E03 必须行集合） | S11 **不**平行 INSERT 同表作 SSOT 写面 |
+| 默认行内容（embed/rerank/generate 钉选） | S11 声明必须行；S14 bootstrap **消费**该清单写入 | 冲突码 `BOOTSTRAP_FAIL` / digest mismatch → readiness 归 S14 `registry_bootstrap` |
+| **运行时 resolve 算法** | **S11-E03 唯一** | S14 仅复述产品语义；**禁止**在 S14 另立完整解析序 |
+| status/enabled 运维变更 | S14 bootstrap/ops 路径（禁公网 CUD）；变更仅 future resolve | S11 运行时只读 binding 行 |
+| `mkb_inference_invocations` 写 | **S11** | 与 catalog 写分账 |
+| readiness：`inference_binding` | **S11** | transport/local 可探 + required capability 有 enabled binding |
+| readiness：`registry_bootstrap` | **S14** | prompt 指针 + catalog 行存在 + digest 一致；**不**双主 |
+
+#### Bootstrap 必须行集合（内容权威 S11 · 写路径 S14）
 
 | 表 | 必须存在的默认行（逻辑） |
 |---|---|
 | `mkb_model_catalog` | embed 2b、rerank 2b、local-json-generator@v1；各含 definition_digest |
 | `mkb_adapter_bindings` | 每 capability 至少一条 `local_vllm` enabled priority 最高；remote 可 enabled=0 |
 
-**解析顺序**：
+#### 解析顺序（**唯一权威** · 仅用于 **无 L4 冻结身份的新 resolve / bootstrap 校验**）
 
 1. 读 enabled bindings：capability → 按 priority；  
 2. team 覆盖（若有）优先于全局；  
 3. 校验 model_key/version ∈ catalog 且 status=active；  
 4. 锁定 binding 快照进 request_digest 材料。
 
-**冲突**：同 version 异 digest → readiness=false。
+**与 L4 冻结（S14-T007/T015）**：S11 **主业务路径** 输入必须携带已冻结 `model_key`/`model_version`/`adapter_kind`（来自 L4 / ProcessCommand / Execution binding digests）。S11 resolver **禁止**在 transport 失败后重 resolve 换 binding（G-10）。仅当调用方未携带冻结身份（bootstrap/diagnostic/新 resolve）时走本序。
 
-**小结**：运行时不解析「最新 HF 字符串」。
+**冲突**：同 version 异 digest → S14 `registry_bootstrap` readiness=false；S11 `inference_binding` 另测 transport 可探。
+
+**小结**：写权威 S14；解析权威 S11；运行时不解析「最新 HF 字符串」。
 
 ---
 
@@ -368,7 +384,7 @@ Remote 未启用 **不**单独导致默认就绪失败。
 | S06/S07 | 只调 structured/text_generate；成功后自管 generation CAS |
 | S08 | **拥有** vectorize 编排与 records 写证明；只调 embed；Layer A 服从本文；E09 为幂等辅助对齐 |
 | S10 | 调 embed(query)+rerank；强制 Layer A/B |
-| S14 | 产品 registry；v1 code-owned bootstrap 即可 |
+| S14 | 产品 registry + catalog/binding **bootstrap 写权威**；S11 仅 resolve/invocation + 必须行清单协作 |
 | S15 | 指标/retention 数值 |
 
 ---

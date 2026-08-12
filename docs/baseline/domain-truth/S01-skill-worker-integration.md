@@ -30,6 +30,8 @@
 ---
 
 > **S13校准声明**：`S13-v1.0` 冻结 v1 本地 `object_root` + `ObjectStorePort`、`mkbobj:v1` handle、team-scoped CAS、bytes-first、同库 catalog/ref/purpose、verify-on-read、周期 GC 与 identity readiness。本文件业务语义不变；对象 I/O 必须经 S13 Port，禁止 path/R2 key 进入契约。
+>
+> **S15 readiness 校准（S15-v1.1）**：`not ready`（HealthAggregator）时 **禁止** 新 Task Create 入口；须 fail-closed 查 Ready 标志 → HTTP **503**（非 security_audit）。token→schema→team→幂等序 **之前或并列** 增加 readiness gate（S15-T043）。细节权威=`domain-truth/S15-observability-reliability.md`。
 
 ## 1. Domain 介绍
 

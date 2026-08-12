@@ -400,11 +400,14 @@ D04 回答：在 **单主库 `mkb_primary`**（T-O-102）上，如何用 **一�
 | intake | `intake.snapshot_accepted`,`intake.item_transitioned`,`intake.candidate_sealed`,`intake.candidate_accepted` |
 | generation | `generation.artifact_accepted`,`generation.pointer_cas`,`generation.invocation_recorded` |
 | gate | `gate.opened`,`gate.decided`,`gate.terminal` |
-| outbox | `outbox.enqueued`（可选；高频可采样） |
 | object | `object.registered`,`object.ref_released`,`object.deleted` |
 | vector | `vector.upserted`,`vector.soft_deleted`,`vector.rebuild_started` |
-| ops | `ops.repair_applied`,`ops.readiness_changed` |
+| ops | `ops.repair_applied`,`ops.readiness_changed`,`ops.alert_raised`,`ops.retention_policy_changed`,`config.ops_reload`,`config.override_applied` |
+| registry | `registry.bootstrap_completed`,`registry.digest_mismatch` |
+| outbox | `outbox.enqueued`（可选；高频可采样）,`outbox.dead`（可选低频） |
 | security | **不写本表** → 见 `mkb_security_audit_events` |
+
+> **扩展登记纪律（v1.2 校准）**：上表为 event_type **物理/合同 SSOT 最小闭集**。S14/S15 仅可提议；新增 type **必须** change-request 回填本表 + S15 DomainEventWriter 登记。未登记 type → 写入失败（`OBS_EVENT_PAYLOAD_INVALID`）。**禁止**各域 formal 私自发明 type 名。payload_json 服从全局 redaction（S16-T056）与各 type 有界 allowlist（S15-E01）。
 
 **索引**
 

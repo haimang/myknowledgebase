@@ -182,6 +182,8 @@ OutboxPort
   enqueue(same_tx, OutboxRecord)
   claim_batch_for_dispatch(limit, worker) -> rows  # CAS pending→in_flight
   mark_done / mark_retry(available_at) / mark_dead
+  requeue_dead(outbox_id) -> ok | conflict   # CAS dead→pending；审计/事件；禁 silent dead→done
+  reset_attempts(outbox_id) -> ok | conflict # 显式清 attempts 后可再 claim；须审计
 
 ClaimPort
   claim_process(expected_status, lease, worker) -> fence | conflict

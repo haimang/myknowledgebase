@@ -12,13 +12,13 @@
 >
 > **阶段**：`leaf-worker / LS-RAG re-foundation`
 >
-> **日期**：`2026-08-11`
+> **日期**：`2026-08-12`
 >
-> **作者**：`MKB owner + Codex`
+> **作者**：`MKB owner + Grok workflow domain-truth-s14-s16`
 >
 > **文档性质**：`specification / index`
 >
-> **文档状态**：`active index`
+> **文档状态**：`active index`（S01–S16 均已 accepted；`17`/`18` 仍 pending → **尚未** `review-ready` / `frozen truth index`）
 >
 > **当前站位**：站① · specification 基线与设计编排
 >
@@ -176,20 +176,20 @@ pending → designing → owner-gate → accepted → frozen
 | `06` | `S06` | LS-RAG Structurizer | `P0` | `accepted` | `domain-truth/S06-lsrag-structurizer.md` | `D01, D02-v1.0, S03-S05, S07-S14` | `S06-v1.1`：**执行 SSOT**；E01–E10；自动路径+input freeze；generation账本；`mkb.structure_document@1`；`T-O-77..85`+`T-O-93..96`；QNA 非执行真相 |
 | `07` | `S07` | LS-RAG Constructor | `P0` | `accepted` | `domain-truth/S07-lsrag-constructor.md` | `S04, S06, S11, S13-S14` | `S07-v1.1`：**执行 SSOT**；E01–E12；整包 dual-channel；ConstructionSchema；outbox；`T-O-126..140`；QNA 非执行真相 |
 | `08` | `S08` | Embedding & Vectorization | `P0` | `accepted` | `domain-truth/S08-embedding-vectorization.md` | `D05, S07, S09, S11, S12–S14, D04` | `S08-v1.0`：**执行 SSOT**；E01–E12；`T-O-211..230`；ConstructGate；整包成败；幂等 upsert；Layer B 只抄写 S04；S09 handoff；QNA 非执行真相 |
-| `09` | `S09` | Vector Index Lifecycle | `P0` | `pending` | `domain-truth/S09-vector-index.md` | `S04, S12, S14, D04` | 待设计；**最终向量落点/ANN index 存在**已由 D04 冻；S09 定 metric/topk/serving publication |
-| `10` | `S10` | LS-RAG Retrieval & Reranking | `P0` | `pending` | `domain-truth/S10-lsrag-retrieval.md` | `S04, S07-S09, S11, S14` | 待设计 |
+| `09` | `S09` | Vector Index Lifecycle | `P0` | `accepted` | `domain-truth/S09-vector-index.md` | `S04, S08, S10, S12, S14, D04` | `S09-v1.0`：**执行 SSOT**；E01–E10；`T-O-231..246`；validate 对账；PublicationProof；ActiveIndexPointer；可服务谓词；metric/topk；QNA 非执行真相 |
+| `10` | `S10` | LS-RAG Retrieval & Reranking | `P0` | `accepted` | `domain-truth/S10-lsrag-retrieval.md` | `S01, S04, S07-S09, S11, S12, S14` | `S10-v1.0`：**执行 SSOT**；E01–E10；`T-O-247..262`；dual-fence；Traceback/Inflation；rank；context-only；Bundle；QNA 非执行真相 |
 | `11` | `S11` | Inference Runtime & Adapters | `P0` | `accepted` | `domain-truth/S11-inference-runtime.md` | `00, D03-D04, S06-S10, S14, S16` | `S11-v1.1`：**执行 SSOT**；E01–E11；Inference≠Adapter；全本地 vLLM；双层 filter；transport/闸/幂等；`T-O-180..201`；QNA 非执行真相 |
 | `12` | `S12` | Turso Persistence | `P0` | `accepted` | `domain-truth/S12-turso-persistence.md` | `S01-S06, S09, S13, D04, 17` | `S12-v1.1`：**执行 SSOT**；E01–E11；单主库；TX-01..08；outbox/claim；CW+vector；**DDL 以 D04 为准**；`T-O-97..110`；QNA 非执行真相 |
 | `13` | `S13` | Artifact & Object Storage | `P1` | `accepted` | `domain-truth/S13-artifact-storage.md` | `S04-S06, S12, S15-S16, 17` | `S13-v1.1`：**执行 SSOT**；E01–E11；local FS+Port；CAS；bytes-first；catalog/ref/GC；`T-O-111..125`；G-11 closed；QNA 非执行真相 |
-| `14` | `S14` | Config, Prompt & Model Registry | `P1` | `pending` | `domain-truth/S14-config-prompt-model-registry.md` | `00, S11` | 待设计 |
-| `15` | `S15` | Observability & Reliability | `P0` | `pending` | `domain-truth/S15-observability-reliability.md` | `S01-S14, D04` | 待设计；**物理表**已由 D04 冻 `domain_events/diagnostic_logs/security_audit`；S15 定 retention/alert/export |
-| `16` | `S16` | Security & Trust Boundary | `P0` | `pending` | `domain-truth/S16-security-trust-boundary.md` | `S01-S15` | 待设计 |
+| `14` | `S14` | Config, Prompt & Model Registry | `P1` | `accepted` | `domain-truth/S14-config-prompt-model-registry.md` | `00, S11, S15-S16, D03-D05` | `S14-v1.1`：**执行 SSOT**；E01–E11；`T-O-263..286`；L0–L4/registry bootstrap 写权威；QNA 证据层 |
+| `15` | `S15` | Observability & Reliability | `P0` | `accepted` | `domain-truth/S15-observability-reliability.md` | `S01-S14, S16, D04` | `S15-v1.1`：**执行 SSOT**；E01–E11；`T-O-287..311`；retention/metric/alert/ready；`sec_token_loaded`；QNA 证据层 |
+| `16` | `S16` | Security & Trust Boundary | `P0` | `accepted` | `domain-truth/S16-security-trust-boundary.md` | `S01-S15, D04` | `S16-v1.1`：**执行 SSOT**；E01–E12；`T-O-312..336`；token/egress/audit/redaction；QNA 证据层 |
 
 ### 1.2 跨系统基线与跨 Domain Truth 文档
 
 | ID | 文档 | 状态 | 用途 |
 |----|------|------|------|
-| `00` | `spec-glossary.md` | `active / v2.6` | **S08-v1.0** 词表：`lsrag.vectorize`、Handoff、RequiredSet；Layer B 抄写；FacetMap→S04 |
+| `00` | `spec-glossary.md` | `active / v2.8` | **S01–S16 calibrated**：S08–S10 检索/向量词；**S14** ConfigSnapshot/RegistryPort/Provenance；**S15** DomainEventWriter/Retention/Alert/Health；**S16** InternalToken/EndpointClass/Egress/SupplyFence/sec_token_loaded；G-07/G-10/G-11 closed；G-01/G-12 deferred |
 | `D01` | `domain-truth/D01-task-execution-process-flow.md` | `accepted / S06-calibrated` | `D01-v1.4`：三层状态；S06 generation非第四层runtime |
 | `D02` | `domain-truth/D02-production-state-and-routing.md` | `frozen / v1.0 / S13-calibrated` | `T-O-86..92`；DR005/DR006 S06关闭；DR007 S12+S13部分关闭；generation/pointer/object physical |
 | `D03` | `domain-truth/D03-repository-layout.md` | `accepted / v1.0 / T-O-141..159` | 仓库宪法：contracts typed 唯一SSOT；prompts git+hash；intake顶级；workflows≠runtime；Port 落点 |
@@ -367,17 +367,19 @@ pending → designing → owner-gate → accepted → frozen
 
 ### 3.9 `S09` Vector Index Lifecycle
 
-- **范围**：index namespace、upsert/delete/search/rebuild、metadata filter、tombstone、backup、capacity 和 Turso/ANN adapter。
-- **必须回答**：Turso exact vector 是否满足首版；何时需要 ANN；关系事务与 index 副作用如何对账。
-- **关键不变量**：索引记录必须引用有效知识版本；查询必须声明 model/dimension/metric。
-- **完成回填**：冻结 VectorIndex 接口、索引 schema、容量门槛和一致性协议。
+- **状态**：`accepted / S09-v1.0`；**执行 SSOT = domain-truth only**（E01–E10）；QNA `qna-truth/S09.md` 仅证据（`T-O-231..246`）。
+- **定位**：S08 写证明之后的 publication / IndexGeneration / 可服务谓词 / invalidation / metric·topk 默认；不拥有向量写编排与 S04 serving CAS。
+- **已冻结**：`index.validate_publication` 整包对账；PublicationProofV1；ActiveIndexPointer；rebuild 五段；publication-valid 谓词；cosine 默认；topK default/cap；错误/readiness/容量/OOS。
+- **关键不变量**：存在≠serving；Handoff≠Proof；禁仅 ANN 返回；S09 不写 serving_revision。
+- **完成回填**：formal Spec 已发布；D04 additive pointer/proof 表；S03/S04/S08/S10/glossary 校准。
 
 ### 3.10 `S10` LS-RAG Retrieval & Reranking
 
-- **范围**：query embedding、filter、topK、hydration、summary traceback、全文膨胀、dedupe、rerank、context budget 和结果契约。
-- **必须回答**：阈值、片段/全文策略、reranker 失败、过滤维度和是否包含 answer generation。
-- **关键不变量**：summary 只作为索引；summary 命中时保留 `hit_content`，但 `payload_content` 必须回溯 original。
-- **完成回填**：冻结 Retrieval Result v1、Traceback 算法、rerank 策略和 golden scenarios。
+- **状态**：`accepted / S10-v1.0`；**执行 SSOT = domain-truth only**（E01–E10）；QNA `qna-truth/S10.md` 仅证据（`T-O-247..262`）。
+- **定位**：同步 `retrieval.search`；dual-fence 应用；Traceback/Inflation/Rerank/Pack；**v1 context-only**。
+- **已冻结**：硬管道；return_k=10/recall_k=20/threshold=0.0；rerank ON 诚实 fallback；pack 预算；`RETRIEVE_*`；G-07 closed。
+- **关键不变量**：禁仅 ANN 返回；Traceback 可观测；无 raw vector；无 answer v1；无 Task 污染。
+- **完成回填**：formal Spec 已发布；G-07 closed；glossary/S09 分账对齐。
 
 ### 3.11 `S11` Inference Runtime & Adapters
 
@@ -405,24 +407,31 @@ pending → designing → owner-gate → accepted → frozen
 
 ### 3.14 `S14` Config, Prompt & Model Registry
 
-- **范围**：workflow version、prompt digest、schema version、model alias/revision、threshold、batch、feature flag 和受控 override。
-- **必须回答**：配置来源、热更新、一致快照、task override 白名单和产物复现。
-- **关键不变量**：每个模型产物可追溯到模型、prompt、schema 和参数版本。
-- **完成回填**：冻结配置优先级、版本标识和 provenance schema。
+- **状态**：`accepted / S14-v1.1`；**执行 SSOT = domain-truth only**（E01–E11）；QNA `qna-truth/S14.md` 仅证据（`T-O-263..286`）；全系统尚未 frozen。
+- **权威 Spec**：`docs/baseline/domain-truth/S14-config-prompt-model-registry.md`。
+- **定位**：Config / Prompt / Model Registry **产品治理域**；回答配置分层、热更新、一致快照、Task override 白名单与模型产物复现；**不**拥有 Process 状态机、Inference transport、ANN、prompt 正文字节、Workflow 七表 SSOT、密钥生命周期、event retention 数值。
+- **已冻结**：L0→L1→L2→L3→L4 分层；`resolve_for_new_execution` 一次 materialize → 不可变 `ConfigSnapshot`/`config_snapshot_digest`；binding-affecting 仅 future；Ops-only 可 last-good reload；override 窄白名单 + 成功写 `config.override_applied` / 拒绝写 security_audit；**RegistryBootstrap 写权威** vs **S11-E03 runtime resolve** 单一矩阵；Semantic 进 digest / Ops（`security.*`/`obs.*`）不进；feature_flags git + `flag_bundle_digest` 默认 OFF；ProvenanceEnvelope 最小字段；promptA/B/C + aux 命名空间；**无** latest/@champion 产品解析层；typed `CONFIG_*` 错误；readiness 含 registry_bootstrap/prompt_hash。
+- **关键不变量**：每个模型产物可追溯 **model + prompt + schema + params**；log ≠ 业务 SSOT；Process 禁止再 merge L0–L3；禁 silent 换 model/adapter（G-10）；禁 agent 写 registry（G-12 deferred）；禁 DB 第二份 prompt 正文。
+- **邻域交接**：D03 正文 git；D04/S11 表与 resolve；D05 prompt 三身份；S03 workflow 只读视图；S15 metric 目录收录 `mkb_registry_*`/`mkb_config_*`；S16 secret 值/生命周期。
+- **完成回填**：formal `S14-v1.1` + 对抗评审矩阵；`T-O-263..286`；G-10/G-13/G-14 继承 closed；G-12 deferred；全局下一空号 **T-O-337**。
 
 ### 3.15 `S15` Observability & Reliability
 
-- **范围**：log、trace、metric、task/workflow event、queue/GPU/index 指标、dead-letter、reconciliation、health 和 operator API。
-- **必须回答**：事件保存位置、基数控制、告警、ready/live、trace 传播和数据修复权限。
-- **关键不变量**：`team_uuid/task_uuid/trace_uuid` 贯穿事件；失败不能只存在于日志字符串。
-- **完成回填**：冻结事件 envelope、指标目录、健康语义和运维动作。
+- **状态**：`accepted / S15-v1.1`；**执行 SSOT = domain-truth only**（E01–E11）；QNA `qna-truth/S15.md` 仅证据（`T-O-287..311`）；全系统尚未 frozen。
+- **权威 Spec**：`docs/baseline/domain-truth/S15-observability-reliability.md`。
+- **定位**：事件保留、低基数 metric 导出、告警 runbook、ready/live、trace 关联、dead-letter 可观测、repair evidence、operator 只读面；**不**拥有业务 CAS/状态机、DDL 表名闭集、outbox 投递环、ANN 算法、对象 GC 协议、密钥/trust 主责。
+- **已冻结**：三表 retention（events 90d / diagnostic 14d / security_audit 180d hot）+ 批 DELETE + pre-delete export fail 禁删；metric 闭集目录（含 S14 registry/config 与 S16 sec_*，未收录禁 export）；必告警闭集（含 `ALERT_OUTBOX_DEAD`/`ALERT_READINESS_FALSE`/`ALERT_SEC_*` 等）；`/live` 禁依赖 vs `/ready` 聚合（含 **`sec_token_loaded`**）→ 503；root `trace_uuid` 不替换；无外部 repair 写面；ObservabilityReadPort 内网+token+team 过滤；dead outbox 可查+告警，redrive 仅 S12+审计；typed `OBS_*`；redaction **sync-from S16-T056**；BackupScheduler 唯一 cron 调 S13。
+- **关键不变量**：`team_uuid`/`task_uuid`/`trace_uuid` 贯穿业务域事件；**失败不能只存在于日志字符串**；domain_events 与业务 mutation 同 TX；events 非 CAS SSOT；禁业务 webhook 默认；禁公网匿名 operator。
+- **完成回填**：formal `S15-v1.1`；`T-O-287..311`；与 S14/S16 钩子目录双向钉死。
 
 ### 3.16 `S16` Security & Trust Boundary
 
-- **范围**：内部 token、rotation、网络边界、request limit、replay、SSRF、路径安全、secret、日志脱敏和模型供应链。
-- **必须回答**：token 由谁签发/轮换；哪些 endpoint 内部可见；URL fetch 是否允许；调试能力如何隔离。
-- **关键不变量**：简单认证不等于无安全边界；`team_uuid` 不得被解释为授权凭证。
-- **完成回填**：冻结 threat model、信任边界、最小安全基线和 secret 生命周期。
+- **状态**：`accepted / S16-v1.1`；**执行 SSOT = domain-truth only**（E01–E12）；QNA `qna-truth/S16.md` 仅证据（`T-O-312..336`）；全系统尚未 frozen。
+- **权威 Spec**：`docs/baseline/domain-truth/S16-security-trust-boundary.md`。
+- **定位**：内部 token、轮换、EndpointClass、限流、replay 边界声明、egress/SSRF 宪法、secret 生命周期、path 消毒、debug 隔离、供应链围栏、security_audit 写语义、redaction 规则权威、威胁模型；**不**拥有业务状态机、DDL、retention 天数、ANN、object CAS 布局、prompt registry、完整 IdP/OAuth/RBAC 平台。
+- **已冻结**：ops mint shared-secret；at-rest 仅指纹；timing-safe；主 header Bearer（兼容 `X-MKB-Internal-Token`）；ActiveTokenSet N=2 dual-active + 24h 重叠 + 吊销 audit；EndpointClass（Business/Operator/Repair 必 token；Live 可免；Ready 默认可免；Metrics 禁公网匿名）；限流 600/min token + 120/min IP；限流故障 degraded 但鉴权 fail-closed；业务防重放权威 = S01/S02 幂等；egress fail-closed + DNS→IP + redirect≤3 硬拒私网/metadata；SecretSlot env(+file)；生产 debug OFF；SupplyFence binding-only + G-10；`SEC_*` + audit 采样 + redaction 闭集。
+- **关键不变量**：**简单认证 ≠ 无安全边界**；**`team_uuid` 绝不是授权凭证**；invalid token 先于任何资源读；禁 open proxy；禁 silent model swap；禁 log/audit 明文 token/secret。
+- **完成回填**：formal `S16-v1.1`；`T-O-312..336`；G-02/G-10/G-29 closed 继承；G-12 deferred；与 S15 readiness/alert/retention 交叉合同完整。
 
 ---
 
@@ -438,10 +447,10 @@ pending → designing → owner-gate → accepted → frozen
 | `G-04` | 首版 Intake 范围 | `S04-S05, S13` | text/object only / URL / PDF/browser/API/OCR/Vision | `closed` | `T-O-49..51 / S05-v1.1`：完整能力面纳入v1；source kind只有inline/local/HTTP/registered API，browser/PDF/OCR/Vision/scatter为正交capability/cardinality |
 | `G-05` | parent-child/scatter首版范围 | `D01, S03-S07` | 首版支持 / schema预留后延 | `closed` | `D01-v1.4/S04-v1.2/S05-v1.1`：scatter为一等能力；Task→root→0..N child Executions；集合truth为Snapshot/Membership/ChangeSet，root/child preflight/gate原生支持 |
 | `G-06` | MKB-native LS-RAG canonical structure形状 | `S06-S10` | legacy flat layered array / single-root ordered typed tree + deterministic block projection / blocks-only | `closed / S06-v1.0` | `T-O-94..95`：typed ordered tree + anchors + generation-local coords + 分账projection；`mkb.structure_document@1`；legacy flat排除 |
-| `G-07` | Retrieval 是否承担 answer generation | `S01-S02, S10-S11` | 只返回 context / 可选生成任务 | `open` | 待 `S10` |
+| `G-07` | Retrieval 是否承担 answer generation | `S01-S02, S10-S11` | 只返回 context / 可选生成任务 | `closed / S10-v1.0` | `T-O-260`：v1 **context-only**；不承担 answer；未来须显式 reopen |
 | `G-08` | Turso 运行和进程模型 | `S03, S09, S12, 17` | 单进程 embedded / 多进程 / remote-sync | `closed / S12-v1.0` | `T-O-102/107..109`：单主库+同进程+CW；outbox/claim；扩写defer |
-| `G-09` | 首版向量索引 | `S08-S10, S12` | Turso exact / 独立 ANN / 分阶段 | `partial / S12+S09` | `T-O-107/110`：同库native vector最小合同已冻；算法/容量/benchmark仍归S09 |
-| `G-10` | 模型 fallback 语义 | `S06-S08, S10-S11, S14` | 禁止自动 fallback / 受控 fallback | `closed for v1 transport` | `S11-v1.1`：**禁** transport/429 驱动 silent 换 model/adapter（`T-O-199`）；v1 默认单 local binding；跨模型切换须显式 binding/reopen，非自动 fallback |
+| `G-09` | 首版向量索引 | `S08-S10, S12` | Turso exact / 独立 ANN / 分阶段 | `closed foundation / S09-v1.0` | `T-O-107/110`+`T-O-231..246`：同库 ANN；publication/代数/谓词/metric·topk 默认已冻；精确商业 benchmark 曲线可与 S15 共治 |
+| `G-10` | 模型 fallback 语义 | `S06-S08, S10-S11, S14, S16` | 禁止自动 fallback / 受控 fallback | `closed for v1 transport` | `S11-v1.1`+`S14-v1.1`+`S16-v1.1`：**禁** transport/429/registry/override/flag 驱动 silent 换 model/adapter（`T-O-199`/`T-O-267`/`T-O-335`）；跨模型须显式 binding/reopen |
 | `G-11` | Asset storage首版backend | `S05-S07, S12-S13, 17` | 本地filesystem / S3-compatible | `closed / S13-v1.1` | `T-O-117`：v1=本地盘+Port；R2 因成本 defer；HF Xet 非 SSOT；未来 adapter 不 reopen 业务契约 |
 | `G-12` | Agent authoring 与 Workflow publication 治理 | `S03, S14-S16` | v1 实现 / future adapter-ready / 永不支持 | `deferred` | `T-O-13`：第一次重构 out-of-scope；只保留 future-agent-ready schema/interface，未来接入必须 reopen |
 | `G-13` | Workflow Registry、SSOT 与 compiled representation | `S03, S12-S14` | 外部 CRUD + JSON truth / 内部注册 + relational truth + compiled JSON / code-only hardcode | `closed` | `T-O-14..16`：内部注册；外部仅 list/get；normalized DB schema 是 SSOT；compiled JSON 是可重建派生表示 |
@@ -520,6 +529,14 @@ pending → designing → owner-gate → accepted → frozen
 | CUDA/vLLM + 外部服务 adapter | 业主裁决 | `S11` 设计能力接口，不再回到 MLX 叙事 |
 | 当前 Python 实现已归档 | 当前仓库 | 只作历史证据，不继续增量开发 |
 | TypeScript legacy 已保留 | `legacy-family/` | 用于行为考古，禁止成为运行依赖 |
+| S08 Embedding formal Spec | `S08-v1.0 / T-O-211..230` | ConstructGate、整包成败、幂等 upsert、Layer B 抄写、S09 handoff；不得重问 |
+| S09 Vector Index formal Spec | `S09-v1.0 / T-O-231..246` | validate/PublicationProof/ActiveIndexPointer/可服务谓词/metric·topk；不得重问 |
+| S10 Retrieval formal Spec | `S10-v1.0 / T-O-247..262` | dual-fence、Traceback/Inflation、context-only、Bundle；G-07 closed；不得重问 |
+| S11 Inference formal Spec | `S11-v1.1 / T-O-180..201` | Inference≠Adapter；全本地 vLLM；resolve 权威；G-10 closed for v1 transport |
+| S13 Artifact formal Spec | `S13-v1.1 / T-O-111..125` | local CAS/Port/GC；G-11 closed |
+| S14 Config/Prompt/Model Registry | `S14-v1.1 / T-O-263..286` | L0–L4、RegistryBootstrap 写权威、override/provenance；不得重问 |
+| S15 Observability & Reliability | `S15-v1.1 / T-O-287..311` | retention/metric/alert/ready/operator；log≠SSOT；不得重问 |
+| S16 Security & Trust Boundary | `S16-v1.1 / T-O-312..336` | token/egress/audit/redaction/SupplyFence；team≠credential；不得重问 |
 
 ---
 
@@ -587,6 +604,10 @@ implementation finding
 - Intake & Cleaning：`docs/baseline/domain-truth/S05-intake-cleaning.md`
 - S06 Formal Spec：`docs/baseline/domain-truth/S06-lsrag-structurizer.md`
 - S06 Progressive QNA：`docs/baseline/qna-truth/S06.md`
+- S14 Formal Spec：`docs/baseline/domain-truth/S14-config-prompt-model-registry.md`
+- S15 Formal Spec：`docs/baseline/domain-truth/S15-observability-reliability.md`
+- S16 Formal Spec：`docs/baseline/domain-truth/S16-security-trust-boundary.md`
+- S14–S16 战役审计：`docs/baseline/qna-truth/_s14-s16-campaign-audit.md`
 - 系统拓扑：`docs/baseline/specs/17-system-topology.md`（待创建）
 - Truth freeze：`docs/baseline/specs/18-acceptance-truth-freeze.md`（待创建）
 
@@ -596,16 +617,16 @@ implementation finding
 
 | 检查项 | 状态 | 证据/备注 |
 |--------|------|-----------|
-| `00` Scope & Glossary accepted | `pending` | active v1.5；S06词汇已登记 |
+| `00` Scope & Glossary accepted | `accepted / active v2.8` | S01–S16 词表已登记；非 frozen truth index 入口（待 17/18） |
 | `D01` Task/Execution/Process Flow accepted | `accepted / S06-calibrated` | D01-v1.4 + S06 generation非第四层runtime |
 | `D02` Production State Constitution & Ledger | `frozen / v1.0 / S06-calibrated` | `T-O-86..92`；S06 DR005/DR006已回填 |
-| `S01-S16` 全部 accepted | `pending` | S01–S08、S11–S13 accepted；S09–S10、S14–S16 pending |
-| `17` System Topology accepted | `pending` | |
-| `18` Acceptance Matrix accepted | `pending` | |
-| Owner-gate 全部 closed/deferred | `pending` | |
-| 跨 spec ID 对账完成 | `pending` | |
-| 跨 spec 状态机对账完成 | `D02 baseline + S01-S08/S11–S13 calibrated / S09+ ongoing` | D01/S01–S08及六StateFamily已对账；S09–S10/S14–S16仍须逐Spec继承 |
-| 错误、事件、版本语义对账完成 | `pending` | |
+| `S01-S16` 全部 accepted | `met` | S01–S16 domain-truth accepted（S14–S16 v1.1 对抗评审校准） |
+| `17` System Topology accepted | `pending` | 运行拓扑/进程/资源汇总尚未编写 |
+| `18` Acceptance Matrix accepted | `pending` | 全量验收矩阵与 truth freeze 签署尚未编写 |
+| Owner-gate 全部 closed/deferred | `partial` | G-01/G-12 **deferred**；其余 G-02..G-11/G-13..G-35 **closed**（或 closed foundation）；无 open owner-gate |
+| 跨 spec ID 对账完成 | `pending / residual` | T-O 连续至 336；event_type 闭集/错误族全表对账归 18 |
+| 跨 spec 状态机对账完成 | `D02 baseline + S01-S16 calibrated` | D01/S01–S16 及治理/观测/安全交接已校准；全系统 truth layer 仍未 frozen |
+| 错误、事件、版本语义对账完成 | `partial` | S14 `CONFIG_*` / S15 `OBS_*` / S16 `SEC_*` 已域内冻结；跨域 matrix 归 18 |
 | LS-RAG golden scenarios 冻结 | `pending` | |
 | Turso/process spike 证据完成 | `pending` | |
 | Vector capacity benchmark 完成 | `pending` | |
@@ -674,3 +695,7 @@ implementation finding
 | `v0.55` | `2026-08-12` | `MKB owner + Codex` | S08 Round 3 冻结 `T-O-228..230`（Q8=执行写面 only，不覆盖 S04）；Mid III；**Round 4 waived**；QNA v1.0 locked 待 formal Spec。 |
 | `v0.56` | `2026-08-12` | `MKB owner + Codex` | 发布 **S08-v1.0** formal Spec（`T-O-211..230`）；domain-truth 唯一执行 SSOT；S08 accepted；QNA 降为证据层。 |
 | `v0.57` | `2026-08-12` | `MKB owner + Codex` | **S08 全族回填**：D01/S03 废止 `lsrag.vectorize_index`；S07/S11/S12/D02/D04/D05 校准；glossary v2.6；冲突扫描闭环。 |
+| `v0.58` | `2026-08-12` | `MKB owner + Codex` | 发布 **S10-v1.0** formal Spec（`T-O-247..262`）；S10 accepted；**G-07 closed** context-only；glossary/index 校准；QNA locked。 |
+| `v0.59` | `2026-08-12` | `MKB owner + Codex` | 发布 **S09-v1.0** formal Spec（`T-O-231..246`）；S09 accepted；**G-09 closed foundation**；PublicationProof/ActiveIndexPointer/可服务谓词；QNA locked。 |
+| `v0.60` | `2026-08-12` | `MKB owner + Grok workflow domain-truth-s14-s16` | 发布 **S14-v1.1 / S15-v1.1 / S16-v1.1** 执行 SSOT（`T-O-263..336`）；QNA 证据层 locked；S11 catalog/binding 写权威矩阵与 S14 双向钉死；G-10 加固 closed for v1 transport；G-12 deferred 不变。 |
+| `v0.61` | `2026-08-12` | `MKB owner + Grok workflow domain-truth-s14-s16` | **S14–S16 战役全真相层审计**：§1.1/§3.14–3.16/§7/附录 A 回填；glossary → **v2.8**；对抗扫描（race/盲点/覆盖）；审计报告 `qna-truth/_s14-s16-campaign-audit.md`；索引保持 **`active index`**（`17`/`18` pending，**不**宣称 frozen truth index）。 |

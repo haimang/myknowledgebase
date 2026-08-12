@@ -1,67 +1,27 @@
-legacy-family/
-legacy-python/
-
-# Python build artifacts
-*.egg-info/
+venv/
 __pycache__/
-*.pyc
-*.pyo
-*.pyd
-.Python
-build/
-dist/
-*.egg
-*.whl
-
-# Test / lint caches
+*.py[cod]
+*.egg-info/
 .pytest_cache/
-.ruff_cache/
 .mypy_cache/
+.ruff_cache/
+data/db/*
+data/objects/*
+data/logs/*
+!data/db/.gitkeep
+!data/objects/.gitkeep
+!data/logs/.gitkeep
+dist/
+build/
 .coverage
 htmlcov/
-
-# Secrets / local config (Q-RW-7 / TR-5: 密钥不进仓)
+*.db
+*.db-*
 .env
-.env.*
-!.env.example
 
-# Eval fixtures scratch (RWA-06: 大样本 git-ignored, 精简集在 tests/fixtures)
-.tmp/
-.context/
-.claude/
-.adocs/
+# 业主文件
+.avisuals
+.adocs
 
-# Virtual environments
-.venv/
-venv/
-env/
-
-# IDE
-.vscode/
-.idea/
-*.swp
-*.swo
-*~
-
-# OS
-.DS_Store
-._*
-Thumbs.db
-
-# Data files (keep .gitkeep)
-data/db/*
-!data/db/.gitkeep
-data/logs/*
-!data/logs/.gitkeep
-data/tmp/*
-!data/tmp/.gitkeep
-data/objects/raw/*
-!data/objects/raw/.gitkeep
-data/objects/cleaned/*
-!data/objects/cleaned/.gitkeep
-data/objects/structured/*
-!data/objects/structured/.gitkeep
-data/objects/constructed/*
-!data/objects/constructed/.gitkeep
-data/objects/exports/*
-!data/objects/exports/.gitkeep
+# 参考系
+context

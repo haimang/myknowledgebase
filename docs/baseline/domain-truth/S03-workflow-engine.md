@@ -33,6 +33,8 @@
 > **S06校准声明**：`S06-v1.0`冻结`lsrag.structurize`业务contract、ProcessCommand+input digest冻结、GenerationArtifact/pointer（非StateFamily）与仅自动retry收敛。S03继续独占Process八态/claim/fence/max-retries与route；S06 leaf只返回ProcessOutcome+generation refs/proof。phase `structurizing`仍只是业务坐标。meta-only/index rebuild跳过structurize须用typed route与exact structure generation ref，禁止step-name字符串匹配。完整HITL不因S06进入S03新状态。
 
 > **S12校准声明**：`S12-v1.0` 兑现 claim/fence/lease、transactional outbox、先commit后wake、七表+executions/processes 物理存放与单一migration；Concurrent Writes 默认启用服务并发claim。S03仍拥有状态边与recovery语义；S12不定义route。
+>
+> **S15 readiness 校准（S15-v1.1）**：`not ready` 时 **禁止新 process claim**（S15-T043）；ClaimPort/调度入口须 fail-closed 查 HealthAggregator Ready；in-flight lease 不受探针杀死。权威=`S15`。
 
 > **S11校准声明**：`S11-v1.0` 冻结 Inference≠Adapter、transport 有界退避（**不计入** Process `retry_count`）、`INFERENCE_BACKPRESSURE`（retryable，与 claim 正交）、禁 silent 换模型。S03 继续拥有 max-retries/retry_wait 账本与 Outcome `retryability` 消费；工序叶调用模型必须经 `runtime.inference`，不得直连 adapter。
 
