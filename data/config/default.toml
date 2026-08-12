@@ -1,0 +1,29 @@
+[application]
+name = "mkb"
+api_version = "v1"
+
+[database]
+logical_name = "mkb_primary"
+concurrent_writes_required = true
+native_vector_required = true
+
+[inference]
+vllm_base_url = "http://127.0.0.1:668"
+probe_enabled = false
+embed_model = "qwen-vl-2b"
+generate_model = "qwen35-a3b"
+
+[storage]
+max_object_bytes = 268435456
+
+[security]
+metrics_require_token = false
+*** Add File: /mnt/usb/workspace/myknowledgebase/data/prompts/prompt-a-clean-v1.md
+Normalize the supplied intake content without adding facts. Preserve provenance and return
+plain text suitable for deterministic preflight checks.
+*** Add File: /mnt/usb/workspace/myknowledgebase/data/prompts/prompt-b-structure-v1.md
+Produce a faithful structured representation of the supplied cleaned content. Keep original
+anchors and coverage evidence. Do not use summaries as kernel truth.
+*** Add File: /mnt/usb/workspace/myknowledgebase/data/prompts/prompt-c-summary-v1.md
+Summarize one construction unit without changing the corresponding original text. The summary
+is a retrieval channel, not a replacement for the original evidence.

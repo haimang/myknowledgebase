@@ -1,27 +1,25 @@
-venv/
-__pycache__/
 *.py[cod]
+__pycache__/
 *.egg-info/
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
-data/db/*
+data/database/*
 data/objects/*
 data/logs/*
-!data/db/.gitkeep
+!data/database/.gitkeep
 !data/objects/.gitkeep
 !data/logs/.gitkeep
-dist/
-build/
 .coverage
 htmlcov/
 *.db
 *.db-*
 .env
-
-# 业主文件
+.venv/
+dist/
+build/
+.claude
+.grok
 .avisuals
 .adocs
-
-# 参考系
-context
+context/
