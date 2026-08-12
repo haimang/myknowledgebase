@@ -36,6 +36,7 @@
 
 > **S11校准声明**：`S11-v1.0` 冻结 Inference≠Adapter、transport 有界退避（**不计入** Process `retry_count`）、`INFERENCE_BACKPRESSURE`（retryable，与 claim 正交）、禁 silent 换模型。S03 继续拥有 max-retries/retry_wait 账本与 Outcome `retryability` 消费；工序叶调用模型必须经 `runtime.inference`，不得直连 adapter。
 
+> **D05校准声明（T-O-202/207/208/210）**：S03 继续独占 max-retries 与 Outcome 上卷（D05 **不**另建失败真相）。知识生产链 phase：`cleaning`（**promptA**）→ `structurizing`（**promptB**）→ `constructing`（**promptC**）→ `vectorizing_indexing` → `validating_publication`。Command materialize 须冻结各叶 `PromptRef`（promptA/B/C + hash）入 input digest。`lsrag.vectorize_index` 仍为 coarse placeholder；**不得**在 construct full_valid 前调度 vectorize（T-O-206）。
 ---
 
 > **S13校准声明**：`S13-v1.0` 冻结 v1 本地 `object_root` + `ObjectStorePort`、`mkbobj:v1` handle、team-scoped CAS、bytes-first、同库 catalog/ref/purpose、verify-on-read、周期 GC 与 identity readiness。本文件业务语义不变；对象 I/O 必须经 S13 Port，禁止 path/R2 key 进入契约。
@@ -446,8 +447,8 @@ v1 operator allowlist 至少包含：`eq/ne/lt/lte/gt/gte/exists/not_exists/in_r
 | `intake.preflight_validate` | 以exact PreflightValidator只读校验frozen acquisition/collection/clean evidence | `passed|blocked` Outcome、ordered check evidence与binding digest完整；runtime错误不伪装blocked |
 | `intake.accept_snapshot` | 调用S04 acceptance提交Snapshot/Membership/ChangeSet | accepted Snapshot/required set durable，可重放；truth仍归S04 |
 | `lsrag.structurize` | 结构化/逻辑分块 | exact S06 schema、coverage/coordinates 合法 |
-| `lsrag.construct` | 整包 original/summary 双通道构造（S07-v1.0） | 整包 dual-channel full-valid + generation refs/proof；exact contract 归 S07；mode=`full_construct`\|`metadata_refresh` |
-| `lsrag.vectorize_index`（coarse downstream placeholder） | 覆盖embedding与index写入需求 | embedding成功不能代替index publication；是否拆Process由S08/S09冻结 |
+| `lsrag.construct` | 整包 original/summary 双通道构造（S07；**promptC**） | 整包 dual-channel full-valid + generation refs/proof；mode=`full_construct`\|`metadata_refresh`；合法后才可 enqueue vectorize（D05 T-O-206） |
+| `lsrag.vectorize_index`（coarse downstream placeholder） | 覆盖embedding与index写入需求 | **仅**消费 construct 合法原料；失败 retry 归 S03 max-retries（D05 T-O-207）；embedding成功不能代替index publication |
 | `index.validate_publication` | 独立验证发布集合 | expected/actual、filter、检索 proof 一致 |
 | `intake.update_metadata` | 更新Intake semantic metadata/filter | versioned semantic/proof完整，必要时追加IntakeRevision |
 | `intake.physical_purge` | 受控清理eligible派生数据 | retention/hold/substrate cleanup proofs完成 |
@@ -1238,3 +1239,4 @@ S03 将 legacy 已验证的声明式 Workflow 与 Process 解耦原理，重建�
 | `S03-v1.3-cal` | `2026-08-11` | `MKB owner + Codex` | `accepted / S13-calibrated` | 接收S06-v1.0：`lsrag.structurize` leaf contract、input digest冻结、generation非状态机、仅自动retry；typed route跳过structurize须用generation ref。 |
 | `S03-v1.3-cal-s12` | `2026-08-11` | `MKB owner + Codex` | `accepted / S13-calibrated` | 接收S12-v1.0：outbox/claim/TX物理兑现；状态机与七表职责不变。 |
 | `S03-v1.3-cal-s13` | `2026-08-11` | `MKB owner + Codex` | `accepted / S13-calibrated` | 接收S13-v1.0：binding 仅 logical handle；禁 absolute path。 |
+| `S03-v1.3-cal-d05` | `2026-08-12` | `MKB owner + Codex` | `accepted / D05-calibrated` | 接收 D05-v1.0：max-retries 独占；promptA/B/C 入 Command digest；construct 前禁 vectorize（T-O-206/207/208）。 |

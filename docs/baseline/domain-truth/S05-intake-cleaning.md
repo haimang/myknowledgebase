@@ -39,6 +39,7 @@
 
 > **S13校准声明**：`S13-v1.0` 冻结 v1 本地 `object_root` + `ObjectStorePort`、`mkbobj:v1` handle、team-scoped CAS、bytes-first、同库 catalog/ref/purpose、verify-on-read、周期 GC 与 identity readiness。本文件业务语义不变；对象 I/O 必须经 S13 Port，禁止 path/R2 key 进入契约。
 
+> **D05校准声明（T-O-202/208/210）**：清洗是知识生产主链 **第 1 环节**。凡模型辅助 clean 必须绑定 **`promptA.<variant>.<version>` + content_hash**（`PromptRef`）；正文在 `data/prompts/intake/clean/**`，DB 仅 hash 指针（D03）。Clean **不**做多粒度 structure / summary / 向量。失败 retry/max_retries **仅** 服从 S03/D01（T-O-207）。下游 structurize 消费 exact clean Artifact。
 ## 1. Domain 介绍
 
 ### 1.1 Domain 价值
@@ -139,7 +140,7 @@ S05 不负责：
 | Workflow graph、Process 状态、claim/retry/recovery engine | `S03` | 使用 ProcessCommand/Outcome、waiting 与统一 repair |
 | Intake identity、Snapshot/Revision acceptance、serving/lifecycle | `S04` | 只提交候选、Outcome、gate refs |
 | Block/Construction/Embedding/Index | `S06-S09` | 输出 exact Revision/Artifact lineage 需求 |
-| model/prompt registry 与推理 provider | `S11/S14` | clean binding只引用 exact logical refs |
+| model/prompt registry 与推理 provider | `S11/S14` + **D05 `promptA`** | clean binding 只引用 exact **`PromptRef`（promptA.* + content_hash）**；正文不在 S05 |
 | exact Turso DDL、事务、queue/outbox driver | `S12` | 冻结逻辑职责和原子性，不冻结表数 |
 | bytes backend、logical locator、atomic write、GC | `S13` | 只持有handle/digest/size与引用保护要求 |
 | metric/alert/runbook、等待SLA/timeout policy | `S15` | 输出typed evidence/event，不建设运营平台 |
@@ -861,7 +862,8 @@ S05 definitions/capabilities
 |---|---|
 | `S06` | clean Artifact→structure_document/projection exact contract（已由S06-v1.0冻结） |
 | `S07-S09` | Construction/Embedding/Index exact contract与publication proof |
-| `S11/S14` | model/prompt/provider registry、fallback、cost与determinism policy |
+| `S11/S14` | model/provider；**promptA** registry（identity→path→hash） |
+| `D05` | 生产链定位：promptA@clean → promptB@structurize → promptC@construct（T-O-208/210） |
 | `S12` | 四组职责的exact Turso DDL/index/transaction/outbox/repair与capacity benchmark |
 | `S13` | local logical handle/backend/atomic write、staging/orphan/reference-protected GC |
 | `S15` | typed event/metric/trace、review SLA/timeout/alert/runbook与retention数值 |
@@ -884,3 +886,4 @@ S05 以严格、确定、可复验的source与clean contract把任意外部输�
 | `S05-v1.1-cal` | `2026-08-11` | `MKB owner + Codex` | `accepted / S13-calibrated` | 接收S06-v1.0：S06消费admitted clean且input digest后冻结；完整clean curation产品不因S06扩为v1主路径；Gate最小面可保留。 |
 | `S05-v1.1-cal-s12` | `2026-08-11` | `MKB owner + Codex` | `accepted / S13-calibrated` | 接收S12-v1.0：TX-08/outbox；S05语义不变。 |
 | `S05-v1.1-cal-s13` | `2026-08-11` | `MKB owner + Codex` | `accepted / S13-calibrated` | 接收S13-v1.0：staging port/handle/gate evidence 引用保护落地。 |
+| `S05-v1.1-cal-d05` | `2026-08-12` | `MKB owner + Codex` | `accepted / D05-calibrated` | 接收 D05-v1.0 / `T-O-208`：clean 绑定 **promptA**；生产链第 1 环节。 |

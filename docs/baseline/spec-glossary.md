@@ -4,11 +4,11 @@
 >
 > **文档角色**：跨规格词汇手册、命名边界与对齐登记册
 >
-> **权威输入**：D01-v1.4、D02-v1.0、D03-v1.0（`T-O-141..159`）、D04-v1.1（`T-O-160..179`+S11 reopen）、S01-v1.5、S02-v1.3、S03-v1.3、S04-v1.2、S05-v1.1、S06-v1.0、S07-v1.0、**S11-v1.0（`T-O-180..201`）**、S12-v1.0、S13-v1.0
+> **权威输入**：D01–D04、**D05-v1.0（T-O-202..210）**、S01–S07、S11–S13
 >
-> **状态**：`active / D01-D04+S01-S07+S11-S13 calibrated`
+> **状态**：`active / D05-v1.0 frozen calibrated`
 >
-> **版本 / 日期**：`v2.1 / 2026-08-12`
+> **版本 / 日期**：`v2.5 / 2026-08-12`
 
 ## 0. 使用规则
 
@@ -271,27 +271,67 @@ Revision 回答“来源业务事实是否改变”；build generation 回答“
 
 ## 4. LS-RAG 与派生资产词汇
 
+> **高等级 handbook**：`domain-truth/D05-layered-semantic-rag-handbook.md`（**`D05-v1.0 frozen` / `T-O-202..210`**）。  
+> **裁决等级**：`D*` > `S*`。  
+> **typed 形状**：`src/contracts/`（D03）。  
+> **失败重试**：不在 D05；见 **D01 / S03** `max_retries`。
+
+### 4.0 产品核心词（D05-v1.0 / T-O-202..210）
+
+| Canonical term | 成熟度 | 定义 | 边界 |
+|---|---|---|---|
+| `LS-RAG` | `frozen / D05-v1.0` | GenerationScopedCoordinate 为轴；**默认双通道**；**默认粒度 0/1/2**；g=0 必入向量候选；construct 合法后 vectorize；召回 Traceback + ContextTier | 不自建 max_retries；不新增 StateFamily |
+| `LSRagProductionChain` | `frozen / D05-v1.0` | Intake→structurize→construct→**(gate)**→vectorize→publication→Retrieve | 禁跳过 construct |
+| `DualChannel` | `frozen / D05-v1.0` | **LS-RAG 根本**：Original+Summary 默认可索引、共坐标 | 非可选插件 |
+| `Granularity0` / `FullDocumentLayer` | `frozen / D05-v1.0` | **粒度 0**：整份文档根层全文检索单元；**必须**进入向量候选 | 生产 g=0；inflation 目标 |
+| `Granularity1` / `SectionLayer` | `frozen / D05-v1.0` | **粒度 1**：一级章节/一级标题下连贯正文 | 例：预算报告「二、收入预算」整章 |
+| `Granularity2` / `ParagraphLayer` | `frozen / D05-v1.0` | **粒度 2**：章内段落/条款/列表项组 | 例：「（三）非税收入」单段 |
+| `DefaultGranularitySet` | `frozen / D05-v1.0` | v1 默认 **`{0,1,2}`** | 更细层须 profile 注册 |
+| `GenerationScopedCoordinate` | `frozen / D05-v1.0` | generation + unit_id（+ granularity 元数据） | 禁裸三元组跨代 |
+| `promptA` / `CleanPrompt` | `frozen / D05-v1.0` | **生产 Prompt 身份 A**：清洗；identity=`promptA.<variant>.<version>`；DB=`content_hash` 指针 | 锚定 S05 clean.*；正文 `data/prompts/intake/clean/**` |
+| `promptB` / `StructurePrompt` | `frozen / D05-v1.0` | **生产 Prompt 身份 B**：结构化多粒度 original；`promptB.<variant>.<version>` + hash | 锚定 `lsrag.structurize`；legacy 例 `RAG_STRUCTURIZER_V1_GENERAL` |
+| `promptC` / `SummaryPrompt` / `SummarizerPrompt` | `frozen / D05-v1.0` | **生产 Prompt 身份 C**：整包填 Summary 通道；`promptC.<variant>.<version>` + hash | 锚定 `lsrag.construct` Summarizer；legacy 例 `RAG:CONSTRUCTOR:GEMINI_SUMMARY:V2` |
+| `PromptIdentity` | `frozen / D05-v1.0` | `prompt{A\|B\|C}.variant.version` 闭集角色 + 变体 + 代次 | 运行须 hash 校验；禁无名散落字符串 |
+| `PromptRef` | `frozen / D05-v1.0` | `{ identity, content_hash, path? }`；进入 ProcessCommand digest | DB 不存第二份正文（D03） |
+| `ConstructToVectorizeGate` | `frozen / D05-v1.0` | full_valid construct + dual-channel 完备 + g=0 在场后才可 vectorize | 原料门闩 |
+| `VectorizationUnit` | `frozen / D05-v1.0` | team×coord×channel×content_full_digest×LayerA/B | 非 Process row |
+| `ContentFull` | `frozen / D05-v1.0` | Recipe 输出 embed 文本；非 identity；非向量表列 | D04 禁列 |
+| `Traceback` | `frozen / D05-v1.0` | summary 命中→同坐标 original→PayloadContent | 与 HitContent 分账 |
+| `DocumentInflation` | `frozen / D05-v1.0` | 非 g=0 命中后有界附加 FullDocument original | 预算 S10 |
+| `HitContent` / `PayloadContent` | `frozen / D05-v1.0` | 命中正文 vs 交付正文 | 禁静默伪装 |
+| `TracebackStatus` | `frozen / D05-v1.0` | `not_needed\|resolved\|failed\|degraded` | 默认可观测 degraded |
+| `RetrievalResult` | `frozen / D05-v1.0` | 含 granularity、分账、traceback、context_tier | Eligibility 围栏 |
+| `ContextTier` | `frozen / D05-v1.0` | `focus_fragment` / `document_root` / assembly | 前端多等级上下文 |
+| `PublicationProof` | `frozen / D05-v1.0` | 可检索性证明；D01 成功 guard | ≠ 向量存在 |
+| `ContextMetaProjection` | `frozen / D05-v1.0` | 叙事 meta 投影 | 非 filter SSOT |
+| `FilterMetaAuthority` | `frozen / D05-v1.0` | S04+team 过滤权威 | child 不串 parent |
+
+### 4.1 派生资产与通道（S06/S07 + D05）
+
 | Canonical term | 成熟度 | 定义 | 与 Intake 的关系 |
 |---|---|---|---|
-| `DerivedAsset` | `frozen category / exact types downstream` | 从exact IntakeRevision经Workflow/Process构建的长期派生对象统称；具体类型必须使用LSRagBlock、ConstructionUnit、VectorRecord等领域名 | 不等于IntakeArtifact、Process output或KnowledgeItem；重建通常创建DerivedGeneration而非IntakeRevision |
-| `ArtifactStorage` / `AssetStorage` | `pending S13` | 保存IntakeArtifact bytes及其他derived asset bytes/locators的基础设施职责名 | 不是业务identity类型；backend变化不得改变Intake UUID或logical refs |
-| `StructureDocument` | `frozen / S06-v1.0 / T-O-94` | S06 一次 generation 的 original structure truth：single root typed ordered tree + anchors + proofs | 不是 IntakeArtifact；不含权威 summary |
-| `RetrievalBlockProjection` | `frozen / S06-v1.0 / T-O-94` | 从 StructureDocument 派生的检索投影；generation-scoped block coordinates | 不得反向修改 tree；S07–S10 共享坐标 |
-| `LSRagBlock` | `frozen as projection unit / S06` | RetrievalBlockProjection 内带稳定坐标的块（或兼容旧称） | 必须经 structure generation 追溯；不是 IntakeArtifact |
-| `ConstructionUnit` | `frozen / S07-v1.0 / T-O-132` | 与 S06 projection **1:1 对齐**的双通道构造单元（generation-scoped coordinate + OriginalChannel + SummaryChannel）；封装在整包 Construction artifact 内 | 不是独立 Process 成败单元；从 StructureDocument/Projection 派生 |
-| `OriginalChannel` | `frozen / S07-v1.0 / T-O-128/129` | 检索最终 payload 回溯的原文通道；payload 仅 verified clean/structure 切片 | 禁模型写 original；与 Summary 共享 generation-scoped 坐标 |
-| `SummaryChannel` | `frozen / S07-v1.0 / T-O-128/138` | 语义索引用摘要通道；命中后回溯 OriginalChannel | **不在 S06 kernel**；v1 整包 dual-channel 完备才 CAS current |
-| `ConstructionDocument` | `frozen / S07-v1.0 / T-O-135` | S07 整包 envelope artifact：S06 refs、unit 清单、meta 投影 digest、plan/alignment proof | 与 dual_channel_projection 分账 |
-| `DualChannelProjection` | `frozen / S07-v1.0 / T-O-135` | 按 coordinate 枚举 original/summary 通道记录（payload handle+digest、content_full 配方 digest） | S08 消费面；非 vec 队列表 SSOT |
-| `ConstructionSchemaDefinition` | `frozen / S07-v1.0 / T-O-135` | S07 拥有的 immutable construction contract（key/version/digest）；独立于 StructureSchema | readiness 前必须注册 |
-| `ContentFullRecipe` | `frozen / S07-v1.0 / T-O-137` | 确定性 embed 输入文本配方（channel body + S04 投影 meta 闭集头） | 非 identity；S08 可重算对账 |
-| `ConstructMode` | `frozen / S07-v1.0 / T-O-137/139` | ProcessCommand 闭集：`full_construct` \| `metadata_refresh` | 非 step-name；非第二 capability |
-| `EmbeddingSpace` | `pending S08` | model/revision/dimension/metric/normalization 一致的向量空间 | 同一 IntakeRevision 可有多个派生 generation/space |
-| `VectorRecord` | `pending S08-S09` | 与 Block/ConstructionUnit、embedding space 和 filter metadata 绑定的索引记录 | 必须引用 exact IntakeRevision；不是 Process row或 IntakeArtifact |
-| `IndexGeneration` | `frozen lifecycle / exact schema pending S09` | 一组隔离构建、验证、CAS切换、grace后失效的vector index projection代次 | reindex不创建IntakeRevision；失败继续服务旧generation |
-| `RetrievalEligibility` | `frozen fence / exact query pending S09-S10` | team、IntakeItem lifecycle、ServingRevision与IndexGeneration共同形成的查询围栏 | 不能仅由vector是否存在或Task成功决定 |
+| `DerivedAsset` | `frozen category` | 从 exact IntakeRevision 经 Workflow/Process 构建的长期派生对象统称 | ≠ IntakeArtifact；重建通常新 generation |
+| `StructureDocument` | `frozen / S06 / T-O-94` | original structure truth：single-root tree + anchors + proofs | 不含权威 summary |
+| `RetrievalBlockProjection` | `frozen / S06 / T-O-94` | 检索投影；generation-scoped blocks | 不得反向改 tree |
+| `LSRagBlock` | `frozen / S06` | Projection 内带坐标的块 | 经 structure generation 追溯 |
+| `ConstructionUnit` | `frozen / S07 / T-O-132` | 与 projection 1:1 的双通道单元 | 非独立 Process 成败 |
+| `OriginalChannel` | `frozen / S07 / T-O-128/129` | 可复验原文通道 | 禁模型写 |
+| `SummaryChannel` | `frozen / S07 / T-O-128/138` | 语义摘要通道 | 不在 S06 kernel；v1 整包 dual-channel 完备才 CAS |
+| `ConstructionDocument` | `frozen / S07 / T-O-135` | 整包 envelope artifact | 与 DualChannelProjection 分账 |
+| `DualChannelProjection` | `frozen / S07 / T-O-135` | 按 coordinate 枚举双通道记录 | S08 消费面 |
+| `ConstructionSchemaDefinition` | `frozen / S07 / T-O-135` | construction contract key/version/digest | readiness 前注册 |
+| `ContentFullRecipe` | `frozen / S07 / T-O-137` | 确定性 ContentFull 配方 | S08 可重算 |
+| `ConstructMode` | `frozen / S07 / T-O-137/139` | `full_construct` \| `metadata_refresh` | 非 step-name |
+| `EmbeddingSpace` / `VectorNamespace` | `frozen concept / D04+S11；exact S08` | model/dim/metric 一致的向量空间（Layer A） | 粒度/通道不是 namespace |
+| `VectorRecord` | `frozen concept / D04；exact S08` | `mkb_vector_records` 行：坐标+channel+embedding+filters | 须绑 generation；非 Process row |
+| `IndexGeneration` | `frozen lifecycle / exact S09` | 索引投影代次 CAS | reindex 不新建 IntakeRevision |
+| `RetrievalEligibility` | `frozen fence / exact S09-S10` | team ∩ Item lifecycle ∩ ServingRevision ∩ IndexGeneration | 不能仅由 vector 存在决定 |
+| `FinalVectorBody` | `frozen / D04` | `mkb_vector_records.embedding` F32 | 禁外置 Vectorize 作 v1 SSOT |
+| `VectorizeOutboxKind` | `frozen / D04` | `vectorize_construct` / `vectorize_structure` / `vector_purge_generation` | 单 outbox；禁 vec_process 表 |
+| `VectorSpaceIsolation` (Layer A) | `frozen / S11` | model/adapter/dim 一致性 fail-closed | 禁跨空间 ANN |
+| `BusinessRetrievalFilter` (Layer B) | `frozen / S11` | team + intake + 业务 facet | 禁用换模型模拟分区 |
 
-### 4.1 S06 已冻结工作词（S06-v1.0）
+### 4.2 S06 已冻结工作词
 
 | Canonical term | 成熟度 | 定义 | 边界 |
 |---|---|---|---|

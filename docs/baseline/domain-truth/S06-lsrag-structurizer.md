@@ -4,41 +4,33 @@
 >
 > **Domain / 子系统**：`D5 LS-RAG 构建 / S06 LS-RAG Structurizer`
 >
-> **日期**：`2026-08-11`
+> **日期**：`2026-08-12`
 >
 > **作者 / 裁决者**：`MKB owner + Codex`
 >
-> **文档性质**：`domain truth / formal subsystem specification`
+> **文档性质**：`domain truth / formal subsystem specification`（**唯一执行真相 SSOT**）
 >
 > **文档状态**：`accepted`（S06 域内已接受；全系统 truth layer 尚未 frozen）
 >
-> **Truth 版本**：`S06-v1.0`
+> **Truth 版本**：`S06-v1.1`（v1.0 宪法 + **执行台账全面升格**；QNA 细节并入本文）
 >
-> **上游权威输入**：`D01-v1.4`、`D02-v1.0`、`S01-v1.5`、`S02-v1.3`、`S03-v1.3`、`S04-v1.2`、`S05-v1.1`；冻结的 `qna-truth/S06.md v0.9`（Q1–Q6 / `T-O-77..85`、`T-O-93..96`）
+> **上游权威输入**：`D01–D04`、`S01–S05`、`S07`、`S11–S13`；`qna-truth/S06.md v0.9`（**证据层 / 中间态 only**，非执行 SSOT）
 >
-> **词汇权威**：`docs/baseline/spec-glossary.md`
+> **词汇权威**：`docs/baseline/spec-glossary.md` v2.1
 >
-> **事实证据**：`context/legacy-family/` 仅作 production-pitfall / behavior-archeology / design-counterexample `ReferenceAnchor`（Structurizer、Constructor、Recorder、RAG Dispatcher、Contexter Traceback、SMCP v1.6.3）；另有 Docling / Unstructured / LlamaIndex / RAPTOR / JSON Schema 一手资料
+> **事实证据**：`context/legacy-family/` 仅作 ReferenceAnchor（Structurizer、Constructor、Recorder、RAG Dispatcher、Contexter、SMCP）；Docling/Unstructured/LlamaIndex/RAPTOR/JSON Schema 一手资料
 >
-> **下游消费者**：`S07-S10`、`S11-S15`、跨系统拓扑 `17`、验收冻结 `18`
+> **下游消费者**：`S07–S11`、`S12–S15`、跨系统拓扑 `17`、验收冻结 `18`、实现与 architecture tests
 
-> **Owner-originated 约束**：S06 是可复验的 **original structure compiler**，不是 generic text chunker、二次 clean、summary worker 或 document editor。v1 生产路径 **全自动**；完整 human-in-the-loop 不在 S06 v1 范围，仅保留上游最小人工入口。
+> **★ 执行 SSOT 声明（Owner 强制）**：实现、验收、对账 **只依赖本 domain-truth 文件**。`qna-truth/S06.md` 仅 progressive 形成过程，**不得**作第二执行真相；冲突时 **以本文为准**。禁止「细节在 QNA、Spec 只写原则」。实现 **无需** 打开 QNA 即可编码。
 
-> **跨文档审计声明**：S06 不新增 StateFamily、不复制 S03 Process 八态、不创建 Intake identity、不切 serving pointer。GenerationArtifact / Invocation / per-type current pointer 是正交 typed facts（D02）。StructureSchema 由 S06 拥有业务语义；S12 只承接物理 registry。
+> **Owner-originated 约束**：S06 是可复验的 **original structure compiler**，不是 generic text chunker、二次 clean、summary worker 或 document editor。v1 生产路径 **全自动**；完整 HITL 不在 S06 v1 范围。
 
-> **S12校准声明**：`S12-v1.0` 兑现 Generation accept+pointer CAS（TX-06）、bytes-first artifact 元数据、generation 模块表、StructureSchema 物理 registry 与 readiness；Concurrent Writes 服务并发。S06 业务 contract 不变。
+> **跨文档**：不新增 StateFamily；不复制 S03 Process 八态；不创建 Intake identity；不切 serving。GenerationArtifact/Invocation/per-type current 为正交 typed facts（D02）。StructureSchema 业务语义归 S06；物理 registry/TX 归 S12；对象 bytes 归 S13。S11 提供 structured_generate；调用成功≠Process 成功。S07 消费 structure+projection；S06 **不**产出权威 summary。
 
-> **S11校准声明**：`S11-v1.0` 提供 `structured_generate` / 本地默认 vLLM；S06 只经 Inference 门面调用模型；调用成功≠Process 成功；generation_invocations 可链 `inference_invocation_uuid`。fallback/换模型政策以 S11 为准（v1 禁 transport 驱动 silent 换模型）。
+> **Legacy 边界（T-O-42）**：不继承 SMCP wire、R2 key 成功语义、裸 `file_uuid+block_id+granularity`、flat layered wire、模型 UUID、Worker 私有 retry、CF 拓扑。
 
-> **Legacy 边界（T-O-42）**：不继承 SMCP wire、R2 key 成功语义、`file_uuid+block_id+granularity` 裸坐标、flat `layered_content` wire 兼容、模型生成 UUID、Worker 私有 retry 或 Cloudflare 拓扑。
-
----
-
-> **S13校准声明**：`S13-v1.0` 冻结 v1 本地 `object_root` + `ObjectStorePort`、`mkbobj:v1` handle、team-scoped CAS、bytes-first、同库 catalog/ref/purpose、verify-on-read、周期 GC 与 identity readiness。本文件业务语义不变；对象 I/O 必须经 S13 Port，禁止 path/R2 key 进入契约。
-
-> **S07校准声明**：`S07-v1.0` 消费本域 current structure + 同 generation projection，产出整包 dual-channel construction（projection 1:1）；S06 **仍不**产出权威 summary。S07 整包二元成败与 ConstructionSchema 不 reopen S06 kernel；S06 success 仍不等于 construct/serving success。
-
-## 1. Domain 介绍
+> **D05校准声明（T-O-202..210）**：S06 服从 D05 handbook。结构化绑定 **`promptB.<variant>.<version>` + content_hash**；默认产出 **粒度 0/1/2** 投影语义且 **强制 FullDocument（g=0）**；**不**填权威 Summary（归 promptC/S07）；失败仅 S03 max-retries。Generation-scoped 坐标；禁裸三元组跨代。## 1. Domain 介绍
 
 ### 1.1 Domain 价值
 
@@ -436,76 +428,192 @@ v1 默认 profile 必须能从 structure 生成：
 
 ---
 
-## 4. 业务流转与接口 Contract
+## 4. 具体执行方案清单
 
-### 4.1 全自动主路径
+### 4.1 `S06-E01` — 目录、capability 与 architecture 围栏
+
+**真相**：S06-T（capability leaf）；T-O-85/93
+
+| 路径（逻辑） | 职责 |
+|---|---|
+| `src/services/lsrag_structurize/` | binder、generator、kernel/extension validators、projector、accept |
+| `src/contracts/lsrag/structure/` | Command/Outcome、schema shapes、error codes |
+| `src/contracts/lsrag/structure/schemas/` | bootstrap `mkb.structure_document@1` definition |
+| 经 `runtime.inference`（S11） | structured_generate；禁 services→llm_adapters |
+| 经 S12 ports | generation artifacts / pointers / UoW TX-06 |
+| 经 S13 ObjectStorePort | promote structure/projection bytes |
+
+| 规则 | 验收 |
+|---|---|
+| 无 S06 私有 job/retry 状态机 | architecture |
+| 无公网 structure 编辑 API | surface |
+| 零 legacy structurizer/SMCP 依赖 | 扫描 |
+| summary 不得进入 structure kernel | contract/schema test |
+
+---
+
+### 4.2 `S06-E02` — ProcessCommand、input freeze 与幂等
+
+**真相**：T-O-93/81
+
+**ProcessCommand 最小字段**：
+
+| 字段 | 约束 |
+|---|---|
+| `clean_artifact_ref` + digest | selected admitted clean |
+| `intake_revision_ref` | S04 binding |
+| `structure_schema_ref` | key/version/digest exact |
+| `structure_profile_ref` / `projection_profile_ref` | exact |
+| `model_ref` | 经 S11 binding |
+| `prompt_ref` | **`PromptRef` → `promptB.<variant>.<version>` + content_hash**（D05 T-O-208） |
+| `command_input_digest` | materialize 后冻结（含 prompt_ref） |
+
+**冻结规则**：materialize 后禁止替换 clean/schema/profile/model；retry **同 digest**；禁 `latest`。  
+**幂等**：`(execution, lsrag.structurize, command_input_digest)` → 同一 logical current 或 conflict。
+
+---
+
+### 4.3 `S06-E03` — ProcessOutcome 与错误轴
+
+**成功 Outcome 最小**：
+
+| 字段 | 约束 |
+|---|---|
+| `disposition` | full-valid（kernel+extension+proof） |
+| `structure_document_ref` + digest | current |
+| `retrieval_block_projection_ref` + digest | current |
+| `validation_report_ref` + digest | current / proof 面 |
+| `schema_key/version/digest` | 回显 |
+| `command_input_digest` | 回显 |
+| `token_summary?` | 有界 |
+| **禁止** | path、R2 key、正文 tree 全文进 Outcome |
+
+**失败**：typed error + 可选 invalid artifact refs；**不 CAS** current。
+
+**错误轴（闭集骨架）**：
+
+| 前缀 | 条件 |
+|---|---|
+| `STRUCTURE_BINDING_*` | 缺 ref、digest 不匹配、latest |
+| `STRUCTURE_SCHEMA_*` | 未知 version、digest drift |
+| `STRUCTURE_KERNEL_*` | 树/坐标/anchor/coverage 失败 |
+| `STRUCTURE_EXTENSION_*` | extension 校验/repair 失败 |
+| `STRUCTURE_BUDGET_*` | large-input / window 超限 |
+| `STRUCTURE_DEPENDENCY_*` | S11/S12/S13 不可用 |
+
+---
+
+### 4.4 `S06-E04` — 全自动主路径逐步
+
+**真相**：T-O-93/94/96
+
+| 步 | 动作 | 失败 |
+|---|---|---|
+| 1 | claim Process + fence | claim fail |
+| 2 | load Command；校验 input digest | BINDING |
+| 3 | S13/S12 读 clean bytes/elements | DEPENDENCY / MISSING |
+| 4 | resolve exact StructureSchema | SCHEMA |
+| 5 | budget precheck（chars/nodes/window） | BUDGET |
+| 6 | 加载 **promptB** 正文（hash 校验）→ S11 `structured_generate` → candidate structure_document + Invocation | DEPENDENCY / KERNEL / PROMPT |
+| 7 | kernel validate（§3.7.3） | KERNEL → report；S03 retry |
+| 8 | extension validate | EXTENSION |
+| 9 | 若 extension fail 且 profile `repair_budget>0` 且未耗尽 | 见 E05 |
+| 10 | project `retrieval_block_projection`（§3.6/3.7.6） | KERNEL |
+| 11 | full proof（tree+coverage+coordinate+projection） | KERNEL |
+| 12 | S13 promote members | DEPENDENCY |
+| 13 | S12 TX-06 multi-pointer CAS（structure + projection + report） | CAS conflict |
+| 14 | ProcessOutcome succeeded | — |
+
+**Input freeze 后非法**：换 clean；latest schema；RAG 内编辑 node；人工 promote 历史 candidate；用户 generation 精修产品（OOS）。
+
+---
+
+### 4.5 `S06-E05` — Kernel / extension cutoff 与 repair
+
+**真相**：T-O-83/84/85
+
+| 层 | 规则 |
+|---|---|
+| kernel | 不可 agent 修；失败 → typed evidence → S03 retry（同 digest） |
+| extension | 仅 schema 声明的 JSON pointers；每次 repair → **新** immutable artifact + Invocation |
+| repair 后 | **从零** 全量 schema/semantic/source proof；仅 full-valid 可 CAS |
+| repair_budget | profile；0 = 禁用；**禁止** 无限循环 / 原位覆盖 |
+| max-retries | **仅** S03；达到上限 Process failed；历史全留 |
+| 禁止 | silent preprocess coerce；放宽 schema；切 latest；改写历史 |
+
+---
+
+### 4.6 `S06-E06` — Generation 账本与 multi-pointer CAS
+
+**真相**：T-O-77/78/96；§3.2
+
+| 动作 | 规范 |
+|---|---|
+| 每次 generation/repair 输出 | 写 `GenerationArtifactRecord` immutable |
+| 每次模型调用 | 写 `GenerationInvocationRecord`（可链 S11 `invocation_uuid`） |
+| current | unique `(team, execution, artifact_type)` CAS pointer |
+| transition | append-only before/after + causation |
+| 唯一 accepted | per-type full-valid current；**无** GenerationCommit 业务身份 |
+| 有意重建 | 新 generation + CAS；下游绑新 generation |
+
+---
+
+### 4.7 `S06-E07` — StructureSchema bootstrap 与 readiness
+
+**真相**：T-O-80..82/95；§3.3/3.7
+
+| 规则 | 规范 |
+|---|---|
+| bootstrap | readiness 前注册 `mkb.structure_document` v1 + digest |
+| 同 version 同 digest | 幂等 |
+| 同 version 异 digest | readiness=false |
+| consumer | S07–S10 声明 supported range；S03 compile 拒绝不兼容 |
+| 外部 CUD | **禁止** |
+| 旧 artifact | 永不被 latest schema 重解释 |
+
+---
+
+### 4.8 `S06-E08` — Task-scoped 只读 API
+
+**真相**：T-O-79
 
 ```text
-S05 admitted clean (+ 既有 Gate 仅当上游已触发)
-  → S03 materialize ProcessCommand(lsrag.structurize) + input digest
-  → claim/fence Process
-  → read clean artifact bytes/elements
-  → resolve exact StructureSchema
-  → generate candidate structure_document (+ invocation)
-  → kernel validate
-       fail → report + S03 retry (same digest)
-  → extension validate
-       fail + repair_allowed → repair new artifact → full revalidate
-  → project retrieval_block_projection
-  → full proof
-  → CAS current pointers (structure, projection, report)
-  → ProcessOutcome succeeded
-  → S03 route → S07
+GET /v1/teams/{team}/tasks/{task}/generation-artifacts
+GET /v1/teams/{team}/tasks/{task}/generation-artifacts/{generation_artifact_uuid}
+GET /v1/teams/{team}/tasks/{task}/generation-artifact-pointers
 ```
 
-### 4.2 Input freeze 之后的非法操作
+| 规则 | 规范 |
+|---|---|
+| 校验 | team + Task→Execution→artifact 归属 |
+| 写面 | 无普通 POST/PATCH/DELETE |
+| Create | 仅 current-fenced Process |
+| 返回 | 禁 path/secret；refs+digests+安全摘要 |
 
-- 替换 selected clean Artifact；
-- 解析 active/latest schema 或 latest clean；
-- RAG 内编辑 node/block；
-- 人工 promote 历史 candidate；
-- 用户产品化 “再生成一次” 精修（defer）。
+---
 
-### 4.3 失败与 rebuild
+### 4.9 `S06-E09` — 失败、rebuild、scatter、预算
 
 | 情形 | 行为 |
 |---|---|
-| AI/schema/kernel/provider 失败 | typed evidence → S03 retry_wait / failed |
-| max-retries | Process failed；历史全留 |
-| 换 schema/model/profile/clean | 新 Execution 或 S02 rebuild/full-retry generation |
-| terminal 后业务重做 | 既有 S02 causal 机制；不复活旧 tree 多轮 accepted |
+| AI/kernel/provider 失败 | typed → S03 retry_wait / failed |
+| max-retries | Process failed；历史完整 |
+| 换 schema/model/profile/clean | 新 Execution 或 S02 rebuild/full-retry；禁热切旧 Execution accepted |
+| scatter | **每内容 child Execution 独立** structurize；无跨 Item 大树 |
+| large-input 超 budget | fail-loud `STRUCTURE_BUDGET_*`；禁截断冒充成功 |
+| success | ≠ Execution/Task/serving success |
 
-### 4.4 Task-scoped 只读 API（语义）
+---
 
-```text
-GET /v1/tasks/{task_uuid}/generation-artifacts
-GET /v1/tasks/{task_uuid}/generation-artifacts/{generation_artifact_uuid}
-GET /v1/tasks/{task_uuid}/generation-artifact-pointers
-```
+### 4.10 `S06-E10` — 对 S07–S10 强制消费合同与交接
 
-服务端校验 team + Task→Execution→artifact。无 POST/PATCH/DELETE 普通写面。
-
-### 4.5 ProcessOutcome 最小字段（逻辑）
-
-```text
-outcome_status: succeeded | failed | cancelled
-retryability: ...
-structure_document_ref + digest?
-projection_ref + digest?
-validation_report_ref + digest?
-schema_key/version/digest
-input_digest
-token_summary?
-error_code/details?
-```
-
-### 4.6 对 S07–S10 的强制消费合同
-
-1. 必须加载 artifact 声明的 exact schema version/digest；
-2. 必须携带 generation-scoped coordinates；
-3. summary 通道必须能 traceback 到 original（经 structure/projection）；
-4. 不得用 file_uuid+int 裸坐标作为跨代 identity；
-5. structure success 后的 serving/index 仍需各自 publication proof。
+1. 必须加载 artifact 声明的 exact schema version/digest；  
+2. 必须携带 **generation-scoped coordinates**；  
+3. summary 通道须能 traceback original（经 structure/projection）——summary 在 **S07**；  
+4. 禁止 `file_uuid+int` 裸坐标作跨代 identity；  
+5. structure success 后 serving/index 仍需各自 publication proof；  
+6. S11：只经 facade；transport 内环不计 Process retry_count；  
+7. S12/S13：TX-06 + bytes-first + `generation_artifact` purpose。
 
 ---
 
@@ -577,6 +685,8 @@ error_code/details?
 | `S06-A18` | legacy package import / SMCP 依赖扫描 | 零命中 |
 | `S06-A19` | large-input 超 budget | fail-loud 或 profile 声明的合法 disposition，非截断冒充成功 |
 | `S06-A20` | model 返回 summary 字段 | 忽略或 invalid（不得进入 kernel truth） |
+| `S06-A21` | process-local 无限 repair | 禁止；受 repair_budget + S03 |
+| `S06-A22` | 实现可不打开 QNA | 文档自包含审查 |
 
 ---
 
@@ -608,19 +718,19 @@ error_code/details?
 
 ### 8.1 Verdict
 
-**`ACCEPTED / GO`**：S06 作为 original structure compiler 的 foundation、自动生产路径、logical structure contract、generation 账本、schema 机制与首版 `mkb.structure_document@1` 草稿已闭合；下游 **S07-v1.0** 已 accepted 并校准本域消费合同。
+**`ACCEPTED / GO / execution-complete for v1.1`**：S06 作为 **唯一执行真相** 已含 E01–E10 台账、§3 schema 合同与 `mkb.structure_document@1` 草稿；实现不得外挂 QNA。
 
 ### 8.2 强制结论
 
-1. S06 不是 chunker / 二次 clean / summary worker / HITL 编辑器；
-2. 产物全历史 + per-type full-valid current；
-3. Schema 独立版本化；readiness 前必须注册首版；
-4. kernel 不可 agent 修；repair 新 artifact 全量复验；
-5. ProcessCommand input digest 后输入冻结；retry 同 digest；
-6. structure_document 树 + anchors + generation-local coordinates；projection 分账；
-7. 唯一 accepted 由 pointers 表达；无 GenerationCommit 身份；无用户精修产品；
-8. success ≠ Execution/Task/serving；
-9. legacy 仅 reference-anchor。
+1. domain-truth only；  
+2. S06 不是 chunker / 二次 clean / summary worker / HITL 编辑器；  
+3. 产物全历史 + per-type full-valid current；  
+4. Schema 独立版本化；readiness 前必须注册首版；  
+5. kernel 不可 agent 修；repair 新 artifact 全量复验；  
+6. input digest 冻结；retry 同 digest；  
+7. structure_document 树 + anchors + generation-local coordinates；projection 分账；  
+8. 唯一 accepted 由 pointers 表达；无 GenerationCommit；无用户精修产品；  
+9. success ≠ Execution/Task/serving；legacy 仅 ReferenceAnchor。
 
 ### 8.3 下游必须继续冻结的边界
 
@@ -636,7 +746,7 @@ error_code/details?
 
 ### 8.4 一句话结论
 
-S06 把 admitted clean 内容编译为可证明的 generation-scoped original structure 与检索投影，用自动路径、冻结输入、版本化 schema 与统一 Process 失败收敛，为 LS-RAG 双通道与溯源提供唯一可信结构地基。
+S06-v1.1 把 admitted clean 编译为可证明的 generation-scoped original structure 与检索投影，并以 **可编码 E 包** 独占结构域执行真相层。
 
 ---
 
@@ -644,6 +754,8 @@ S06 把 admitted clean 内容编译为可证明的 generation-scoped original st
 
 | 版本 | 日期 | 作者 | 状态 | 主要变更 |
 |---|---|---|---|---|
-| `S06-v1.0` | `2026-08-11` | `MKB owner + Codex` | `accepted` | 吸收 Q1–Q6 与 `T-O-77..85`、`T-O-93..96`；冻结自动生产路径、generation 账本、StructureSchema 机制、logical structure/projection contract、首版 `mkb.structure_document@1` 草稿、验收矩阵与 legacy reference-anchor 裁决。 |
-| `S06-v1.0-cal-s12` | `2026-08-11` | `MKB owner + Codex` | `accepted / S13-calibrated` | 接收S12-v1.0：TX-06/bytes-first/registry readiness；S06语义不变。 |
-| `S06-v1.0-cal-s13` | `2026-08-11` | `MKB owner + Codex` | `accepted / S13-calibrated` | 接收S13-v1.0：logical handle/CAS/GC；S06 generation 语义不变。 |
+| `S06-v1.0` | `2026-08-11` | `MKB owner + Codex` | `accepted` | 吸收 Q1–Q6 与 `T-O-77..85`、`T-O-93..96`；冻结自动路径、generation 账本、StructureSchema、`mkb.structure_document@1` 草稿。 |
+| `S06-v1.0-cal-s12` | `2026-08-11` | `MKB owner + Codex` | calibrated | 接收 S12 TX-06/bytes-first/registry。 |
+| `S06-v1.0-cal-s13` | `2026-08-11` | `MKB owner + Codex` | calibrated | 接收 S13 handle/CAS/GC。 |
+| `S06-v1.1` | `2026-08-12` | `MKB owner + Codex` | `accepted` | **执行 SSOT 强制**；QNA 细节并入 E01–E10；禁止执行依赖 QNA。 |
+| `S06-v1.1-cal-d05` | `2026-08-12` | `MKB owner + Codex` | `accepted / D05-calibrated` | 接收 D05-v1.0：`promptB`、默认粒度 0/1/2、强制 FullDocument；T-O-204/208。 |

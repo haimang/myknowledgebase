@@ -8,31 +8,25 @@
 >
 > **作者 / 裁决者**：`MKB owner + Codex`
 >
-> **文档性质**：`domain truth / formal subsystem specification`
+> **文档性质**：`domain truth / formal subsystem specification`（**唯一执行真相 SSOT**）
 >
 > **文档状态**：`accepted`（S11 域内已接受；全系统 truth layer 尚未 frozen）
 >
-> **Truth 版本**：`S11-v1.0`
+> **Truth 版本**：`S11-v1.1`（v1.0 宪法 + **执行台账全面升格**；QNA 细节并入本文）
 >
-> **上游权威输入**：`D01-v1.4`、`D02-v1.0`、`D03-v1.0`（`T-O-141..159`）、`D04-v1.1`（`T-O-160..179` + `T-O-192..194` + `T-O-197..198`）、`S01–S07` accepted、`S12–S13` accepted；冻结的 `qna-truth/S11.md v1.0`（Q1–Q9 / `T-O-180..201`；Round 4 waived）
+> **上游权威输入**：`D01–D04`、`S01–S07`、`S12–S13`；`qna-truth/S11.md v1.0`（**证据层 / 中间态 only**，非执行 SSOT）
 >
-> **词汇权威**：`docs/baseline/spec-glossary.md`
+> **词汇权威**：`docs/baseline/spec-glossary.md` v2.1
 >
-> **事实证据**：`legacy-family` structurizer/constructor/vectorizer/contexter AI 栈（ReferenceAnchor）；2026-08 Qwen3-VL-Embedding/Reranker、Gemini Embedding、Ranking API 检索（非 Workers）
->
-> **下游消费者**：`S06–S10`、`S08` vectorize、`S14` registry 产品面、`S15` 指标、`S16` 密钥、`17` topology、`18` 验收
+> **下游消费者**：`S06–S10`、`S14–S16`、`17`、`18`、实现与 architecture tests
 
-> **Owner-originated 约束（2026-08-11 / Round 1–3）**：  
-> 1. **脱离 Workers AI / AI Gateway / DO 内嵌推理** 作为 v1 必选路径；  
-> 2. **Inference ≠ Adapter**：Inference 属 **runtime**（分能力抽象）；Adapter 属 **对接层**（`src/llm_adapters/`）；  
-> 3. **v1 默认全本地**（Local vLLM）；Gemini 仅 **理论/可选** 通道；  
-> 4. **不同 embedding 模型向量严禁混用**；空间隔离 + **业务 filter 层**（team / intake / 上游 facet）；  
-> 5. **catalog 独立三表**（D04-v1.1）；  
-> 6. **transport 有界退避、推理并发闸、无 WAL 幂等重放**。
+> **★ 执行 SSOT 声明（Owner 强制）**：实现、验收、对账 **只依赖本 domain-truth 文件**。`qna-truth/S11.md` 仅保留 progressive 形成过程，**不得**被引用为第二执行真相；冲突时 **以本文为准**。禁止「细节在 QNA、Spec 只写原则」。
 
-> **跨文档审计声明**：S11 **不**拥有 Task/Execution/Process/Intake/Generation 状态机合法边；**不**拥有 ANN/serving（S09）；**不**拥有 prompt 正文 SSOT（D03/S14）。推理调用成功 **≠** 业务成功。冲突时：状态机以 S02–S07 为准；物理表以 D04 为准；typed 消息以 contracts 为准。
+> **Owner 约束摘要**：禁 Workers AI/Gateway/DO 必选；Inference≠Adapter；v1 全本地 vLLM 默认；Gemini 理论可选；embedding 空间隔离 + 业务 filter；catalog 三表；transport 退避；并发闸；无 WAL 幂等 vectorize。
 
-> **Legacy 边界（T-O-42 / T-O-181）**：不继承 `env.AI`、AI Gateway 必选、DO 队列/WAL 拓扑、`smind_vec_process`、SMCP callback=模型成功、silent prompt fallback。
+> **跨文档**：不拥有状态机/ANN/prompt 正文。调用成功≠业务成功。物理表 DDL 以 D04 为准；本文钉死 **写语义与执行步骤**。
+
+> **D05校准声明（T-O-207/208）**：S11 **不**拥有 promptA/B/C 产品语义（正文 D03/S14；绑定 S05/S06/S07）。transport 退避 **不计入** Process `retry_count`；叶失败上报与 max_retries **归 S03**。vectorize 编排与 ConstructToVectorizeGate **归 S07/S08**；本文仅 embed 门面与幂等写路径。
 
 ---
 
@@ -40,327 +34,412 @@
 
 ### 1.1 Domain 价值
 
-S11 回答：在单体 leaf-worker 内，如何用 **分能力的 Inference 运行时** + **可替换 Adapter** 完成 embed / rerank / structured_generate / text_generate，并与 Process、outbox、向量表、双层 filter 对账——而不把供应商 SDK、Workers 拓扑或模型字符串泄漏进业务状态机。
+S11 规定 leaf-worker 内 **如何安全、可审计、可背压地调用模型**，并把结果以 typed 形状交还 domain——使 S06/S07/S08/S10 不嵌入供应商 SDK，不把限流/并发/半成品向量写成业务成功。
 
-S11 解决十二个核心问题：
-
-1. Inference 与 Adapter 如何分层；  
-2. 业务如何只依赖 Inference 门面；  
-3. v1 能力闭集与 typed I/O；  
-4. 本地默认 vs Gemini 理论通道；  
-5. 本地模型钉选与 catalog 绑定；  
-6. 代码落点（runtime/inference vs llm_adapters）；  
-7. embedding 空间隔离（Layer A）；  
-8. 业务检索 filter（Layer B）；  
-9. transport 429/限流合同；  
-10. 本地并发闸与背压；  
-11. vectorize 两阶段耐久与禁丢意图；  
-12. 与 D04 三表 / S03 retry 的分账。
-
-### 1.2 在整体拓扑中的位置
+### 1.2 拓扑
 
 ```text
-S03/S06/S07/S08/S10 services
-  │ only runtime.inference (capability API)
+services (S05–S10)
+  │ 仅 import runtime.inference
   ▼
-src/runtime/inference/     [S11 门面：binding 解析、闸、transport policy、写 invocation]
+src/runtime/inference/     # 门面：binding、闸、transport policy、写 invocation
   │
   ▼
-src/llm_adapters/          [S11 对接：LocalVllm* 默认；RemoteGemini* 可选骨架]
-  │
-  ├── local vLLM (ai-dev)  embed / rerank / generate
-  └── (optional) Gemini / Ranking API
+src/llm_adapters/          # LocalVllm* 默认；RemoteGemini* 可选骨架
   │
   ▼
-D04: mkb_model_catalog / mkb_adapter_bindings / mkb_inference_invocations
-     mkb_vector_records (+ Layer A/B filters) via S08/S12 UoW
+D04: catalog / bindings / invocations / (S08) vector_records
 ```
 
 ### 1.3 Scope fence
 
-**S11 负责：**
+**负责**：Inference 门面与能力合同；Adapter 边界；transport/闸/错误码；catalog/binding/invocation **写入语义**；Layer A 执行规则；与 Layer B 的衔接义务；readiness 探针语义。
 
-- Inference 门面与分能力合同；  
-- Adapter 实现边界与默认路由；  
-- transport 退避 / 背压闸 / 错误分类；  
-- catalog/binding/invocation **写入语义**（DDL 属 D04）；  
-- 与 prompt hash 校验的衔接（不存正文）；  
-- readiness：本地默认 adapter/binding 可探测。
+**不负责**：Process 八态与 max-retries 账本（S03）；ANN/serving（S09）；vectorize 业务编排主责（S08 消费本文）；prompt 正文（D03/S14）；DDL 形状（D04）；密钥（S16）。
 
-**S11 不负责：**
+### 1.4 完成定义
 
-| 排除项 | 归属 |
-|---|---|
-| Task/Execution/Process 合法边、max-retries 账本 | S02/S03 |
-| 向量 ANN、serving publication | S09 |
-| vectorize 业务编排细节（outbox kind 消费） | S08（消费 S11） |
-| prompt 正文与发布产品 | D03/S14 |
-| 密钥与威胁模型 | S16 / `17` |
-| retention/告警数值 | S15 |
-| Workers AI / DO 拓扑 | **禁止** |
-
-### 1.4 Domain 完成定义
-
-1. §2 `T-O-180..201` 可映射到 ports、目录、表、测试；  
-2. services 不 import llm_adapters；  
-3. 429 不换 model；闸与 transport 错误码分账；  
-4. vectorize 无 WAL 表、幂等 upsert、不丢 outbox；  
-5. Layer A/B filter 可验收；  
-6. §6 HARD 矩阵可通过（实现期）。
+1. §2 Truth 与 §4 E 包可映射到代码与测试；  
+2. architecture：services 禁 import llm_adapters；  
+3. §6 HARD 矩阵全部有对应 E 包；  
+4. 实现 **无需** 打开 QNA 即可编码。
 
 ---
 
 ## 2. 真相层
 
-### 2.1 Owner Truth 登记（全局 T-O）
+### 2.1 全局 T-O（摘要台账 · 全文权威仍为已冻 T-O 原文）
 
-| Truth-ID | 摘要 |
+| ID | 一句话 |
 |---|---|
-| `T-O-180` | S11=推理运行时+适配；不拥有状态机/ANN/prompt 正文 |
-| `T-O-181` | 禁 Workers AI / Gateway / DO 内嵌推理为 v1 必选 |
-| `T-O-182` | Domain 只经 Inference；Adapter 独占 SDK |
-| `T-O-183` | LocalVllm + RemoteGemini **实现族可并存**（默认路由由 T-O-191 收窄） |
-| `T-O-184` | 能力：embed / rerank / structured_generate / text_generate |
-| `T-O-185` | 调用成功≠业务成功；向量存在≠serving |
-| `T-O-186` | Prompt=git+hash；adapter 无正文 SSOT |
-| `T-O-187` | D04 曾缺 catalog 表 → 由 T-O-193 关闭 |
-| `T-O-188` | 非 Workers 模型方向（本地 Qwen VL embed 等） |
-| `T-O-189` | **Inference（runtime）≠ Adapter（对接）** |
-| `T-O-190` | 分能力 Inference 抽象 |
-| `T-O-191` | **v1 全本地默认**；Gemini 理论/可选 |
-| `T-O-192` | 不同 embedding 严禁混用；adapter/model 空间 filter |
-| `T-O-193` | 三表：catalog / bindings / invocations |
-| `T-O-195` | 本地分能力模型钉选（embed/rerank/instruct） |
-| `T-O-196` | 落点：`runtime/inference` + `llm_adapters` |
-| `T-O-197` | Layer A 空间隔离 + 调用 fail-closed 基线 |
-| `T-O-198` | Layer B 业务 filter（team/intake/上游 facet） |
-| `T-O-199` | Transport 有界退避；与 S03 分账；禁换模型 |
-| `T-O-200` | Inference 有界并发闸 + BACKPRESSURE |
-| `T-O-201` | 无 WAL；outbox+幂等 upsert；禁丢意图 |
+| T-O-180..188 | 范围、禁 CF、Ports、双 adapter 族、能力、SSOT fence、prompt、D04 缺口关闭路径、非 Workers 模型方向 |
+| T-O-189..193 | Inference≠Adapter；分能力；**v1 全本地**；空间隔离；三表 |
+| T-O-195..198 | 本地模型钉选；路径；Layer A fail-closed；**Layer B 业务 filter** |
+| T-O-199..201 | transport 退避；并发闸；无 WAL 幂等重放禁丢意图 |
 
-> `T-O-194` 为 D04 表计数（55），不属 S11 产品语义但为本域物理前提。
+### 2.2 域内 S11-T（执行向）
 
-### 2.2 域内 Truth（S11-T）
-
-| ID | 冻结内容 | 来源 |
-|---|---|---|
-| `S11-T001` | Inference 门面是业务唯一入口；Adapter 禁止被 services 直接 import。 | T-O-189/190/196 |
-| `S11-T002` | 能力方法闭集：`embed`、`rerank`、`structured_generate`、`text_generate`。 | T-O-184/190 |
-| `S11-T003` | 统一结果附属：`adapter_kind`、`model_key`+`version`、`usage?`、`latency_ms`、`request_digest`。 | T-O-190 |
-| `S11-T004` | structured 出口必须 contracts 校验通过；非法 → 失败抛弃。 | D03 + T-O-190 |
-| `S11-T005` | v1 默认 binding：`adapter_kind=local_vllm` 覆盖全部能力；remote_gemini 可登记 disabled/theoretical。 | T-O-191 |
-| `S11-T006` | 默认模型逻辑：embed=`qwen3-vl-embedding@2b` 级；rerank=`qwen3-vl-reranker@2b` 级；generate=catalog 登记的 local instruct（digest 幂等）。 | T-O-195 |
-| `S11-T007` | 路径：`src/runtime/inference/**`、`src/llm_adapters/**`、`src/contracts/inference/**`。 | T-O-196 |
-| `S11-T008` | Layer A：`(namespace, model_key, version, dimension, adapter_kind)` 写读一致；不匹配 fail-closed。 | T-O-192/197 |
-| `S11-T009` | Layer B：team 强制；intake 坐标；上游 facet（如 industry-domain+map）可索引过滤；B 不替代 A。 | T-O-198 |
-| `S11-T010` | TransportRetryable 有界退避；不计入 Process retry_count；禁换模型。 | T-O-199 |
-| `S11-T011` | 并发闸满 → `INFERENCE_BACKPRESSURE`（retryable）；claimed≠获配额。 | T-O-200 |
-| `S11-T012` | vectorize：outbox + 幂等 records；可重 embed；禁删未终态意图；无 WAL 必选表。 | T-O-201 |
-| `S11-T013` | 每次最终调用写 `mkb_inference_invocations`；可选链 `generation_invocations`。 | T-O-193 |
-| `S11-T014` | Readiness：默认 local binding + catalog digest 可用；remote 未启用不得挡默认就绪（除非配置强制）。 | T-O-191 |
-| `S11-T015` | payload_extra / invocation 禁 secret、prompt 正文、向量全文。 | S01/D04 |
+| ID | 内容 |
+|---|---|
+| S11-T001 | 业务只调 `runtime.inference`；禁 services→llm_adapters |
+| S11-T002 | 能力闭集：embed / rerank / structured_generate / text_generate |
+| S11-T003 | 结果必含 adapter_kind、model_key、model_version、usage?、latency_ms、request_digest |
+| S11-T004 | structured 出口 = contracts 校验后的 typed 对象 |
+| S11-T005 | v1 默认 adapter_kind=`local_vllm` 覆盖全部能力 |
+| S11-T006 | 默认 model：embed `qwen3-vl-embedding@2b`；rerank `qwen3-vl-reranker@2b`；generate catalog instruct |
+| S11-T007 | 路径：runtime/inference、llm_adapters、contracts/inference |
+| S11-T008 | Layer A 键一致 fail-closed |
+| S11-T009 | Layer B：team + intake + facets |
+| S11-T010 | TransportRetryable 有界退避；不计 Process retry_count |
+| S11-T011 | 闸满 → INFERENCE_BACKPRESSURE |
+| S11-T012 | vectorize：outbox+幂等 upsert；可重 embed；禁丢意图 |
+| S11-T013 | 最终调用写 mkb_inference_invocations |
+| S11-T014 | readiness：local binding 可探测 |
+| S11-T015 | invocation 禁 secret/prompt 正文/向量全文 |
 
 ---
 
-## 3. Contract schema 与逻辑结构
+## 3. 总体方案陈述
 
-### 3.1 分层
-
-| 层 | 目录 | 允许 | 禁止 |
-|---|---|---|---|
-| Inference | `src/runtime/inference/` | 能力 API、binding 解析、闸、transport policy、经 Ports 写 invocation | 持有供应商 SDK、推进业务状态机 |
-| Adapter | `src/llm_adapters/` | HTTP/SDK、协议翻译、原始响应解析到 contracts | import services；写 Task/Process；存 prompt 正文 |
-| Contracts | `src/contracts/inference/` | Request/Result/Usage/Error 形状 | I/O |
-
-**依赖方向：**
-
-```text
-services → runtime.inference → llm_adapters
-services 🚫 llm_adapters
-llm_adapters 🚫 services / 🚫 业务表直写
-```
-
-### 3.2 能力合同（逻辑）
-
-```text
-InferenceFacade
-  embed(EmbedRequest) -> EmbedResult
-  rerank(RerankRequest) -> RerankResult
-  structured_generate(StructuredGenerateRequest) -> StructuredGenerateResult
-  text_generate(TextGenerateRequest) -> TextGenerateResult
-```
-
-**公共结果字段：** `adapter_kind`、`model_key`、`model_version`、`usage?`、`latency_ms`、`request_digest`、`invocation_uuid?`。
-
-**EmbedResult：** 向量矩阵或单向量 + `dimension`（必须与 binding/namespace 声明一致）。  
-**RerankResult：** 有序 ids + scores（或稳定并列规则）。  
-**StructuredGenerateResult：** **已校验** typed 对象（非原始 dict）。
-
-### 3.3 默认路由与模型
-
-| capability | v1 默认 adapter | v1 默认 model 逻辑键 | 证据主候选 |
-|---|---|---|---|
-| embed | `local_vllm` | `qwen3-vl-embedding@2b` | `Qwen/Qwen3-VL-Embedding-2B` |
-| rerank | `local_vllm` | `qwen3-vl-reranker@2b` | `Qwen/Qwen3-VL-Reranker-2B` |
-| structured_generate | `local_vllm` | `local-json-generator@v1` | catalog 登记 instruct 权重 digest |
-| text_generate | `local_vllm` | 可与 structured 同权重不同 profile | 同上 |
-
-Gemini / Ranking API：允许 **disabled** binding 与适配器骨架；**非** v1 默认 readiness 路径。
-
-### 3.4 物理表（D04 拥有 DDL；S11 拥有语义）
-
-| 表 | S11 义务 |
-|---|---|
-| `mkb_model_catalog` | bootstrap 默认模型行；同 version 同 digest 幂等 |
-| `mkb_adapter_bindings` | 默认 local 启用；remote 可 disabled |
-| `mkb_inference_invocations` | 每次最终调用 append；禁正文/secret |
-| `mkb_vector_records` | 由 S08 经 UoW 写入；S11 保证 embed 维度/model 与 binding 一致 |
-
-### 3.5 错误轴（最小）
-
-| 错误类 | 示例码 | retryability 建议 |
-|---|---|---|
-| Transport 耗尽 | `INFERENCE_TRANSPORT_EXHAUSTED` | retryable |
-| 背压 | `INFERENCE_BACKPRESSURE` | retryable |
-| 校验/schema | `INFERENCE_VALIDATION_*` | non_retryable |
-| 配置/binding | `INFERENCE_CONFIG_*` / `ADAPTER_DISABLED` | non_retryable |
-| 空间/隔离 | `INFERENCE_SPACE_VIOLATION` | non_retryable |
+1. **双层架构**：runtime Inference 门面 + adapters 对接。  
+2. **分能力合同**：四能力各自 typed I/O。  
+3. **v1 全本地**：Gemini 可选骨架。  
+4. **binding 驱动**：catalog + adapter_bindings 解析，禁硬编码散落。  
+5. **双层 filter**：A 空间 / B 业务。  
+6. **韧性三件套**：transport 退避、并发闸、outbox 幂等。  
+7. **审计**：invocation 账非成功定义。  
+8. **QNA 零依赖**：执行细节全部在本文 §4。
 
 ---
 
-## 4. 业务流转与运行合同
+## 4. 具体执行方案清单
 
-### 4.1 调用通式
+### 4.1 `S11-E01` — 目录、依赖与 architecture 围栏
 
-```text
-domain command (S06/S07/S08/S10)
-  → resolve binding (capability → adapter_kind + model)
-  → ConcurrencyGate.acquire
-  → transport loop (same binding):
-       adapter.call
-       on TransportRetryable → backoff ≤ N
-       on other → fail
-  → contracts validate (structured)
-  → record inference_invocation
-  → Gate.release
-  → return to domain (domain 再 CAS/outbox)
-```
+**真相**：S11-T001/T007；T-O-189/196
 
-### 4.2 Transport 退避（T-O-199）
+**执行台账**：
 
-- **可重试**：429、503、超时、连接失败、rate_limited/overloaded（语义类）。  
-- **默认**：max_attempts≈3，initial_delay_ms≈1000，factor≈2，max_delay 封顶可配。  
-- **不计入** Process `retry_count`。  
-- **禁止** 换 model/adapter 重试。
-
-### 4.3 并发闸（T-O-200）
-
-- 全局 + 可选 per-capability 上限。  
-- 满：`INFERENCE_BACKPRESSURE`，不调模型。  
-- 与 claim 正交；可用 outbox `available_at` 延后。  
-- 禁止删任务疏通。
-
-### 4.4 Vectorize 两阶段（T-O-201）
-
-```text
-outbox vectorize_*
-  → embed
-  → UoW: upsert mkb_vector_records + invocation
-  → outbox done
-fail before done → redeliver; re-embed allowed; upsert idempotent
-never drop undischarged intent
-```
-
-### 4.5 双层 Filter（T-O-197/198）
-
-```text
-Layer A space: namespace + model + version + dim + adapter_kind
-Layer B business: team_uuid ∧ intake coords ∧ facets (e.g. industry-domain)
-retrieve: A gate → ANN → B filters → lifecycle/serving (S04/S09)
-```
-
-### 4.6 显式 defer
-
-| 项 | 状态 |
+| 路径 | 职责 |
 |---|---|
-| 多 OS 进程分布式推理锁 | defer（单发布单元） |
-| 向量 WAL / buffered_vectors 表 | defer reopen |
-| Gemini 默认路径 / 强制 readiness | 非 v1 默认 |
-| instruct 权重具体 HF id | catalog 登记，非本 Spec 绑死字符串 |
-| 数值 SLA/告警阈值 | S15 |
+| `src/runtime/inference/` | Facade、policies、gate、binding resolver、invocation writer（经 S12 ports） |
+| `src/llm_adapters/local_vllm/` | vLLM HTTP/SDK |
+| `src/llm_adapters/remote_gemini/` | 可选骨架；默认 disabled |
+| `src/contracts/inference/` | Embed/Rerank/Structured/Text Request·Result·Usage·Error |
+
+| 规则 | 验收 |
+|---|---|
+| services 禁止 `import ...llm_adapters` | architecture test fail |
+| adapters 禁止 import services | 同上 |
+| adapters 禁止写 tasks/processes | 同上 |
+
+**小结**：依赖方向可机械测试。
+
+---
+
+### 4.2 `S11-E02` — 分能力 Inference Facade 与字段合同
+
+**真相**：S11-T002..T004；T-O-184/190
+
+**执行台账 — 方法闭集**：
+
+| 方法 | 最小请求字段 | 最小成功结果 |
+|---|---|---|
+| `embed` | team_uuid?、texts[] 或 multimodal parts、binding 覆盖?、trace/process refs? | vectors[][] 或 vector[]、dimension、公共附属字段 |
+| `rerank` | query、documents[]（id+text/ref）、top_n? | ordered {id, score}[]、公共附属 |
+| `structured_generate` | prompt_key+hash 或已渲染且校验的系统/用户消息、json_schema_ref、profile | **typed object**（已 contracts.validate） |
+| `text_generate` | 同上消息绑定、profile | text、公共附属 |
+
+**公共附属字段（强制）**：`adapter_kind`、`model_key`、`model_version`、`usage{input_tokens?,output_tokens?,total_tokens?}`、`latency_ms`、`request_digest`、`invocation_uuid`。
+
+**禁止返回**：path、API key、未校验 dict、绝对 URL 身份。
+
+**小结**：无万能 `invoke(model, blob)`。
+
+---
+
+### 4.3 `S11-E03` — Catalog / Binding bootstrap 与解析
+
+**真相**：S11-T005/T006/T013；T-O-193/195；D04 §3.8
+
+**执行台账 — bootstrap（empty-DB / migration）**：
+
+| 表 | 必须存在的默认行（逻辑） |
+|---|---|
+| `mkb_model_catalog` | embed 2b、rerank 2b、local-json-generator@v1；各含 definition_digest |
+| `mkb_adapter_bindings` | 每 capability 至少一条 `local_vllm` enabled priority 最高；remote 可 enabled=0 |
+
+**解析顺序**：
+
+1. 读 enabled bindings：capability → 按 priority；  
+2. team 覆盖（若有）优先于全局；  
+3. 校验 model_key/version ∈ catalog 且 status=active；  
+4. 锁定 binding 快照进 request_digest 材料。
+
+**冲突**：同 version 异 digest → readiness=false。
+
+**小结**：运行时不解析「最新 HF 字符串」。
+
+---
+
+### 4.4 `S11-E04` — 单次调用主路径（含闸与 transport）
+
+**真相**：T-O-199/200；S11-T010/T011
+
+**执行台账 — 逐步**：
+
+| 步 | 动作 | 失败 |
+|---|---|---|
+| 1 | 解析 binding | CONFIG / ADAPTER_DISABLED |
+| 2 | Layer A 预检（embed 时 dim/model） | SPACE_VIOLATION |
+| 3 | ConcurrencyGate.try_acquire | **立即** BACKPRESSURE（不进 transport 环） |
+| 4 | transport loop attempt=1..N | 见 E05 |
+| 5 | structured → contracts.validate | VALIDATION_*；release gate |
+| 6 | 写 `mkb_inference_invocations` | 仍须 best-effort 审计；业务失败不因 audit 改成功语义（若同 TX 业务写则按域 UoW） |
+| 7 | Gate.release（finally） | — |
+| 8 | 返回 domain | domain 负责 CAS/outbox |
+
+**小结**：闸在模型调用前；transport 在闸内。
+
+---
+
+### 4.5 `S11-E05` — Transport 错误分类与有界退避
+
+**真相**：T-O-199
+
+**执行台账 — 分类**：
+
+| 类 | 条件（逻辑） | 行为 |
+|---|---|---|
+| TransportRetryable | HTTP 429/503；超时；连接失败；rate_limited/overloaded/capacity 语义 | 退避后同 binding 重试 |
+| ValidationNonRetryable | 4xx 校验、contracts、空输入策略、预算超限 | 立即失败 |
+| ConfigNonRetryable | model 未注册、binding disabled、adapter 未启用 | 立即失败 |
+| SpaceViolation | 跨 model/adapter/dim | 立即失败 |
+| Backpressure | 闸满 | 见 E04；**不算** transport attempt |
+
+**退避默认（可配置，有界）**：
+
+| 参数 | 默认 |
+|---|---|
+| max_transport_attempts | 3 |
+| initial_delay_ms | 1000 |
+| backoff_factor | 2 |
+| max_delay_ms | 30000 |
+| jitter | 允许 |
+
+**耗尽**：`INFERENCE_TRANSPORT_EXHAUSTED`；建议 Process `retryability=retryable`。  
+**禁止**：换 model_key / adapter_kind / dimension 再试。  
+**S03 分账**：内环 attempt **不**增加 `processes.retry_count`。
+
+**小结**：对齐 vectorizer embedder 有界 429 退避，去掉 CF 错误码依赖。
+
+---
+
+### 4.6 `S11-E06` — 并发闸与 Backpressure
+
+**真相**：T-O-200
+
+**执行台账**：
+
+| 项 | 规范 |
+|---|---|
+| 位置 | `runtime/inference` 进程内 |
+| 粒度 | global_max_in_flight；可选 per-capability |
+| 超额 | `INFERENCE_BACKPRESSURE`，retryable，**零**模型调用 |
+| 与 claim | 正交：多 Process claimed 仍受闸约束 |
+| 缓解 | outbox `available_at` 延后；或短等（须有上限，不无限吃 lease） |
+| 禁止 | 删 outbox/任务疏通；用换模型减压 |
+| 可观测 | failed invocation 或 diagnostic 记 BACKPRESSURE |
+
+**小结**：替代 DO 串行/mutex 的容量语义。
+
+---
+
+### 4.7 `S11-E07` — Layer A 空间隔离执行
+
+**真相**：T-O-192/197；S11-T008
+
+**执行台账 — embed 写路径预检/后检**：
+
+| 检查 | 失败码 |
+|---|---|
+| model ∈ catalog 且 modality 含 embed | CONFIG |
+| binding.model 与请求一致 | SPACE_VIOLATION |
+| 返回 dimension == namespace.dimension == binding 声明 | SPACE_VIOLATION |
+| adapter_kind 写入/校验与 binding 一致 | SPACE_VIOLATION |
+
+**检索/查询 embed**：query 所用 model/version/dim/adapter 必须匹配目标 namespace，否则 typed error 或空结果（实现选一，**禁止** 静默跨空间 ANN）。
+
+**小结**：内部流转围栏，非业务 facet。
+
+---
+
+### 4.8 `S11-E08` — Layer B 业务 filter 义务
+
+**真相**：T-O-198
+
+**执行台账 — 最低业务 filter 集合**（S11 保证 embed 元数据可携带；S08/S10 写入/查询）：
+
+| 维度 | 义务 |
+|---|---|
+| team_uuid | 始终强制 |
+| intake source/item/revision | 按查询面可过滤；写向量时坐标完整 |
+| 上游 facet（如 industry-domain + map） | 有 map 则必须物化为可索引 filter 值；检索可按域裁剪 |
+| 扩展 facet | versioned 注册后晋升列或规范化结构；禁仅靠不可查 blob 当唯一真相 |
+
+**分账**：S11 不拥有 facet 产品定义；**拒绝** 用换 embedding 模型模拟业务分区。
+
+**小结**：业务 filter ≠ 空间隔离。
+
+---
+
+### 4.9 `S11-E09` — Vectorize 耐久与幂等（无 WAL）
+
+**真相**：T-O-201；S11-T012
+
+**执行台账 — 成功路径**：
+
+```text
+1. claim outbox kind∈{vectorize_structure,vectorize_construct,...}
+2. load embed input via generation/object (禁止 content_full 常驻向量表)
+3. Inference.embed (E04–E07)
+4. UnitOfWork:
+     upsert mkb_vector_records (幂等键见 D04)
+     insert mkb_inference_invocations succeeded
+     optional domain_event
+5. mark outbox done
+```
+
+**失败矩阵**：
+
+| 失败点 | outbox | 重放 |
+|---|---|---|
+| embed transport 耗尽 | 未 done | 再试；可 re-embed |
+| upsert 失败 | 未 done | 再 embed+upsert 幂等 |
+| done 标记失败 | 可能已有向量 | upsert 幂等 + done |
+| 崩溃 | pending/in_flight | S12 投递恢复 |
+
+**禁止**：`buffered_vectors` 必选表；静默删 outbox/Process 意图；embed 成功=Process 成功。
+
+**小结**：正确性优先；可重 embed。
+
+---
+
+### 4.10 `S11-E10` — 错误码、配置与 Readiness
+
+**真相**：S11-T014；E05–E06
+
+**错误码表（稳定机读）**：
+
+| code | 条件 | retryability |
+|---|---|---|
+| `INFERENCE_TRANSPORT_EXHAUSTED` | transport 退避耗尽 | retryable |
+| `INFERENCE_BACKPRESSURE` | 闸满 | retryable |
+| `INFERENCE_VALIDATION_*` | 输入/contracts | non_retryable |
+| `INFERENCE_CONFIG_*` | catalog/binding | non_retryable |
+| `ADAPTER_DISABLED` | remote 未启用等 | non_retryable |
+| `INFERENCE_SPACE_VIOLATION` | Layer A 不一致 | non_retryable |
+| `INFERENCE_INTERNAL_*` | 未分类内部错 | indeterminate/retryable（实现钉默认） |
+
+**配置键（逻辑，落 data/config 或 env，禁秘密进 git）**：
+
+| 键 | 含义 |
+|---|---|
+| `inference.gate.global_max_in_flight` | 全局并发 |
+| `inference.gate.{capability}_max_in_flight` | 分能力 |
+| `inference.transport.max_attempts` 等 | 退避 |
+| `inference.vllm.base_url` | 本地端点 |
+| `inference.default_adapter` | 默认 `local_vllm` |
+
+**Readiness=false 当**：默认 local binding 缺失；catalog digest 漂移；vLLM 探针失败（若配置要求）。  
+Remote 未启用 **不**单独导致默认就绪失败。
+
+**小结**：错误与配置可编码、可测。
+
+---
+
+### 4.11 `S11-E11` — 与 S03/S06/S07/S08 交接
+
+| 上游/下游 | 合同 |
+|---|---|
+| S03 | 只消费 Outcome retryability；内环 attempt 不计 retry_count；lease 须覆盖或 heartbeat |
+| S06/S07 | 只调 structured/text_generate；成功后自管 generation CAS |
+| S08 | 只调 embed；负责 outbox vectorize 与 records 写；遵守 E09 |
+| S10 | 调 embed(query)+rerank；强制 Layer A/B |
+| S14 | 产品 registry；v1 code-owned bootstrap 即可 |
+| S15 | 指标/retention 数值 |
 
 ---
 
 ## 5. 事实反例、风险与实施切片
 
-### 5.1 Legacy 反例 → 禁令
+### 5.1 反例
 
-| Legacy | MKB |
+| 反例 | 订正 |
 |---|---|
-| `env.AI.run` / Gateway 必选 | Local vLLM 默认；禁 CF 必选 |
-| DO 队列 + 删坏任务 | outbox + S03；禁丢意图 |
-| WAL 必选 | v1 幂等 upsert + 可重 embed |
-| content_full 在 vec 表 | 禁；generation/object |
-| 429 换模型 | 禁 |
-| 业务直调 gemini/AI | 只经 runtime.inference |
+| services 直调 vLLM | 只经 runtime.inference |
+| 429 换 embedding 模型 | 禁止 |
+| DO 删坏任务 | 禁止；S03/outbox |
+| content_full 进向量表 | 禁止 |
+| QNA 当实现说明书 | 禁止；以本文为准 |
 
 ### 5.2 风险
 
 | 风险 | 缓解 |
 |---|---|
-| vLLM 过载 | 闸 + backpressure + outbox 延迟 |
-| 重复 embed 成本 | 接受 v1；未来 staging reopen |
-| 混空间 | Layer A fail-closed + 禁 silent fallback |
-| 业务漏 filter | Layer B 强制 team；facet 可索引 |
+| 重复 embed 成本 | E09 接受 v1；未来 staging reopen |
+| 闸过小饿死 | 配置上调；观测 BACKPRESSURE |
+| lease 与长退避 | max_delay 封顶 + heartbeat |
 
 ### 5.3 实施切片
 
-1. contracts/inference + runtime/inference 门面 + gate/policy；  
-2. LocalVllmAdapter（embed/rerank/generate）；  
-3. catalog/binding bootstrap + invocation 写入；  
-4. transport 退避 + 背压测试；  
-5. vectorize handler 幂等 upsert；  
-6. Gemini adapter 骨架（disabled）；  
-7. architecture tests（import 图、禁换模型）。
+1. contracts + facade + gate + transport  
+2. LocalVllm embed/rerank/generate  
+3. bootstrap catalog/bindings  
+4. invocation 写入  
+5. vectorize handler 幂等  
+6. architecture tests E01  
+7. Gemini 骨架 disabled  
 
 ---
 
 ## 6. 强制验收矩阵
 
-| ID | HARD 场景 | 期望 |
+| ID | 场景 | 期望 |
 |---|---|---|
-| `S11-A01` | services import llm_adapters | architecture 失败 |
-| `S11-A02` | 未 parse dict 当 structured 成功 | 拒绝 |
-| `S11-A03` | 默认路径调用 remote_gemini（未启用） | ADAPTER_DISABLED / 不默认成功 |
-| `S11-A04` | embed 使用错误 dimension vs namespace | SPACE_VIOLATION |
-| `S11-A05` | 429 后换 model 重试 | 禁止；同 binding 退避或耗尽 |
-| `S11-A06` | transport 耗尽 | 上抛；Process retry_count 未因内环 +N 误增 |
-| `S11-A07` | 并发超闸 | BACKPRESSURE；无模型调用 |
-| `S11-A08` | claim 多 Process 仍受闸约束 | 不并行打爆超过上限 |
-| `S11-A09` | upsert 失败 outbox 仍 pending | 可重放；可重 embed |
-| `S11-A10` | 幂等重放 | 不双写 conflicting vectors |
-| `S11-A11` | 删 outbox 疏通队列 | 禁止 |
-| `S11-A12` | 仅有向量行 | 不自动 Task success / serving |
-| `S11-A13` | 跨 team 检索 | 拒绝 |
-| `S11-A14` | Layer B 缺 team | 拒绝 |
-| `S11-A15` | industry-domain facet 可过滤（当已登记 map） | 仅返回匹配域 |
-| `S11-A16` | prompt 正文进 DB invocation | 禁止 |
-| `S11-A17` | Workers AI 为 v1 必选路径 | 不存在 |
-| `S11-A18` | catalog 异 digest 同 version | bootstrap/readiness fail |
+| S11-A01 | services→llm_adapters | 架构失败 |
+| S11-A02 | structured 未校验成功 | 拒绝 |
+| S11-A03 | 默认路径强制 remote | 失败/禁用 |
+| S11-A04 | dim 与 namespace 不符 | SPACE_VIOLATION |
+| S11-A05 | 429 后换 model | 禁止 |
+| S11-A06 | transport 耗尽 | EXHAUSTED；retry_count 未因内环虚增 |
+| S11-A07 | 闸满 | BACKPRESSURE；无模型调用 |
+| S11-A08 | 多 claimed Process | 仍受闸 |
+| S11-A09 | upsert 失败 | outbox 未 done |
+| S11-A10 | 幂等重放 | 无双冲突行 |
+| S11-A11 | 删 outbox 疏通 | 禁止 |
+| S11-A12 | 仅有向量 | 非 Task success |
+| S11-A13 | 跨 team | 拒绝 |
+| S11-A14 | 无 team filter | 拒绝 |
+| S11-A15 | industry-domain 过滤 | 仅匹配 |
+| S11-A16 | prompt 进 invocation | 禁止 |
+| S11-A17 | Workers 必选 | 不存在 |
+| S11-A18 | catalog digest 漂移 | readiness false |
+| S11-A19 | 无 QNA 依赖实现 | 审查/文档测试：Spec 自包含 E 包 |
 
 ---
 
 ## 7. Reference-anchor 台账
 
-| Anchor | 用途 | 裁决 |
-|---|---|---|
-| structurizer/constructor `cloudflare_ai` | structured gen + usage | 升级 Port；删 Gateway 必选 |
-| vectorizer `embedder.ts` | 429 退避 | 升级 T-O-199 |
-| vectorizer DO mutex/429 | 资源忙 | 升级闸 T-O-200；删 DO |
-| vectorizer WAL | 两阶段 | v1 用幂等+outbox；WAL defer |
-| contexter embed/rerank 拆分 | 能力分面 | 保留 |
-| Qwen3-VL-Embedding/Reranker-2B | 本地默认候选 | T-O-195 |
-| Gemini Embedding / Ranking API | 理论通道参考 | 非默认 |
+| 锚 | 裁决 |
+|---|---|
+| vectorizer embedder 429 退避 | 升级 E05；删 CF 码依赖 |
+| DO mutex/删任务 | 升级 E06；删丢任务 |
+| WAL | E09 不建表 |
+| structurizer gemini JSON | 升级 structured_generate |
+| Qwen3-VL-Embedding/Reranker-2B | 默认候选 E03 |
+
+**QNA**：`qna-truth/S11.md` = 形成过程证据；**非**执行 SSOT。
 
 ---
 
@@ -368,37 +447,30 @@ retrieve: A gate → ANN → B filters → lifecycle/serving (S04/S09)
 
 ### 8.1 Verdict
 
-**`ACCEPTED / GO`**：S11 推理运行时与适配宪法（分层、全本地默认、能力面、双层 filter、catalog 三表、transport/闸/重放）已闭合，可作为实现与 S08/S10 formal 的权威输入。
+**`ACCEPTED / GO / execution-complete for v1.1`**：S11 作为 **唯一执行真相** 已含 E01–E11 台账；实现不得外挂 QNA。
 
 ### 8.2 强制结论
 
-1. Inference∈runtime；Adapter∈对接；services 只调门面；  
-2. v1 默认 Local vLLM 全能力；Gemini 理论可选；  
-3. 禁 CF 必选路径与 DO/vec_process/WAL 回潮；  
-4. Layer A 空间隔离 + Layer B 业务 filter；  
-5. transport 有界退避；并发闸；outbox+幂等 records；  
-6. 调用/向量存在 ≠ 业务成功。
+1. domain-truth only；  
+2. Inference≠Adapter；全本地默认；  
+3. 双层 filter；三表语义；  
+4. transport+闸+幂等 vectorize；  
+5. 调用≠业务成功。
 
 ### 8.3 下游
 
-| 下游 | 承接 |
-|---|---|
-| S08 | vectorize handler 调 embed；幂等写 records |
-| S09 | ANN/serving；消费 Layer A/B |
-| S10 | 检索编排；rerank + 业务 filter |
-| S03 | 消费 retryability；lease 与长退避共存 |
-| S14 | registry 产品面（v1 code-owned 即可） |
-| S15 | 指标/retention |
-| D04 | 已含三表；无新强制表 |
+S08/S09/S10/S03/S14/S15 必须消费本文 E 包，不得另写并行推理运行时真相。
 
 ### 8.4 一句话
 
-S11 用 runtime 分能力推理门面 + 本地 vLLM 默认适配，在可审计的 transport/闸/幂等重放下服务 LS-RAG，而不把供应商或 Workers 拓扑写进业务真相。
+S11-v1.1 把推理从「原则」升格为 **可编码执行台账**，并独占执行真相层。
 
 ---
 
 ## 9. 修订历史
 
-| 版本 | 日期 | 作者 | 状态 | 主要变更 |
-|---|---|---|---|---|
-| `S11-v1.0` | `2026-08-12` | `MKB owner + Codex` | `accepted` | 吸收 Q1–Q9 / `T-O-180..201`；冻结分层、全本地、模型钉选、落点、双层 filter、三表语义、transport/闸/vectorize 耐久与验收矩阵。 |
+| 版本 | 日期 | 状态 | 变更 |
+|---|---|---|---|
+| S11-v1.0 | 2026-08-12 | accepted | 初版 formal（偏宪法） |
+| S11-v1.1 | 2026-08-12 | accepted | **执行 SSOT 强制**；QNA 细节并入 E01–E11；禁止执行依赖 QNA |
+| S11-v1.1-cal-d05 | 2026-08-12 | accepted / D05-calibrated | 接收 D05-v1.0：不拥有 promptA/B/C；max-retries 外引 S03 |
