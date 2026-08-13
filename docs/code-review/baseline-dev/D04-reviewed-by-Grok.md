@@ -405,6 +405,34 @@
 
 ---
 
+## 6. 实现者回应（2026-08-13 · Grok）
+
+本轮按审查 R1–R12 与 spec-index `PY-13`/`PY-20`/`PY-21`/`PY-22` 实装，不改写 §0–§5。
+
+| Finding | 处置 |
+|---------|------|
+| R1 | 锁定官方 `libsql>=0.1.11`；新增 `src/persistence/turso/` + `build_persistence()`；组合根按 `Settings.persistence_backend` 选择。无 Turso Cloud token，使用 local/embedded `libsql.connect(path)`。 |
+| R2 | Settings 读取 `concurrent_writes_required` / `native_vector_required`（宪法默认 true）。真实探测 `BEGIN CONCURRENT` 与 `vector32`/`libsql_vector_idx`。stock sqlite + 宪法默认 → `/ready=not_ready`。同名 B-tree 不再冒充 ANN。 |
+| R3 | 单条 accept 同 UoW 写 `mkb_intake_change_sets` + facts，并回填 `mkb_tasks.change_set_uuid`。 |
+| R4 | accept / generation artifact+pointer+invocation / vector upsert 写覆盖型 domain_events；`_record_event_tx` 并入 `DomainEventWriter` allowlist+redaction。事件插入失败回滚业务行。 |
+| R5 | 不把 resume 折进 `decide_gate`（避免 reopen D02）。`schema-reconciliation.md` 第 13 条把 S01 两步写成可执行 TX-08。 |
+| R6 | 保留 portable BLOB；libsql 适配器对 `vector32`/`libsql_vector_idx` 做真实探测。本地 libsql：`native_vector_probe=true`，`BEGIN CONCURRENT` 仍 false。 |
+| R7 | 不把工作区遗留 `.db` 当 SSOT；空库 migrate 现应用 `001`–`006`。 |
+| R8 | 本轮不抽全套 typed repo（非 blocker）。Ports 增加 `migrate`/`close`；驱动仍只在 persistence。 |
+| R9 | `test_single_intake_publishes_grounded_retrieval_context` 关闭后 reopen 断言 ChangeSet、覆盖事件、`mkb_stored_objects`、`length(embedding)=dimension*4`。 |
+| R10 | migration `006` 增加 `scatter_*` 列；fan-in/投影读 typed 列，不再从 `payload_extra` 取身份。 |
+| R11 | 继续以 reconciliation 为可执行拼写，不另起表账。 |
+| R12 | Task 投影 UPDATE WHERE 含期望 `status` + `row_revision`。 |
+
+**验证摘录**
+
+- `import libsql` 成功（`libsql-import.txt`）。
+- 空库 migrate：`001`…`006`（含 `004`/`005`）。
+- constitution sqlite `/ready=not_ready`；libsql 本地 `native_vector_probe=true`、`concurrent_writes_probe=false`（无 Cloud CW）。
+- mock e2e 两次 succeeded；reopen：ChangeSet=1，facts=1，`task.created` + `intake.*` + `generation.*` + `vector.upserted`，stored_objects=29，vectors 6×`length=256`（dim=64）。
+
+---
+
 ## 附录 A — 三问对照（给实现者的短表）
 
 | 用户问题 | 结论 | 一句话 |
