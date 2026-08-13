@@ -2,21 +2,36 @@
 
 from __future__ import annotations
 
+import hashlib
 import inspect
 
 import pytest
 
+import intake.web as web_channel
 from intake import dispatch_clean
+from intake.types import CleanPrompt
 from src.contracts.common.ids import uuid7
 from src.contracts.runtime.models import ProcessCommand
 from src.runtime.intake.clean_preflight import IntakeCleanPreflightMixin
 from src.runtime.intake.pipeline import IntakePipeline
+from src.workflows.builtin_scatter import BUILTIN_REGISTERED_API_SCATTER_ROOT_WORKFLOW
 from src.workflows.lsrag_definition import (
+    BUILTIN_BROWSER_PRINT_PDF_INTAKE_WORKFLOW,
     BUILTIN_DOC_LLM_INTAKE_WORKFLOW,
     BUILTIN_HTTP_BROWSER_INTAKE_WORKFLOW,
     BUILTIN_HTTP_PDF_INTAKE_WORKFLOW,
     BUILTIN_HTTP_STATIC_INTAKE_WORKFLOW,
+    BUILTIN_HTTP_WEB_LLM_INTAKE_WORKFLOW,
     BUILTIN_LOCAL_PDF_INTAKE_WORKFLOW,
+    BUILTIN_LOCAL_PDF_LLM_INTAKE_WORKFLOW,
+)
+
+_PROMPT_TEXT = "verified prompt"
+_PROMPT = CleanPrompt(
+    key="promptA.default",
+    version="v1",
+    text=_PROMPT_TEXT,
+    content_sha256=hashlib.sha256(_PROMPT_TEXT.encode()).hexdigest(),
 )
 
 
@@ -88,7 +103,7 @@ async def test_runtime_ocr_uses_injected_intake_llm() -> None:
             del kwargs
             return "recognized letters"
 
-    pipeline = IntakePipeline(None, None, None, clean_llm=_LLM())  # type: ignore[arg-type]
+    pipeline = IntakePipeline(None, None, None, clean_llm=_LLM(), clean_prompt=_PROMPT)  # type: ignore[arg-type]
     command = _command("clean.ocr.local")
     state = {
         "decoded_text": "",
@@ -117,20 +132,21 @@ class _RecordingLLM:
 async def test_http_pdf_uses_pdf_channel_and_injected_llm() -> None:
     llm = _RecordingLLM("HTTP PDF understood via LLM")
     result = await dispatch_clean(
-        "clean.extract.deterministic",
+        "clean.extract.pdf_llm",
         text="decoded layer ignored when llm+blob present",
         blob=b"%PDF-1.4 http-acquired",
         media_type="application/pdf",
         source_kind="http_resource",
         llm=llm,
+        prompt=_PROMPT,
     )
     assert result.evidence["channel"] == "pdf"
     assert result.text == "HTTP PDF understood via LLM"
     assert llm.calls and llm.calls[0].get("blob") == b"%PDF-1.4 http-acquired"
 
-    pipeline = IntakePipeline(None, None, None, clean_llm=llm)  # type: ignore[arg-type]
+    pipeline = IntakePipeline(None, None, None, clean_llm=llm, clean_prompt=_PROMPT)  # type: ignore[arg-type]
     material, _extra, _callback = await pipeline._clean(
-        _command("clean.extract.deterministic"),
+        _command("clean.extract.pdf_llm"),
         {
             "decoded_text": "layer",
             "decoded_digest": "1" * 64,
@@ -142,6 +158,43 @@ async def test_http_pdf_uses_pdf_channel_and_injected_llm() -> None:
     )
     assert material.envelope["state"]["clean_evidence"]["channel"] == "pdf"
     assert material.envelope["state"]["clean_text"] == "HTTP PDF understood via LLM"
+
+
+@pytest.mark.asyncio
+async def test_http_pdf_text_layer_never_enters_web_sanitizer(monkeypatch: pytest.MonkeyPatch) -> None:
+    def forbidden_web_clean(*_args: object, **_kwargs: object) -> object:
+        raise AssertionError("PDF bytes entered the web sanitizer")
+
+    monkeypatch.setattr(web_channel, "clean_html_representation", forbidden_web_clean)
+    result = await dispatch_clean(
+        "clean.extract.pdf_text",
+        text="PDF text layer",
+        media_type="application/pdf",
+        source_kind="http_resource",
+    )
+    assert result.text == "PDF text layer"
+    assert result.evidence["channel"] == "pdf"
+
+
+@pytest.mark.asyncio
+async def test_runtime_pdf_ocr_uses_pdf_strategy() -> None:
+    llm = _RecordingLLM("scanned PDF text")
+    pipeline = IntakePipeline(None, None, None, clean_llm=llm, clean_prompt=_PROMPT)  # type: ignore[arg-type]
+    material, _extra, _callback = await pipeline._clean(
+        _command("clean.ocr.local"),
+        {
+            "decoded_text": "",
+            "decoded_digest": "9" * 64,
+            "media_type": "application/pdf",
+            "source_kind": "local_object",
+            "raw_binary_transport": True,
+            "raw_text": b"%PDF-1.4 scanned".decode("latin-1"),
+        },
+    )
+    evidence = material.envelope["state"]["clean_evidence"]
+    assert evidence["channel"] == "pdf"
+    assert evidence["strategy"] == "pdf.ocr"
+    assert material.envelope["state"]["clean_text"] == "scanned PDF text"
 
 
 @pytest.mark.asyncio
@@ -192,7 +245,7 @@ async def test_live_process_keys_reach_dispatch_clean(
     expect_text: str,
 ) -> None:
     llm = _RecordingLLM("doc-or-pdf-llm")
-    pipeline = IntakePipeline(None, None, None, clean_llm=llm)  # type: ignore[arg-type]
+    pipeline = IntakePipeline(None, None, None, clean_llm=llm, clean_prompt=_PROMPT)  # type: ignore[arg-type]
     material, extra, callback = await pipeline._clean(_command(process_key), state)
     await callback(None, {})  # type: ignore[arg-type]
     assert extra == {}
@@ -205,6 +258,10 @@ async def test_live_process_keys_reach_dispatch_clean(
 def test_live_source_profiles_declare_channel_clean_keys() -> None:
     assert "clean.extract.web" in BUILTIN_HTTP_STATIC_INTAKE_WORKFLOW.required_process_keys
     assert "clean.extract.web" in BUILTIN_HTTP_BROWSER_INTAKE_WORKFLOW.required_process_keys
-    assert "clean.extract.pdf_llm" in BUILTIN_HTTP_PDF_INTAKE_WORKFLOW.required_process_keys
-    assert "clean.extract.pdf_llm" in BUILTIN_LOCAL_PDF_INTAKE_WORKFLOW.required_process_keys
+    assert "clean.extract.pdf_text" in BUILTIN_HTTP_PDF_INTAKE_WORKFLOW.required_process_keys
+    assert "clean.extract.pdf_text" in BUILTIN_LOCAL_PDF_INTAKE_WORKFLOW.required_process_keys
     assert "clean.extract.doc_llm" in BUILTIN_DOC_LLM_INTAKE_WORKFLOW.required_process_keys
+    assert "clean.extract.web_llm" in BUILTIN_HTTP_WEB_LLM_INTAKE_WORKFLOW.required_process_keys
+    assert "clean.extract.pdf_llm" in BUILTIN_LOCAL_PDF_LLM_INTAKE_WORKFLOW.required_process_keys
+    assert "clean.extract.pdf_llm" in BUILTIN_BROWSER_PRINT_PDF_INTAKE_WORKFLOW.required_process_keys
+    assert "clean.map.registered_api" in BUILTIN_REGISTERED_API_SCATTER_ROOT_WORKFLOW.required_process_keys

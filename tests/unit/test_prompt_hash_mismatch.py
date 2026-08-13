@@ -121,6 +121,7 @@ async def test_live_generation_config_fails_on_prompt_hash_mismatch(tmp_path: Pa
             OutcomeArtifactCommitter(storage),
             live_inference=True,
             prompt_root=prompt_root,
+            clean_llm=object(),
         )
         command = ProcessCommand(
             schema_version="mkb.process-command.v1",
@@ -149,6 +150,10 @@ async def test_live_generation_config_fails_on_prompt_hash_mismatch(tmp_path: Pa
                 schema_version="v1",
             )
         assert exc_info.value.code == "PROMPT_HASH_MISMATCH"
+        (prompt_root / "prompt-a-clean-v1.md").write_text("tampered clean prompt bytes\n", encoding="utf-8")
+        with pytest.raises(MkbError) as clean_prompt_error:
+            await pipeline._clean_prompt_material(command, "web.llm_rewrite")
+        assert clean_prompt_error.value.code == "PROMPT_HASH_MISMATCH"
         # The object handle is only used for identity; keep the import used.
         assert isinstance(ObjectHandle(value=snapshot.handle.value).value, str)
     finally:
