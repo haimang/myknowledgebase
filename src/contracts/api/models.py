@@ -123,47 +123,46 @@ class HttpSourceDescriptor(PayloadExtraModel):
     require_human_review: bool = False
 
 
-class RegisteredApiRecord(StrictModel):
-    """One member of a registered-API collection observation.
-
-    A collection root identifies the connector/source namespace, while every
-    member must carry its own stable external key.  Keeping this as a strict
-    public model prevents the previous untyped ``dict`` payload from quietly
-    collapsing a collection into one synthetic document or inventing a member
-    identity at runtime.
-    """
-
-    external_key: Annotated[str, Field(min_length=1, max_length=1024)]
-    content: Annotated[str, Field(min_length=1, max_length=8 * 1024 * 1024)]
-    media_type: Annotated[str, Field(min_length=1, max_length=255)] = "text/plain"
-    title: Annotated[str | None, Field(max_length=1024)] = None
-    require_human_review: bool = False
-
-    @field_validator("external_key")
-    @classmethod
-    def validate_external_key(cls, value: str) -> str:
-        if not value.strip():
-            raise ValueError("external_key must not be blank")
-        return value
-
-
 class RegisteredApiSourceDescriptor(PayloadExtraModel):
     source_kind: Literal["registered_api"]
     external_key: Annotated[str, Field(min_length=1, max_length=1024)]
     connector_key: Annotated[str, Field(pattern=r"^[a-z][a-z0-9_.-]{0,127}$")]
-    records: list[RegisteredApiRecord] = Field(default_factory=list, max_length=10_000)
+    provider: Literal["chinatax", "domain", "realestate"]
+    operation: Literal["get_articles", "get_agency_listings", "get_listings"]
+    definition_version: Literal["v1"]
+    representation: Literal["raw"] = "raw"
+    records: list[dict[str, Any]] = Field(max_length=10_000)
+    exhaustion_proof: Literal["caller_frozen_records.v1"] | None = None
     pagination_key: Annotated[str | None, Field(max_length=1024)] = None
     require_human_review: bool = False
 
     @model_validator(mode="after")
     def validate_member_keys(self) -> RegisteredApiSourceDescriptor:
-        # Match the durable per-source Item namespace.  The acquisition
-        # boundary case-folds trimmed member keys, so accepting only an exact
-        # Python duplicate here would defer a public-contract conflict into a
-        # worker retry.
-        keys = [record.external_key.strip().casefold() for record in self.records]
+        from src.contracts.intake.providers import ChinaTaxRawMember, DomainRawMember, RealestateRawMember
+
+        binding = (self.provider, self.operation, self.definition_version)
+        definitions = {
+            ("chinatax", "get_articles", "v1"): (ChinaTaxRawMember, "id"),
+            ("domain", "get_agency_listings", "v1"): (DomainRawMember, "id"),
+            ("realestate", "get_listings", "v1"): (RealestateRawMember, "listingId"),
+        }
+        selected = definitions.get(binding)
+        if selected is None:
+            raise ValueError("registered_api provider/operation/version binding is unsupported")
+        model, identity_field = selected
+        validated: list[dict[str, Any]] = []
+        keys: list[str] = []
+        for raw in self.records:
+            try:
+                member = model.model_validate(raw)
+            except ValidationError as exc:
+                raise ValueError("registered_api record failed its versioned raw member schema") from exc
+            dumped = member.model_dump(mode="json", by_alias=True)
+            validated.append(dumped)
+            keys.append(str(dumped[identity_field]).strip().casefold())
+        self.records = validated
         if len(keys) != len(set(keys)):
-            raise ValueError("registered_api records must have unique external_key values")
+            raise ValueError("registered_api records must have unique provider external keys")
         return self
 
 
