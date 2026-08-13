@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+import json
 import sqlite3
 import time
 from pathlib import Path
@@ -13,8 +15,10 @@ from api.app import create_app
 from src.contracts.common.ids import uuid7
 from src.contracts.common.time import utc_now
 from src.contracts.runtime.models import ProcessCommand, ProcessOutcome
+from src.contracts.storage.models import ObjectHandle
 from src.runtime.config import Settings
 from src.runtime.intake_pipeline import IntakePipeline
+from src.storage.local_store import LocalObjectStore
 
 _TERMINAL = {"succeeded", "failed", "cancelled"}
 
@@ -37,6 +41,8 @@ def _task_body(
     task_uuid: str,
     trace_uuid: str,
     records: list[dict[str, Any]],
+    provider: str = "chinatax",
+    operation: str = "get_articles",
     require_human_review: bool = False,
 ) -> dict[str, Any]:
     return {
@@ -50,7 +56,12 @@ def _task_body(
                 "source_kind": "registered_api",
                 "external_key": f"collection-{task_uuid}",
                 "connector_key": "scatter-e2e",
+                "provider": provider,
+                "operation": operation,
+                "definition_version": "v1",
+                "representation": "raw",
                 "records": records,
+                "exhaustion_proof": "caller_frozen_records.v1",
                 "require_human_review": require_human_review,
             }
         },
@@ -82,6 +93,8 @@ def _submit(
     team_uuid: str,
     headers: dict[str, str],
     records: list[dict[str, Any]],
+    provider: str = "chinatax",
+    operation: str = "get_articles",
     require_human_review: bool = False,
 ) -> str:
     task_uuid, trace_uuid = uuid7(), uuid7()
@@ -93,6 +106,8 @@ def _submit(
             task_uuid=task_uuid,
             trace_uuid=trace_uuid,
             records=records,
+            provider=provider,
+            operation=operation,
             require_human_review=require_human_review,
         ),
     )
@@ -169,16 +184,112 @@ def _items(client: TestClient, *, team_uuid: str, task_uuid: str, headers: dict[
 def _records(prefix: str) -> list[dict[str, Any]]:
     return [
         {
-            "external_key": f"{prefix}-alpha",
+            "id": f"{prefix}-alpha",
+            "label": "公告",
+            "column": "政策法规",
             "content": f"{prefix} alpha member demonstrates independent scatter publication.",
             "title": "Alpha",
+            "xxgk_aging": "全文有效",
         },
         {
-            "external_key": f"{prefix}-beta",
+            "id": f"{prefix}-beta",
+            "label": "通知",
+            "column": "政策法规",
             "content": f"{prefix} beta member demonstrates exact fan in proof validation.",
             "title": "Beta",
+            "xxgk_aging": "全文有效",
         },
     ]
+
+
+def test_registered_api_three_raw_provider_operations_map_seal_and_persist_semantics(tmp_path: Path) -> None:
+    headers = {"Authorization": "Bearer scatter-token"}
+    team_uuid = uuid7()
+    app = create_app(_settings(tmp_path))
+    cases = {
+        ("chinatax", "get_articles"): [
+            {
+                "id": "tax-one",
+                "label": "公告",
+                "column": "政策法规",
+                "title": "Tax title",
+                "content": "Tax fixture reaches registered API scatter.",
+                "xxgk_aging": "全文有效",
+            }
+        ],
+        ("domain", "get_agency_listings"): [
+            {
+                "id": 1001,
+                "advertiserIdentifiers": {"advertiserId": 12106, "contactIds": []},
+                "headline": "Domain title",
+                "description": "Domain fixture reaches registered API scatter.",
+                "propertyTypes": ["House"],
+                "status": "live",
+                "saleMode": "buy",
+                "channel": "residential",
+            }
+        ],
+        ("realestate", "get_listings"): [
+            {
+                "listingId": "rea-one",
+                "channel": "sold",
+                "status": {"label": "Sold", "type": "sold_listing"},
+                "title": "REA title",
+                "description": "REA fixture reaches <br>registered API scatter.",
+                "agency": {"name": "Buxton", "agencyId": "37576"},
+            }
+        ],
+    }
+    task_ids: dict[tuple[str, str], str] = {}
+    with TestClient(app, raise_server_exceptions=True) as client:
+        _create_team(client, team_uuid=team_uuid, headers=headers)
+        for (provider, operation), records in cases.items():
+            task_uuid = _submit(
+                client,
+                team_uuid=team_uuid,
+                headers=headers,
+                provider=provider,
+                operation=operation,
+                records=records,
+            )
+            terminal = _wait_for_terminal(client, team_uuid=team_uuid, task_uuid=task_uuid, headers=headers)
+            assert terminal["status"] == "succeeded", (provider, terminal)
+            task_ids[(provider, operation)] = task_uuid
+
+    store = LocalObjectStore(tmp_path / "objects")
+    with sqlite3.connect(tmp_path / "mkb.sqlite3") as connection:
+        connection.row_factory = sqlite3.Row
+        for (provider, operation), task_uuid in task_ids.items():
+            process = connection.execute(
+                "SELECT output_manifest_ref FROM mkb_processes WHERE team_uuid=? AND task_uuid=? "
+                "AND process_key='clean.map.registered_api' AND status='succeeded'",
+                (team_uuid, task_uuid),
+            ).fetchone()
+            assert process is not None
+            output = json.loads(
+                asyncio.run(store.read_verified(team_uuid, ObjectHandle(value=process["output_manifest_ref"]))).decode()
+            )
+            evidence = output["output"]["clean_collection"]["evidence"]
+            assert evidence == {
+                "clean_capability": "clean.map.registered_api",
+                "definition_version": "v1",
+                "member_count": 1,
+                "operation": operation,
+                "provider": provider,
+            }
+            member_evidence = output["state"]["collection_members"][0]["clean_evidence"]
+            assert member_evidence["provider"] == provider
+            assert member_evidence["operation"] == operation
+            semantics = connection.execute(
+                "SELECT s.semantic_key,s.value_text,s.value_int FROM mkb_intake_revision_semantics s "
+                "JOIN mkb_intake_snapshot_memberships m ON m.team_uuid=s.team_uuid "
+                "AND m.observed_revision_uuid=s.intake_revision_uuid "
+                "JOIN mkb_tasks t ON t.team_uuid=m.team_uuid AND t.intake_snapshot_uuid=m.intake_snapshot_uuid "
+                "WHERE t.team_uuid=? AND t.task_uuid=?",
+                (team_uuid, task_uuid),
+            ).fetchall()
+            semantic_map = {row["semantic_key"]: row["value_text"] if row["value_text"] is not None else row["value_int"] for row in semantics}
+            assert {"realm", "type", "channel", "source_name", "is_active", "context_tags"} <= set(semantic_map)
 
 
 def test_registered_api_scatter_auto_zero_and_fanin_recovery(tmp_path: Path) -> None:

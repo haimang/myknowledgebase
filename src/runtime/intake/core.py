@@ -7,6 +7,7 @@ from collections.abc import Awaitable, Callable, Mapping
 from pathlib import Path
 from typing import Any
 
+from intake.types import CleanPrompt
 from src.contracts.common.errors import MkbError
 from src.contracts.common.ids import canonical_json, stable_digest
 from src.contracts.runtime.models import ProcessCommand, ProcessOutcome
@@ -44,6 +45,7 @@ class IntakeCoreMixin:
             inference: InferenceFacade | None = None,
             live_inference: bool = False,
             clean_llm: object | None = None,
+            clean_prompt: CleanPrompt | None = None,
             lifecycle: IntakeLifecycleService | None = None,
             scatter_acceptance: ScatterAcceptanceWriter | None = None,
             index_retirement: IndexGenerationRetirementService | None = None,
@@ -63,6 +65,7 @@ class IntakeCoreMixin:
             self._inference = inference
             self._live_inference = live_inference
             self._clean_llm = clean_llm
+            self._clean_prompt = clean_prompt
             self._lifecycle = lifecycle
             self._scatter_acceptance = scatter_acceptance or ScatterAcceptanceWriter()
             # This is optional only for focused unit compositions that never make
@@ -285,6 +288,8 @@ class IntakeCoreMixin:
                 "intake.decode.pdf": self._decode,
                 "clean.extract.deterministic": self._clean,
                 "clean.extract.web": self._clean,
+                "clean.extract.web_llm": self._clean,
+                "clean.extract.pdf_text": self._clean,
                 "clean.extract.pdf_llm": self._clean,
                 "clean.extract.doc_llm": self._clean,
                 "clean.ocr.local": self._clean,

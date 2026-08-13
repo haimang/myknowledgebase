@@ -270,7 +270,7 @@ async def test_source_profiles_resolve_to_distinct_executable_workflow_capabilit
             "local_pdf": (
                 "local_object",
                 "local_object.pdf",
-                ("intake.acquire.local_object", "intake.decode.pdf", "clean.extract.pdf_llm"),
+                ("intake.acquire.local_object", "intake.decode.pdf", "clean.extract.pdf_text"),
             ),
             "http_static": (
                 "http_resource",
@@ -285,7 +285,7 @@ async def test_source_profiles_resolve_to_distinct_executable_workflow_capabilit
             "http_pdf": (
                 "http_resource",
                 "http_resource.pdf",
-                ("intake.acquire.http_static", "intake.decode.pdf", "clean.extract.pdf_llm"),
+                ("intake.acquire.http_static", "intake.decode.pdf", "clean.extract.pdf_text"),
             ),
             "local_ocr": (
                 "local_object",

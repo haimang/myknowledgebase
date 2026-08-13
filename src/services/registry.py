@@ -6,10 +6,12 @@ import hashlib
 from dataclasses import dataclass
 from pathlib import Path
 
+from intake.api.registry import registered_provider_manifest_digest
 from src.contracts.common.errors import MkbError
 from src.contracts.common.ids import stable_digest, uuid7
 from src.contracts.common.time import utc_now
 from src.contracts.inference.models import InferenceBinding
+from src.contracts.intake.strategies import clean_strategy_manifest_digest
 from src.persistence.ports import PersistencePort
 
 
@@ -80,12 +82,44 @@ def default_enabled_inference_bindings() -> tuple[InferenceBinding, ...]:
 # These are immutable registry *definitions*, not a second runtime workflow
 # configuration.  Intake/generation callbacks copy their resolved digests into
 # durable facts so a later bootstrap cannot silently reinterpret history.
-DEFAULT_SOURCE_KINDS = (
-    ("inline_payload", "single"),
-    ("local_object", "single"),
-    ("http_resource", "single"),
-    ("registered_api", "collection"),
-)
+DEFAULT_SOURCE_KINDS = {
+    "inline_payload": {
+        "cardinality": "single",
+        "acquire": ("intake.acquire.inline",),
+        "decode": ("intake.decode.text_json_html",),
+        "clean": ("clean.extract.deterministic",),
+    },
+    "local_object": {
+        "cardinality": "single",
+        "acquire": ("intake.acquire.local_object",),
+        "decode": ("intake.decode.text_json_html", "intake.decode.pdf"),
+        "clean": (
+            "clean.extract.deterministic",
+            "clean.extract.pdf_text",
+            "clean.extract.pdf_llm",
+            "clean.extract.doc_llm",
+            "clean.ocr.local",
+            "clean.extract.vision",
+        ),
+    },
+    "http_resource": {
+        "cardinality": "single",
+        "acquire": ("intake.acquire.http_static", "intake.acquire.http_browser"),
+        "decode": ("intake.decode.text_json_html", "intake.decode.pdf"),
+        "clean": (
+            "clean.extract.web",
+            "clean.extract.web_llm",
+            "clean.extract.pdf_text",
+            "clean.extract.pdf_llm",
+        ),
+    },
+    "registered_api": {
+        "cardinality": "collection",
+        "acquire": ("intake.acquire.registered_api",),
+        "decode": (),
+        "clean": ("clean.map.registered_api",),
+    },
+}
 
 DEFAULT_ACTIONS = (
     # S04's minimum immutable transition vocabulary.  These are domain
@@ -111,6 +145,12 @@ DEFAULT_SEMANTICS = (
     ("canonical_content", "text"),
     ("context_metadata", "text"),
     ("filter_metadata", "text"),
+    ("realm", "text"),
+    ("type", "text"),
+    ("channel", "text"),
+    ("source_name", "text"),
+    ("is_active", "int"),
+    ("context_tags", "text"),
 )
 
 
@@ -269,13 +309,22 @@ class RegistryService:
         if not isinstance(tx, UnitOfWork):
             raise MkbError("REGISTRY_TX_INVALID", "Registry bootstrap transaction is invalid", 503)
         now = utc_now()
-        for source_kind, cardinality in DEFAULT_SOURCE_KINDS:
+        for source_kind, capability_set in DEFAULT_SOURCE_KINDS.items():
+            cardinality = capability_set["cardinality"]
+            provider_manifest_digest = (
+                registered_provider_manifest_digest() if source_kind == "registered_api" else None
+            )
             body = {
                 "source_kind": source_kind,
                 "version": "v1",
                 "cardinality": cardinality,
                 "descriptor_schema": "mkb.intake.source-descriptor.v1",
                 "preflight_profile_key": "default",
+                "acquire_capabilities": list(capability_set["acquire"]),
+                "decode_capabilities": list(capability_set["decode"]),
+                "clean_capabilities": list(capability_set["clean"]),
+                "clean_strategy_manifest_digest": clean_strategy_manifest_digest(),
+                "provider_operation_manifest_digest": provider_manifest_digest,
             }
             digest = stable_digest(body)
             row = await tx.fetchone(
@@ -298,10 +347,19 @@ class RegistryService:
                         digest,
                         stable_digest({"schema": "mkb.intake.source-descriptor.v1"}),
                         cardinality,
-                        stable_digest({"source": source_kind, "capability": "acquire"}),
-                        stable_digest({"source": source_kind, "capability": "decode"}),
-                        stable_digest({"source": source_kind, "capability": "clean"}),
-                        stable_digest({"source": source_kind, "eligibility": "v1"}),
+                        stable_digest(list(capability_set["acquire"])),
+                        stable_digest(list(capability_set["decode"])),
+                        stable_digest(list(capability_set["clean"])),
+                        stable_digest(
+                            {
+                                "source_kind": source_kind,
+                                "acquire": list(capability_set["acquire"]),
+                                "decode": list(capability_set["decode"]),
+                                "clean": list(capability_set["clean"]),
+                                "strategy_manifest": clean_strategy_manifest_digest(),
+                                "provider_manifest": provider_manifest_digest,
+                            }
+                        ),
                         __import__("json").dumps(body, ensure_ascii=False, sort_keys=True, separators=(",", ":")),
                         now,
                     ),

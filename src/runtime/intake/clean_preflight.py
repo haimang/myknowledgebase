@@ -2,14 +2,17 @@
 
 from __future__ import annotations
 
+import hashlib
 from collections.abc import Awaitable, Callable, Mapping
+from pathlib import Path
 from typing import Any
 
 from intake import dispatch_clean
-from intake.types import CleanLanguageModel, CleanMember, CleanResult
+from intake.types import CleanLanguageModel, CleanMember, CleanPrompt, CleanResult
 from src.contracts.common.errors import MkbError
 from src.contracts.common.ids import stable_digest
 from src.contracts.common.time import utc_now
+from src.contracts.intake.strategies import CleanStrategyKey, resolve_clean_strategy
 from src.contracts.runtime.models import ProcessCommand
 from src.persistence.ports import UnitOfWork
 from src.runtime.intake.types import (
@@ -25,16 +28,49 @@ class IntakeCleanPreflightMixin:
             self, command: ProcessCommand, state: dict[str, Any]
         ) -> tuple[_StageMaterial, dict[str, Any], Callable[[UnitOfWork, Mapping[str, str]], Awaitable[None]]]:
             media_type = state.get("media_type")
-            if command.process_key in {"clean.ocr.local", "clean.extract.vision"} and (
+            if command.process_key == "clean.extract.vision" and (
                 not isinstance(media_type, str) or not media_type.startswith("image/")
             ):
-                raise MkbError("CLEAN_CAPABILITY_MISMATCH", "Image clean capability requires image evidence", 409)
+                raise MkbError("CLEAN_CAPABILITY_MISMATCH", "Vision clean capability requires image evidence", 409)
+            if command.process_key == "clean.ocr.local" and (
+                not isinstance(media_type, str)
+                or (not media_type.startswith("image/") and media_type != "application/pdf")
+            ):
+                raise MkbError("CLEAN_CAPABILITY_MISMATCH", "OCR clean capability requires image or PDF evidence", 409)
             if command.process_key == "clean.extract.deterministic" and isinstance(media_type, str) and media_type.startswith("image/"):
                 raise MkbError("CLEAN_CAPABILITY_MISMATCH", "Image representation requires an image clean capability", 409)
             decoded = state.get("decoded_text")
             if command.process_key not in {"clean.ocr.local", "clean.extract.vision"} and not isinstance(decoded, str):
                 raise MkbError("PIPELINE_INPUT_INVALID", "Decoded representation is unavailable", 422)
-            representation = "rendered" if (state.get("acquisition_evidence") or {}).get("representation_kind") == "rendered" else "static"
+            representation_kind = (state.get("acquisition_evidence") or {}).get("representation_kind")
+            representation = (
+                "print_pdf"
+                if representation_kind == "print_pdf"
+                else "rendered"
+                if representation_kind == "rendered"
+                else "static"
+            )
+            strategy = {
+                "clean.extract.deterministic": CleanStrategyKey.DOC_DETERMINISTIC.value,
+                "clean.extract.web": CleanStrategyKey.WEB_DETERMINISTIC.value,
+                "clean.extract.web_llm": CleanStrategyKey.WEB_LLM_REWRITE.value,
+                "clean.extract.pdf_text": CleanStrategyKey.PDF_TEXT_LAYER.value,
+                "clean.extract.pdf_llm": (
+                    CleanStrategyKey.WEB_BROWSER_PRINT_PDF.value
+                    if representation == "print_pdf"
+                    else CleanStrategyKey.PDF_DOCUMENT_UNDERSTANDING.value
+                ),
+                "clean.extract.doc_llm": CleanStrategyKey.DOC_DOCUMENT_UNDERSTANDING.value,
+                "clean.ocr.local": (
+                    CleanStrategyKey.PDF_OCR.value
+                    if media_type == "application/pdf"
+                    else CleanStrategyKey.DOC_OCR.value
+                ),
+                "clean.extract.vision": CleanStrategyKey.DOC_VISION.value,
+            }.get(command.process_key)
+            if strategy is None:
+                raise MkbError("CLEAN_STRATEGY_UNSUPPORTED", "Process has no registered clean strategy", 409)
+            prompt = await self._clean_prompt_material(command, strategy)
             result = await dispatch_clean(
                 command.process_key,
                 text=decoded if isinstance(decoded, str) else None,
@@ -43,7 +79,9 @@ class IntakeCleanPreflightMixin:
                 source_kind=state.get("source_kind") if isinstance(state.get("source_kind"), str) else None,
                 url=self._clean_source_url(state),
                 representation=representation,
+                strategy=strategy,
                 llm=self._clean_language_model(),
+                prompt=prompt,
                 http_fetch=self._http_fetcher,
                 browser_fetch=self._browser_fetcher,
             )
@@ -77,6 +115,59 @@ class IntakeCleanPreflightMixin:
     def _clean_language_model(self) -> CleanLanguageModel | None:
         injected = getattr(self, "_clean_llm", None)
         return injected if injected is not None else None
+
+    async def _clean_prompt_material(self, command: ProcessCommand, strategy: str) -> CleanPrompt | None:
+        definition = resolve_clean_strategy(strategy)
+        if not definition.llm_required or self._clean_language_model() is None:
+            return None
+        injected = getattr(self, "_clean_prompt", None)
+        if injected is not None:
+            if (
+                not isinstance(injected, CleanPrompt)
+                or injected.key != definition.prompt_key
+                or injected.version != definition.prompt_version
+            ):
+                raise MkbError("PROMPT_HASH_MISMATCH", "Injected clean prompt does not match the strategy", 503)
+            return injected
+        snapshot = await self._load_config_snapshot(command)
+        prompts = (snapshot.get("l1") or {}).get("prompts")
+        if not isinstance(prompts, list):
+            raise MkbError("PROMPT_HASH_MISMATCH", "Frozen clean prompt registry is unavailable", 503)
+        pointer = next(
+            (
+                item
+                for item in prompts
+                if isinstance(item, Mapping)
+                and item.get("prompt_key") == definition.prompt_key
+                and item.get("prompt_version") == definition.prompt_version
+            ),
+            None,
+        )
+        if not isinstance(pointer, Mapping):
+            raise MkbError("PROMPT_HASH_MISMATCH", "Frozen clean prompt pointer is unavailable", 503)
+        relative_path = pointer.get("git_relative_path")
+        expected_sha = pointer.get("content_sha256")
+        if not isinstance(relative_path, str) or not isinstance(expected_sha, str):
+            raise MkbError("PROMPT_HASH_MISMATCH", "Frozen clean prompt pointer is invalid", 503)
+        path_fragment = Path(relative_path)
+        if path_fragment.is_absolute() or ".." in path_fragment.parts:
+            raise MkbError("PROMPT_HASH_MISMATCH", "Frozen clean prompt path is invalid", 503)
+        prompt_path = (self._prompt_root / path_fragment).resolve()
+        try:
+            prompt_path.relative_to(self._prompt_root)
+            prompt_bytes = prompt_path.read_bytes()
+            prompt_text = prompt_bytes.decode("utf-8")
+        except (OSError, UnicodeDecodeError, ValueError) as exc:
+            raise MkbError("PROMPT_HASH_MISMATCH", "Frozen clean prompt bytes are unavailable", 503) from exc
+        actual_sha = hashlib.sha256(prompt_bytes).hexdigest()
+        if actual_sha != expected_sha:
+            raise MkbError("PROMPT_HASH_MISMATCH", "Clean prompt bytes do not match the frozen pointer", 503)
+        return CleanPrompt(
+            key=definition.prompt_key or "",
+            version=definition.prompt_version or "",
+            text=prompt_text,
+            content_sha256=actual_sha,
+        )
 
     @staticmethod
     def _clean_blob(state: Mapping[str, Any]) -> bytes | None:
@@ -113,6 +204,12 @@ class IntakeCleanPreflightMixin:
                 command.process_key,
                 members=raw_members,
                 provider=state.get("api_provider") if isinstance(state.get("api_provider"), str) else None,
+                operation=state.get("api_operation") if isinstance(state.get("api_operation"), str) else None,
+                definition_version=(
+                    state.get("api_definition_version")
+                    if isinstance(state.get("api_definition_version"), str)
+                    else None
+                ),
             )
             if not isinstance(mapped, list):
                 raise MkbError("CLEAN_RESULT_INVALID", "Registered API clean did not return members", 500)
@@ -125,9 +222,15 @@ class IntakeCleanPreflightMixin:
                 member["external_key"] = item.external_key
                 member["normalized_external_key"] = item.normalized_external_key
                 member["raw_digest"] = item.raw_digest
+                member["content_digest"] = item.content_digest
+                member["meta_digest"] = item.meta_digest
                 member["clean_text"] = item.clean_text
                 member["clean_digest"] = stable_digest({"text": item.clean_text})
                 member["clean_evidence"] = item.evidence
+                member["parsed_payload"] = item.payload
+                member["filter_meta"] = item.filter_meta
+                member["context_meta"] = item.context_meta
+                member["semantic_tuples"] = list(item.semantic_tuples)
                 clean_members.append(member)
             candidate_root_digest = stable_digest(
                 {
@@ -138,6 +241,8 @@ class IntakeCleanPreflightMixin:
                             "member_ordinal": member["member_ordinal"],
                             "normalized_external_key": member["normalized_external_key"],
                             "raw_digest": member["raw_digest"],
+                            "content_digest": member["content_digest"],
+                            "meta_digest": member["meta_digest"],
                             "clean_digest": member["clean_digest"],
                         }
                         for member in clean_members
@@ -150,6 +255,13 @@ class IntakeCleanPreflightMixin:
             next_state["collection_clean_digest"] = stable_digest(
                 [member["clean_digest"] for member in clean_members]
             )
+            next_state["collection_clean_evidence"] = {
+                "clean_capability": command.process_key,
+                "provider": state.get("api_provider"),
+                "operation": state.get("api_operation"),
+                "definition_version": state.get("api_definition_version"),
+                "member_count": len(clean_members),
+            }
             material = self._material(
                 command,
                 next_state,
@@ -158,6 +270,7 @@ class IntakeCleanPreflightMixin:
                         "candidate_root_digest": candidate_root_digest,
                         "member_count": len(clean_members),
                         "clean_digest": next_state["collection_clean_digest"],
+                        "evidence": next_state["collection_clean_evidence"],
                     }
                 },
             )
@@ -266,6 +379,12 @@ class IntakeCleanPreflightMixin:
             root_digest = state.get("candidate_root_digest")
             if not isinstance(members, list) or not isinstance(root_digest, str) or not root_digest:
                 raise MkbError("SCATTER_STATE_INVALID", "Collection candidates are unavailable for sealing", 422)
+            if state.get("collection_exhaustion_proof") != "caller_frozen_records.v1":
+                raise MkbError(
+                    "SCATTER_EXHAUSTION_PROOF_REQUIRED",
+                    "Registered API collection cannot seal complete without exhaustion proof",
+                    422,
+                )
             if any(
                 not isinstance(member, dict)
                 or member.get("member_ordinal") != ordinal
@@ -641,6 +760,9 @@ class IntakeCleanPreflightMixin:
                 or evidence.get("acquisition_capability") != "intake.acquire.registered_api"
                 or evidence.get("completeness_evidence") != "caller_frozen_records.v1"
                 or evidence.get("member_count") != len(members)
+                or evidence.get("provider") != state.get("api_provider")
+                or evidence.get("operation") != state.get("api_operation")
+                or evidence.get("definition_version") != state.get("api_definition_version")
             ):
                 raise MkbError("PREFLIGHT_EVIDENCE_INVALID", "Registered API acquisition evidence is incomplete", 422)
             if any(
@@ -648,6 +770,11 @@ class IntakeCleanPreflightMixin:
                 or member.get("member_ordinal") != ordinal
                 or not isinstance(member.get("clean_text"), str)
                 or not isinstance(member.get("clean_digest"), str)
+                or not isinstance(member.get("content_digest"), str)
+                or not isinstance(member.get("meta_digest"), str)
+                or not isinstance(member.get("filter_meta"), Mapping)
+                or not isinstance(member.get("context_meta"), Mapping)
+                or not isinstance(member.get("semantic_tuples"), list)
                 for ordinal, member in enumerate(members)
             ):
                 raise MkbError("PREFLIGHT_EVIDENCE_INVALID", "Registered API member evidence is incomplete", 422)

@@ -164,50 +164,41 @@ class IntakeAcquisitionIngestMixin:
         ) -> tuple[_StageMaterial, dict[str, Any], Callable[[UnitOfWork, Mapping[str, str]], Awaitable[None]]]:
             """Acquire an ordered typed API collection without flattening members.
 
-            Each input record already passed the strict public contract, but this
-            boundary validates its durable identity again before a collection can
-            become a CandidateSet.  The root descriptor names the source namespace;
-            member external keys name the individual IntakeItems.
+            Each input record already passed its provider-specific strict public
+            contract.  Acquisition freezes raw records only; the sole provider
+            parser remains behind ``intake.dispatch_clean``.
             """
 
             if command.process_key != "intake.acquire.registered_api":
                 raise MkbError("ACQUISITION_CAPABILITY_MISMATCH", "Registered API requires its scatter acquisition capability", 409)
             external_key = descriptor.get("external_key")
             records = descriptor.get("records")
+            provider = descriptor.get("provider")
+            operation = descriptor.get("operation")
+            definition_version = descriptor.get("definition_version")
             if not isinstance(external_key, str) or not external_key.strip() or not isinstance(records, list):
                 raise MkbError("ACQUISITION_RECORDS_REQUIRED", "Registered API records are required", 422)
+            if not all(isinstance(value, str) and value for value in (provider, operation, definition_version)):
+                raise MkbError("CLEAN_PROVIDER_OPERATION_REQUIRED", "Registered API provider binding is required", 422)
             members: list[dict[str, Any]] = []
-            seen_keys: set[str] = set()
             for ordinal, record in enumerate(records):
                 if not isinstance(record, dict):
                     raise MkbError("ACQUISITION_RECORD_INVALID", "Registered API record must be an object", 422)
-                member_key = record.get("external_key")
-                content = record.get("content")
-                media_type = record.get("media_type", "text/plain")
-                if (
-                    not isinstance(member_key, str)
-                    or not member_key.strip()
-                    or not isinstance(content, str)
-                    or not content
-                    or not isinstance(media_type, str)
-                    or not media_type.strip()
-                ):
-                    raise MkbError("ACQUISITION_RECORD_INVALID", "Registered API record lacks typed member content", 422)
-                normalized_key = member_key.strip().casefold()
-                if normalized_key in seen_keys:
-                    raise MkbError("ACQUISITION_RECORD_DUPLICATE", "Registered API member external_key is duplicated", 422)
-                seen_keys.add(normalized_key)
-                canonical_content = _canonical_text(content)
+                canonical_record = dict(record)
+                raw_member_digest = stable_digest(
+                    {
+                        "provider": provider,
+                        "operation": operation,
+                        "definition_version": definition_version,
+                        "raw": canonical_record,
+                    }
+                )
                 members.append(
                     {
                         "member_ordinal": ordinal,
-                        "external_key": member_key.strip(),
-                        "normalized_external_key": normalized_key,
-                        "raw_text": canonical_content,
-                        "raw_digest": stable_digest({"media_type": media_type.strip(), "text": canonical_content}),
-                        "media_type": _normalized_media_type(media_type) or "text/plain",
-                        "title": record.get("title") if isinstance(record.get("title"), str) else None,
-                        "require_human_review": bool(record.get("require_human_review", False)),
+                        "raw_record": canonical_record,
+                        "raw_digest": raw_member_digest,
+                        "require_human_review": False,
                         "intake_item_uuid": uuid7(),
                         "intake_revision_uuid": uuid7(),
                         "clean_artifact_uuid": uuid7(),
@@ -222,14 +213,14 @@ class IntakeAcquisitionIngestMixin:
                     "records": [
                         {
                             "member_ordinal": member["member_ordinal"],
-                            "normalized_external_key": member["normalized_external_key"],
                             "raw_digest": member["raw_digest"],
                         }
                         for member in members
                     ],
                 }
             )
-            collection_byte_count = sum(len(member["raw_text"].encode("utf-8")) for member in members)
+            collection_byte_count = sum(len(canonical_json(member["raw_record"])) for member in members)
+            exhaustion_proof = descriptor.get("exhaustion_proof")
             acquisition_evidence = {
                 "schema_version": "mkb.acquisition-evidence.v1",
                 "source_kind": "registered_api",
@@ -241,7 +232,11 @@ class IntakeAcquisitionIngestMixin:
                 "declared_media_type": "application/json",
                 "detected_media_type": "application/json",
                 "verified_media_type": "application/json",
-                "completeness_evidence": "caller_frozen_records.v1",
+                "provider": provider,
+                "operation": operation,
+                "definition_version": definition_version,
+                "representation": descriptor.get("representation"),
+                "completeness_evidence": exhaustion_proof,
                 "budget_verdict": "within_registered_api_member_budget",
             }
             next_state = {
@@ -255,11 +250,14 @@ class IntakeAcquisitionIngestMixin:
                 "external_key": root_external_key,
                 "normalized_external_key": root_external_key.casefold(),
                 "collection_members": members,
+                "api_provider": provider,
+                "api_operation": operation,
+                "api_definition_version": definition_version,
+                "collection_exhaustion_proof": exhaustion_proof,
                 "raw_digest": raw_digest,
                 "acquisition_capability": "intake.acquire.registered_api",
                 "acquisition_evidence": acquisition_evidence,
-                "require_human_review": bool(descriptor.get("require_human_review", False))
-                or any(member["require_human_review"] for member in members),
+                "require_human_review": bool(descriptor.get("require_human_review", False)),
                 "intake_source_uuid": uuid7(),
                 "candidate_set_uuid": uuid7(),
                 "intake_snapshot_uuid": uuid7(),
@@ -277,7 +275,7 @@ class IntakeAcquisitionIngestMixin:
                         "member_count": len(members),
                         "content_digest": raw_digest,
                         "byte_count": collection_byte_count,
-                        "completeness": "complete",
+                        "completeness": "complete" if exhaustion_proof == "caller_frozen_records.v1" else "unproven",
                         "evidence": acquisition_evidence,
                     }
                 },
@@ -375,7 +373,7 @@ class IntakeAcquisitionIngestMixin:
                     capability="intake.acquire.registered_api",
                     source_kind="registered_api",
                     mode="registered_api",
-                    extra_evidence={"member_count": len(records), "exhaustion_proof": "caller_frozen_records.v1"},
+                    extra_evidence={"member_count": len(records), "exhaustion_proof": descriptor.get("exhaustion_proof")},
                 )
             if source_kind != "http_resource":
                 raise MkbError("SOURCE_KIND_INVALID", "Source kind is not registered", 422)
@@ -575,4 +573,3 @@ class IntakeAcquisitionIngestMixin:
                 del tx, refs
 
             return material, {}, callback
-

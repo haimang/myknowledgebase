@@ -165,6 +165,7 @@ def test_local_static_browser_and_pdf_sources_produce_distinct_frozen_acquisitio
             assert terminal["status"] == "succeeded", (name, terminal)
 
     output_refs: dict[str, str] = {}
+    clean_refs: dict[str, tuple[str, str]] = {}
     with sqlite3.connect(tmp_path / "mkb.sqlite3") as connection:
         connection.row_factory = sqlite3.Row
         for name, task_uuid in task_ids.items():
@@ -175,6 +176,13 @@ def test_local_static_browser_and_pdf_sources_produce_distinct_frozen_acquisitio
             ).fetchone()
             assert row is not None, name
             output_refs[name] = row["output_manifest_ref"]
+            clean = connection.execute(
+                "SELECT process_key,output_manifest_ref FROM mkb_processes "
+                "WHERE team_uuid=? AND task_uuid=? AND step_key='clean' AND status='succeeded'",
+                (team_uuid, task_uuid),
+            ).fetchone()
+            assert clean is not None, name
+            clean_refs[name] = (clean["process_key"], clean["output_manifest_ref"])
 
     store = LocalObjectStore(tmp_path / "objects")
     evidence: dict[str, dict[str, object]] = {}
@@ -192,6 +200,18 @@ def test_local_static_browser_and_pdf_sources_produce_distinct_frozen_acquisitio
     rendered = json.dumps(evidence["static"])
     assert static_url not in rendered
     assert "opaque=not-persisted" not in rendered
+
+    clean_evidence: dict[str, dict[str, object]] = {}
+    for name, (process_key, output_ref) in clean_refs.items():
+        document = json.loads(
+            asyncio.run(store.read_verified(team_uuid, ObjectHandle(value=output_ref))).decode("utf-8")
+        )
+        clean_evidence[name] = document["output"]["clean_candidate"]["evidence"]
+        assert clean_evidence[name]["clean_capability"] == process_key
+    assert clean_refs["static"][0] == "clean.extract.web"
+    assert clean_evidence["static"]["strategy"] == "web.deterministic"
+    assert clean_refs["pdf"][0] == "clean.extract.pdf_text"
+    assert clean_evidence["pdf"]["strategy"] == "pdf.text_layer"
 
 
 def test_local_image_reaches_the_exact_ocr_workflow_then_fails_closed_when_unconfigured(tmp_path: Path) -> None:

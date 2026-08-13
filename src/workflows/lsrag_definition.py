@@ -783,8 +783,8 @@ BUILTIN_LOCAL_PDF_INTAKE_WORKFLOW: Final[WorkflowDefinition] = _source_profile_w
     display_name="Single local-PDF intake LS-RAG",
     acquire_process_key="intake.acquire.local_object",
     decode_process_key="intake.decode.pdf",
-    clean_process_key="clean.extract.pdf_llm",
-    revision_number=2,
+    clean_process_key="clean.extract.pdf_text",
+    revision_number=3,
 )
 
 
@@ -813,8 +813,8 @@ BUILTIN_HTTP_PDF_INTAKE_WORKFLOW: Final[WorkflowDefinition] = _source_profile_wo
     display_name="Single PDF intake LS-RAG",
     acquire_process_key="intake.acquire.http_static",
     decode_process_key="intake.decode.pdf",
-    clean_process_key="clean.extract.pdf_llm",
-    revision_number=2,
+    clean_process_key="clean.extract.pdf_text",
+    revision_number=3,
 )
 
 
@@ -848,6 +848,42 @@ BUILTIN_DOC_LLM_INTAKE_WORKFLOW: Final[WorkflowDefinition] = _source_profile_wor
 )
 
 
+BUILTIN_HTTP_WEB_LLM_INTAKE_WORKFLOW: Final[WorkflowDefinition] = _source_profile_workflow(
+    workflow_key="intake.ingest.single.http-web-llm.lsrag.v1",
+    display_name="Single static-HTTP LLM rewrite intake LS-RAG",
+    acquire_process_key="intake.acquire.http_static",
+    decode_process_key="intake.decode.text_json_html",
+    clean_process_key="clean.extract.web_llm",
+)
+
+
+BUILTIN_HTTP_BROWSER_WEB_LLM_INTAKE_WORKFLOW: Final[WorkflowDefinition] = _source_profile_workflow(
+    workflow_key="intake.ingest.single.http-browser-web-llm.lsrag.v1",
+    display_name="Single browser-rendered LLM rewrite intake LS-RAG",
+    acquire_process_key="intake.acquire.http_browser",
+    decode_process_key="intake.decode.text_json_html",
+    clean_process_key="clean.extract.web_llm",
+)
+
+
+BUILTIN_LOCAL_PDF_LLM_INTAKE_WORKFLOW: Final[WorkflowDefinition] = _source_profile_workflow(
+    workflow_key="intake.ingest.single.local-pdf-understanding.lsrag.v1",
+    display_name="Single local-PDF document-understanding intake LS-RAG",
+    acquire_process_key="intake.acquire.local_object",
+    decode_process_key="intake.decode.pdf",
+    clean_process_key="clean.extract.pdf_llm",
+)
+
+
+BUILTIN_BROWSER_PRINT_PDF_INTAKE_WORKFLOW: Final[WorkflowDefinition] = _source_profile_workflow(
+    workflow_key="intake.ingest.single.http-browser-print-pdf.lsrag.v1",
+    display_name="Single browser print-PDF document-understanding intake LS-RAG",
+    acquire_process_key="intake.acquire.http_browser",
+    decode_process_key="intake.decode.pdf",
+    clean_process_key="clean.extract.pdf_llm",
+)
+
+
 BUILTIN_SOURCE_PROFILE_WORKFLOWS: Final[tuple[WorkflowDefinition, ...]] = (
     BUILTIN_LOCAL_OBJECT_INTAKE_WORKFLOW,
     BUILTIN_LOCAL_PDF_INTAKE_WORKFLOW,
@@ -857,5 +893,8 @@ BUILTIN_SOURCE_PROFILE_WORKFLOWS: Final[tuple[WorkflowDefinition, ...]] = (
     BUILTIN_LOCAL_OCR_INTAKE_WORKFLOW,
     BUILTIN_VISION_REJECTION_INTAKE_WORKFLOW,
     BUILTIN_DOC_LLM_INTAKE_WORKFLOW,
+    BUILTIN_HTTP_WEB_LLM_INTAKE_WORKFLOW,
+    BUILTIN_HTTP_BROWSER_WEB_LLM_INTAKE_WORKFLOW,
+    BUILTIN_LOCAL_PDF_LLM_INTAKE_WORKFLOW,
+    BUILTIN_BROWSER_PRINT_PDF_INTAKE_WORKFLOW,
 )
-

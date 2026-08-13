@@ -44,8 +44,13 @@ class ScatterCollectionMember:
     external_key: str
     normalized_external_key: str
     raw_digest: str
+    content_digest: str
+    meta_digest: str
     clean_text: str
     clean_digest: str
+    filter_meta: dict[str, Any]
+    context_meta: dict[str, Any]
+    semantic_tuples: tuple[dict[str, Any], ...]
     require_human_review: bool
     intake_item_uuid: str
     intake_revision_uuid: str
@@ -396,7 +401,15 @@ class ScatterAcceptanceWriter:
                 now,
             ),
         )
-        semantic_state = {"source_kind": acceptance.source_kind, "clean_digest": member.clean_digest}
+        semantic_state = {
+            "source_kind": acceptance.source_kind,
+            "clean_digest": member.clean_digest,
+            "content_digest": member.content_digest,
+            "meta_digest": member.meta_digest,
+            "filter_meta": member.filter_meta,
+            "context_meta": member.context_meta,
+            "semantic_tuples": list(member.semantic_tuples),
+        }
         semantics = await initial_semantics(tx, semantic_state)
         fingerprint = semantic_fingerprint(semantics)
         await tx.execute(

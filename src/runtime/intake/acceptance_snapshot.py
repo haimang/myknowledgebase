@@ -324,28 +324,48 @@ class IntakeAcceptanceSnapshotMixin:
             clean_digest = state.get("clean_digest")
             if not isinstance(source_kind, str) or not source_kind or not isinstance(clean_digest, str) or not clean_digest:
                 raise MkbError("INTAKE_SEMANTICS_INPUT_INVALID", "Accepted intake lacks canonical semantic inputs", 422)
-            values = (
-                ("source_representation", source_kind),
-                ("canonical_content", clean_digest),
-                ("context_metadata", "{}"),
-                ("filter_metadata", _json({"source_kind": source_kind})),
-            )
+            filter_meta = state.get("filter_meta")
+            context_meta = state.get("context_meta")
+            values: list[tuple[str, str, bool | int | float | str]] = [
+                ("source_representation", "text", source_kind),
+                ("canonical_content", "text", clean_digest),
+                ("context_metadata", "text", _json(context_meta) if isinstance(context_meta, Mapping) else "{}"),
+                (
+                    "filter_metadata",
+                    "text",
+                    _json(filter_meta) if isinstance(filter_meta, Mapping) else _json({"source_kind": source_kind}),
+                ),
+            ]
+            if isinstance(filter_meta, Mapping):
+                for semantic_key in ("realm", "type", "channel", "source_name"):
+                    value = filter_meta.get(semantic_key)
+                    if not isinstance(value, str) or not value:
+                        raise MkbError("INTAKE_SEMANTICS_INPUT_INVALID", "Provider filter semantics are incomplete", 422)
+                    values.append((semantic_key, "text", value))
+                is_active = filter_meta.get("is_active")
+                if isinstance(is_active, bool) or is_active not in {0, 1}:
+                    raise MkbError("INTAKE_SEMANTICS_INPUT_INVALID", "Provider active semantic is invalid", 422)
+                values.append(("is_active", "int", is_active))
+                tags = context_meta.get("tags") if isinstance(context_meta, Mapping) else None
+                if not isinstance(tags, list) or any(not isinstance(tag, str) for tag in tags):
+                    raise MkbError("INTAKE_SEMANTICS_INPUT_INVALID", "Provider context tags are invalid", 422)
+                values.append(("context_tags", "text", "\n".join(tags)))
             entries: list[dict[str, Any]] = []
-            for semantic_key, value in values:
+            for semantic_key, value_kind, value in values:
                 definition = await tx.fetchone(
                     "SELECT definition_version,definition_digest,value_kind,fingerprint_participation "
                     "FROM mkb_intake_semantic_definitions "
                     "WHERE semantic_key=? AND definition_version='v1'",
                     (semantic_key,),
                 )
-                if definition is None or definition["value_kind"] != "text":
+                if definition is None or definition["value_kind"] != value_kind:
                     raise MkbError("REGISTRY_NOT_FOUND", "Required intake semantic definition is unavailable", 503)
                 entries.append(
                     {
                         "semantic_key": semantic_key,
                         "definition_version": definition["definition_version"],
                         "definition_digest": definition["definition_digest"],
-                        "value_kind": "text",
+                        "value_kind": value_kind,
                         "fingerprint_participation": bool(definition["fingerprint_participation"]),
                         "value": value,
                         "value_digest": self._semantic_value_digest(
@@ -427,4 +447,3 @@ class IntakeAcceptanceSnapshotMixin:
                     now,
                 ),
             )
-

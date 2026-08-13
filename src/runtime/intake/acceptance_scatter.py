@@ -74,6 +74,14 @@ class IntakeAcceptanceScatterMixin:
                 )
                 if any(not isinstance(raw_member.get(key), str) or not raw_member[key] for key in required_text):
                     raise MkbError("SCATTER_MEMBER_INVALID", "Collection member lacks immutable identifiers", 422)
+                if (
+                    not isinstance(raw_member.get("content_digest"), str)
+                    or not isinstance(raw_member.get("meta_digest"), str)
+                    or not isinstance(raw_member.get("filter_meta"), dict)
+                    or not isinstance(raw_member.get("context_meta"), dict)
+                    or not isinstance(raw_member.get("semantic_tuples"), list)
+                ):
+                    raise MkbError("SCATTER_MEMBER_INVALID", "Collection member lacks provider semantics", 422)
                 clean_text = raw_member["clean_text"]
                 if stable_digest({"text": clean_text}) != raw_member["clean_digest"]:
                     raise MkbError("SCATTER_MEMBER_INVALID", "Collection member clean content changed before acceptance", 409)
@@ -85,6 +93,11 @@ class IntakeAcceptanceScatterMixin:
                     "normalized_external_key": raw_member["normalized_external_key"],
                     "clean_digest": raw_member["clean_digest"],
                     "clean_text": clean_text,
+                    "content_digest": raw_member["content_digest"],
+                    "meta_digest": raw_member["meta_digest"],
+                    "filter_meta": raw_member["filter_meta"],
+                    "context_meta": raw_member["context_meta"],
+                    "semantic_tuples": raw_member["semantic_tuples"],
                 }
                 clean_artifact = await self._storage.promote(
                     canonical_json(clean_body),
@@ -104,7 +117,12 @@ class IntakeAcceptanceScatterMixin:
                             "source_kind": "registered_api",
                             "external_key": state["external_key"],
                             "connector_key": source.get("connector_key"),
+                            "provider": source.get("provider"),
+                            "operation": source.get("operation"),
+                            "definition_version": source.get("definition_version"),
+                            "representation": "raw",
                             "records": [],
+                            "exhaustion_proof": "caller_frozen_records.v1",
                         }
                     },
                     "intent_context": {
@@ -123,6 +141,9 @@ class IntakeAcceptanceScatterMixin:
                             "clean_artifact_uuid": raw_member["clean_artifact_uuid"],
                             "clean_digest": raw_member["clean_digest"],
                             "clean_text": clean_text,
+                            "provider": state.get("api_provider"),
+                            "operation": state.get("api_operation"),
+                            "definition_version": state.get("api_definition_version"),
                             "require_human_review": bool(raw_member.get("require_human_review", False)),
                         },
                     },
@@ -137,8 +158,13 @@ class IntakeAcceptanceScatterMixin:
                         external_key=raw_member["external_key"],
                         normalized_external_key=raw_member["normalized_external_key"],
                         raw_digest=raw_member["raw_digest"],
+                        content_digest=raw_member["content_digest"],
+                        meta_digest=raw_member["meta_digest"],
                         clean_text=clean_text,
                         clean_digest=raw_member["clean_digest"],
+                        filter_meta=dict(raw_member["filter_meta"]),
+                        context_meta=dict(raw_member["context_meta"]),
+                        semantic_tuples=tuple(dict(item) for item in raw_member["semantic_tuples"]),
                         require_human_review=bool(raw_member.get("require_human_review", False)),
                         intake_item_uuid=raw_member["intake_item_uuid"],
                         intake_revision_uuid=raw_member["intake_revision_uuid"],
@@ -237,4 +263,3 @@ class IntakeAcceptanceScatterMixin:
                     ],
                 }
             )
-
