@@ -8,7 +8,7 @@
 >
 > **文档状态**：`draft / owner-review`（**未** owner-freeze；**未**替换索引 `18` 直至本文件 accepted 并与 `18` 分账）
 >
-> **Truth 版本 / 日期**：`D07-v0.4 / 2026-08-12`
+> **Truth 版本 / 日期**：`D07-v0.5 / 2026-08-13`
 >
 > **文件路径**：`docs/baseline/domain-truth/D07-v1-acceptance-truth.md`
 >
@@ -16,7 +16,7 @@
 >
 > **组织参考**：`context/legacy-specs/owner-truth/04-v1-success-and-non-goals.md`（OT-04 完成定义 / 可观察成败 / 质量底线 / non-goals）
 >
-> **权威输入**：全部 `docs/baseline/domain-truth/D01–D06`、`S01–S16` 已落盘 formal；`spec-index` v0.62；`spec-glossary` v2.8；D06 资源非 blocker 纪律
+> **权威输入**：全部 `docs/baseline/domain-truth/D01–D08`、`S01–S16` 已落盘 formal；`spec-index` v0.64；`spec-glossary` v2.9；D06 资源非 blocker 纪律；**D08** 四域能力迁移 HARD
 >
 > **下游消费者**：实现测试计划、architecture tests、CI 门禁、owner release gate、`spec-index` 附录 A、未来 `18` 签署矩阵
 >
@@ -60,7 +60,7 @@
 |---|---|---|
 | `D07-G01` | **单体闭环**：一 Python 应用、一发布单元、caller-neutral Contract；无 legacy runtime 依赖即可执行合法请求 | S01/D03/D06 |
 | `D07-G02` | **接入闭环**：Team 投影 + InternalToken + Task+Audit 原子 + polling + 有限 command；同步 `retrieval.search` | S01/S02/S16/S10 |
-| `D07-G03` | **Intake/Clean 闭环**：四类 source + typed evidence + mandatory preflight + bounded gate | S04/S05 |
+| `D07-G03` | **Intake/Clean 闭环**：四类 source + typed evidence + mandatory preflight + bounded gate；**四域 legacy 能力按 D08 闭集吸收**（provider/operation + clean strategy，非通道空壳） | S04/S05/**D08** |
 | `D07-G04` | **Structure 闭环**：immutable generation + exact schema + full-valid 才 current | S06/D05 |
 | `D07-G05` | **Construct 闭环**：整包 dual-channel + ConstructToVectorizeGate | S07/D05 |
 | `D07-G06` | **Vectorize 闭环**：整包成败 + 幂等 + Layer A/B | S08 |
@@ -125,6 +125,8 @@
 | `D04` | Turso 物理 schema | `domain-truth/D04-turso-physical-schema.md` | accepted / D04-v1.1 | D07-D04-A01..A12（派生） | 表闭集/migration/readiness 接合；无独立 *A* 表 |
 | `D05` | LS-RAG handbook | `domain-truth/D05-layered-semantic-rag-handbook.md` | frozen / D05-v1.0 | D07-D05-A01..A10（派生） | 双通道/粒度/prompt 三身份/门闩；产品法验收 |
 | `D06` | 运行拓扑 | `domain-truth/D06-runtime-topology.md` | draft / D06-v0.2 | D06-A01..A10 | ai-mkb/668·669/角色；资源非 blocker |
+| `D07` | 本验收台账 | `domain-truth/D07-v1-acceptance-truth.md` | draft / D07-v0.5 | （索引，不自引用 HARD） | 全局门闩 / 剖面 / 槽位 |
+| `D08` | Legacy clean → intake 拓扑 | `domain-truth/D08-legacy-capabilities-migration.md` | draft / D08-v0.1 | D08-A01..A20 | 三 provider 规范 + web/pdf/doc strategy；禁 duck-type 冒充交付 |
 | `S01` | Skill-Worker Integration | `domain-truth/S01-skill-worker-integration.md` | accepted / S01-v1.5 | S01-A01..A39 | token/Team/Task+Audit/polling/standalone |
 | `S02` | Task API | `domain-truth/S02-task-api.md` | accepted / S02-v1.3 | S02-A01..A40 | 六态/CAS/scatter/retry/rebuild/gate 投影 |
 | `S03` | Workflow Engine | `domain-truth/S03-workflow-engine.md` | accepted / S03-v1.3 | S03-A01..A56 | 七表/claim/lease/retry/scatter/recovery/gate |
@@ -142,9 +144,9 @@
 | `S15` | Observability & Reliability | `domain-truth/S15-observability-reliability.md` | accepted / S15-v1.1 | S15-A01..A20 | events/metric/ready-live/retention |
 | `S16` | Security & Trust Boundary | `domain-truth/S16-security-trust-boundary.md` | accepted / S16-v1.1 | S16-A01..A24 | token/rate/egress/redact/ready |
 
-**合计（引用型 HARD）**：D01 24 + D03 17 + D06 10 + S01 39 + S02 40 + S03 56 + S04 40 + S05 35 + S06 22 + S07 22 + S08 15 + S09 20 + S10 20 + S11 19 + S12 23 + S13 21 + S14 30 + S15 20 + S16 24 = **497**  
+**合计（引用型 HARD）**：D01 24 + D03 17 + D06 10 + D08 20 + S01 39 + S02 40 + S03 56 + S04 40 + S05 35 + S06 22 + S07 22 + S08 15 + S09 20 + S10 20 + S11 19 + S12 23 + S13 21 + S14 30 + S15 20 + S16 24 = **517**  
 **派生 HARD**：D02 8 + D04 12 + D05 10 = **30**  
-**Ledger 总 HARD 意图行 ≈ 527**（以各域权威表为准；冲突时 **domain-truth 正文优先**，本文件回填）。
+**Ledger 总 HARD 意图行 ≈ 547**（以各域权威表为准；冲突时 **domain-truth 正文优先**，本文件回填）。
 
 ---
 
@@ -167,6 +169,9 @@
 | `D07-E2E-13` | security admission | invalid token 401-before-read；ready 需 sec_token_loaded | S16,S15 |
 | `D07-E2E-14` | prompt hash | 文件改 hash 未更新 → fail | S14,D03,D05 |
 | `D07-E2E-15` | object bytes-first | promote 后 TX 回滚可 orphan GC；无假 success | S13,S12 |
+| `D07-E2E-16` | registered_api fixture scatter | raw chinatax/domain/REA 至少一条 → `clean.map.registered_api` + 正确 provider/operation evidence + seal | D08,S05,S04 |
+| `D07-E2E-17` | web strategy | static HTML `web.deterministic` 终态可观测；script/nav 不进 clean_text | D08,S05 |
+| `D07-E2E-18` | pdf strategy | HTTP/local PDF 走 pdf 通道；mock LLM understanding 或 text_layer 显式 mode | D08,S05 |
 
 ---
 
@@ -176,7 +181,7 @@
 |---|---|---|
 | **P0-CI** | architecture + 合同 + 单测可 mock 的 HARD（默认） | 每 PR |
 | **P1-Integration** | DB/object/outbox/process 集成 HARD | nightly / pre-release |
-| **P2-E2E** | §4 E2E-01..15（除依赖 live GPU 的部分可 mock embed） | release candidate |
+| **P2-E2E** | §4 E2E-01..18（除依赖 live GPU 的部分可 mock embed；**无 live vendor crawl**） | release candidate |
 | **P3-LiveInference** | D06-A08 + 真实 `ai-mkb` embed/LLM | **仅**业主运行窗口 `mkb_live_inference=1` |
 | **P4-SemanticGolden** | E2E-10 / G13 | V1 完成签署前必过 |
 
@@ -384,6 +389,43 @@
 | `D06-A08` | live：embed + generate 往返 · **OFF 默认** | ON 当 `mkb_live_inference=1 |
 | `D06-A09` | 单写 DB/object_root 纪律 · HARD | — |
 | `D06-A10` | 文档声明 ComfyUI 互斥窗口 · doc review | ops |
+
+
+### 7.D08 槽位 · Legacy clean → intake 拓扑
+
+| 字段 | 值 |
+|---|---|
+| 权威 SSOT | `domain-truth/D08-legacy-capabilities-migration.md` |
+| 状态 | draft / D08-v0.1 |
+| HARD 范围 | D08-A01..A20 |
+| 验收方法 | unit（registry/parser/dispatch）+ `tests/intake` per-domain（真实 intake 入口 + mock I/O）+ e2e fixture scatter/web/pdf；architecture 禁 legacy import 与 duck-type 冒充三 provider。 |
+| 槽位完成定义 | 三 operation + 已登记 clean strategy 均有 HARD 证据；通道空壳或单一 `map_provider_record` **不得**关闭本槽 |
+| 关键禁令（抽样） | 禁止 branch-name taxonomy、live 隧道/cookie/CF、silent skip、随机 ExternalKey；见 D08 §5 |
+
+#### HARD 清单（权威来源：`domain-truth/D08-legacy-capabilities-migration.md`）
+
+| ID | HARD 断言摘要 | 证据/方法 |
+|---|---|---|
+| `D08-A01` | 恰三 operation 注册；未知键 fail-closed | unit |
+| `D08-A02` | chinatax raw fixture → 字段表 + 双 digest + is_active | per-domain |
+| `D08-A03` | domain fixture 扁平化 + agency 对照表 | per-domain |
+| `D08-A04` | REA fixture 拍平 + sold⇒inactive | per-domain |
+| `D08-A05` | parser 失败 typed rejection，无 silent skip | unit |
+| `D08-A06` | 空集合须 exhaustion 才 complete | unit/e2e |
+| `D08-A07` | FilterMeta 五维 + tags 入 semantic，不只 clean_text | per-domain |
+| `D08-A08` | web deterministic：标签/属性规则 + 结构 parser | per-domain |
+| `D08-A09` | web llm_rewrite 无 LLM fail-closed | per-domain |
+| `D08-A10` | rendered 缺 browser fail-closed | per-domain |
+| `D08-A11` | print/HTTP PDF 不走 HTML sanitizer | unit + per-domain |
+| `D08-A12` | pdf 无文本层不得空成功；无 LLM understanding fail-closed | per-domain |
+| `D08-A13` | doc/ocr/vision 分策略；图像禁 deterministic | per-domain |
+| `D08-A14` | runtime 只 dispatch_clean | architecture |
+| `D08-A15` | 线上图声明精确 clean Process key | unit |
+| `D08-A16` | e2e raw API fixture scatter | e2e |
+| `D08-A17` | e2e web deterministic + pdf strategy | e2e |
+| `D08-A18` | 无 legacy import / 无生产 URL SSOT | architecture |
+| `D08-A19` | member schema extra=forbid | unit |
+| `D08-A20` | 同 raw+version 幂等 key/digest | unit |
 
 
 ### 7.S01 槽位 · Skill-Worker Integration
@@ -1109,6 +1151,7 @@
 | **v0.2** | 注入 S01–S07/D01/D03 全量 A 表 | 前半链路 HARD 已充分；必须全量引用而非摘要丢 ID |
 | **v0.3** | 注入 S08–S16/D06 + D02/D04/D05 派生 HARD | 后半链路与无 A 表的 D 域必须可勾选 |
 | **v0.4** | E2E 场景 + release 剖面 + non-goals + 资源非 blocker | 可对 owner 声明「如何算交付」；P3 live 可选 |
+| **v0.5** | D08 四域能力槽 + E2E-16..18 | 通道空壳不得关闭 G03；provider/strategy HARD 进 P0 |
 
 ---
 
@@ -1116,12 +1159,12 @@
 
 | 项 | 状态 |
 |---|---|
-| 槽位覆盖 D01–D06 / S01–S16 | **完整** |
+| 槽位覆盖 D01–D08 / S01–S16 | **完整** |
 | HARD 权威 | 以各域正文为准；本文件 ledger |
 | 可支持 V1 收口 | **是（草稿）**；待 owner freeze → accepted |
 | 开放 | golden corpus 具体条目表（归 P4 资产，可另文）；D06 仍 draft |
 
-**草稿结论**：`D07-v0.4` 足以作为 **验收与 HARD 交付标准** 的工作 SSOT 候选；owner 冻结后应回填 `spec-index`（D07 行）并与 `18` 分账签署。
+**草稿结论**：`D07-v0.5` 足以作为 **验收与 HARD 交付标准** 的工作 SSOT 候选（含 D08 四域能力槽）；owner 冻结后应回填 `spec-index`（D07/D08 行）并与 `18` 分账签署。
 
 ---
 
@@ -1133,6 +1176,7 @@
 | `D07-v0.2` | 2026-08-12 | draft | S01–S07/D01/D03 HARD 注入 |
 | `D07-v0.3` | 2026-08-12 | draft | S08–S16/D06 + D02/D04/D05 派生 |
 | `D07-v0.4` | 2026-08-12 | draft / owner-review | **收口版**：E2E、release 剖面、non-goals、全槽位 HARD 台账 |
+| `D07-v0.5` | 2026-08-13 | draft / owner-review | **D08 槽位**：G03 扩四域能力闭集；HARD D08-A01..A20；E2E-16..18；计数 547 |
 
 ---
 
@@ -1146,6 +1190,7 @@
 | D04 (派生) | 12 |
 | D05 (派生) | 10 |
 | D06 | 10 |
+| D08 | 20 |
 | S01 | 39 |
 | S02 | 40 |
 | S03 | 56 |
@@ -1162,6 +1207,6 @@
 | S14 | 30 |
 | S15 | 20 |
 | S16 | 24 |
-| **合计** | **527** |
+| **合计** | **547** |
 
 若源文件增删 `*-A*`，以源文件为准并在本附录重计。

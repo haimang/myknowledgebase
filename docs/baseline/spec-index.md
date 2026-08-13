@@ -12,13 +12,13 @@
 >
 > **阶段**：`leaf-worker / LS-RAG re-foundation`
 >
-> **日期**：`2026-08-12`
+> **日期**：`2026-08-13`
 >
 > **作者**：`MKB owner + Grok workflow domain-truth-s14-s16`
 >
 > **文档性质**：`specification / index`
 >
-> **文档状态**：`active index`（S01–S16 均已 accepted；**D06** Runtime Topology = `draft / owner-calibrated`；`18` 仍 pending → **尚未** `review-ready` / `frozen truth index`）
+> **文档状态**：`active index`（S01–S16 均已 accepted；**D06** Runtime Topology = `draft / owner-calibrated`；**D07** 验收台账 = `draft / v0.5`；**D08** 四域能力迁移 = `draft / v0.1`；`18` 仍 pending → **尚未** `review-ready` / `frozen truth index`）
 >
 > **当前站位**：站① · specification 基线与设计编排
 >
@@ -60,7 +60,7 @@ pending → designing → owner-gate → accepted → frozen
 
 - **一句话**：将 MKB 从包含平台职能的 Python 模块化单体，重新定义并设计为由 `03-nano/orchestrator-core` 调用、以任务为入口、以 LS-RAG 为核心、可使用本地 CUDA/vLLM 或外部推理服务的有状态 leaf-worker 单体应用。
 - **为什么现在做**：现有 Python 版本完成了工作流骨架，但没有完成 LS-RAG 的关键业务语义；同时运行环境已从 MLX/macOS 叙事转向 NVIDIA CUDA 13.0，系统上游、部署拓扑和产品责任均已改变。
-- **本阶段产物**：8 个核心 domain、16 个子系统的详细 specification，外加范围词汇表、**运行拓扑（D06）** 和验收/真相冻结矩阵（`18`）。
+- **本阶段产物**：8 个核心 domain、16 个子系统的详细 specification，外加范围词汇表、**运行拓扑（D06）**、验收台账（**D07**）、legacy 四域能力迁移（**D08**）和真相冻结矩阵（`18`）。
 - **本阶段不产出**：实现任务拆解、工期、迭代排期、具体代码和迁移执行计划。  
 - **有限例外（D03-v1.0 / `T-O-141..159`；D04-v1.0 / `T-O-160..179`）**：Owner 冻结 **仓库目录宪法与 `src/contracts` typed SSOT 落点**，以及 **Turso 物理表闭集/列/索引/VIEW（D04）**；不因此开放随意实现排期或业务状态机旁路。
 - **最终出口**：所有 spec 接受并完成交叉对账后，将 `docs/baseline/` 冻结为 truth layer，再据此编写重构计划。
@@ -310,13 +310,15 @@ pending → designing → owner-gate → accepted → frozen
 
 | ID | 文档 | 状态 | 用途 |
 |----|------|------|------|
-| `00` | `spec-glossary.md` | `active / v2.8` | **S01–S16 calibrated**：S08–S10 检索/向量词；**S14** ConfigSnapshot/RegistryPort/Provenance；**S15** DomainEventWriter/Retention/Alert/Health；**S16** InternalToken/EndpointClass/Egress/SupplyFence/sec_token_loaded；G-07/G-10/G-11 closed；G-01/G-12 deferred |
+| `00` | `spec-glossary.md` | `active / v2.9` | **S01–S16 + D08 calibrated**：既有治理词 + **ProviderOperation / CleanStrategy / FilterMeta / ContextMeta**；G-07/G-10/G-11 closed；G-01/G-12 deferred |
 | `D01` | `domain-truth/D01-task-execution-process-flow.md` | `accepted / S06-calibrated` | `D01-v1.4`：三层状态；S06 generation非第四层runtime |
 | `D02` | `domain-truth/D02-production-state-and-routing.md` | `frozen / v1.0 / S13-calibrated` | `T-O-86..92`；DR005/DR006 S06关闭；DR007 S12+S13部分关闭；generation/pointer/object physical |
 | `D03` | `domain-truth/D03-repository-layout.md` | `accepted / v1.0 / T-O-141..159` | 仓库宪法：contracts typed 唯一SSOT；prompts git+hash；intake顶级；workflows≠runtime；Port 落点 |
 | `D04` | `domain-truth/D04-turso-physical-schema.md` | `accepted / v1.1 / T-O-160..179+192..194` | **物理 schema**：55 表；+model_catalog/adapter_bindings/inference_invocations；embedding 隔离 |
 | `D05` | `domain-truth/D05-layered-semantic-rag-handbook.md` | `frozen / v1.0 / T-O-202..210` | **LS-RAG handbook 已冻结**：双通道根本；粒度0/1/2；g=0必向量；construct门闩；promptA/B/C；失败引D01/S03；驱动S05–S10 |
 | `D06` | `domain-truth/D06-runtime-topology.md` | `draft / owner-calibrated / v0.2` | **运行拓扑 SSOT**（原索引条目 `17` / `system-topology` **收敛至此**）：MKB 应用平面 + **`ai-mkb`** 推理平面；端口 **668/669**；角色 **`qwen-vl-2b` embed** + **`qwen35-a3b` LLM**（多路/MTP/充足 KV）；MKB 窗口停 ComfyUI；**宿主机资源业主调配，瞬时不符非 blocker**。**禁止**再维护 `docs/baseline/specs/17-system-topology.md` 第二源 |
+| `D07` | `domain-truth/D07-v1-acceptance-truth.md` | `draft / owner-review / v0.5` | **验收 HARD 台账**：全局门闩 G01–G14、release 剖面、一域一槽；`18` 只做签署。v0.5 载入 **D08-A01..A20** 与 E2E-16..18 |
+| `D08` | `domain-truth/D08-legacy-capabilities-migration.md` | `draft / owner-review / v0.1` | **legacy 四域能力 → `intake/` 拓扑**：chinatax/domain/REA operation 闭集；web/pdf/doc strategy；D03 §4.3 clean reopen；D04 三表 proposed。**不**恢复 branch taxonomy 或 Worker 栈 |
 | `18` | `specs/18-acceptance-truth-freeze.md` | `pending` | 汇总不变量、验收矩阵、owner-gate closure 和冻结签署 |
 
 > **已废止槽位**：历史编号 **`17` System Topology** 不再作为独立 pending 文档；职责由 **`D06`** 承接。文中若仍见旧称 `17`，一律读作 **D06**（直至各邻域 header 完成 D06-calibrated 回填）。
@@ -350,7 +352,7 @@ pending → designing → owner-gate → accepted → frozen
 | 核心 domain | `8` | 新系统的业务责任分组，不对应部署单元 |
 | 详细子系统 spec | `16` | 必须逐项设计、接受并回填的最小完整集合 |
 | 跨系统基线 spec | `2` | scope/glossary（`00`）、acceptance/truth freeze（`18`）；**运行拓扑不在此列** |
-| 跨 Domain architecture truth | `6` | `D01` Flow；`D02` 状态宪法；`D03` 仓库布局；`D04` 物理 schema；`D05` LS-RAG handbook；**`D06` Runtime Topology**（原 `17`） |
+| 跨 Domain architecture truth | `8` | `D01` Flow；`D02` 状态宪法；`D03` 仓库布局；`D04` 物理 schema；`D05` LS-RAG handbook；**`D06` Runtime Topology**（原 `17`）；**`D07` 验收台账**；**`D08` legacy 四域能力迁移** |
 | Legacy TypeScript 项目 | `10` | 证据源数量，不代表新子系统数量 |
 | 新 Python 发布单元 | `1` | leaf-worker 单体应用 |
 | 已知首个上游调用单位 | `1` | `03-nano/orchestrator-core`；其他内部 orchestrator 必须遵守同一 MKB Contract |
@@ -366,8 +368,8 @@ pending → designing → owner-gate → accepted → frozen
 | `smind-admin` | `S01, S02, S04, S05` | ingress、资源生命周期和平台职责泄漏反例 |
 | `smind-clean-dispatcher` | `S03, S04, S05` | callback、diff/scatter、restart、关系散射与非事务 wakeup 踩坑 |
 | `smind-rag-dispatcher` | `S03, S06-S09` | RAG 阶段、失败、purge 与跨 Worker 状态债务 |
-| `smind-skill-clean-universal` | `S05, S11, S13` | input/clean/Artifact 行为和浏览器/PDF复杂度证据；不决定首版范围 |
-| `smind-skill-clean-dedicated-apis` | `S04, S05` | API scatter、atomic key、content/meta digest 与 provider 分支证据 |
+| `smind-skill-clean-universal` | `S05, S11, S13, D08` | input/clean/Artifact 和 browser/PDF **strategy 分叉**；D08 写成可勾选 CleanStrategy |
+| `smind-skill-clean-dedicated-apis` | `S04, S05, D08` | 三 provider operation、atomic key、content/meta digest；D08 吸收 parser/schema，删除隧道/cookie |
 | `smind-skill-rag-structurizer` | `S06, S11, S14` | layered original/summary坐标、全文层、schema/model/prompt/repair行为与历史补丁证据 |
 | `smind-skill-rag-constructor` | `S07, S11, S14` | LS-RAG 双通道、meta fusion 与 recorder 行为证据 |
 | `smind-skill-rag-vectorizer` | `S03, S08, S09, S12, S15` | embedding/index/purge、队列与持久化耦合反例 |
@@ -459,6 +461,7 @@ pending → designing → owner-gate → accepted → frozen
 - **ReferenceAnchor纪律**：legacy-family只证明能力面、SMCP typed I/O原理与silent skip/random child/callback成功等踩坑，不产生runtime/schema/API/storage/acceptance兼容。
 - **关键不变量**：无validator不自动放行；missing Artifact不可人工伪造；root required evidence未过不推进children；waiting永不自动approve；`payload_extra`不承载identity/state/proof/route/auth/正文。
 - **完成回填**：正式Spec冻结30条S05 Truth、logical contracts、single/scatter/preflight/HITL flows、typed errors、风险、35项验收与reference-anchor台账；G04/G30-G32关闭。
+- **D08 校准（2026-08-13）**：四域 **operation/strategy 闭集与 `intake/` 树** 归 `D08-v0.1`；本域 kind/preflight/gate 不变。registered_api HARD（A09–A13）以 D08 parser/双 digest 为证据；通道空壳不构成关闭。
 
 ### 3.6 `S06` LS-RAG Structurizer
 
@@ -605,7 +608,7 @@ pending → designing → owner-gate → accepted → frozen
 
 - **一句话目标**：形成一套无平台职能泄漏、无 legacy 部署拓扑复制、契约完整且可验收的 MKB leaf-worker truth layer。
 - **完成定义**：
-  1. `00`、`D01–D06`、`S01–S16`、`18` 全部达到 `accepted`（**运行拓扑以 D06 为准**；历史编号 `17` 已废止，不得再单列 pending）；
+  1. `00`、`D01–D08`、`S01–S16`、`18` 全部达到 `accepted`（**运行拓扑以 D06 为准**；**验收 HARD 以 D07 为准**；**四域能力以 D08 为准**；历史编号 `17` 已废止，不得再单列 pending）；
   2. §4 所有 gate 已裁决或被明确移出本次范围；
   3. 所有跨系统 ID、状态、错误、版本、删除和审计语义完成对账；
   4. LS-RAG golden scenarios 完整覆盖 summary traceback；
@@ -692,7 +695,7 @@ pending → designing → owner-gate → accepted → frozen
 
 ### 8.3 Truth Freeze 流程
 
-当跨系统/cross-domain 与子系统真相文档（**`00 + D01–D06 + S01–S16 + 18`**）全部达到 `accepted`：
+当跨系统/cross-domain 与子系统真相文档（**`00 + D01–D08 + S01–S16 + 18`**）全部达到 `accepted`：
 
 1. 生成 `18-acceptance-truth-freeze.md` 的最终矩阵；
 2. 对账所有 contract、ID、状态机、error、event 和 version；
@@ -703,7 +706,7 @@ pending → designing → owner-gate → accepted → frozen
 7. 记录 truth version/tag；
 8. 从冻结 truth layer 生成重构计划，禁止用实施需要反向偷偷修改 spec。
 
-> **计数说明**：历史公式曾写 `00+D01+D02+S01–S16+17+18 = 21`（未单列当时尚未存在的 D03–D05）。现以 **`00 + D01–D06 + S01–S16 + 18`** 为完整集合；**`17` 不再计数**。
+> **计数说明**：历史公式曾写 `00+D01+D02+S01–S16+17+18 = 21`（未单列当时尚未存在的 D03–D05）。现以 **`00 + D01–D08 + S01–S16 + 18`** 为完整集合；**`17` 不再计数**。
 
 如果实施阶段发现 specification 错误，必须显式 reopen：
 
@@ -733,6 +736,8 @@ implementation finding
 - S16 Formal Spec：`docs/baseline/domain-truth/S16-security-trust-boundary.md`
 - S14–S16 战役审计：`docs/baseline/qna-truth/_s14-s16-campaign-audit.md`
 - **运行拓扑（D06 · 原 `17`）**：`docs/baseline/domain-truth/D06-runtime-topology.md`（`D06-v0.2-draft`；**禁止**再创建 `docs/baseline/specs/17-system-topology.md`）
+- **验收台账（D07）**：`docs/baseline/domain-truth/D07-v1-acceptance-truth.md`（`D07-v0.5-draft`）
+- **四域能力迁移（D08）**：`docs/baseline/domain-truth/D08-legacy-capabilities-migration.md`（`D08-v0.1-draft`）
 - Truth freeze：`docs/baseline/specs/18-acceptance-truth-freeze.md`（待创建）
 
 ---
@@ -741,13 +746,15 @@ implementation finding
 
 | 检查项 | 状态 | 证据/备注 |
 |--------|------|-----------|
-| `00` Scope & Glossary accepted | `accepted / active v2.8` | S01–S16 词表已登记；非 frozen truth index 入口（待 D06 accepted + `18`） |
+| `00` Scope & Glossary accepted | `accepted / active v2.9` | S01–S16 + D08 词表已登记；非 frozen truth index 入口（待 D06/D07/D08 accepted + `18`） |
 | `D01` Task/Execution/Process Flow accepted | `accepted / S06-calibrated` | D01-v1.4 + S06 generation非第四层runtime |
 | `D02` Production State Constitution & Ledger | `frozen / v1.0 / S06-calibrated` | `T-O-86..92`；S06 DR005/DR006已回填 |
 | `D03` Repository Layout | `accepted / v1.0` | `T-O-141..159` |
 | `D04` Turso Physical Schema | `accepted / v1.1` | `T-O-160..179+192..194` |
 | `D05` LS-RAG Handbook | `frozen / v1.0` | `T-O-202..210` |
 | `D06` Runtime Topology | `draft / owner-calibrated / v0.2` | **原 `17` 收敛**；`ai-mkb`+668/669+模型角色；**待 owner freeze → accepted** |
+| `D07` V1 Acceptance Truth | `draft / owner-review / v0.5` | HARD 台账；已载入 D08 槽；**待 owner freeze → accepted** |
+| `D08` Legacy Capabilities Migration | `draft / owner-review / v0.1` | 四域闭集 + intake 树 + D04 proposed；**待 owner freeze** |
 | `S01-S16` 全部 accepted | `met` | S01–S16 domain-truth accepted（S14–S16 v1.1 对抗评审校准） |
 | ~~`17` System Topology~~ | **`superseded by D06`** | **不再**维护 `specs/17-system-topology.md` |
 | `18` Acceptance Matrix accepted | `pending` | 全量验收矩阵与 truth freeze 签署尚未编写 |
@@ -829,3 +836,4 @@ implementation finding
 | `v0.61` | `2026-08-12` | `MKB owner + Grok workflow domain-truth-s14-s16` | **S14–S16 战役全真相层审计**：§1.1/§3.14–3.16/§7/附录 A 回填；glossary → **v2.8**；对抗扫描（race/盲点/覆盖）；审计报告 `qna-truth/_s14-s16-campaign-audit.md`；索引保持 **`active index`**（`17`/`18` pending，**不**宣称 frozen truth index）。 |
 | `v0.62` | `2026-08-12` | `MKB owner + Grok` | **废止独立 `17` System Topology 槽位**：运行拓扑收敛至 **`D06-runtime-topology.md`（v0.2-draft）**；§1.2/§1.3/§2.2/§4/§5/§8.3/§9/附录 A 全部改指 D06；完成定义改为 `00+D01–D06+S01–S16+18`；宿主机资源非 blocker 纪律见 D06。 |
 | `v0.63` | `2026-08-12` | `MKB owner + Grok` | 新增 **§0.5 Python 技术栈：描述 · 要求 · 约束**（`PY-01..53`）：CPython≥3.12、单体发布、contracts typed SSOT、Ports 隔离 Turso/对象/vLLM、`ai-mkb` 推理平面、安全/观测与 architecture 门禁；与 D03/D04/D06/S11–S16 勾稽。 |
+| `v0.64` | `2026-08-13` | `MKB owner + Grok` | 登记 **D08-v0.1**（legacy 四域能力 → intake 拓扑）与 **D07-v0.5** 槽位回填；D03/D04/S05 D08-calibrated；跨 Domain truth 计数 6→8；完成集合改为 `00+D01–D08+S01–S16+18`；glossary v2.9。 |

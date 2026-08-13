@@ -32,6 +32,8 @@
 
 > **冻结声明**：Owner 2026-08-11 批准本文件为真相层一部分。§2 全域 `T-O-141..159` 与域内 `D03-T*` 一一对应，**append-only**；变更须显式 reopen D03。
 
+> **D08 校准（2026-08-13）**：`D08-v0.1` **reopen §4.3「禁止在 intake 内实现 clean」**。`intake/{api,doc,pdf,web}` 是四域 **源适配 + 清洗变换** 的唯一实现点（`D08-T006`）。`src/runtime` 只围栏；S04 表权威仍不在 intake。D03-T004 顶级四域目录 **不改**。完整树与禁止事项以 D08 §4.3 为准。
+
 ---
 
 ## 1. Domain 介绍
@@ -391,9 +393,10 @@ intake/
 | 允许 | 禁止 |
 |---|---|
 | 按源 kind 的 **源 I/O 适配**（fetch/decode/stream） | 写 IntakeSnapshot/Revision 权威表（须经 S04 ports） |
-| 产出必须先 **contracts/intake** 校验再交给 services | 在 intake 内实现 clean/structurize 等非源职责 |
-| 被 runtime/services 在 acquire 工序调用 | 独立对外 HTTP 产品面（对外仍 `api/public` Task） |
-| legacy 源抽象思想 | runtime import `legacy-family` |
+| **四域清洗变换**（provider parser、web/pdf/doc strategy；D08） | 在 `src/services` 或 `src/runtime` 再实现平行 cleaner |
+| 产出必须先 **contracts/intake** 校验再交给 runtime | structurize/construct/vectorize（非 intake 职责） |
+| 被 runtime 在 acquire/**clean** 工序调用 | 独立对外 HTTP 产品面（对外仍 `api/public` Task） |
+| legacy 规范的纯函数改写（schema/parser/strategy） | runtime import `legacy-family`；live 隧道/cookie/CF 常量 |
 
 **对应真相**：`D03-T004`。
 
@@ -609,6 +612,7 @@ src/contracts  ──x──►  api | runtime | services | persistence | storag
 | `D03-v0.3-draft` | `2026-08-11` | `superseded` | contracts 分域；消息必校验抛弃 |
 | `D03-v0.4-draft` | `2026-08-11` | `superseded` | contracts 唯一 SSOT；prompts git+hash；消息范围收紧 |
 | `D03-v1.0` | `2026-08-11` | `accepted / frozen` | Owner 冻结为真相层；登记 `T-O-141..159`；回填 index/glossary |
+| `D03-v1.0-cal-d08` | `2026-08-13` | `accepted / D08-calibrated` | reopen §4.3：intake 四域承载 clean 变换；T-O-144 顶级目录不变 |
 
 ---
 

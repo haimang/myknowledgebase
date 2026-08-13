@@ -4,11 +4,11 @@
 >
 > **文档角色**：跨规格词汇手册、命名边界与对齐登记册
 >
-> **权威输入**：D01–D05、S01–S16
+> **权威输入**：D01–D08、S01–S16
 >
-> **状态**：`active / S14-S16-v1.1 calibrated / campaign-audit`
+> **状态**：`active / S14-S16-v1.1 calibrated / D08-calibrated`
 >
-> **版本 / 日期**：`v2.8 / 2026-08-12`
+> **版本 / 日期**：`v2.9 / 2026-08-13`
 
 ## 0. 使用规则
 
@@ -203,6 +203,13 @@ Revision 回答“来源业务事实是否改变”；build generation 回答“
 | `HTTPValidatorEvidence` | `frozen distinction / S05-v1.1` | ETag、Last-Modified等HTTP条件请求/一致性提示证据，不自动成为Revision identity、完整性证明或PreflightValidator |
 | `Digest` | `frozen / S05-v1.1` | 带scope、SHA-256算法和canonicalization/schema/definition版本的内容或metadata摘要；JSON基线JCS，text基线UTF-8/LF/NFC；用于完整性/变更判断，不替代UUID、authority或identity |
 | `IntakeSourceKindDefinition` | `frozen / S05-T004` | 内部注册、immutable versioned的source contract，绑定strict descriptor/config schemas、cardinality/completeness、capability eligibility、normalizer、budget与preflight eligibility |
+| `ProviderDefinition` | `owner-directed / D08-v0.1` | `registered_api` 下 versioned provider 头（如 `chinatax`/`domain`/`realestate`）；**不是**第五类 source kind，也不是 `action_branch` |
+| `ProviderOperation` | `owner-directed / D08-v0.1` | 某 provider 的精确 operation（request/envelope/member schema + normalizer + cardinality）；坐标 `(provider, operation, definition_version)`；不等于 live URL |
+| `CleanStrategy` | `owner-directed / D08-v0.1` | 与 source kind 正交的清洗策略（`web.deterministic`/`web.llm_rewrite`/`web.browser_print_pdf`/`pdf.text_layer`/`pdf.document_understanding`/`doc.*`）；禁止组合 branch 名当 taxonomy |
+| `FilterMeta` | `owner-directed / D08-v0.1` | registered_api member 的五维筛选面：`realm,type,channel,source_name,is_active`；晋升 SemanticDefinition；不等于 clean_text |
+| `ContextMeta` | `owner-directed / D08-v0.1` | 复用 FilterMeta 五维 + `title` + `tags[]`，供 prompt/检索上下文；不等于 StructureDocument |
+| `ContentDigest` / `MetaDigest` | `owner-directed / D08-v0.1` | member 正文维与效力/状态维的双 SHA-256；禁止随机 UUID 替代 ExternalKey |
+| `action_branch` | `legacy-only` | legacy Worker 用组合字符串同时选 provider 与是否上 Gemini；**禁止**进入 MKB source_kind / workflow_key / 对外 descriptor |
 | `AcquisitionEvidence` | `frozen / S05-T008` | 一次acquisition Process在exact Execution fence下形成的typed representation/media/encoding/redirect/page/budget证据；不是IntakeSnapshot或HTTP日志 |
 | `IntakeCandidateMember` | `frozen / S05-T008` | CandidateSet内具有stable ordinal、ExternalKey evidence、canonical semantic tuples、Artifact/clean/validation refs的typed member；不是IntakeItem，需经S04 acceptance解析 |
 | `CleanArtifactCandidate` | `frozen / S05-T008..10` | clean活动产出的staged typed descriptor，携带input/output digest、logical handle、capability/parser/model/prompt、producer fence、loss/quality与lineage；acceptance后才绑定canonical IntakeArtifact owner |
@@ -613,6 +620,8 @@ Revision 回答“来源业务事实是否改变”；build generation 回答“
 | `qna-truth/_s14-s16-campaign-audit.md` | 全真相层战役审计 | `2026-08-12 / campaign complete` |
 | `qna-truth/S06.md` | S06 formal Spec 证据层 | `locked / S06-v1.0` |
 | `qna-truth/D02.md` | `T-O-86..92` | `frozen` |
+| `domain-truth/D07-v1-acceptance-truth.md` | 验收 HARD 台账 | `D07-v0.5 / draft` |
+| `domain-truth/D08-legacy-capabilities-migration.md` | 四域能力闭集与 intake 树 | `D08-v0.1 / draft` |
 
 所有后续实现与Spec遵守：
 
@@ -646,3 +655,4 @@ Revision 回答“来源业务事实是否改变”；build generation 回答“
 | `v2.6` | `2026-08-12` | 接收S08-v1.0与`T-O-211..230`：LsragVectorizeCapability、VectorizeCommand/Outcome/Handoff、RequiredSet；Layer B 抄写分账；vectorize_structure v1 forbid；FacetMap reserved→S04。 |
 | `v2.7` | `2026-08-12` | 接收 S14–S16 v1.1：登记 ConfigSnapshot/RegistryPort/ProvenanceEnvelope、ObservabilityReadPort/HealthAggregator、InternalToken/EndpointClass/EgressPolicy/SupplyFence/sec_token_loaded 等；权威输入扩至 S01–S16。 |
 | `v2.8` | `2026-08-12` | **S14–S16 战役审计**：扩展 ConfigLayer/binding_digest/OverrideAllowlist/CONFIG_*、EventTypeRegistry/OBS_*/DomainEventLedger、AdmissionDecision/actor_fingerprint/RedactionPolicy/SEC_*；alignment 补 S08–S11；同步 index v0.61。 |
+| `v2.9` | `2026-08-13` | 接收 **D08-v0.1**：登记 ProviderDefinition/ProviderOperation/CleanStrategy/FilterMeta/ContextMeta/双 digest；`action_branch` 标 legacy-only；alignment 补 D07/D08。 |

@@ -39,6 +39,8 @@
 
 > **S13校准声明**：`S13-v1.0` 冻结 v1 本地 `object_root` + `ObjectStorePort`、`mkbobj:v1` handle、team-scoped CAS、bytes-first、同库 catalog/ref/purpose、verify-on-read、周期 GC 与 identity readiness。本文件业务语义不变；对象 I/O 必须经 S13 Port，禁止 path/R2 key 进入契约。
 
+> **D08 校准声明（2026-08-13）**：`D08-v0.1` 是 **legacy 四域能力闭集与 `intake/` 树** 的 SSOT。本文件四类 source kind、三轴 binding、preflight/gate **不改**。`S05-T001` 的「不得删减」能力面由 D08 写成可勾选 operation/strategy；`S05-T002` 继续禁止 `action_branch` taxonomy。`S05-A09..A13` 的 provider schema / stable key / 空集合证明以 D08 parser 与双 digest 为证据形态。通道空壳或 duck-type mapper **不满足** 本域 registered_api HARD。
+
 > **D05校准声明（T-O-202/208/210）**：清洗是知识生产主链 **第 1 环节**。凡模型辅助 clean 必须绑定 **`promptA.<variant>.<version>` + content_hash**（`PromptRef`）；正文在 `data/prompts/intake/clean/**`，DB 仅 hash 指针（D03）。Clean **不**做多粒度 structure / summary / 向量。失败 retry/max_retries **仅** 服从 S03/D01（T-O-207）。下游 structurize 消费 exact clean Artifact。
 ## 1. Domain 介绍
 
@@ -887,3 +889,4 @@ S05 以严格、确定、可复验的source与clean contract把任意外部输�
 | `S05-v1.1-cal-s12` | `2026-08-11` | `MKB owner + Codex` | `accepted / S13-calibrated` | 接收S12-v1.0：TX-08/outbox；S05语义不变。 |
 | `S05-v1.1-cal-s13` | `2026-08-11` | `MKB owner + Codex` | `accepted / S13-calibrated` | 接收S13-v1.0：staging port/handle/gate evidence 引用保护落地。 |
 | `S05-v1.1-cal-d05` | `2026-08-12` | `MKB owner + Codex` | `accepted / D05-calibrated` | 接收 D05-v1.0 / `T-O-208`：clean 绑定 **promptA**；生产链第 1 环节。 |
+| `S05-v1.1-cal-d08` | `2026-08-13` | `MKB owner + Grok` | `accepted / D08-calibrated` | 四域能力闭集与 intake 树归 D08；kind/gate 不变；A09–A13 以 provider parser 为证据。 |

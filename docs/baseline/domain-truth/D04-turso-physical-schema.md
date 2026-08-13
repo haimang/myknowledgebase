@@ -8,7 +8,7 @@
 >
 > **文档状态**：`accepted / owner-frozen`（域内已接受并进入真相层；全系统 truth layer 尚未统一 frozen）
 >
-> **Truth 版本 / 日期**：`D04-v1.1 / 2026-08-12`（v1.0 + S11 窄 reopen：model/inference 三表）
+> **Truth 版本 / 日期**：`D04-v1.1 / 2026-08-12`（v1.0 + S11 窄 reopen：model/inference 三表）；**D08-calibrated 2026-08-13**（registry 要求重排 + 3 表 proposed，**55 required 不变**）
 >
 > **作者 / 规范化**：`Codex`；**裁决**：`MKB owner` 2026-08-11 冻结 v1.0；2026-08-12 批准 S11 增表 reopen
 >
@@ -219,6 +219,9 @@ D04 回答：在 **单主库 `mkb_primary`**（T-O-102）上，如何用 **一�
 | 54 | `mkb_model_catalog` | 逻辑模型目录（embed/rerank/generate…） | S11/S14 | required |
 | 55 | `mkb_adapter_bindings` | 能力 → adapter_kind + model 绑定 | S11 | required |
 | — | ProcessCapabilityManifest 表 | code registry | S03 | **defer 表** |
+| — | `mkb_intake_provider_definitions` | registered_api provider 头 | D08/S05 | **proposed / D08**（非 required） |
+| — | `mkb_intake_provider_operations` | operation + request/envelope/member schema digest | D08/S05 | **proposed / D08**（非 required） |
+| — | `mkb_intake_clean_strategy_definitions` | web/pdf/doc clean strategy | D08/S05 | **proposed / D08**（非 required） |
 
 #### 2.2.4 `intake` 模块（15）
 
@@ -872,12 +875,34 @@ UNIQUE(`workflow_revision_uuid`,`guard_group_key`,`order_index`)。
 |---|---|---|
 | `mkb_intake_semantic_definitions` | `semantic_key`,`definition_version` | `value_kind`; fingerprint/route flags |
 | `mkb_intake_action_definitions` | `action_key`,`definition_version` | effect mask；from-state mask |
-| `mkb_source_kind_definitions` | `source_kind`,`definition_version` | cardinality；capability eligibility digests |
+| `mkb_source_kind_definitions` | `source_kind`,`definition_version` | cardinality；capability eligibility digests。**D08**：eligibility 必须列出精确 acquire/clean keys（含 `clean.extract.web\|pdf_llm\|doc_llm`）；`registered_api` 行须绑定 provider-operation manifest digest。**禁止**把 provider 做成第五 kind |
 | `mkb_preflight_profile_definitions` | `profile_key`,`definition_version` | check-set digest |
 | `mkb_structure_schema_definitions` | `schema_key`,`schema_version` | kernel/extension schema digests；media contracts |
 | `mkb_construction_schema_definitions` | `schema_key`,`schema_version` | structure schema range；channel contracts |
 
 **索引**：各表 UNIQUE(key,version)；(`definition_digest`)。
+
+#### 3.3.2b D08 校准：FilterMeta 语义键与 proposed provider/strategy 表
+
+> **闭集纪律**：本节 **不**把 required 表数从 55 改为 58。下列表与列是 **D08-v0.1 提出的重排要求**；升 required 必须 D04 reopen + owner `T-O`。未 reopen 前，等价合同落在 `src/contracts/intake` + code-owned bootstrap digest（**禁止**用 `payload_extra` 冒充 schema SSOT）。
+
+**SemanticDefinition 应登记的 FilterMeta 五维**（进现表 `mkb_intake_semantic_definitions`，不新建表）：
+
+| `semantic_key` | 说明 |
+|---|---|
+| `realm` | 如 `tax_china` / `realestate_on_market` / `realestate` |
+| `type` | 如税局文件类型、`sale_mode`、`listing` |
+| `channel` | 栏目 / 物业类型 / buy\|rent\|sold |
+| `source_name` | 站点或 agency 名 |
+| `is_active` | `0\|1`；规则按 **operation version** |
+
+CandidateMember 合同必须携带 `content_digest` 与 `meta_digest`（D08-T008）。可暂存于 `mkb_intake_candidate_pages` 的 sealed payload，但 contracts 形状一等，不得只写 extra。
+
+**Proposed 表列（权威叙述在 D08 §4.4；此处仅钉物理意图）：**
+
+- `mkb_intake_provider_definitions`：`(provider_key, definition_version)` + digest + `source_kind='registered_api'`  
+- `mkb_intake_provider_operations`：`(provider_key, operation_key, definition_version)` + request/envelope/member/normalizer digest + cardinality + secret **slot 名**  
+- `mkb_intake_clean_strategy_definitions`：`(strategy_key, version)` + channel + acquire/clean capability + llm/browser required + optional prompt pointer + `max_input_bytes`
 
 #### 3.3.3 `mkb_prompt_hash_pointers`
 
@@ -1759,6 +1784,7 @@ D04 把单库 Turso 的 **表闭集、索引、可观测与模型/推理账、�
 | `D04-v1.0` | `2026-08-11` | `MKB owner + Codex` | `owner-frozen` | `T-O-160..179`。 |
 | `D04-v1.1` | `2026-08-12` | `MKB owner + Codex` | **`owner-frozen / S11-reopen`** | +3 表至 55；`T-O-192..194`；embedding 隔离；§3.8。 |
 | `D04-v1.1-cal-s11-r2` | `2026-08-12` | `MKB owner + Codex` | **`owner-frozen / S11-R2-calibrated`** | §3.7.4b 双层 filter：`T-O-197` 空间隔离 + `T-O-198` 业务 filter（team/intake/上游 facet）。 |
+| `D04-v1.1-cal-d08` | `2026-08-13` | `MKB owner + Grok` | **`owner-frozen / D08-calibrated`** | §2.2.3 三表 proposed；§3.3.2b FilterMeta 五维 + provider/strategy 重排。**55 required 不变**。 |
 
 ---
 
