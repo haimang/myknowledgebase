@@ -23,6 +23,9 @@ def _settings(tmp_path: Path) -> Settings:
         object_root=tmp_path / "objects",
         inference_probe_enabled=False,
         live_inference=False,
+        persistence_backend="turso",
+        concurrent_writes_required=False,
+        native_vector_required=False,
         rate_limit_ip_per_min=1_000,
         rate_limit_token_per_min=2_000,
     )

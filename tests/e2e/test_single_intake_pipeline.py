@@ -20,13 +20,14 @@ from src.contracts.inference.models import (
     TextGenerateResponse,
 )
 from src.runtime.config import Settings
+from tests.local_runtime import local_mock_settings
 
 
 def _settings(tmp_path: Path) -> Settings:
-    return Settings(
-        internal_token="integration-token",
+    return local_mock_settings(
         database_path=tmp_path / "mkb.sqlite3",
         object_root=tmp_path / "objects",
+        internal_token="integration-token",
         inference_probe_enabled=False,
         # The offline profile intentionally shares its deterministic vector
         # transform between vectorization and query retrieval, so this test
@@ -135,6 +136,33 @@ def test_single_intake_publishes_grounded_retrieval_context(tmp_path: Path) -> N
         assert "execution_uuid" not in rendered
         assert "process_uuid" not in rendered
 
+    _assert_d04_full_chain(tmp_path / "mkb.sqlite3")
+
+
+def _assert_d04_full_chain(database_path: Path) -> None:
+    database_uri = f"file:{database_path}?mode=ro"
+    with sqlite3.connect(database_uri, uri=True) as connection:
+        connection.row_factory = sqlite3.Row
+        changesets = connection.execute("SELECT change_set_uuid FROM mkb_intake_change_sets").fetchall()
+        facts = connection.execute("SELECT fact_uuid FROM mkb_intake_change_set_facts").fetchall()
+        events = {
+            row["event_type"]
+            for row in connection.execute("SELECT event_type FROM mkb_domain_events")
+        }
+        stored = connection.execute("SELECT stored_object_uuid FROM mkb_stored_objects").fetchall()
+        vectors = connection.execute(
+            "SELECT embedding, dimension FROM mkb_vector_records WHERE deleted_at IS NULL"
+        ).fetchall()
+    assert changesets, "single-item TX-05 must persist a ChangeSet"
+    assert facts, "single-item TX-05 must persist ChangeSet facts"
+    assert "task.created" in events
+    assert "intake.snapshot_accepted" in events
+    assert "generation.artifact_accepted" in events
+    assert "vector.upserted" in events
+    assert stored, "object catalog must land"
+    assert vectors, "vector records must land"
+    assert all(row["embedding"] is not None and len(row["embedding"]) == row["dimension"] * 4 for row in vectors)
+
 
 class _LiveEmbeddingFixture:
     """A binding-observant facade stub for live S06/S07/S08 paths.
@@ -223,10 +251,10 @@ def test_live_profile_uses_frozen_binding_for_vector_write_and_query(tmp_path: P
     team_uuid, task_uuid, trace_uuid = uuid7(), uuid7(), uuid7()
     token = "live-integration-token"
     app = create_app(
-        Settings(
-            internal_token=token,
+        local_mock_settings(
             database_path=tmp_path / "mkb.sqlite3",
             object_root=tmp_path / "objects",
+            internal_token=token,
             inference_probe_enabled=False,
             live_inference=True,
             rate_limit_ip_per_min=1_000,

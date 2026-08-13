@@ -25,6 +25,9 @@ def client(tmp_path: Path) -> TestClient:
         Settings(
             internal_token="retrieval-validation-token",
             database_path=tmp_path / "mkb.sqlite3",
+            persistence_backend="sqlite",
+            concurrent_writes_required=False,
+            native_vector_required=False,
             object_root=tmp_path / "objects",
             inference_probe_enabled=False,
             rate_limit_ip_per_min=1_000,

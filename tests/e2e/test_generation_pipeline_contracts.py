@@ -33,6 +33,9 @@ def test_generation_members_are_independent_and_vectorize_every_channel(tmp_path
             object_root=object_root,
             inference_probe_enabled=False,
             live_inference=False,
+            persistence_backend="turso",
+            concurrent_writes_required=False,
+            native_vector_required=False,
             rate_limit_ip_per_min=1_000,
             rate_limit_token_per_min=2_000,
         )

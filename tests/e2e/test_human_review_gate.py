@@ -34,6 +34,9 @@ def test_human_review_gate_is_task_scoped_idempotent_and_resumes(tmp_path: Path)
         database_path=tmp_path / "mkb.sqlite3",
         object_root=tmp_path / "objects",
         inference_probe_enabled=False,
+        persistence_backend="turso",
+        concurrent_writes_required=False,
+        native_vector_required=False,
         # The test polls a local supervisor every 20ms.  Isolate that load
         # from production's deliberately conservative S16 defaults.
         rate_limit_ip_per_min=1_000,
