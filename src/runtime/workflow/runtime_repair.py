@@ -176,10 +176,24 @@ class WorkflowRepairMixin:
                     continue
                 if reason == "human_review":
                     gate = await tx.fetchone(
-                        "SELECT gate_uuid FROM mkb_execution_gates WHERE gate_uuid=? AND execution_uuid=? AND status='open'",
+                        "SELECT gate_uuid,status FROM mkb_execution_gates WHERE gate_uuid=? AND execution_uuid=?",
                         (execution.get("waiting_ref"), execution["execution_uuid"]),
                     )
-                    if gate is not None:
+                    if gate is not None and gate["status"] == "open":
+                        continue
+                    # S02 may have CAS-closed the Gate while the S03 outbox
+                    # resume is still pending (D02 R3 two-phase ownership).
+                    pending = await tx.fetchone(
+                        "SELECT o.outbox_id FROM mkb_outbox AS o "
+                        "JOIN mkb_execution_gate_decisions AS d "
+                        "ON json_extract(o.payload_json,'$.decision_uuid')=d.decision_uuid "
+                        "WHERE o.team_uuid=? AND o.kind='gate_decision' AND o.status IN ('pending','in_flight') "
+                        "AND d.gate_uuid=?",
+                        (execution["team_uuid"], execution.get("waiting_ref")),
+                    )
+                    if pending is not None or (
+                        gate is not None and gate["status"] in {"released", "rejected", "superseded"}
+                    ):
                         continue
                     await self._fail_execution_integrity_tx(
                         tx,

@@ -19,7 +19,6 @@ import re
 import unicodedata
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
-from html.parser import HTMLParser
 from typing import Any, Literal
 
 from src.contracts.common.errors import MkbError
@@ -29,7 +28,6 @@ from src.contracts.inference.models import (
 from src.contracts.storage.models import ObjectStat
 from src.runtime.http_acquisition import HttpAcquisitionResult
 
-_SPACE = re.compile(r"\s+")
 _HTML_HINT = re.compile(r"<\s*(?:!doctype|html|head|body|article|main|div|p|h[1-6]|table|ul|ol|section)\b", re.I)
 _PDF_TEXT = re.compile(rb"\((?:\\.|[^\\()])*\)\s*(?:Tj|')")
 _PDF_ARRAY_TEXT = re.compile(rb"\[(.*?)\]\s*TJ", re.S)
@@ -70,81 +68,6 @@ class _AcquiredContent:
     evidence: dict[str, Any]
 
 
-class _DeterministicHtmlTextExtractor(HTMLParser):
-    """Small structural HTML extractor; never use regex tag stripping."""
-
-    _IGNORED = frozenset({"script", "style", "template", "noscript", "svg", "canvas"})
-    _BLOCK = frozenset(
-        {
-            "address",
-            "article",
-            "aside",
-            "blockquote",
-            "br",
-            "div",
-            "dl",
-            "dt",
-            "dd",
-            "figcaption",
-            "figure",
-            "footer",
-            "h1",
-            "h2",
-            "h3",
-            "h4",
-            "h5",
-            "h6",
-            "header",
-            "hr",
-            "li",
-            "main",
-            "nav",
-            "ol",
-            "p",
-            "pre",
-            "section",
-            "table",
-            "td",
-            "th",
-            "tr",
-            "ul",
-        }
-    )
-
-    def __init__(self) -> None:
-        super().__init__(convert_charrefs=True)
-        self.parts: list[str] = []
-        self._ignored_depth = 0
-        self.removed_tags: dict[str, int] = {}
-
-    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
-        del attrs
-        normalized = tag.lower()
-        if normalized in self._IGNORED:
-            self._ignored_depth += 1
-            self.removed_tags[normalized] = self.removed_tags.get(normalized, 0) + 1
-            return
-        if not self._ignored_depth and normalized in self._BLOCK:
-            self.parts.append("\n")
-
-    def handle_startendtag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
-        self.handle_starttag(tag, attrs)
-        self.handle_endtag(tag)
-
-    def handle_endtag(self, tag: str) -> None:
-        normalized = tag.lower()
-        if normalized in self._IGNORED:
-            if self._ignored_depth:
-                self._ignored_depth -= 1
-            return
-        if not self._ignored_depth and normalized in self._BLOCK:
-            self.parts.append("\n")
-
-    def handle_data(self, data: str) -> None:
-        if not self._ignored_depth:
-            self.parts.append(data)
-
-
 def _canonical_text(value: str) -> str:
     """The v1 text coordinate: UTF-8 decoded, LF and NFC normalized."""
 
@@ -172,20 +95,6 @@ def _canonical_json_text(value: str) -> str:
         return json.dumps(parsed, ensure_ascii=False, sort_keys=True, separators=(",", ":"), allow_nan=False)
     except (TypeError, ValueError, json.JSONDecodeError) as exc:
         raise MkbError("DECODE_JSON_INVALID", "JSON representation is not canonicalizable", 422) from exc
-
-
-def _extract_html_text(value: str) -> tuple[str, dict[str, Any]]:
-    extractor = _DeterministicHtmlTextExtractor()
-    try:
-        extractor.feed(value)
-        extractor.close()
-    except Exception as exc:  # HTMLParser has a deliberately small error surface.
-        raise MkbError("CLEAN_HTML_INVALID", "HTML representation could not be structurally parsed", 422) from exc
-    clean = _SPACE.sub(" ", _canonical_text("".join(extractor.parts))).strip()
-    return clean, {
-        "parser": "stdlib.html-parser.v1",
-        "removed_tag_counts": dict(sorted(extractor.removed_tags.items())),
-    }
 
 
 def _pdf_literal_bytes(value: bytes) -> bytes:
@@ -309,10 +218,6 @@ def _verified_media_type(*, declared: str | None, detected: str, mode: str | Non
     if detected != "application/octet-stream":
         return detected
     return declared or detected
-
-
-def _clean_text(value: str) -> str:
-    return _SPACE.sub(" ", _canonical_text(value)).strip()
 
 
 @dataclass(frozen=True, slots=True)

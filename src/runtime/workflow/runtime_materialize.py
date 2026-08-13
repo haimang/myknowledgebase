@@ -84,13 +84,44 @@ class WorkflowMaterializeMixin:
         context_key = {
             "registered_admission_result": "admission_result",
             "registered_request_intent": "request_intent",
+            "registered_metadata_disposition": "metadata_disposition",
         }.get(guard.predicate_type)
         if context_key is None:
             raise MkbError("workflow-guard-unsupported", "Workflow guard is not supported by the bounded runtime", 409)
+        # Missing typed fact fails closed (D02 R2): extra-only context never matches.
+        if context_key not in context:
+            results[route.guard_key] = False
+            return False
         result = context.get(context_key)
         matched = result == guard.expected_value
         results[route.guard_key] = matched
         return matched
+
+    async def _typed_route_context_tx(self, tx: UnitOfWork, execution: dict[str, Any]) -> dict[str, Any]:
+        """Build route guard context from durable Task/CandidateSet/transition facts."""
+
+        context: dict[str, Any] = {}
+        task = await tx.fetchone(
+            "SELECT request_intent FROM mkb_tasks WHERE team_uuid=? AND task_uuid=?",
+            (execution["team_uuid"], execution["task_uuid"]),
+        )
+        if task is not None and isinstance(task.get("request_intent"), str):
+            context["request_intent"] = task["request_intent"]
+        candidate = await tx.fetchone(
+            "SELECT admission_result FROM mkb_intake_candidate_sets "
+            "WHERE team_uuid=? AND producer_execution_uuid=?",
+            (execution["team_uuid"], execution["execution_uuid"]),
+        )
+        if candidate is not None and isinstance(candidate.get("admission_result"), str):
+            context["admission_result"] = candidate["admission_result"]
+        no_change = await tx.fetchone(
+            "SELECT 1 AS present FROM mkb_intake_item_transitions "
+            "WHERE team_uuid=? AND causation_execution_uuid=? AND action_key='no_change' LIMIT 1",
+            (execution["team_uuid"], execution["execution_uuid"]),
+        )
+        if no_change is not None:
+            context["metadata_disposition"] = "no_change"
+        return context
 
 
     async def _apply_routes_tx(

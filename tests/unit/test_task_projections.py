@@ -141,7 +141,7 @@ async def test_gate_decision_is_idempotent_and_never_leaks_runtime_ids(tmp_path:
             decisions = await tx.fetchone(
                 "SELECT COUNT(*) AS count FROM mkb_execution_gate_decisions WHERE gate_uuid=?", (gate_uuid,)
             )
-        assert execution == {"status": "running", "waiting_ref": None}
+        assert execution == {"status": "waiting", "waiting_ref": gate_uuid}
         assert outbox is not None and outbox["kind"] == "gate_decision"
         assert json.loads(outbox["payload_json"])["decision_uuid"] == committed["decision_uuid"]
         assert decisions == {"count": 1}

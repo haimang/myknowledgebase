@@ -17,6 +17,7 @@ from src.workflows.builtin_lsrag import (
     BUILTIN_SINGLE_INTAKE_LSRAG_WORKFLOW,
     HISTORICAL_SINGLE_INTAKE_LSRAG_WORKFLOW_V1,
 )
+from tests.unit.test_workflow_runtime import seed_typed_auto_admission
 
 
 class _SuccessfulLegacyStage:
@@ -97,6 +98,7 @@ async def _seed_v1_execution(persistence: SqlitePersistence, identity: WorkflowI
                 now,
             ),
         )
+        await seed_typed_auto_admission(tx, team_uuid=team_uuid, execution_uuid=execution_uuid)
     return team_uuid, task_uuid, execution_uuid
 
 

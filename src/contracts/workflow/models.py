@@ -246,7 +246,11 @@ class WorkflowGuardDefinition(StrictModel):
     """A bounded, registered admission guard with no free expression surface."""
 
     guard_key: WorkflowKey
-    predicate_type: Literal["registered_admission_result", "registered_request_intent"]
+    predicate_type: Literal[
+        "registered_admission_result",
+        "registered_request_intent",
+        "registered_metadata_disposition",
+    ]
     operator: Literal["eq"]
     expected_value: Annotated[str, Field(min_length=1, max_length=128)]
     failure_disposition: Literal["route_false"] = "route_false"
@@ -264,6 +268,7 @@ class WorkflowGuardDefinition(StrictModel):
                 "intake.delete",
                 "index.rebuild",
             },
+            "registered_metadata_disposition": {"no_change"},
         }
         if self.expected_value not in allowed[self.predicate_type]:
             raise ValueError("guard expected_value is not registered for its predicate")

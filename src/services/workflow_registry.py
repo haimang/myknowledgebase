@@ -341,8 +341,9 @@ class WorkflowRegistryService:
         )
         for guard in definition.guards:
             operand_kind, operand_ref = {
-                "registered_admission_result": ("admission_result", "preflight_outcome.admission_result"),
+                "registered_admission_result": ("admission_result", "candidate_set.admission_result"),
                 "registered_request_intent": ("request_intent", "task.request_intent"),
+                "registered_metadata_disposition": ("metadata_disposition", "intake_item_transition.no_change"),
             }.get(guard.predicate_type, (None, None))
             if operand_kind is None or operand_ref is None:
                 raise MkbError("workflow-guard-unsupported", "Workflow guard declaration is unsupported", 503)

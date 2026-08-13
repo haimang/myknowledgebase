@@ -187,44 +187,6 @@ class IntakeAcquisitionIntentsMixin:
                     )
                     if current_fingerprint != fingerprint or current_merged != _merged:
                         raise MkbError("METADATA_TARGET_STALE", "Frozen metadata inputs changed before admission", 409)
-                    candidate = await tx.execute(
-                        "INSERT OR IGNORE INTO mkb_intake_candidate_sets "
-                        "(candidate_set_uuid,team_uuid,intake_source_uuid,producer_execution_uuid,producer_process_uuid,"
-                        "producer_fencing_generation,source_kind_definition_digest,acquisition_capability_digest,s05_binding_digest,"
-                        "observation_key,observation_fingerprint,completeness,expected_member_count,observed_member_count,"
-                        "accepted_member_count,rejected_member_count,duplicate_member_count,expected_page_count,observed_page_count,"
-                        "expected_bytes,observed_bytes,root_digest,staging_state,seal_at,created_at,updated_at,payload_extra) "
-                        "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?, '{}')",
-                        (
-                            uuid7(),
-                            command.team_uuid,
-                            target["intake_source_uuid"],
-                            command.execution_uuid,
-                            command.process_uuid,
-                            command.fencing_generation,
-                            target["source_kind_definition_digest"],
-                            stable_digest({"process_key": "intake.update_metadata.no_change"}),
-                            command.binding_digest,
-                            target["normalized_external_key"],
-                            fingerprint,
-                            "complete",
-                            1,
-                            1,
-                            1,
-                            0,
-                            0,
-                            1,
-                            1,
-                            0,
-                            0,
-                            fingerprint,
-                            "accepted",
-                            now,
-                            now,
-                            now,
-                        ),
-                    )
-                    del candidate
                     await self._insert_no_change_transition(
                         tx,
                         command=command,
@@ -234,7 +196,7 @@ class IntakeAcquisitionIntentsMixin:
                         now=now,
                     )
 
-                return material, {"admission_result": "auto_admitted"}, no_change_callback
+                return material, {}, no_change_callback
 
             # Freeze an exact, already full-valid S06/S07 family before this
             # metadata Task enters its replay stages.  The later S07 handler may

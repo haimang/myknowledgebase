@@ -240,12 +240,57 @@ _ROUTES = [
         priority=10,
     ),
     WorkflowRouteDefinition(
+        route_key="acquire.to_succeeded_index_rebuild",
+        from_step_key="acquire",
+        to_step_key="succeeded",
+        route_kind=WorkflowRouteKind.TERMINAL,
+        outcome_selector=WorkflowOutcomeSelector.SUCCEEDED,
+        priority=0,
+        guard_key="request_intent_index_rebuild",
+    ),
+    WorkflowRouteDefinition(
+        route_key="acquire.to_succeeded_deactivate",
+        from_step_key="acquire",
+        to_step_key="succeeded",
+        route_kind=WorkflowRouteKind.TERMINAL,
+        outcome_selector=WorkflowOutcomeSelector.SUCCEEDED,
+        priority=1,
+        guard_key="request_intent_deactivate",
+    ),
+    WorkflowRouteDefinition(
+        route_key="acquire.to_succeeded_reactivate",
+        from_step_key="acquire",
+        to_step_key="succeeded",
+        route_kind=WorkflowRouteKind.TERMINAL,
+        outcome_selector=WorkflowOutcomeSelector.SUCCEEDED,
+        priority=2,
+        guard_key="request_intent_reactivate",
+    ),
+    WorkflowRouteDefinition(
+        route_key="acquire.to_succeeded_delete",
+        from_step_key="acquire",
+        to_step_key="succeeded",
+        route_kind=WorkflowRouteKind.TERMINAL,
+        outcome_selector=WorkflowOutcomeSelector.SUCCEEDED,
+        priority=3,
+        guard_key="request_intent_delete",
+    ),
+    WorkflowRouteDefinition(
+        route_key="acquire.to_succeeded_metadata_no_change",
+        from_step_key="acquire",
+        to_step_key="succeeded",
+        route_kind=WorkflowRouteKind.TERMINAL,
+        outcome_selector=WorkflowOutcomeSelector.SUCCEEDED,
+        priority=4,
+        guard_key="metadata_no_change",
+    ),
+    WorkflowRouteDefinition(
         route_key="acquire.to_decode",
         from_step_key="acquire",
         to_step_key="decode",
         route_kind=WorkflowRouteKind.NORMAL,
         outcome_selector=WorkflowOutcomeSelector.SUCCEEDED,
-        priority=0,
+        priority=10,
     ),
     WorkflowRouteDefinition(
         route_key="decode.to_clean",
@@ -558,6 +603,30 @@ BUILTIN_SINGLE_INTAKE_LSRAG_WORKFLOW: Final[WorkflowDefinition] = WorkflowDefini
             expected_value="intake.update_metadata",
         ),
         WorkflowGuardDefinition(
+            guard_key="request_intent_deactivate",
+            predicate_type="registered_request_intent",
+            operator="eq",
+            expected_value="intake.deactivate",
+        ),
+        WorkflowGuardDefinition(
+            guard_key="request_intent_reactivate",
+            predicate_type="registered_request_intent",
+            operator="eq",
+            expected_value="intake.reactivate",
+        ),
+        WorkflowGuardDefinition(
+            guard_key="request_intent_delete",
+            predicate_type="registered_request_intent",
+            operator="eq",
+            expected_value="intake.delete",
+        ),
+        WorkflowGuardDefinition(
+            guard_key="metadata_no_change",
+            predicate_type="registered_metadata_disposition",
+            operator="eq",
+            expected_value="no_change",
+        ),
+        WorkflowGuardDefinition(
             guard_key="admission_auto_admitted",
             predicate_type="registered_admission_result",
             operator="eq",
@@ -589,16 +658,34 @@ def _pre_metadata_refresh_execution_document() -> dict[str, object]:
     S07 mode.
     """
 
+    _d02_acquire_shortcuts = {
+        "acquire.to_succeeded_index_rebuild",
+        "acquire.to_succeeded_deactivate",
+        "acquire.to_succeeded_reactivate",
+        "acquire.to_succeeded_delete",
+        "acquire.to_succeeded_metadata_no_change",
+    }
+    _d02_acquire_guards = {
+        "request_intent_deactivate",
+        "request_intent_reactivate",
+        "request_intent_delete",
+        "metadata_no_change",
+    }
     document = BUILTIN_SINGLE_INTAKE_LSRAG_WORKFLOW.model_dump()
     document["routes"] = [
-        route
+        {
+            **route,
+            **({"priority": 0} if route["route_key"] == "acquire.to_decode" else {}),
+        }
         for route in document["routes"]
         if route["guard_key"] != "request_intent_metadata_refresh"
+        and route["route_key"] not in _d02_acquire_shortcuts
     ]
     document["guards"] = [
         guard
         for guard in document["guards"]
         if guard["guard_key"] != "request_intent_metadata_refresh"
+        and guard["guard_key"] not in _d02_acquire_guards
     ]
     document["bindings"] = [
         binding

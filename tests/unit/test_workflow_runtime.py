@@ -102,6 +102,47 @@ class _StaleFenceStage(_AlwaysSuccessfulStage):
         return stale.model_copy(update={"outcome_digest": canonical_outcome_digest(stale)})
 
 
+async def seed_typed_auto_admission(tx, *, team_uuid: str, execution_uuid: str) -> None:
+    """Persist the CandidateSet admission fact engine routes now require (D02 R2)."""
+
+    now = utc_now()
+    await tx.execute(
+        "INSERT OR IGNORE INTO mkb_source_kind_definitions "
+        "(source_kind,definition_version,definition_digest,descriptor_schema_ref,descriptor_schema_digest,"
+        "cardinality,registered_at) VALUES ('inline_payload','v1',?,?,?,'single',?)",
+        ("a" * 64, "mkbtest:schema", "b" * 64, now),
+    )
+    source_uuid = uuid7()
+    await tx.execute(
+        "INSERT INTO mkb_intake_sources "
+        "(team_uuid,intake_source_uuid,source_kind,source_kind_definition_version,source_kind_definition_digest,"
+        "source_descriptor_ref,source_descriptor_digest,created_at,updated_at,payload_extra) "
+        "VALUES (?,?,'inline_payload','v1',?,'mkbobj:v1:source',?,?,?,'{}')",
+        (team_uuid, source_uuid, "a" * 64, "c" * 64, now, now),
+    )
+    await tx.execute(
+        "INSERT INTO mkb_intake_candidate_sets "
+        "(candidate_set_uuid,team_uuid,intake_source_uuid,producer_execution_uuid,producer_process_uuid,"
+        "producer_fencing_generation,source_kind_definition_digest,s05_binding_digest,"
+        "observation_key,observation_fingerprint,completeness,observed_member_count,observed_page_count,"
+        "observed_bytes,staging_state,admission_result,created_at,updated_at,payload_extra) "
+        "VALUES (?,?,?,?,?,1,?,?,?,?,'complete',1,1,4,'sealed','auto_admitted',?,?, '{}')",
+        (
+            uuid7(),
+            team_uuid,
+            source_uuid,
+            execution_uuid,
+            uuid7(),
+            "a" * 64,
+            "b" * 64,
+            f"obs-{execution_uuid}",
+            "d" * 64,
+            now,
+            now,
+        ),
+    )
+
+
 async def _seed_runtime(
     tmp_path: Path,
     *,
@@ -227,6 +268,7 @@ async def _seed_runtime(
                 now,
             ),
         )
+        await seed_typed_auto_admission(tx, team_uuid=ids["team_uuid"], execution_uuid=ids["execution_uuid"])
     return (
         persistence,
         WorkflowRuntime(
@@ -717,6 +759,12 @@ async def test_human_review_fails_closed_without_durable_acceptance_evidence(tmp
     """A route fact alone must never create a placeholder review target."""
 
     persistence, runtime, ids = await _seed_runtime(tmp_path)
+    async with persistence.transaction() as tx:
+        await tx.execute(
+            "UPDATE mkb_intake_candidate_sets SET admission_result='human_review_required' "
+            "WHERE producer_execution_uuid=?",
+            (ids["execution_uuid"],),
+        )
     await runtime.materialize_root(ids["execution_uuid"])
     worker = WorkflowWorker(runtime, _HumanReviewStage())
     for _ in range(6):

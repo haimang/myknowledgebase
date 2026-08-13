@@ -5,15 +5,15 @@ from __future__ import annotations
 from collections.abc import Awaitable, Callable, Mapping
 from typing import Any
 
+from intake import dispatch_clean
+from intake.types import CleanLanguageModel, CleanMember, CleanResult
 from src.contracts.common.errors import MkbError
 from src.contracts.common.ids import stable_digest
 from src.contracts.common.time import utc_now
 from src.contracts.runtime.models import ProcessCommand
 from src.persistence.ports import UnitOfWork
 from src.runtime.intake.types import (
-    _clean_text,
     _digest_bytes,
-    _extract_html_text,
     _StageMaterial,
 )
 
@@ -31,35 +31,31 @@ class IntakeCleanPreflightMixin:
                 raise MkbError("CLEAN_CAPABILITY_MISMATCH", "Image clean capability requires image evidence", 409)
             if command.process_key == "clean.extract.deterministic" and isinstance(media_type, str) and media_type.startswith("image/"):
                 raise MkbError("CLEAN_CAPABILITY_MISMATCH", "Image representation requires an image clean capability", 409)
-            if command.process_key == "clean.ocr.local":
-                raise MkbError(
-                    "CLEAN_OCR_CAPABILITY_UNAVAILABLE",
-                    "Local OCR is not configured for this deployment",
-                    503,
-                )
-            if command.process_key == "clean.extract.vision":
-                raise MkbError(
-                    "CLEAN_VISION_CAPABILITY_UNAVAILABLE",
-                    "Vision clean is not configured for this deployment",
-                    503,
-                )
             decoded = state.get("decoded_text")
-            if not isinstance(decoded, str):
+            if command.process_key not in {"clean.ocr.local", "clean.extract.vision"} and not isinstance(decoded, str):
                 raise MkbError("PIPELINE_INPUT_INVALID", "Decoded representation is unavailable", 422)
-            if media_type == "text/html":
-                clean, clean_evidence = _extract_html_text(decoded)
-            else:
-                clean = _clean_text(decoded)
-                clean_evidence = {"parser": "deterministic-text-normalizer.v1", "removed_tag_counts": {}}
-            if not clean:
-                raise MkbError("CLEAN_EMPTY", "Cleaning produced no admissible text", 422)
+            representation = "rendered" if (state.get("acquisition_evidence") or {}).get("representation_kind") == "rendered" else "static"
+            result = await dispatch_clean(
+                command.process_key,
+                text=decoded if isinstance(decoded, str) else None,
+                blob=self._clean_blob(state),
+                media_type=media_type if isinstance(media_type, str) else None,
+                source_kind=state.get("source_kind") if isinstance(state.get("source_kind"), str) else None,
+                url=self._clean_source_url(state),
+                representation=representation,
+                llm=self._clean_language_model(),
+                http_fetch=self._http_fetcher,
+                browser_fetch=self._browser_fetcher,
+            )
+            if not isinstance(result, CleanResult):
+                raise MkbError("CLEAN_RESULT_INVALID", "Single-document clean did not return a text artifact", 500)
             next_state = dict(state)
-            next_state["clean_text"] = clean
-            next_state["clean_digest"] = stable_digest({"text": clean})
+            next_state["clean_text"] = result.text
+            next_state["clean_digest"] = stable_digest({"text": result.text})
             next_state["clean_evidence"] = {
-                "clean_capability": "clean.extract.deterministic",
+                "clean_capability": result.capability,
                 "input_decoded_digest": state.get("decoded_digest"),
-                **clean_evidence,
+                **result.evidence,
             }
             material = self._material(
                 command,
@@ -67,7 +63,7 @@ class IntakeCleanPreflightMixin:
                 {
                     "clean_candidate": {
                         "content_digest": next_state["clean_digest"],
-                        "char_count": len(clean),
+                        "char_count": len(result.text),
                         "evidence": next_state["clean_evidence"],
                     }
                 },
@@ -77,6 +73,31 @@ class IntakeCleanPreflightMixin:
                 del tx, refs
 
             return material, {}, callback
+
+    def _clean_language_model(self) -> CleanLanguageModel | None:
+        injected = getattr(self, "_clean_llm", None)
+        return injected if injected is not None else None
+
+    @staticmethod
+    def _clean_blob(state: Mapping[str, Any]) -> bytes | None:
+        raw = state.get("raw_text")
+        if isinstance(raw, str) and state.get("raw_binary_transport"):
+            return raw.encode("latin-1")
+        return None
+
+    @staticmethod
+    def _clean_source_url(state: Mapping[str, Any]) -> str | None:
+        source = state.get("source")
+        if isinstance(source, Mapping):
+            url = source.get("url")
+            if isinstance(url, str) and url:
+                return url
+        evidence = state.get("acquisition_evidence")
+        if isinstance(evidence, Mapping):
+            url = evidence.get("request_url") or evidence.get("final_url")
+            if isinstance(url, str) and url:
+                return url
+        return None
 
     async def _clean_registered_api(
             self, command: ProcessCommand, state: dict[str, Any]
@@ -88,28 +109,25 @@ class IntakeCleanPreflightMixin:
             raw_members = state.get("collection_members")
             if not isinstance(raw_members, list):
                 raise MkbError("SCATTER_STATE_INVALID", "Registered API member list is unavailable", 422)
+            mapped = await dispatch_clean(
+                command.process_key,
+                members=raw_members,
+                provider=state.get("api_provider") if isinstance(state.get("api_provider"), str) else None,
+            )
+            if not isinstance(mapped, list):
+                raise MkbError("CLEAN_RESULT_INVALID", "Registered API clean did not return members", 500)
             clean_members: list[dict[str, Any]] = []
-            for ordinal, raw_member in enumerate(raw_members):
-                if not isinstance(raw_member, dict) or raw_member.get("member_ordinal") != ordinal:
-                    raise MkbError("SCATTER_MEMBER_ORDER_INVALID", "Registered API member order is invalid", 422)
-                raw_text = raw_member.get("raw_text")
-                if not isinstance(raw_text, str):
-                    raise MkbError("SCATTER_MEMBER_INVALID", "Registered API member content is unavailable", 422)
-                if raw_member.get("media_type") == "text/html":
-                    clean_text, clean_evidence = _extract_html_text(raw_text)
-                else:
-                    clean_text = _clean_text(raw_text)
-                    clean_evidence = {"parser": "deterministic-text-normalizer.v1", "removed_tag_counts": {}}
-                if not clean_text:
-                    raise MkbError("CLEAN_EMPTY", "Registered API member cleaning produced no admissible text", 422)
-                member = dict(raw_member)
-                member["clean_text"] = clean_text
-                member["clean_digest"] = stable_digest({"text": clean_text})
-                member["clean_evidence"] = {
-                    "clean_capability": "clean.map.registered_api",
-                    "input_raw_digest": member["raw_digest"],
-                    **clean_evidence,
-                }
+            for item in mapped:
+                if not isinstance(item, CleanMember):
+                    raise MkbError("CLEAN_RESULT_INVALID", "Registered API clean member is invalid", 500)
+                member = dict(raw_members[item.ordinal])
+                member["member_ordinal"] = item.ordinal
+                member["external_key"] = item.external_key
+                member["normalized_external_key"] = item.normalized_external_key
+                member["raw_digest"] = item.raw_digest
+                member["clean_text"] = item.clean_text
+                member["clean_digest"] = stable_digest({"text": item.clean_text})
+                member["clean_evidence"] = item.evidence
                 clean_members.append(member)
             candidate_root_digest = stable_digest(
                 {
@@ -218,8 +236,8 @@ class IntakeCleanPreflightMixin:
                         len(clean.encode("utf-8")),
                         len(clean.encode("utf-8")),
                         root_digest,
-                        "sealed",
-                        now,
+                        "open",
+                        None,
                         now,
                         now,
                     ),
@@ -315,8 +333,8 @@ class IntakeCleanPreflightMixin:
                         observed_bytes,
                         observed_bytes,
                         root_digest,
-                        "sealed",
-                        now,
+                        "open",
+                        None,
                         now,
                         now,
                     ),
@@ -377,21 +395,49 @@ class IntakeCleanPreflightMixin:
             )
 
             async def callback(tx: UnitOfWork, refs: Mapping[str, str]) -> None:
-                updated = await tx.execute(
-                    "UPDATE mkb_intake_candidate_sets SET preflight_outcome_ref=?,preflight_outcome_digest=?,"
-                    "row_revision=row_revision+1,updated_at=? WHERE candidate_set_uuid=? AND team_uuid=? AND staging_state='sealed'",
-                    (
-                        refs["output_ref"],
-                        refs["output_digest"],
-                        utc_now(),
-                        state["candidate_set_uuid"],
-                        command.team_uuid,
-                    ),
+                await self._seal_open_candidate_set_tx(
+                    tx,
+                    team_uuid=command.team_uuid,
+                    candidate_set_uuid=state["candidate_set_uuid"],
+                    preflight_ref=refs["output_ref"],
+                    preflight_digest=refs["output_digest"],
+                    admission_result=admission,
+                    fence_message="Preflight could not seal the open candidate set",
                 )
-                if updated.rowcount != 1:
-                    raise MkbError("CANDIDATE_SET_FENCE", "Preflight could not update the sealed candidate set", 409)
 
-            return material, {"admission_result": admission}, callback
+            return material, {}, callback
+
+    @staticmethod
+    async def _seal_open_candidate_set_tx(
+        tx: UnitOfWork,
+        *,
+        team_uuid: str,
+        candidate_set_uuid: str,
+        preflight_ref: str,
+        preflight_digest: str,
+        admission_result: str,
+        fence_message: str,
+    ) -> None:
+        """CAS open→sealed and bind validator refs on that seal edge (D02 R1)."""
+
+        now = utc_now()
+        updated = await tx.execute(
+            "UPDATE mkb_intake_candidate_sets SET staging_state='sealed',seal_at=COALESCE(seal_at,?),"
+            "preflight_outcome_ref=?,preflight_outcome_digest=?,admission_result=?,"
+            "row_revision=row_revision+1,updated_at=? "
+            "WHERE candidate_set_uuid=? AND team_uuid=? AND staging_state='open'",
+            (
+                now,
+                preflight_ref,
+                preflight_digest,
+                admission_result,
+                now,
+                candidate_set_uuid,
+                team_uuid,
+            ),
+        )
+        if updated.rowcount != 1:
+            raise MkbError("CANDIDATE_SET_FENCE", fence_message, 409)
 
     @staticmethod
     def _validate_single_preflight_evidence(state: Mapping[str, Any]) -> list[dict[str, str]]:
@@ -451,7 +497,7 @@ class IntakeCleanPreflightMixin:
                 )
             ):
                 raise MkbError("PREFLIGHT_EVIDENCE_INVALID", "Decoded representation failed its frozen digest fence", 409)
-            if not isinstance(clean, Mapping) or clean.get("clean_capability") != "clean.extract.deterministic":
+            if not isinstance(clean, Mapping) or not str(clean.get("clean_capability") or "").startswith("clean."):
                 raise MkbError("PREFLIGHT_EVIDENCE_INVALID", "Clean evidence is unavailable", 422)
             clean_text = state.get("clean_text")
             clean_digest = state.get("clean_digest")
@@ -569,7 +615,7 @@ class IntakeCleanPreflightMixin:
             clean = state.get("clean_evidence")
             if (
                 not isinstance(clean, Mapping)
-                or clean.get("clean_capability") != "clean.extract.deterministic"
+                or not str(clean.get("clean_capability") or "").startswith("clean.")
                 or clean.get("input_decoded_digest") != decoded_digest
             ):
                 raise MkbError("PREFLIGHT_EVIDENCE_INVALID", "Rebuild clean evidence is unavailable", 422)
@@ -636,18 +682,14 @@ class IntakeCleanPreflightMixin:
             )
 
             async def callback(tx: UnitOfWork, refs: Mapping[str, str]) -> None:
-                updated = await tx.execute(
-                    "UPDATE mkb_intake_candidate_sets SET preflight_outcome_ref=?,preflight_outcome_digest=?,"
-                    "row_revision=row_revision+1,updated_at=? WHERE candidate_set_uuid=? AND team_uuid=? AND staging_state='sealed'",
-                    (
-                        refs["output_ref"],
-                        refs["output_digest"],
-                        utc_now(),
-                        state["candidate_set_uuid"],
-                        command.team_uuid,
-                    ),
+                await self._seal_open_candidate_set_tx(
+                    tx,
+                    team_uuid=command.team_uuid,
+                    candidate_set_uuid=state["candidate_set_uuid"],
+                    preflight_ref=refs["output_ref"],
+                    preflight_digest=refs["output_digest"],
+                    admission_result=admission,
+                    fence_message="Preflight could not seal the open collection",
                 )
-                if updated.rowcount != 1:
-                    raise MkbError("CANDIDATE_SET_FENCE", "Preflight could not update the sealed collection", 409)
 
-            return material, {"admission_result": admission}, callback
+            return material, {}, callback

@@ -375,23 +375,6 @@ class TaskProjectionsMixin:
             )
             if gate_update.rowcount != 1:
                 raise ConflictError("gate-revision-conflict", "Gate changed while the decision was being committed")
-            execution_update = await tx.execute(
-                "UPDATE mkb_executions SET status='running',waiting_reason=NULL,waiting_ref=NULL,next_wake_at=?,"
-                "row_revision=row_revision+1,updated_at=? WHERE execution_uuid=? AND team_uuid=? AND task_uuid=? "
-                "AND generation=? AND status='waiting' AND waiting_ref=? AND row_revision=?",
-                (
-                    now,
-                    now,
-                    gate["execution_uuid"],
-                    team_uuid,
-                    task_uuid,
-                    gate["generation"],
-                    gate_uuid,
-                    target_data["expected_execution_revision"],
-                ),
-            )
-            if execution_update.rowcount != 1:
-                raise ConflictError("gate-execution-stale", "Execution changed while the decision was being committed")
             await self._enqueue(
                 tx,
                 team_uuid,

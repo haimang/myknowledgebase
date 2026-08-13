@@ -180,16 +180,13 @@ class TaskCommandsMixin:
             if row["status"] in {"succeeded", "failed", "cancelled"}:
                 return self._view(row), False
             now = utc_now()
-            await tx.execute(
+            updated = await tx.execute(
                 "UPDATE mkb_tasks SET status='cancelling',cancel_requested_at=?,row_revision=row_revision+1,updated_at=? "
                 "WHERE team_uuid=? AND task_uuid=? AND row_revision=? AND status IN ('queued','running','cancelling')",
                 (now, now, team_uuid, task_uuid, request.expected_revision),
             )
-            await tx.execute(
-                "UPDATE mkb_executions SET status='cancelling',cancel_requested_at=?,cancel_command_revision=?,updated_at=? "
-                "WHERE execution_uuid=? AND status NOT IN ('succeeded','failed','cancelled')",
-                (now, request.expected_revision + 1, now, row["current_root_execution_uuid"]),
-            )
+            if updated.rowcount != 1:
+                raise ConflictError("revision-conflict", "Task revision is stale")
             await self._enqueue(
                 tx,
                 team_uuid,

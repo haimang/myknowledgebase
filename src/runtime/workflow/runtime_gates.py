@@ -158,10 +158,9 @@ class WorkflowGatesMixin:
     async def consume_gate_decision(self, decision_uuid: str) -> bool:
         """Advance an already committed Task-surface Gate decision exactly once.
 
-        The public Task service owns decision admission, Gate CAS, and the
-        waiting-to-running projection.  This consumer never rewrites the
-        terminal Gate state.  It simply interprets the immutable decision in
-        the bound workflow and materializes its next durable intent.
+        The public Task service owns decision admission and Gate CAS only.
+        This consumer is the sole writer of Execution resume/failure for that
+        command (D02 R3).  It never rewrites the terminal Gate state.
         """
 
         async with self.persistence.transaction() as tx:
@@ -186,6 +185,20 @@ class WorkflowGatesMixin:
             execution = await self._execution(tx, decision["execution_uuid"])
             if execution["status"] in _TERMINAL_EXECUTION_STATUSES:
                 return False
+            if execution["status"] == ExecutionStatus.WAITING.value:
+                now = utc_now()
+                resumed = await tx.execute(
+                    "UPDATE mkb_executions SET status='ready',waiting_reason=NULL,waiting_ref=NULL,next_wake_at=NULL,"
+                    "row_revision=row_revision+1,updated_at=? "
+                    "WHERE execution_uuid=? AND status='waiting' AND waiting_ref=?",
+                    (now, execution["execution_uuid"], decision["gate_uuid"]),
+                )
+                if resumed.rowcount != 1:
+                    raise ConflictError(
+                        "gate-execution-projection-missing",
+                        "Gate decision could not resume the waiting Execution",
+                    )
+                execution = await self._execution(tx, decision["execution_uuid"])
             plan = await self._assert_execution_binding(tx, execution)
             control = self._control_step(plan, decision["gate_kind"])
             if decision["action"] == "approve":
@@ -197,9 +210,6 @@ class WorkflowGatesMixin:
                 selector = WorkflowOutcomeSelector.SUCCEEDED
                 terminal_error = None
             elif decision["action"] == "reject":
-                # The Task service leaves a rejected decision's Execution
-                # resumable enough for the runtime to take the declared
-                # failure terminal; it must not alter Gate state here.
                 if execution["status"] not in {
                     ExecutionStatus.WAITING.value,
                     ExecutionStatus.RUNNING.value,
@@ -212,12 +222,14 @@ class WorkflowGatesMixin:
                 raise MkbError(
                     "gate-action-route-unavailable", "No declared reclean route exists for this workflow", 409
                 )
+            typed = await self._typed_route_context_tx(tx, execution)
+            typed["gate_action"] = decision["action"]
             decision_result = self._route_decision(
                 plan=plan,
                 execution=execution,
                 source_step_key=control.step_key,
                 selector=selector,
-                route_context={"gate_action": decision["action"]},
+                route_context=typed,
             )
             changed = await self._apply_routes_tx(
                 tx,
@@ -225,7 +237,7 @@ class WorkflowGatesMixin:
                 execution=execution,
                 decision=decision_result,
                 source_process=None,
-                route_context={"gate_action": decision["action"]},
+                route_context=typed,
                 terminal_error=terminal_error,
             )
             await self._refresh_execution_counts_tx(tx, execution["execution_uuid"])

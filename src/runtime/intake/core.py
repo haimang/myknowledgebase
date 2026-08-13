@@ -43,6 +43,7 @@ class IntakeCoreMixin:
             browser_fetcher: BrowserFetcher | None = None,
             inference: InferenceFacade | None = None,
             live_inference: bool = False,
+            clean_llm: object | None = None,
             lifecycle: IntakeLifecycleService | None = None,
             scatter_acceptance: ScatterAcceptanceWriter | None = None,
             index_retirement: IndexGenerationRetirementService | None = None,
@@ -61,6 +62,7 @@ class IntakeCoreMixin:
             self._browser_fetcher = browser_fetcher
             self._inference = inference
             self._live_inference = live_inference
+            self._clean_llm = clean_llm
             self._lifecycle = lifecycle
             self._scatter_acceptance = scatter_acceptance or ScatterAcceptanceWriter()
             # This is optional only for focused unit compositions that never make
@@ -80,7 +82,7 @@ class IntakeCoreMixin:
 
             try:
                 state = await self._load_state(command)
-                material, route_extra, callback = await self._material_for(command, state)
+                material, _route_extra, callback = await self._material_for(command, state)
                 refs: dict[str, str] = {}
 
                 async def commit(tx: UnitOfWork) -> None:
@@ -113,7 +115,9 @@ class IntakeCoreMixin:
                     output_manifest_digest=staged.output_digest,
                     proof_ref=staged.proof_ref,
                     proof_digest=staged.proof_digest,
-                    payload_extra=route_extra,
+                    # Route facts live on Task / CandidateSet / transitions.
+                    # Outcome extra must never be the admission/intent SSOT.
+                    payload_extra={},
                 )
                 return provisional.model_copy(update={"outcome_digest": canonical_outcome_digest(provisional)})
             except MkbError as exc:
@@ -271,14 +275,6 @@ class IntakeCoreMixin:
             command: ProcessCommand,
             state: dict[str, Any],
         ) -> tuple[_StageMaterial, dict[str, Any], Callable[[UnitOfWork, Mapping[str, str]], Awaitable[None]]]:
-            # Lifecycle commands have one durable mutation at acquisition.  The
-            # declarative v1 skeleton then records its bounded terminal evidence
-            # without pretending that clean/construct/vector stages changed an
-            # already withdrawn Item.
-            if state.get("operation_mode") in {"lifecycle", "index_rebuild", "index_rebuild_noop", "metadata_no_change"} and (
-                command.process_key not in {"intake.acquire.inline", "index.rebuild"}
-            ):
-                return await self._passthrough(command, state)
             dispatch = {
                 "intake.acquire.inline": self._acquire,
                 "intake.acquire.local_object": self._acquire,
@@ -288,6 +284,9 @@ class IntakeCoreMixin:
                 "intake.decode.text_json_html": self._decode,
                 "intake.decode.pdf": self._decode,
                 "clean.extract.deterministic": self._clean,
+                "clean.extract.web": self._clean,
+                "clean.extract.pdf_llm": self._clean,
+                "clean.extract.doc_llm": self._clean,
                 "clean.ocr.local": self._clean,
                 "clean.extract.vision": self._clean,
                 "clean.map.registered_api": self._clean_registered_api,

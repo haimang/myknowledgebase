@@ -400,12 +400,15 @@ class WorkflowOutcomeMixin:
         terminal_error: str | None,
     ) -> None:
         plan = await self._assert_execution_binding(tx, execution)
+        typed = await self._typed_route_context_tx(tx, execution)
+        if "gate_action" in route_context:
+            typed["gate_action"] = route_context["gate_action"]
         decision = self._route_decision(
             plan=plan,
             execution=execution,
             source_step_key=process["step_key"],
             selector=selector,
-            route_context=route_context,
+            route_context=typed,
         )
         await self._apply_routes_tx(
             tx,
@@ -413,7 +416,7 @@ class WorkflowOutcomeMixin:
             execution=execution,
             decision=decision,
             source_process=process,
-            route_context=route_context,
+            route_context=typed,
             terminal_error=terminal_error,
         )
 
@@ -690,6 +693,12 @@ class WorkflowOutcomeMixin:
                 "row_revision=row_revision+1,updated_at=? "
                 "WHERE execution_uuid=? AND status IN ('claimed','running')",
                 (now, row["execution_uuid"]),
+            )
+            await tx.execute(
+                "UPDATE mkb_intake_candidate_sets SET staging_state='abandoned',"
+                "row_revision=row_revision+1,updated_at=? "
+                "WHERE team_uuid=? AND producer_execution_uuid=? AND staging_state IN ('open','sealed')",
+                (now, row["team_uuid"], row["execution_uuid"]),
             )
         # Children are ordered first.  A waiting review child has no Process
         # and therefore converges immediately; claimed/running children retain
