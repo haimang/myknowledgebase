@@ -53,6 +53,13 @@ second truth source. The domain-truth hierarchy remains authoritative.
     `POST /v1/teams/{team_uuid}/retrieval:search`. The route's path team UUID
     must equal the typed body team UUID; it creates no Task, Audit, Execution,
     Process, or outbox row and returns context-only data.
+13. D04/S12 TX-08 “gate decision + waiting 投影原子” is executed as the S01
+    two-step mapping already accepted by D02 R3: the public `decide_gate`
+    UoW writes `mkb_execution_gate_decisions` + gates CAS + `mkb_outbox`
+    `gate_decision` + `gate.decided`. Execution waiting release is applied
+    later by `consume_gate_decision` replaying that outbox row. There is
+    still one physical outbox and no second claim table. Folding resume
+    into the HTTP decide UoW would reopen D02.
 
 The record is deliberately small and is exercised by schema and architecture
 tests. A future formal documentation freeze should fold these resolutions back

@@ -15,6 +15,7 @@ from src.runtime.intake.types import (
     _json,
     _StageMaterial,
 )
+from src.services.events import DomainEventWriter
 
 
 class IntakeAcceptanceSnapshotMixin:
@@ -220,13 +221,103 @@ class IntakeAcceptanceSnapshotMixin:
                 )
                 if execution_updated.rowcount != 1:
                     raise MkbError("INTAKE_SNAPSHOT_EXECUTION_FENCE", "Execution snapshot coordinate changed before acceptance", 409)
+                change_set_uuid = uuid7()
+                change_set_digest = stable_digest(
+                    {
+                        "schema_version": "mkb.intake-change-set.v1",
+                        "intake_snapshot_uuid": state["intake_snapshot_uuid"],
+                        "candidate_root_digest": state["candidate_root_digest"],
+                        "members": [
+                            {
+                                "member_ordinal": 0,
+                                "intake_item_uuid": state["intake_item_uuid"],
+                                "intake_revision_uuid": state["intake_revision_uuid"],
+                                "required": True,
+                            }
+                        ],
+                    }
+                )
+                await tx.execute(
+                    "INSERT INTO mkb_intake_change_sets "
+                    "(change_set_uuid,team_uuid,intake_snapshot_uuid,change_set_digest,created_at,payload_extra) "
+                    "VALUES (?,?,?,?,?,'{}')",
+                    (
+                        change_set_uuid,
+                        command.team_uuid,
+                        state["intake_snapshot_uuid"],
+                        change_set_digest,
+                        now,
+                    ),
+                )
+                fact = {
+                    "kind": "accept_revision",
+                    "member_ordinal": 0,
+                    "intake_item_uuid": state["intake_item_uuid"],
+                    "intake_revision_uuid": state["intake_revision_uuid"],
+                }
+                await tx.execute(
+                    "INSERT INTO mkb_intake_change_set_facts "
+                    "(fact_uuid,change_set_uuid,team_uuid,fact_kind,fact_ordinal,intake_item_uuid,intake_revision_uuid,"
+                    "semantic_key,semantic_definition_version,absence_key,fact_digest,created_at,payload_extra) "
+                    "VALUES (?,?,?,?,?,?,?,NULL,NULL,NULL,?,?,'{}')",
+                    (
+                        uuid7(),
+                        change_set_uuid,
+                        command.team_uuid,
+                        "accept_revision",
+                        0,
+                        state["intake_item_uuid"],
+                        state["intake_revision_uuid"],
+                        stable_digest(fact),
+                        now,
+                    ),
+                )
                 task_updated = await tx.execute(
-                    "UPDATE mkb_tasks SET intake_snapshot_uuid=?,row_revision=row_revision+1,updated_at=? "
+                    "UPDATE mkb_tasks SET intake_snapshot_uuid=?,change_set_uuid=?,row_revision=row_revision+1,updated_at=? "
                     "WHERE team_uuid=? AND task_uuid=? AND current_root_execution_uuid=? AND intake_snapshot_uuid IS NULL",
-                    (state["intake_snapshot_uuid"], now, command.team_uuid, command.task_uuid, command.execution_uuid),
+                    (
+                        state["intake_snapshot_uuid"],
+                        change_set_uuid,
+                        now,
+                        command.team_uuid,
+                        command.task_uuid,
+                        command.execution_uuid,
+                    ),
                 )
                 if task_updated.rowcount != 1:
                     raise MkbError("INTAKE_SNAPSHOT_TASK_FENCE", "Task snapshot coordinate changed before acceptance", 409)
+                events = DomainEventWriter()
+                event_payload = {
+                    "intake_snapshot_uuid": state["intake_snapshot_uuid"],
+                    "intake_item_uuid": state["intake_item_uuid"],
+                    "intake_revision_uuid": state["intake_revision_uuid"],
+                    "change_set_uuid": change_set_uuid,
+                    "candidate_set_uuid": state["candidate_set_uuid"],
+                }
+                await events.write(
+                    tx,
+                    team_uuid=command.team_uuid,
+                    trace_uuid=command.trace_uuid,
+                    event_type="intake.snapshot_accepted",
+                    aggregate="intake",
+                    summary="Intake snapshot accepted",
+                    task_uuid=command.task_uuid,
+                    execution_uuid=command.execution_uuid,
+                    process_uuid=command.process_uuid,
+                    payload=event_payload,
+                )
+                await events.write(
+                    tx,
+                    team_uuid=command.team_uuid,
+                    trace_uuid=command.trace_uuid,
+                    event_type="intake.candidate_accepted",
+                    aggregate="intake",
+                    summary="Intake candidate accepted",
+                    task_uuid=command.task_uuid,
+                    execution_uuid=command.execution_uuid,
+                    process_uuid=command.process_uuid,
+                    payload=event_payload,
+                )
                 await tx.execute(
                     "INSERT INTO mkb_intake_item_transitions "
                     "(transition_uuid,team_uuid,intake_item_uuid,action_key,action_version,before_lifecycle,after_lifecycle,"
@@ -247,6 +338,20 @@ class IntakeAcceptanceSnapshotMixin:
                         stable_digest({"process": command.process_uuid, "fence": command.fencing_generation}),
                         now,
                     ),
+                )
+                await events.write(
+                    tx,
+                    team_uuid=command.team_uuid,
+                    trace_uuid=command.trace_uuid,
+                    event_type="intake.item_transitioned",
+                    aggregate="intake",
+                    summary="Intake item accepted a new revision",
+                    task_uuid=command.task_uuid,
+                    execution_uuid=command.execution_uuid,
+                    process_uuid=command.process_uuid,
+                    payload=event_payload,
+                    status_before="active",
+                    status_after="active",
                 )
 
             return material, {"admission_result": admission}, callback

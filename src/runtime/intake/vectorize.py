@@ -297,6 +297,25 @@ class IntakeVectorizeMixin:
                         vector_record_uuid=vector_record_uuid,
                         source_kind=state["source_kind"],
                     )
+                    from src.services.events import DomainEventWriter
+
+                    await DomainEventWriter().write(
+                        tx,
+                        team_uuid=command.team_uuid,
+                        trace_uuid=command.trace_uuid,
+                        event_type="vector.upserted",
+                        aggregate="vector",
+                        summary="Vector record upserted",
+                        task_uuid=command.task_uuid,
+                        execution_uuid=command.execution_uuid,
+                        process_uuid=command.process_uuid,
+                        payload={
+                            "vector_record_uuid": vector_record_uuid,
+                            "generation_artifact_uuid": record.get("generation_artifact_uuid")
+                            or state.get("construction_dual_channel_artifact_uuid"),
+                            "channel": record["channel"],
+                        },
+                    )
 
             return material, {"vectorize_outcome": vectorize_outcome.model_dump(mode="json")}, callback
 

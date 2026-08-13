@@ -581,8 +581,9 @@ class ScatterAcceptanceWriter:
             "intake_snapshot_digest,workflow_uuid,workflow_revision_uuid,compiled_digest,resolver_decision_digest,"
             "domain_binding_digest,s05_binding_digest,config_snapshot_ref,config_snapshot_digest,status,phase_key,"
             "waiting_reason,waiting_ref,row_revision,"
-            "manifest_ref,manifest_digest,manifest_revision,created_at,updated_at,payload_extra) "
-            "VALUES (?,?,?,?,?,?,?,NULL,'scatter_child','required','intake_item',?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,0,?,?,?,?,?,?)",
+            "manifest_ref,manifest_digest,manifest_revision,created_at,updated_at,"
+            "scatter_intake_revision_uuid,scatter_member_ordinal,scatter_change_set_uuid,payload_extra) "
+            "VALUES (?,?,?,?,?,?,?,NULL,'scatter_child','required','intake_item',?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,0,?,?,?,?,?,?,?,?,?)",
             (
                 member.child_execution_uuid,
                 command.team_uuid,
@@ -611,6 +612,9 @@ class ScatterAcceptanceWriter:
                 root_manifest_revision,
                 now,
                 now,
+                member.intake_revision_uuid,
+                member.member_ordinal,
+                acceptance.change_set_uuid,
                 payload_extra,
             ),
         )

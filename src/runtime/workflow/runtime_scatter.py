@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 from typing import Any
 
 from src.contracts.common.errors import MkbError
@@ -379,20 +378,14 @@ class WorkflowScatterMixin:
                 malformed = True
                 continue
             child = rows[0]
-            try:
-                binding = json.loads(child.get("payload_extra") or "{}")
-            except (TypeError, json.JSONDecodeError):
-                binding = None
             if (
                 child.get("execution_role") != "scatter_child"
                 or child.get("requiredness") != "required"
                 or child.get("target_kind") != "intake_item"
                 or child.get("intake_snapshot_uuid") != task["intake_snapshot_uuid"]
-                or not isinstance(binding, dict)
-                or binding.get("change_set_uuid") != task["change_set_uuid"]
-                or binding.get("change_set_digest") != change_set["change_set_digest"]
-                or binding.get("member_ordinal") != member["member_ordinal"]
-                or binding.get("intake_revision_uuid") != member["intake_revision_uuid"]
+                or child.get("scatter_change_set_uuid") != task["change_set_uuid"]
+                or child.get("scatter_member_ordinal") != member["member_ordinal"]
+                or child.get("scatter_intake_revision_uuid") != member["intake_revision_uuid"]
             ):
                 malformed = True
                 continue

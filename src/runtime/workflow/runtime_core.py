@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 import secrets
 from collections.abc import Awaitable, Callable
 from typing import Any
@@ -301,7 +300,10 @@ class WorkflowCoreMixin:
             ready = await self.readiness()
         else:
             readiness = await self.persistence.readiness()
-            ready = all(readiness.values())
+            ready = all(
+                readiness.get(name)
+                for name in ("db_primary", "schema_migration", "concurrent_writes", "native_vector")
+            )
         if not ready:
             raise NotReadyError("workflow-not-ready", "Readiness is false; new Process claims are fenced")
 
@@ -503,7 +505,8 @@ class WorkflowCoreMixin:
         """Project counts from the accepted denominator, never child-row count."""
 
         rows = await tx.fetchall(
-            "SELECT execution_uuid,execution_role,requiredness,target_kind,target_uuid,status,payload_extra "
+            "SELECT execution_uuid,execution_role,requiredness,target_kind,target_uuid,status,"
+            "scatter_intake_revision_uuid,scatter_member_ordinal,scatter_change_set_uuid "
             "FROM mkb_executions WHERE team_uuid=? AND task_uuid=? AND root_execution_uuid=? "
             "AND parent_execution_uuid=? ORDER BY execution_uuid",
             (team_uuid, task_uuid, root_execution_uuid, root_execution_uuid),
@@ -521,17 +524,12 @@ class WorkflowCoreMixin:
                 statuses.append(ExecutionStatus.CREATED.value)
                 continue
             candidate = candidates[0]
-            try:
-                binding = json.loads(candidate.get("payload_extra") or "{}")
-            except (TypeError, json.JSONDecodeError):
-                binding = None
             if (
                 candidate.get("execution_role") != "scatter_child"
                 or candidate.get("requiredness") != "required"
                 or candidate.get("target_kind") != "intake_item"
-                or not isinstance(binding, dict)
-                or binding.get("intake_revision_uuid") != member["intake_revision_uuid"]
-                or binding.get("member_ordinal") != member["member_ordinal"]
+                or candidate.get("scatter_intake_revision_uuid") != member["intake_revision_uuid"]
+                or candidate.get("scatter_member_ordinal") != member["member_ordinal"]
             ):
                 statuses.append(ExecutionStatus.CREATED.value)
                 continue
@@ -607,31 +605,22 @@ class WorkflowCoreMixin:
         payload: dict[str, Any],
         severity: str = "info",
     ) -> None:
-        now = utc_now()
-        await tx.execute(
-            "INSERT INTO mkb_domain_events "
-            "(event_uuid,team_uuid,trace_uuid,event_type,aggregate,severity,task_uuid,execution_uuid,process_uuid,"
-            "actor_kind,status_before,status_after,summary,payload_digest,payload_json,schema_version,occurred_at,"
-            "recorded_at,payload_extra) VALUES (?,?,?,?,?,?,?,?,?,'system',?,?,?,?,?,?,?,?,'{}')",
-            (
-                uuid7(),
-                execution["team_uuid"],
-                execution["trace_uuid"],
-                event_type,
-                aggregate,
-                severity,
-                execution["task_uuid"],
-                execution["execution_uuid"],
-                process_uuid,
-                status_before,
-                status_after,
-                summary[:512],
-                stable_digest(payload),
-                _json(payload),
-                "mkb.domain-event.v1",
-                now,
-                now,
-            ),
+        from src.services.events import DomainEventWriter
+
+        await DomainEventWriter().write(
+            tx,
+            team_uuid=execution["team_uuid"],
+            trace_uuid=execution["trace_uuid"],
+            event_type=event_type,
+            aggregate=aggregate,
+            summary=summary[:512],
+            task_uuid=execution.get("task_uuid"),
+            execution_uuid=execution.get("execution_uuid"),
+            process_uuid=process_uuid,
+            payload=payload,
+            severity=severity,
+            status_before=status_before,
+            status_after=status_after,
         )
 
 

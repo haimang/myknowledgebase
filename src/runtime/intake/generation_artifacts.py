@@ -677,6 +677,20 @@ class IntakeGenerationArtifactsMixin:
                     utc_now(),
                 ),
             )
+            from src.services.events import DomainEventWriter
+
+            await DomainEventWriter().write(
+                tx,
+                team_uuid=command.team_uuid,
+                trace_uuid=command.trace_uuid,
+                event_type="generation.artifact_accepted",
+                aggregate="generation",
+                summary=f"Generation artifact {artifact_type} accepted",
+                task_uuid=command.task_uuid,
+                execution_uuid=command.execution_uuid,
+                process_uuid=command.process_uuid,
+                payload={"generation_artifact_uuid": artifact_uuid, "artifact_type": artifact_type},
+            )
 
 
     async def _advance_generation_pointer(
@@ -737,5 +751,23 @@ class IntakeGenerationArtifactsMixin:
                     command.task_uuid,
                     now,
                 ),
+            )
+            from src.services.events import DomainEventWriter
+
+            await DomainEventWriter().write(
+                tx,
+                team_uuid=command.team_uuid,
+                trace_uuid=command.trace_uuid,
+                event_type="generation.pointer_cas",
+                aggregate="generation",
+                summary=f"Generation pointer advanced for {artifact_type}",
+                task_uuid=command.task_uuid,
+                execution_uuid=command.execution_uuid,
+                process_uuid=command.process_uuid,
+                payload={
+                    "artifact_type": artifact_type,
+                    "after_artifact_uuid": artifact_uuid,
+                    "pointer_revision": actual_revision,
+                },
             )
 

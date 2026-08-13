@@ -537,4 +537,18 @@ class IntakeGenerationLiveMixin:
                     ),
                 ),
             )
+            from src.services.events import DomainEventWriter
+
+            await DomainEventWriter().write(
+                tx,
+                team_uuid=command.team_uuid,
+                trace_uuid=command.trace_uuid,
+                event_type="generation.invocation_recorded",
+                aggregate="generation",
+                summary="Generation invocation recorded",
+                task_uuid=command.task_uuid,
+                execution_uuid=command.execution_uuid,
+                process_uuid=command.process_uuid,
+                payload={"invocation_uuid": invocation["invocation_uuid"]},
+            )
 

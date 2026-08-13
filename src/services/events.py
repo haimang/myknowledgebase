@@ -23,11 +23,13 @@ class DomainEventWriter:
         "execution.status_changed",
         "execution.waiting_entered",
         "execution.waiting_released",
+        "execution.prerequisite_released",
         "process.materialized",
         "process.claimed",
         "process.status_changed",
         "process.outcome_accepted",
         "process.lease_recovered",
+        "process.cleanup_eligible",
         "intake.snapshot_accepted",
         "intake.item_transitioned",
         "intake.candidate_sealed",
@@ -71,6 +73,8 @@ class DomainEventWriter:
         process_uuid: str | None = None,
         payload: dict[str, Any] | None = None,
         severity: str = "info",
+        status_before: str | None = None,
+        status_after: str | None = None,
     ) -> str:
         if event_type not in self.ALLOWED_TYPES:
             raise MkbError("OBS_EVENT_PAYLOAD_INVALID", "Unregistered domain event type", 422)
@@ -85,8 +89,8 @@ class DomainEventWriter:
         await tx.execute(
             "INSERT INTO mkb_domain_events "
             "(event_uuid,team_uuid,trace_uuid,event_type,aggregate,severity,task_uuid,execution_uuid,process_uuid,"
-            "actor_kind,summary,payload_digest,payload_json,schema_version,occurred_at,recorded_at,payload_extra) "
-            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'{}')",
+            "actor_kind,status_before,status_after,summary,payload_digest,payload_json,schema_version,occurred_at,"
+            "recorded_at,payload_extra) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'{}')",
             (
                 event_uuid,
                 team_uuid,
@@ -98,6 +102,8 @@ class DomainEventWriter:
                 execution_uuid,
                 process_uuid,
                 actor_kind,
+                status_before,
+                status_after,
                 safe_summary,
                 stable_digest(safe_payload),
                 json.dumps(safe_payload, separators=(",", ":")),

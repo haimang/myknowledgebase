@@ -77,7 +77,7 @@ async def project_task_status_tx(
         "UPDATE mkb_tasks SET status=?,result_ref=COALESCE(?,result_ref),proof_ref=COALESCE(?,proof_ref),"
         "error_code=?,error_message=?,started_at=COALESCE(started_at,?),"
         "completed_at=?,row_revision=row_revision+1,updated_at=? "
-        "WHERE team_uuid=? AND task_uuid=? AND status NOT IN ('succeeded','failed','cancelled')",
+        "WHERE team_uuid=? AND task_uuid=? AND status=? AND row_revision=?",
         (
             target.value,
             result_ref,
@@ -89,6 +89,8 @@ async def project_task_status_tx(
             now,
             team_uuid,
             task_uuid,
+            status,
+            row["row_revision"],
         ),
     )
     if updated.rowcount != 1:
