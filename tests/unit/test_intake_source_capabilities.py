@@ -257,25 +257,43 @@ async def test_source_profiles_resolve_to_distinct_executable_workflow_capabilit
     try:
         await registry.bootstrap()
         cases = {
-            "inline_payload": ("inline_payload", None, "intake.acquire.inline", "intake.decode.text_json_html"),
-            "local_object": ("local_object", "local_object", "intake.acquire.local_object", "intake.decode.text_json_html"),
-            "local_pdf": ("local_object", "local_object.pdf", "intake.acquire.local_object", "intake.decode.pdf"),
+            "inline_payload": (
+                "inline_payload",
+                None,
+                ("intake.acquire.inline", "intake.decode.text_json_html", "clean.extract.deterministic"),
+            ),
+            "local_object": (
+                "local_object",
+                "local_object",
+                ("intake.acquire.local_object", "intake.decode.text_json_html", "clean.extract.deterministic"),
+            ),
+            "local_pdf": (
+                "local_object",
+                "local_object.pdf",
+                ("intake.acquire.local_object", "intake.decode.pdf", "clean.extract.pdf_llm"),
+            ),
             "http_static": (
                 "http_resource",
                 "http_resource.static",
-                "intake.acquire.http_static",
-                "intake.decode.text_json_html",
+                ("intake.acquire.http_static", "intake.decode.text_json_html", "clean.extract.web"),
             ),
             "http_browser": (
                 "http_resource",
                 "http_resource.browser",
-                "intake.acquire.http_browser",
-                "intake.decode.text_json_html",
+                ("intake.acquire.http_browser", "intake.decode.text_json_html", "clean.extract.web"),
             ),
-            "http_pdf": ("http_resource", "http_resource.pdf", "intake.acquire.http_static", "intake.decode.pdf"),
-            "local_ocr": ("local_object", "local_object.image", "intake.acquire.local_object", "clean.ocr.local"),
+            "http_pdf": (
+                "http_resource",
+                "http_resource.pdf",
+                ("intake.acquire.http_static", "intake.decode.pdf", "clean.extract.pdf_llm"),
+            ),
+            "local_ocr": (
+                "local_object",
+                "local_object.image",
+                ("intake.acquire.local_object", "intake.decode.text_json_html", "clean.ocr.local"),
+            ),
         }
-        for profile, (kind, explicit_profile, acquire, downstream) in cases.items():
+        for profile, (kind, explicit_profile, expected_keys) in cases.items():
             identity = await registry.resolve_for_source("intake.ingest", kind, explicit_profile)
             expected_key = SINGLE_SOURCE_PROFILE_WORKFLOW_KEYS.get(explicit_profile or kind)
             assert identity.workflow_key == expected_key, profile
@@ -286,16 +304,20 @@ async def test_source_profiles_resolve_to_distinct_executable_workflow_capabilit
                     (identity.workflow_revision_uuid,),
                 )
             process_keys = [row["process_key"] for row in rows]
-            assert acquire in process_keys, profile
-            assert downstream in process_keys, profile
+            for expected in expected_keys:
+                assert expected in process_keys, (profile, expected)
 
-        vision = await registry.resolve_by_key("intake.ingest.single.vision-rejected.lsrag.v1")
-        async with persistence.transaction() as tx:
-            vision_steps = await tx.fetchall(
-                "SELECT process_key FROM mkb_workflow_steps WHERE workflow_revision_uuid=? AND step_kind='process'",
-                (vision.workflow_revision_uuid,),
-            )
-        assert "clean.extract.vision" in [row["process_key"] for row in vision_steps]
+        for workflow_key, clean_key in (
+            ("intake.ingest.single.vision-rejected.lsrag.v1", "clean.extract.vision"),
+            ("intake.ingest.single.doc-llm.lsrag.v1", "clean.extract.doc_llm"),
+        ):
+            identity = await registry.resolve_by_key(workflow_key)
+            async with persistence.transaction() as tx:
+                steps = await tx.fetchall(
+                    "SELECT process_key FROM mkb_workflow_steps WHERE workflow_revision_uuid=? AND step_kind='process'",
+                    (identity.workflow_revision_uuid,),
+                )
+            assert clean_key in [row["process_key"] for row in steps]
     finally:
         await persistence.close()
 

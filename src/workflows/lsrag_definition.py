@@ -715,6 +715,7 @@ def _source_profile_workflow(
     acquire_process_key: str,
     decode_process_key: str,
     clean_process_key: str = "clean.extract.deterministic",
+    revision_number: int = 1,
 ) -> WorkflowDefinition:
     """Derive one reviewed, immutable source-profile graph.
 
@@ -731,7 +732,7 @@ def _source_profile_workflow(
     document.update(
         {
             "workflow_key": workflow_key,
-            "revision_number": 1,
+            "revision_number": revision_number,
             "display_name": display_name,
             "description": (
                 f"A source-profile LS-RAG path with {acquire_process_key}, "
@@ -782,6 +783,8 @@ BUILTIN_LOCAL_PDF_INTAKE_WORKFLOW: Final[WorkflowDefinition] = _source_profile_w
     display_name="Single local-PDF intake LS-RAG",
     acquire_process_key="intake.acquire.local_object",
     decode_process_key="intake.decode.pdf",
+    clean_process_key="clean.extract.pdf_llm",
+    revision_number=2,
 )
 
 
@@ -790,6 +793,8 @@ BUILTIN_HTTP_STATIC_INTAKE_WORKFLOW: Final[WorkflowDefinition] = _source_profile
     display_name="Single static-HTTP intake LS-RAG",
     acquire_process_key="intake.acquire.http_static",
     decode_process_key="intake.decode.text_json_html",
+    clean_process_key="clean.extract.web",
+    revision_number=2,
 )
 
 
@@ -798,6 +803,8 @@ BUILTIN_HTTP_BROWSER_INTAKE_WORKFLOW: Final[WorkflowDefinition] = _source_profil
     display_name="Single browser-rendered intake LS-RAG",
     acquire_process_key="intake.acquire.http_browser",
     decode_process_key="intake.decode.text_json_html",
+    clean_process_key="clean.extract.web",
+    revision_number=2,
 )
 
 
@@ -806,6 +813,8 @@ BUILTIN_HTTP_PDF_INTAKE_WORKFLOW: Final[WorkflowDefinition] = _source_profile_wo
     display_name="Single PDF intake LS-RAG",
     acquire_process_key="intake.acquire.http_static",
     decode_process_key="intake.decode.pdf",
+    clean_process_key="clean.extract.pdf_llm",
+    revision_number=2,
 )
 
 
@@ -830,6 +839,15 @@ BUILTIN_VISION_REJECTION_INTAKE_WORKFLOW: Final[WorkflowDefinition] = _source_pr
 )
 
 
+BUILTIN_DOC_LLM_INTAKE_WORKFLOW: Final[WorkflowDefinition] = _source_profile_workflow(
+    workflow_key="intake.ingest.single.doc-llm.lsrag.v1",
+    display_name="Single local-document LLM intake LS-RAG",
+    acquire_process_key="intake.acquire.local_object",
+    decode_process_key="intake.decode.text_json_html",
+    clean_process_key="clean.extract.doc_llm",
+)
+
+
 BUILTIN_SOURCE_PROFILE_WORKFLOWS: Final[tuple[WorkflowDefinition, ...]] = (
     BUILTIN_LOCAL_OBJECT_INTAKE_WORKFLOW,
     BUILTIN_LOCAL_PDF_INTAKE_WORKFLOW,
@@ -838,5 +856,6 @@ BUILTIN_SOURCE_PROFILE_WORKFLOWS: Final[tuple[WorkflowDefinition, ...]] = (
     BUILTIN_HTTP_PDF_INTAKE_WORKFLOW,
     BUILTIN_LOCAL_OCR_INTAKE_WORKFLOW,
     BUILTIN_VISION_REJECTION_INTAKE_WORKFLOW,
+    BUILTIN_DOC_LLM_INTAKE_WORKFLOW,
 )
 

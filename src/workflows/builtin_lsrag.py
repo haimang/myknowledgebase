@@ -6,6 +6,7 @@ from typing import Final
 
 from src.contracts.workflow.models import WorkflowDefinition
 from src.workflows.lsrag_definition import (
+    BUILTIN_DOC_LLM_INTAKE_WORKFLOW,
     BUILTIN_HTTP_BROWSER_INTAKE_WORKFLOW,
     BUILTIN_HTTP_PDF_INTAKE_WORKFLOW,
     BUILTIN_HTTP_STATIC_INTAKE_WORKFLOW,
@@ -29,6 +30,7 @@ BUILTIN_WORKFLOWS: Final[tuple[WorkflowDefinition, ...]] = (
 )
 
 __all__ = [
+    "BUILTIN_DOC_LLM_INTAKE_WORKFLOW",
     "BUILTIN_EXECUTION_COMPATIBILITY_WORKFLOWS",
     "BUILTIN_HTTP_BROWSER_INTAKE_WORKFLOW",
     "BUILTIN_HTTP_PDF_INTAKE_WORKFLOW",
