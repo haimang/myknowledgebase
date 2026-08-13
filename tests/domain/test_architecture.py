@@ -394,6 +394,8 @@ def test_runtime_does_not_import_legacy_context() -> None:
         for reference in _imports(path):
             if any(_legacy_import(target) for target in reference.targets):
                 violations.append(f"{reference.location} imports legacy target {reference.module}")
+            if _is_database_driver_import(reference):
+                violations.append(f"{reference.location} imports database driver {reference.module}")
         for module, line in _dynamic_import_targets(path):
             if _legacy_import(module):
                 violations.append(f"{_relative(path)}:{line} dynamically imports legacy target {module}")

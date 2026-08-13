@@ -1,0 +1,49 @@
+"""Composition-root factory. Domain code never selects a driver."""
+
+from __future__ import annotations
+
+from pathlib import Path
+from typing import Literal, Protocol
+
+from src.persistence.sqlite_port import SqlitePersistence
+
+
+class PersistenceEngine(Protocol):
+    database_path: Path
+
+    async def migrate(self) -> None: ...
+
+    def transaction(self): ...
+
+    async def readiness(self) -> dict[str, bool]: ...
+
+    async def close(self) -> None: ...
+
+
+def build_persistence(
+    database_path: Path,
+    migration_directory: Path,
+    *,
+    backend: Literal["sqlite", "turso"] = "turso",
+    vector_backend: Literal["deterministic_exact", "native_ann"] = "deterministic_exact",
+    concurrent_writes_required: bool = True,
+    native_vector_required: bool = True,
+) -> PersistenceEngine:
+    if backend == "sqlite":
+        return SqlitePersistence(
+            database_path,
+            migration_directory,
+            vector_backend=vector_backend,
+            concurrent_writes_required=concurrent_writes_required,
+            native_vector_required=native_vector_required,
+        )
+    if backend != "turso":
+        raise ValueError("persistence backend is unsupported")
+    from src.persistence.turso.port import TursoPersistence
+
+    return TursoPersistence(
+        database_path,
+        migration_directory,
+        concurrent_writes_required=concurrent_writes_required,
+        native_vector_required=native_vector_required,
+    )

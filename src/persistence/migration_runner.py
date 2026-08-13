@@ -3,12 +3,72 @@
 from __future__ import annotations
 
 import hashlib
-import sqlite3
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any, Protocol
 
 from src.contracts.common.errors import MkbError
 from src.contracts.common.time import utc_now
+
+
+class MigrationConnection(Protocol):
+    def execute(self, sql: str, params: tuple[Any, ...] = ...) -> Any: ...
+
+    def rollback(self) -> Any: ...
+
+
+def _fetchall(connection: MigrationConnection, sql: str) -> list[Any]:
+    cursor = connection.execute(sql)
+    fetchall = getattr(cursor, "fetchall", None)
+    if callable(fetchall):
+        return list(fetchall())
+    return list(cursor)
+
+
+def strip_sql_line_comments(sql: str) -> str:
+    """Remove ``--`` comments that Turso's script parser does not accept.
+
+    Checksums stay on the original file bytes. This only changes how SQL is
+    sent to the engine. Apostrophes inside string literals are preserved.
+    """
+
+    out: list[str] = []
+    index = 0
+    length = len(sql)
+    in_string = False
+    while index < length:
+        char = sql[index]
+        if in_string:
+            out.append(char)
+            if char == "'" and index + 1 < length and sql[index + 1] == "'":
+                out.append(sql[index + 1])
+                index += 2
+                continue
+            if char == "'":
+                in_string = False
+            index += 1
+            continue
+        if char == "'":
+            in_string = True
+            out.append(char)
+            index += 1
+            continue
+        if char == "-" and index + 1 < length and sql[index + 1] == "-":
+            while index < length and sql[index] != "\n":
+                index += 1
+            continue
+        out.append(char)
+        index += 1
+    return "".join(out)
+
+
+def _executescript(connection: MigrationConnection, script: str) -> None:
+    executable = strip_sql_line_comments(script)
+    executescript = getattr(connection, "executescript", None)
+    if callable(executescript):
+        executescript(executable)
+        return
+    connection.execute(executable)
 
 
 @dataclass(frozen=True, slots=True)
@@ -33,7 +93,7 @@ def discover_migrations(directory: Path) -> list[Migration]:
     return migrations
 
 
-def ensure_migration_ledger(connection: sqlite3.Connection) -> None:
+def ensure_migration_ledger(connection: MigrationConnection) -> None:
     connection.execute(
         """
         CREATE TABLE IF NOT EXISTS mkb_schema_migrations (
@@ -46,13 +106,13 @@ def ensure_migration_ledger(connection: sqlite3.Connection) -> None:
     )
 
 
-def apply_migrations(connection: sqlite3.Connection, migrations: list[Migration]) -> None:
+def apply_migrations(connection: MigrationConnection, migrations: list[Migration]) -> None:
     """Apply one globally ordered chain and fail loudly on any checksum drift."""
 
     ensure_migration_ledger(connection)
     applied = {
         row[0]: row[1]
-        for row in connection.execute("SELECT migration_id, checksum FROM mkb_schema_migrations ORDER BY migration_id")
+        for row in _fetchall(connection, "SELECT migration_id, checksum FROM mkb_schema_migrations ORDER BY migration_id")
     }
     known = {migration.migration_id for migration in migrations}
     unknown = set(applied) - known
@@ -78,17 +138,17 @@ def apply_migrations(connection: sqlite3.Connection, migrations: list[Migration]
                 script = migration.sql.rstrip()[: -len(marker)] + ledger_sql
             else:
                 raise MkbError("migration-transaction-missing", "Migration must end with COMMIT", 503)
-            connection.executescript(script)
+            _executescript(connection, script)
         except Exception:
             connection.rollback()
             raise
 
 
-def verify_migrations(connection: sqlite3.Connection, migrations: list[Migration]) -> bool:
+def verify_migrations(connection: MigrationConnection, migrations: list[Migration]) -> bool:
     try:
         ensure_migration_ledger(connection)
-        applied = dict(connection.execute("SELECT migration_id, checksum FROM mkb_schema_migrations"))
-    except sqlite3.Error:
+        applied = dict(_fetchall(connection, "SELECT migration_id, checksum FROM mkb_schema_migrations"))
+    except Exception:
         return False
     return len(applied) == len(migrations) and all(
         applied.get(migration.migration_id) == migration.checksum for migration in migrations

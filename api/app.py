@@ -18,8 +18,8 @@ from api.public.routes import router as public_router
 from src.contracts.common.errors import MkbError
 from src.contracts.common.ids import uuid7, validate_external_uuid
 from src.llm_adapters.local_vllm import LocalVllmAdapter
+from src.persistence.factory import PersistenceEngine, build_persistence
 from src.persistence.retrieval_access import ArtifactRetrievalAccess
-from src.persistence.sqlite_port import SqlitePersistence
 from src.runtime.config import Settings
 from src.runtime.health import HealthAggregator
 from src.runtime.http_acquisition import HttpAcquirer
@@ -59,7 +59,7 @@ from src.workflows.builtin_scatter import (
 @dataclass(slots=True)
 class Container:
     settings: Settings
-    persistence: SqlitePersistence
+    persistence: PersistenceEngine
     storage: LocalObjectStore
     registry: RegistryService
     workflows: WorkflowRegistryService
@@ -185,10 +185,13 @@ async def _probe(container: Container) -> dict[str, bool]:
 
 def create_container(settings: Settings | None = None) -> Container:
     settings = settings or Settings()
-    persistence = SqlitePersistence(
+    persistence = build_persistence(
         settings.resolved_database_path,
         settings.migration_directory,
+        backend=settings.persistence_backend,
         vector_backend=settings.vector_backend,
+        concurrent_writes_required=settings.concurrent_writes_required,
+        native_vector_required=settings.native_vector_required,
     )
     storage = LocalObjectStore(settings.resolved_object_root, max_object_bytes=settings.object_max_bytes)
     registry = RegistryService(persistence, settings.prompt_root)

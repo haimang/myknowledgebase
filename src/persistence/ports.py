@@ -22,6 +22,10 @@ class PersistencePort(Protocol):
 
     async def readiness(self) -> dict[str, bool]: ...
 
+    async def migrate(self) -> None: ...
+
+    async def close(self) -> None: ...
+
 
 @runtime_checkable
 class TaskRepository(Protocol):

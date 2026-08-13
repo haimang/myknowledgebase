@@ -18,10 +18,12 @@ class Settings(BaseSettings):
     data_dir: Path = Path("data")
     database_path: Path | None = None
     object_root: Path | None = None
-    # The local profile deliberately uses a deterministic exact scan rather
-    # than silently labelling SQLite's compatibility B-tree as an ANN index.
-    # A deployment that requires native ANN must opt in explicitly and will
-    # fail readiness on this stock-SQLite adapter.
+    # Constitution default is the local Turso Database engine (pyturso).
+    # Stock sqlite is an explicit local/CI waiver.
+    persistence_backend: Literal["sqlite", "turso"] = "turso"
+    concurrent_writes_required: bool = True
+    native_vector_required: bool = True
+    # Retrieval scan profile.  It is never evidence that the engine has ANN.
     vector_backend: Literal["deterministic_exact", "native_ann"] = "deterministic_exact"
     prompt_root_path: Path | None = None
     config_root_path: Path | None = None
