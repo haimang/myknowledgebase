@@ -435,13 +435,17 @@ D08 把规范重新列为 v1 义务，同时守住 T-O-42：fixture + 纯函数 
 
 ## Appendix A — 当前实现对照（非验收豁免）
 
-| 项 | 2026-08-13 代码 | D08 判定 |
+> 2026-08-13 实现见证回填；不改变 `D08-v0.1 / owner-review` 的权威状态。
+
+| 项 | 2026-08-13 代码见证 | D08 判定 |
 |---|---|---|
-| `intake/api/providers.py` 单 mapper | 有 | **缺口**（过渡，不满足 A02–A04） |
-| `clean.extract.web/pdf_llm/doc_llm` Process 键 | 已注册 | 通道 **部分满足**；缺 strategy 表 |
-| HTTP/PDF 图声明 web/pdf_llm | 已升 revision 2 | A15 部分满足 |
-| HTMLRewriter 级属性白名单 | 仅正则砍 chrome | **缺口** A08 |
-| `web.llm_rewrite` / print-pdf | 无 | **缺口** A09/A11 |
-| 三 provider 纯函数 parser | 无 | **缺口** A01–A04 |
-| runtime HTML extractor | 已删除 | A14 方向正确 |
-| e2e inline/HTTP acquire | 绿 | **不足**以关闭 D08（见 X11） |
+| provider-operation registry | `intake/api/registry.py` 恰含三个 v1 operation；未知键 fail-closed | 满足 A01/A05/A19/A20 |
+| provider schema/parser | `intake/api/providers/{chinatax,domain,realestate}.py` + `src/contracts/intake/providers/`；raw schema `extra=forbid` | 满足 A02–A04 |
+| strategy registry | `src/contracts/intake/strategies.py` 登记 web/pdf/doc 十个显式策略与 capability、端口、20 MiB、Prompt A binding | 满足 A08–A13 |
+| 精确 Process 接线 | workflow 分别声明 `clean.extract.web[_llm]`、`clean.extract.pdf_text|pdf_llm`、`clean.extract.doc_llm`、`clean.map.registered_api` | 满足 A15 |
+| Web 消毒 | `intake/web/sanitize.py` 使用结构 parser、闭集删除标签与属性白名单 | 满足 A08/A09 |
+| PDF / OCR / Vision 分流 | HTTP PDF/print-PDF 优先进入 `intake.pdf`；PDF OCR 与 doc OCR/Vision 独立策略，无隐式降级 | 满足 A10–A13 |
+| Runtime clean fence | `src/runtime/intake/clean_preflight.py` 只经 `dispatch_clean` 进入四域；无 runtime parser/HTML extractor | 满足 A14/A18 |
+| 语义与 digest | member、scatter artifact、revision semantics 均携带双 digest、FilterMeta 五维与 ContextMeta tags | 满足 A07 |
+| Prompt A | LLM clean 从冻结 ConfigSnapshot 指针读取正文并复核 SHA-256；正文不在 strategy/runtime 复制 | 满足 prompt hash 约束 |
+| e2e / 回归 | 三 provider raw scatter→map→seal→child；static Web 与 PDF text-layer Task 路径；全量 pytest 绿 | 满足 A06/A16/A17；仍须 owner review 才能改文档权威状态 |
