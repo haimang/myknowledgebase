@@ -15,11 +15,13 @@ from dataclasses import dataclass
 
 from src.contracts.common.errors import MkbError
 from src.contracts.common.ids import stable_digest
+from src.contracts.lsrag.layered_content import normalize_layered_text, validate_layered_content
 
 _NODE_KINDS = frozenset({"document", "section", "paragraph", "list", "list_item", "table", "table_row", "table_cell", "code", "quote", "media_ref", "heading"})
 _CHANNELS = frozenset({"original", "summary"})
 _HEADER_KEY = re.compile(r"^[a-z][a-z0-9_.-]{0,63}$")
 _SENTENCE = re.compile(r"\S(?:.*?)(?:[.!?。！？](?=\s|$)|$)", re.DOTALL)
+_ADOPTED_BLOCK_ID = re.compile(r"^g[0-2]:b(\d{4})$")
 
 
 def _fail(code: str, message: str) -> None:
@@ -46,6 +48,13 @@ def _span_text(value: str, start_byte: int, end_byte: int) -> str:
 
 def _byte_offset(value: str, char_offset: int) -> int:
     return len(value[:char_offset].encode("utf-8"))
+
+
+def _block_number(block_id: str) -> int:
+    match = _ADOPTED_BLOCK_ID.fullmatch(block_id)
+    if match is None:
+        _fail("CONSTRUCT_KERNEL_ALIGNMENT_INVALID", "Projection block identity is not an adopted layered block")
+    return int(match.group(1))
 
 
 @dataclass(frozen=True, slots=True)
@@ -240,6 +249,60 @@ def projection_digest(projection: RetrievalBlockProjection) -> str:
 class LsragContractCompiler:
     """Pure deterministic compiler for the accepted S06--S08 artifact shapes."""
 
+    @staticmethod
+    def _declared_granularities(granularity_set: tuple[int, ...] | list[int] | None) -> tuple[int, ...]:
+        declared = tuple(sorted(set(granularity_set or (0, 1, 2))))
+        if not declared or any(isinstance(item, bool) or item not in {0, 1, 2} for item in declared) or 0 not in declared:
+            _fail("STRUCTURE_PROFILE_INVALID", "A layered profile must declare a closed set containing g0")
+        return declared
+
+    def normalize_layered_candidate(
+        self,
+        *,
+        clean_text: str,
+        layered_json: Mapping[str, object],
+        granularity_set: tuple[int, ...] | list[int] | None = None,
+    ) -> dict[str, object]:
+        """Return the kernel-owned, summary-empty candidate used by S06.
+
+        This is intentionally separate from :meth:`adopt_layered_json` so the
+        accepted candidate can be carried to S07 without asking a later stage
+        to infer blocks from the projection.  The only invention allowed here
+        is the frozen g0 clean-text tunnel.
+        """
+
+        clean = normalize_layered_text(clean_text)
+        declared = self._declared_granularities(granularity_set)
+        candidate = validate_layered_content(layered_json, summaries_must_be_null=True)
+        raw_blocks = candidate["layered_content"]
+        assert isinstance(raw_blocks, list)
+        observed_granularities = {int(block["granularity"]) for block in raw_blocks}
+        if observed_granularities != set(declared):
+            _fail("STRUCTURE_GRANULARITY_SET_MISMATCH", "Candidate granularity set does not match the frozen profile")
+        g0_blocks = [block for block in raw_blocks if block["granularity"] == 0]
+        if len(g0_blocks) != 1:
+            _fail("STRUCTURE_G0_REQUIRED", "A layered candidate must contain exactly one g0 block")
+        seen_keys: set[tuple[int, int]] = set()
+        for raw_block in raw_blocks:
+            block_id = int(raw_block["block_id"])
+            granularity = int(raw_block["granularity"])
+            key = (granularity, block_id)
+            if key in seen_keys:
+                _fail("STRUCTURE_SCHEMA_INVALID", "Layered block identities must be unique")
+            seen_keys.add(key)
+            original = raw_block["original_content"]
+            assert isinstance(original, dict)
+            for field in ("title", "body"):
+                value = original[field]
+                if isinstance(value, str):
+                    original[field] = normalize_layered_text(value)
+            body = original["body"]
+            if granularity == 0 and (body is None or not str(body).strip()):
+                original["body"] = clean
+            elif not isinstance(body, str) or not body.strip():
+                _fail("STRUCTURE_ANCHOR_MISSING", "A non-g0 layered body is empty")
+        return candidate
+
     def structurize(
         self,
         *,
@@ -296,6 +359,281 @@ class LsragContractCompiler:
         self.validate_structure(document=document, projection=projection, clean_text=clean_text)
         return document, projection
 
+    def adopt_layered_json(
+        self,
+        *,
+        clean_text: str,
+        layered_json: Mapping[str, object],
+        generation_artifact_uuid: str,
+        projection_generation_artifact_uuid: str | None = None,
+        clean_artifact_uuid: str,
+        clean_digest: str | None = None,
+        granularity_set: tuple[int, ...] | list[int] | None = None,
+    ) -> tuple[StructureDocument, RetrievalBlockProjection]:
+        """Admit a B.json candidate and project it into the S06 contract.
+
+        ``structurize`` remains available for historical fixture tests only.
+        Production callers must provide this candidate path: the model owns no
+        coordinates, and this kernel derives every anchor/digest from clean
+        bytes.  The exact profile set is supplied by the frozen json catalog
+        row, never inferred from the candidate or from sentence boundaries.
+        """
+
+        structure, projection, _report = self._adopt_layered_json(
+            clean_text=clean_text,
+            layered_json=layered_json,
+            generation_artifact_uuid=generation_artifact_uuid,
+            projection_generation_artifact_uuid=projection_generation_artifact_uuid,
+            clean_artifact_uuid=clean_artifact_uuid,
+            clean_digest=clean_digest,
+            granularity_set=granularity_set,
+        )
+        return structure, projection
+
+    def adopt_layered_json_with_report(
+        self,
+        *,
+        clean_text: str,
+        layered_json: Mapping[str, object],
+        generation_artifact_uuid: str,
+        projection_generation_artifact_uuid: str | None = None,
+        clean_artifact_uuid: str,
+        clean_digest: str | None = None,
+        granularity_set: tuple[int, ...] | list[int] | None = None,
+    ) -> tuple[StructureDocument, RetrievalBlockProjection, dict[str, object]]:
+        """The same admission API with the auditable anchor report."""
+
+        return self._adopt_layered_json(
+            clean_text=clean_text,
+            layered_json=layered_json,
+            generation_artifact_uuid=generation_artifact_uuid,
+            projection_generation_artifact_uuid=projection_generation_artifact_uuid,
+            clean_artifact_uuid=clean_artifact_uuid,
+            clean_digest=clean_digest,
+            granularity_set=granularity_set,
+        )
+
+    def _adopt_layered_json(
+        self,
+        *,
+        clean_text: str,
+        layered_json: Mapping[str, object],
+        generation_artifact_uuid: str,
+        projection_generation_artifact_uuid: str | None,
+        clean_artifact_uuid: str,
+        clean_digest: str | None,
+        granularity_set: tuple[int, ...] | list[int] | None,
+    ) -> tuple[StructureDocument, RetrievalBlockProjection, dict[str, object]]:
+        clean = normalize_layered_text(clean_text)
+        if not clean.strip():
+            _fail("STRUCTURE_KERNEL_EMPTY", "A structure document requires non-empty clean text")
+        if not generation_artifact_uuid or not clean_artifact_uuid:
+            _fail("STRUCTURE_BINDING_INVALID", "Generation and clean artifact identities are required")
+        projection_generation_artifact_uuid = projection_generation_artifact_uuid or f"{generation_artifact_uuid}:projection"
+        if projection_generation_artifact_uuid == generation_artifact_uuid:
+            _fail("STRUCTURE_BINDING_INVALID", "Structure and projection artifact identities must be distinct")
+        declared = self._declared_granularities(granularity_set)
+        observed_clean_digest = _text_digest(clean)
+        if clean_digest is not None and clean_digest != observed_clean_digest:
+            _fail("STRUCTURE_BINDING_CLEAN_DIGEST", "The selected clean artifact digest does not match its bytes")
+
+        candidate = self.normalize_layered_candidate(
+            clean_text=clean,
+            layered_json=layered_json,
+            granularity_set=declared,
+        )
+        raw_blocks = candidate["layered_content"]
+        assert isinstance(raw_blocks, list)
+
+        end = len(clean.encode("utf-8"))
+        leaf_id = "node-0001"
+        leaf_digest = _text_digest(clean)
+        root = StructureNode(
+            "root",
+            "document",
+            None,
+            0,
+            0,
+            0,
+            "container",
+            None,
+            None,
+            stable_digest({"children": [leaf_digest]}),
+        )
+        leaf = StructureNode(
+            leaf_id,
+            "paragraph",
+            root.node_id,
+            0,
+            1,
+            1,
+            "content",
+            TextSpan(0, end),
+            leaf_digest,
+            leaf_digest,
+        )
+        structure = StructureDocument(
+            generation_artifact_uuid,
+            clean_artifact_uuid,
+            observed_clean_digest,
+            root.node_id,
+            (root, leaf),
+            stable_digest({"tree": "layered-adopt", "coverage": [(0, end)], "order": [root.node_id, leaf_id]}),
+        )
+        blocks: list[RetrievalBlock] = []
+        anchor_report: list[dict[str, object]] = []
+        for raw_block in sorted(raw_blocks, key=lambda item: (int(item["granularity"]), int(item["block_id"]))):
+            block_id = int(raw_block["block_id"])
+            granularity = int(raw_block["granularity"])
+            original = raw_block["original_content"]
+            assert isinstance(original, dict)
+            body = original.get("body")
+            if not isinstance(body, str) or not body.strip():
+                _fail("STRUCTURE_ANCHOR_MISSING", "A non-g0 layered body is empty")
+            normalized_body = normalize_layered_text(body)
+            if granularity == 0 and normalized_body != clean:
+                _fail("STRUCTURE_ANCHOR_MISSING", "The g0 body is not the complete clean artifact")
+            if normalized_body not in clean:
+                _fail("STRUCTURE_ANCHOR_MISSING", "A layered body is not an exact clean substring")
+            first_char = clean.find(normalized_body)
+            if first_char < 0:
+                _fail("STRUCTURE_ANCHOR_MISSING", "A layered body has no exact clean anchor")
+            occurrence_count = 0
+            cursor = first_char
+            while cursor >= 0:
+                occurrence_count += 1
+                cursor = clean.find(normalized_body, cursor + 1)
+            start = _byte_offset(clean, first_char)
+            finish = _byte_offset(clean, first_char + len(normalized_body))
+            projection_block_id = f"g{granularity}:b{block_id:04d}"
+            blocks.append(
+                RetrievalBlock(
+                    projection_block_id,
+                    granularity,
+                    (leaf_id,),
+                    (TextSpan(start, finish),),
+                    normalized_body,
+                    _text_digest(normalized_body),
+                )
+            )
+            anchor_report.append(
+                {
+                    "block_id": block_id,
+                    "projection_block_id": projection_block_id,
+                    "granularity": granularity,
+                    "start_byte": start,
+                    "end_byte": finish,
+                    "occurrence_count": occurrence_count,
+                }
+            )
+        projection = RetrievalBlockProjection(
+            projection_generation_artifact_uuid,
+            generation_artifact_uuid,
+            structure_document_digest(structure),
+            tuple(blocks),
+            stable_digest({"coverage": anchor_report, "required_g": list(declared)}),
+        )
+        self.validate_structure(
+            document=structure,
+            projection=projection,
+            clean_text=clean,
+            required_granularities=frozenset(declared),
+        )
+        report: dict[str, object] = {
+            "schema_version": "mkb.layered-content-adoption-report.v1",
+            "disposition": "full_valid",
+            "granularity_set": list(declared),
+            "clean_digest": observed_clean_digest,
+            "anchors": anchor_report,
+        }
+        report["proof_digest"] = stable_digest(report)
+        return structure, projection, report
+
+    @staticmethod
+    def layered_summary_map(
+        *,
+        layered_json: Mapping[str, object],
+        projection: RetrievalBlockProjection,
+        accepted_layered_json: Mapping[str, object] | None = None,
+    ) -> dict[str, str]:
+        """Map one C whole-package result to exact adopted projection blocks."""
+
+        candidate = validate_layered_content(layered_json, summary_required=True)
+        accepted = (
+            validate_layered_content(accepted_layered_json, summaries_must_be_null=True)
+            if accepted_layered_json is not None
+            else None
+        )
+        candidate_blocks = candidate["layered_content"]
+        projection_by_key = {(block.granularity, _block_number(block.block_id)): block for block in projection.blocks}
+        accepted_by_key: dict[tuple[int, int], dict[str, object]] = {}
+        if accepted is not None:
+            accepted_raw = accepted["layered_content"]
+            assert isinstance(accepted_raw, list)
+            accepted_by_key = {
+                (int(block["granularity"]), int(block["block_id"])): block for block in accepted_raw
+            }
+        summaries: dict[str, str] = {}
+        seen: set[tuple[int, int]] = set()
+        assert isinstance(candidate_blocks, list)
+        for raw_block in candidate_blocks:
+            key = (int(raw_block["granularity"]), int(raw_block["block_id"]))
+            if key in seen or key not in projection_by_key:
+                _fail("CONSTRUCT_KERNEL_ALIGNMENT_INVALID", "C layered blocks do not align to the adopted projection")
+            seen.add(key)
+            projection_block = projection_by_key[key]
+            original = raw_block["original_content"]
+            summary = raw_block["llm_summary"]
+            assert isinstance(original, dict)
+            assert isinstance(summary, dict)
+            if accepted is not None:
+                accepted_block = accepted_by_key.get(key)
+                accepted_original = None if accepted_block is None else accepted_block["original_content"]
+                if isinstance(accepted_original, dict) and key[0] == 0 and not str(accepted_original.get("body") or "").strip():
+                    accepted_original = dict(accepted_original)
+                    accepted_original["body"] = projection_block.original_text
+                if accepted_block is None or original != accepted_original:
+                    _fail("CONSTRUCT_KERNEL_ORIGINAL_MUTATION", "C may fill summary only; original content is immutable")
+            elif original.get("body") != projection_block.original_text:
+                _fail("CONSTRUCT_KERNEL_ORIGINAL_MUTATION", "C original content does not match the adopted projection")
+            body = summary.get("body")
+            if not isinstance(body, str) or not body.strip():
+                _fail("CONSTRUCT_KERNEL_SUMMARY_INCOMPLETE", "Every adopted block needs a non-empty C summary")
+            summaries[projection_block.block_id] = body
+        if seen != set(projection_by_key):
+            _fail("CONSTRUCT_KERNEL_ALIGNMENT_INVALID", "C layered output must cover the adopted projection exactly")
+        return summaries
+
+    @staticmethod
+    def fill_layered_summaries(
+        *,
+        accepted_layered_json: Mapping[str, object],
+        projection: RetrievalBlockProjection,
+        summaries_by_block_id: Mapping[str, str],
+    ) -> dict[str, object]:
+        """Build the deterministic C-shaped package without changing B fields."""
+
+        candidate = validate_layered_content(accepted_layered_json, summaries_must_be_null=True)
+        blocks = candidate["layered_content"]
+        assert isinstance(blocks, list)
+        projection_by_key = {(block.granularity, _block_number(block.block_id)): block for block in projection.blocks}
+        seen: set[tuple[int, int]] = set()
+        for raw_block in blocks:
+            key = (int(raw_block["granularity"]), int(raw_block["block_id"]))
+            projection_block = projection_by_key.get(key)
+            if projection_block is None or key in seen:
+                _fail("CONSTRUCT_KERNEL_ALIGNMENT_INVALID", "Summary package does not align to the adopted projection")
+            seen.add(key)
+            summary = summaries_by_block_id.get(projection_block.block_id)
+            if not isinstance(summary, str) or not summary.strip():
+                _fail("CONSTRUCT_KERNEL_SUMMARY_INCOMPLETE", "Every adopted block needs a non-empty C summary")
+            summary_channel = raw_block["llm_summary"]
+            assert isinstance(summary_channel, dict)
+            summary_channel["body"] = summary
+        if seen != set(projection_by_key):
+            _fail("CONSTRUCT_KERNEL_ALIGNMENT_INVALID", "Summary package must cover the adopted projection exactly")
+        return candidate
+
     def _project_blocks(self, *, clean_text: str, generation_artifact_uuid: str, leaf_id: str) -> list[RetrievalBlock]:
         end = len(clean_text.encode("utf-8"))
         full = TextSpan(0, end)
@@ -316,7 +654,14 @@ class LsragContractCompiler:
         del generation_artifact_uuid  # coordinate identity is carried by the projection envelope.
         return blocks
 
-    def validate_structure(self, *, document: StructureDocument, projection: RetrievalBlockProjection, clean_text: str) -> None:
+    def validate_structure(
+        self,
+        *,
+        document: StructureDocument,
+        projection: RetrievalBlockProjection,
+        clean_text: str,
+        required_granularities: frozenset[int] = frozenset({0, 1, 2}),
+    ) -> None:
         if document.clean_digest != _text_digest(clean_text):
             _fail("STRUCTURE_BINDING_CLEAN_DIGEST", "The structure is not bound to these clean bytes")
         if (
@@ -391,8 +736,10 @@ class LsragContractCompiler:
             original = "".join(pieces)
             if original != block.original_text or block.original_digest != _text_digest(original):
                 _fail("STRUCTURE_PROJECTION_ORIGINAL", "Projection original body is not an anchored clean slice")
-        if granularities != {0, 1, 2} or not any(block.granularity == 0 and block.original_text.strip() for block in projection.blocks):
-            _fail("STRUCTURE_PROJECTION_G0_REQUIRED", "Projection must contain non-empty g0, g1, and g2 blocks")
+        if granularities != set(required_granularities) or not any(
+            block.granularity == 0 and block.original_text.strip() for block in projection.blocks
+        ):
+            _fail("STRUCTURE_PROJECTION_G0_REQUIRED", "Projection granularities do not match the frozen profile")
 
     def construct(
         self,
@@ -405,8 +752,15 @@ class LsragContractCompiler:
         summaries_by_block_id: Mapping[str, str],
         metadata_headers: Mapping[str, str] | None = None,
         recipe_version: str = "content_full.v1",
+        required_granularities: frozenset[int] | None = None,
     ) -> tuple[ConstructionDocument, DualChannelProjection]:
-        self.validate_structure(document=structure, projection=projection, clean_text=clean_text)
+        expected_granularities = required_granularities or frozenset(block.granularity for block in projection.blocks)
+        self.validate_structure(
+            document=structure,
+            projection=projection,
+            clean_text=clean_text,
+            required_granularities=expected_granularities,
+        )
         dual_channel_generation_artifact_uuid = dual_channel_generation_artifact_uuid or f"{construction_generation_artifact_uuid}:dual"
         if not construction_generation_artifact_uuid or not dual_channel_generation_artifact_uuid:
             _fail("CONSTRUCT_BINDING_INVALID", "Construction generation identity is required")
@@ -632,6 +986,120 @@ def dual_channel_payload(dual: DualChannelProjection) -> dict[str, object]:
     }
 
 
+def parse_structure_payload(payload: Mapping[str, object]) -> StructureDocument:
+    """Parse an immutable S06 structure member without rebuilding a tree."""
+
+    expected_keys = {
+        "schema_version",
+        "generation_artifact_uuid",
+        "clean_artifact_uuid",
+        "clean_digest",
+        "document_root_node_id",
+        "nodes",
+        "proof_digest",
+    }
+    if set(payload) != expected_keys or payload.get("schema_version") != "mkb.structure-document.v1":
+        _fail("STRUCTURE_ARTIFACT_INVALID", "Frozen structure payload shape is invalid")
+    nodes_raw = payload.get("nodes")
+    if not isinstance(nodes_raw, list):
+        _fail("STRUCTURE_ARTIFACT_INVALID", "Frozen structure nodes are invalid")
+    nodes: list[StructureNode] = []
+    node_keys = {
+        "node_id",
+        "node_kind",
+        "parent_node_id",
+        "sibling_ordinal",
+        "depth",
+        "reading_ordinal",
+        "content_role",
+        "source_anchor",
+        "content_digest",
+        "subtree_digest",
+    }
+    for raw in nodes_raw:
+        if not isinstance(raw, Mapping) or set(raw) != node_keys:
+            _fail("STRUCTURE_ARTIFACT_INVALID", "Frozen structure node shape is invalid")
+        span_raw = raw["source_anchor"]
+        span: TextSpan | None
+        if span_raw is None:
+            span = None
+        elif isinstance(span_raw, Mapping) and set(span_raw) == {"kind", "start_byte", "end_byte"} and span_raw["kind"] == "text_span":
+            span = TextSpan(int(span_raw["start_byte"]), int(span_raw["end_byte"]))
+        else:
+            _fail("STRUCTURE_ARTIFACT_INVALID", "Frozen structure source anchor is invalid")
+        nodes.append(
+            StructureNode(
+                str(raw["node_id"]),
+                str(raw["node_kind"]),
+                None if raw["parent_node_id"] is None else str(raw["parent_node_id"]),
+                int(raw["sibling_ordinal"]),
+                int(raw["depth"]),
+                int(raw["reading_ordinal"]),
+                str(raw["content_role"]),
+                span,
+                None if raw["content_digest"] is None else str(raw["content_digest"]),
+                str(raw["subtree_digest"]),
+            )
+        )
+    return StructureDocument(
+        str(payload["generation_artifact_uuid"]),
+        str(payload["clean_artifact_uuid"]),
+        str(payload["clean_digest"]),
+        str(payload["document_root_node_id"]),
+        tuple(nodes),
+        str(payload["proof_digest"]),
+    )
+
+
+def parse_retrieval_projection_payload(payload: Mapping[str, object]) -> RetrievalBlockProjection:
+    """Parse an immutable S06 projection member without sentence inference."""
+
+    expected_keys = {
+        "schema_version",
+        "generation_artifact_uuid",
+        "structure_generation_artifact_uuid",
+        "structure_document_digest",
+        "blocks",
+        "proof_digest",
+    }
+    if set(payload) != expected_keys or payload.get("schema_version") != "mkb.retrieval-block-projection.v1":
+        _fail("STRUCTURE_ARTIFACT_INVALID", "Frozen projection payload shape is invalid")
+    blocks_raw = payload.get("blocks")
+    if not isinstance(blocks_raw, list):
+        _fail("STRUCTURE_ARTIFACT_INVALID", "Frozen projection blocks are invalid")
+    blocks: list[RetrievalBlock] = []
+    block_keys = {"block_id", "granularity", "source_node_refs", "ordered_source_spans", "original", "original_digest"}
+    for raw in blocks_raw:
+        if not isinstance(raw, Mapping) or set(raw) != block_keys:
+            _fail("STRUCTURE_ARTIFACT_INVALID", "Frozen projection block shape is invalid")
+        refs = raw["source_node_refs"]
+        spans_raw = raw["ordered_source_spans"]
+        if not isinstance(refs, list) or not all(isinstance(ref, str) for ref in refs) or not isinstance(spans_raw, list):
+            _fail("STRUCTURE_ARTIFACT_INVALID", "Frozen projection references are invalid")
+        spans: list[TextSpan] = []
+        for span_raw in spans_raw:
+            if not isinstance(span_raw, Mapping) or set(span_raw) != {"start_byte", "end_byte"}:
+                _fail("STRUCTURE_ARTIFACT_INVALID", "Frozen projection span shape is invalid")
+            spans.append(TextSpan(int(span_raw["start_byte"]), int(span_raw["end_byte"])))
+        blocks.append(
+            RetrievalBlock(
+                str(raw["block_id"]),
+                int(raw["granularity"]),
+                tuple(refs),
+                tuple(spans),
+                str(raw["original"]),
+                str(raw["original_digest"]),
+            )
+        )
+    return RetrievalBlockProjection(
+        str(payload["generation_artifact_uuid"]),
+        str(payload["structure_generation_artifact_uuid"]),
+        str(payload["structure_document_digest"]),
+        tuple(blocks),
+        str(payload["proof_digest"]),
+    )
+
+
 def summary_plan(projection: RetrievalBlockProjection) -> SummaryPlan:
     """Freeze an ordered S07 plan before an inference caller fills summaries."""
 
@@ -677,6 +1145,8 @@ __all__ = [
     "deterministic_summaries",
     "dual_channel_payload",
     "projection_digest",
+    "parse_retrieval_projection_payload",
+    "parse_structure_payload",
     "retrieval_projection_payload",
     "structure_payload",
     "structure_document_digest",
