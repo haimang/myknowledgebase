@@ -712,7 +712,7 @@ NS1-new-pipeline
 | `P5-01 / NS1-T40` | `✅ done` | `d7cf742` | `tests/domain/test_ns1_guards.py:13-38` | 无 runtime 假树调用、无 migration `body_text`、无 caller prompt_ref/path |
 | `P5-02 / NS1-T41/T42` | `✅ done` | `d7cf742` | `tests/e2e/test_ns1_pipeline.py:73-130` | generic/no-md 与 legal/with-md 均 succeeded；projection 覆盖 g0/g1/g2 且原文不全相同 |
 | `P5-03 / NS1-T43` | `✅ done` | `d7cf742` | `tests/e2e/test_registered_api_scatter.py:484-499` | 一 child failed、sibling succeeded、root `scatter-required-child-failed` |
-| `P5-04` | `✅ done` | `docs cluster pending` | `docs/baseline/domain-truth/S14-config-prompt-model-registry.md:1070`; `docs/baseline/domain-truth/D04-turso-physical-schema.md:1920`; `README.md:22` | 窄附录与 payload 示例；不改 QNA |
+| `P5-04` | `✅ done` | `42538ee` | `docs/baseline/domain-truth/S14-config-prompt-model-registry.md:1070`; `docs/baseline/domain-truth/D04-turso-physical-schema.md:1920`; `README.md:22` | 窄附录与 payload 示例；不改 QNA |
 | `NS1-T44/T45/T46` | `🟩 partial` | `d7cf742` | `tests/unit`; `tests/domain`; `tests/unit/test_ns1_prompt_catalog.py:108` | unit/domain/hash soak 与非 residual e2e 通过；6 个 Turso raw inspection cases deferred |
 
 ### 11.5.2 关键指标演进
