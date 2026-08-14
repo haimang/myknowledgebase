@@ -1,0 +1,119 @@
+"""Strict, dependency-free validator for the NS1 layered-content wire shape."""
+
+from __future__ import annotations
+
+import unicodedata
+from collections.abc import Mapping
+from typing import Any
+
+from src.contracts.common.errors import MkbError
+
+LAYERED_CONTENT_SCHEMA_VERSION = "layered_content.v1"
+_TOP_LEVEL_KEYS = {"context_meta", "date", "knowledge_tree", "layered_content"}
+_META_KEYS = {
+    "title",
+    "author",
+    "publisher",
+    "realm",
+    "type",
+    "tags",
+    "channel",
+    "default_locale",
+    "source_name",
+    "source_url",
+}
+_DATE_KEYS = {"processed_at", "published_at"}
+_TREE_KEYS = {"original_file_uuid", "upstream_file_uuids", "downstream_file_uuids"}
+_BLOCK_KEYS = {"block_id", "granularity", "original_content", "llm_summary"}
+_CHANNEL_KEYS = {"title", "body"}
+
+
+def normalize_layered_text(value: str) -> str:
+    """Apply the S05 text recipe used before anchor matching."""
+
+    if not isinstance(value, str):
+        raise MkbError("STRUCTURE_SCHEMA_INVALID", "Layered content text must be a string", 422)
+    return unicodedata.normalize("NFC", value.replace("\r\n", "\n").replace("\r", "\n"))
+
+
+def _object(value: object, name: str, allowed: set[str]) -> dict[str, Any]:
+    if not isinstance(value, Mapping):
+        raise MkbError("STRUCTURE_SCHEMA_INVALID", f"{name} must be an object", 422)
+    result = dict(value)
+    unexpected = set(result) - allowed
+    if unexpected:
+        raise MkbError("STRUCTURE_SCHEMA_INVALID", f"{name} contains unknown fields", 422, {"fields": sorted(unexpected)})
+    return result
+
+
+def _nullable_text(value: object, name: str) -> str | None:
+    if value is not None and not isinstance(value, str):
+        raise MkbError("STRUCTURE_SCHEMA_INVALID", f"{name} must be a string or null", 422)
+    return value
+
+
+def _channel(value: object, name: str, *, summary_required: bool = False) -> dict[str, Any]:
+    result = _object(value, name, _CHANNEL_KEYS)
+    if set(result) != _CHANNEL_KEYS:
+        raise MkbError("STRUCTURE_SCHEMA_INVALID", f"{name} must contain title and body", 422)
+    result["title"] = _nullable_text(result["title"], f"{name}.title")
+    result["body"] = _nullable_text(result["body"], f"{name}.body")
+    if summary_required and (not isinstance(result["body"], str) or not result["body"].strip()):
+        raise MkbError("STRUCTURE_SUMMARY_INVALID", "C summary body must be non-empty", 422)
+    return result
+
+
+def validate_layered_content(
+    payload: object,
+    *,
+    summary_required: bool = False,
+    summaries_must_be_null: bool = False,
+) -> dict[str, Any]:
+    """Validate and return a JSON-safe copy of a layered-content candidate.
+
+    This intentionally implements only the checked-in schema.  It does not
+    normalize or invent content, and it rejects span fields rather than
+    accepting model-supplied coordinates as authority.
+    """
+
+    result = _object(payload, "layered_content", _TOP_LEVEL_KEYS)
+    if "context_meta" not in result or "layered_content" not in result:
+        raise MkbError("STRUCTURE_SCHEMA_INVALID", "context_meta and layered_content are required", 422)
+    result["context_meta"] = _object(result["context_meta"], "context_meta", _META_KEYS)
+    for key in ("title", "author", "publisher", "realm", "type", "channel", "default_locale", "source_name", "source_url"):
+        if key in result["context_meta"]:
+            result["context_meta"][key] = _nullable_text(result["context_meta"][key], f"context_meta.{key}")
+    if "tags" in result["context_meta"]:
+        tags = result["context_meta"]["tags"]
+        if tags is not None and (not isinstance(tags, list) or any(not isinstance(tag, str) for tag in tags)):
+            raise MkbError("STRUCTURE_SCHEMA_INVALID", "context_meta.tags must be strings", 422)
+    if "date" in result:
+        result["date"] = _object(result["date"], "date", _DATE_KEYS)
+        for key, value in result["date"].items():
+            result["date"][key] = _nullable_text(value, f"date.{key}")
+    if "knowledge_tree" in result:
+        result["knowledge_tree"] = _object(result["knowledge_tree"], "knowledge_tree", _TREE_KEYS)
+    blocks = result["layered_content"]
+    if not isinstance(blocks, list) or not blocks:
+        raise MkbError("STRUCTURE_SCHEMA_INVALID", "layered_content must be a non-empty array", 422)
+    validated: list[dict[str, Any]] = []
+    for index, raw_block in enumerate(blocks):
+        block = _object(raw_block, f"layered_content[{index}]", _BLOCK_KEYS)
+        if set(block) != _BLOCK_KEYS:
+            raise MkbError("STRUCTURE_SCHEMA_INVALID", "Each layered block must contain the four wire fields", 422)
+        if isinstance(block["block_id"], bool) or not isinstance(block["block_id"], int) or block["block_id"] < 0:
+            raise MkbError("STRUCTURE_SCHEMA_INVALID", "block_id must be a non-negative integer", 422)
+        if isinstance(block["granularity"], bool) or not isinstance(block["granularity"], int) or block["granularity"] < 0:
+            raise MkbError("STRUCTURE_SCHEMA_INVALID", "granularity must be a non-negative integer", 422)
+        block["original_content"] = _channel(block["original_content"], f"layered_content[{index}].original_content")
+        block["llm_summary"] = _channel(
+            block["llm_summary"], f"layered_content[{index}].llm_summary", summary_required=summary_required
+        )
+        if summaries_must_be_null and any(value is not None for value in block["llm_summary"].values()):
+            raise MkbError("STRUCTURE_SUMMARY_INVALID", "B candidate summaries must be null", 422)
+        validated.append(block)
+    result["layered_content"] = validated
+    return result
+
+
+__all__ = ["LAYERED_CONTENT_SCHEMA_VERSION", "normalize_layered_text", "validate_layered_content"]
