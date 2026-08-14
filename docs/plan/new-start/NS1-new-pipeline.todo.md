@@ -111,8 +111,8 @@ NS1-ENTRY
 
 ## NS1-CLOSURE — 最终收口
 
-- [ ] 只在 P1–P5 EXIT 后创建 `docs/closure/new-start/NS1-new-pipeline-closure.md`。
-- [ ] closure 使用 `.adocs/closure.md` 结构，逐项给出五态与四元组证据。
-- [ ] 回填 action-plan 状态 `executed` 与测试台账/日志，不改 QNA。
-- [ ] 最终审查：`git diff --check`、`ruff`、`compileall`、全量 `pytest`、scope/forbidden scan。
-- [ ] 明确声明：未执行 live migration、未发布 worker、未发布 Pages。
+- [x] 只在 P1–P5 EXIT 后创建 `docs/closure/new-start/NS1-new-pipeline-closure.md`。
+- [x] closure 使用 `.adocs/closure.md` 结构，逐项给出五态与四元组证据。
+- [x] 回填 action-plan 的 `executing + close-with-known-issues` 证据状态与测试台账/日志，不改 QNA；不把 partial full-e2e 伪标为 `executed`。
+- [x] 最终审查：`git diff --check`、`ruff`、`compileall`、全量 `pytest`、scope/forbidden scan；全量 e2e residual 已逐项记录。
+- [x] 明确声明：未执行 live migration、未发布 worker、未发布 Pages。
