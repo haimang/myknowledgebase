@@ -71,6 +71,31 @@ def test_adopt_accepts_closed_domain_profiles_without_silent_layers(
     assert {block.granularity for block in projection.blocks} == set(profile)
 
 
+def test_markdown_markup_cannot_be_a_clean_g0_body() -> None:
+    compiler = LsragContractCompiler()
+    clean = "Chapter one\nA legal notice"
+    markdown = "# Chapter one\n\nA legal notice"
+    with pytest.raises(MkbError, match="STRUCTURE_ANCHOR_MISSING"):
+        compiler.adopt_layered_json(
+            clean_text=clean,
+            layered_json=_candidate(markdown, {0: markdown, 1: "A legal notice"}),
+            generation_artifact_uuid="structure-generation",
+            projection_generation_artifact_uuid="projection-generation",
+            clean_artifact_uuid="clean-artifact",
+            granularity_set=(0, 1),
+        )
+    structure, projection = compiler.adopt_layered_json(
+        clean_text=clean,
+        layered_json=_candidate(clean, {0: clean, 1: "A legal notice"}),
+        generation_artifact_uuid="structure-generation",
+        projection_generation_artifact_uuid="projection-generation",
+        clean_artifact_uuid="clean-artifact",
+        granularity_set=(0, 1),
+    )
+    assert projection.blocks[0].original_text == clean
+    del structure
+
+
 def test_adopt_rejects_profile_drift_anchor_miss_and_b_summary() -> None:
     compiler = LsragContractCompiler()
     clean = "source text"

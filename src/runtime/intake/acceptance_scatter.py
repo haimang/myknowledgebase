@@ -103,6 +103,32 @@ class IntakeAcceptanceScatterMixin:
                     canonical_json(clean_body),
                     PromoteRequest(team_uuid=command.team_uuid, purpose="intake_revision_artifact", media_type="application/json"),
                 )
+                parent_payload = state.get("payload") if isinstance(state.get("payload"), Mapping) else {}
+                prompt_selection = parent_payload.get("prompt_selection") if isinstance(parent_payload, Mapping) else None
+                if not isinstance(prompt_selection, Mapping) or not isinstance(prompt_selection.get("json"), Mapping):
+                    raise MkbError(
+                        "PROMPT_NOT_REGISTERED",
+                        "Scatter child cannot inherit a frozen json prompt selection",
+                        503,
+                    )
+                child_payload: dict[str, Any] = {
+                    "source": {
+                        "source_kind": "registered_api",
+                        "external_key": state["external_key"],
+                        "connector_key": source.get("connector_key"),
+                        "provider": source.get("provider"),
+                        "operation": source.get("operation"),
+                        "definition_version": source.get("definition_version"),
+                        "representation": "raw",
+                        "records": [],
+                        "exhaustion_proof": "caller_frozen_records.v1",
+                    },
+                    "prompt_selection": dict(prompt_selection),
+                }
+                for identity_key in ("json_prompt_id", "markdown_prompt_id", "clean_prompt_id", "summarizer_prompt_id"):
+                    identity = parent_payload.get(identity_key)
+                    if isinstance(identity, str) and identity:
+                        child_payload[identity_key] = identity
                 child_manifest_body = {
                     "schema_version": "mkb.execution-input-manifest.v1",
                     "team_uuid": command.team_uuid,
@@ -112,19 +138,7 @@ class IntakeAcceptanceScatterMixin:
                     # This closed descriptor is contextual evidence only.  The
                     # exact usable member is the immutable scatter_member below;
                     # children never re-enumerate the collection source.
-                    "payload": {
-                        "source": {
-                            "source_kind": "registered_api",
-                            "external_key": state["external_key"],
-                            "connector_key": source.get("connector_key"),
-                            "provider": source.get("provider"),
-                            "operation": source.get("operation"),
-                            "definition_version": source.get("definition_version"),
-                            "representation": "raw",
-                            "records": [],
-                            "exhaustion_proof": "caller_frozen_records.v1",
-                        }
-                    },
+                    "payload": child_payload,
                     "intent_context": {
                         "schema_version": "mkb.scatter-child-context.v1",
                         "scatter_member": {

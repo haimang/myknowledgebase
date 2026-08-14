@@ -29,7 +29,14 @@
     "layered_content": {
       "type": "array",
       "minItems": 1,
-      "items": { "$ref": "#/$defs/layered_content_block" }
+      "items": { "$ref": "#/$defs/layered_content_block" },
+      "contains": {
+        "type": "object",
+        "required": ["granularity"],
+        "properties": {
+          "granularity": { "const": 0 }
+        }
+      }
     }
   },
   "$defs": {

@@ -19,6 +19,7 @@ def test_ns1_production_architecture_fences() -> None:
     )
     assert re.search(r"\bstructurize\s*\(\s*clean_text", runtime_source) is None
     assert "compiler.structurize(" not in runtime_source
+    assert "_live_summaries" not in runtime_source
 
     migration_source = "\n".join(
         path.read_text(encoding="utf-8") for path in Path("src/persistence/migrations").glob("*.sql")

@@ -60,20 +60,39 @@ DEFAULT_PROMPTS = (
 )
 
 
-# The legacy-compatible promptA/B/C rows remain addressable by the existing
-# runtime until the later NS1 wiring phase.  The four-role rows below are the
-# catalog defaults used by new callers; no row contains prompt body text.
+# The legacy-compatible promptA/B/C rows remain addressable so already-frozen
+# v1 pointers stay valid.  New callers resolve the four-role defaults below;
+# no row contains prompt body text.
 DEFAULT_CATALOG_PROMPTS = (
+    ("promptA.clean", "v1", "clean/promptA.clean.v1.md", "clean", None),
     ("promptA.default", "v1", "prompt-a-clean-v1.md", "clean", None),
     ("promptB.markdown.legal", "v1", "markdown/promptB.markdown.legal.v1.md", "markdown", None),
     ("promptB.json.generic", "v1", "json/promptB.json.generic.v1.md", "json", (0, 1, 2)),
+    ("promptB.json.legal", "v1", "json/promptB.json.legal.v1.md", "json", (0, 1)),
+    ("promptB.json.realestate", "v1", "json/promptB.json.realestate.v1.md", "json", (0,)),
     ("promptB.default", "v1", "prompt-b-structure-v1.md", "json", (0, 1, 2)),
+    ("promptC.summarizer", "v1", "summarizer/promptC.summarizer.v1.md", "summarizer", None),
     ("promptC.default", "v1", "prompt-c-summary-v1.md", "summarizer", None),
 )
 
 _PROMPT_ID = re.compile(r"^[A-Za-z][A-Za-z0-9_.-]{0,127}$")
 _PROMPT_VERSION = re.compile(r"^v[0-9]+(?:[.-][A-Za-z0-9_.-]+)?$")
 _PROMPT_ROLES = frozenset({"clean", "markdown", "json", "summarizer"})
+
+
+def prompt_version_sort_key(version: str) -> tuple[int, str]:
+    """Order ``v10`` after ``v9``. Lexical DESC would put ``v9`` first."""
+
+    match = re.fullmatch(r"v(\d+)(.*)", version or "")
+    if match is None:
+        return (-1, version or "")
+    return (int(match.group(1)), match.group(2))
+
+
+def select_latest_catalog_row(rows: list[Mapping[str, Any]]) -> Mapping[str, Any]:
+    """Pick the numerically latest catalog row from an already-filtered set."""
+
+    return max(rows, key=lambda row: prompt_version_sort_key(str(row.get("prompt_version") or "")))
 
 
 DEFAULT_MODELS = (
@@ -409,12 +428,12 @@ class RegistryService:
             raise MkbError("PROMPT_CATALOG_INVALID", "Prompt version is invalid", 422)
         async with self.persistence.transaction() as tx:
             if version is None:
-                row = await tx.fetchone(
+                rows = await tx.fetchall(
                     "SELECT prompt_id,prompt_key,prompt_version,git_relative_path,content_sha256,role,status,granularity_set "
-                    "FROM mkb_prompt_hash_pointers WHERE prompt_id=? AND status='active' "
-                    "ORDER BY prompt_version DESC LIMIT 1",
+                    "FROM mkb_prompt_hash_pointers WHERE prompt_id=? AND status='active'",
                     (prompt_id,),
                 )
+                row = select_latest_catalog_row(rows) if rows else None
             else:
                 row = await tx.fetchone(
                     "SELECT prompt_id,prompt_key,prompt_version,git_relative_path,content_sha256,role,status,granularity_set "
@@ -466,6 +485,11 @@ class RegistryService:
                 if entry.content_sha256 != pointer.content_sha256 or entry.relative_path != relative_path or entry.role != role:
                     raise MkbError("PROMPT_VERSION_EXISTS", "Prompt version already points to different bytes", 409)
                 return entry
+            await tx.execute(
+                "UPDATE mkb_prompt_hash_pointers SET status='retired' "
+                "WHERE prompt_id=? AND status='active'",
+                (prompt_id,),
+            )
             await tx.execute(
                 "INSERT INTO mkb_prompt_hash_pointers "
                 "(prompt_id,prompt_key,prompt_version,git_relative_path,content_sha256,role,status,granularity_set,registered_at,payload_extra) "

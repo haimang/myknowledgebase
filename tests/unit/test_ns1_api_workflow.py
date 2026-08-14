@@ -58,6 +58,7 @@ def test_ingest_payload_requires_json_identity_and_rejects_transport_coordinates
 def _catalog_rows() -> list[dict[str, object]]:
     rows: list[dict[str, object]] = []
     for prompt_id, version, relative_path, role, granularity_set in (
+        ("promptA.clean", "v1", "clean/promptA.clean.v1.md", "clean", None),
         ("promptA.default", "v1", "prompt-a-clean-v1.md", "clean", None),
         (
             "promptB.markdown.legal",
@@ -67,6 +68,8 @@ def _catalog_rows() -> list[dict[str, object]]:
             None,
         ),
         ("promptB.json.generic", "v1", "json/promptB.json.generic.v1.md", "json", [0, 1, 2]),
+        ("promptB.json.legal", "v1", "json/promptB.json.legal.v1.md", "json", [0, 1]),
+        ("promptC.summarizer", "v1", "summarizer/promptC.summarizer.v1.md", "summarizer", None),
         ("promptC.default", "v1", "prompt-c-summary-v1.md", "summarizer", None),
     ):
         content = (Path("data/prompts") / relative_path).read_bytes()
@@ -108,6 +111,29 @@ def test_materialize_resolves_role_rows_to_hash_path_and_profile() -> None:
     with pytest.raises(MkbError) as error:
         service._resolve_prompt_selection(mismatched, SimpleNamespace(payload=payload))
     assert error.value.code == "PROMPT_ROLE_MISMATCH"
+
+
+def test_new_ingest_selects_latest_active_and_frozen_pointer_stays_put() -> None:
+    service = object.__new__(ConfigSnapshotService)
+    service.settings = SimpleNamespace(prompt_root=Path("data/prompts").resolve())
+    rows = _catalog_rows()
+    payload = IntakeIngestPayload.model_validate(_payload())
+    first = service._resolve_prompt_selection(rows, SimpleNamespace(payload=payload))
+    frozen_hash = first["json"]["content_sha256"]
+    v1 = next(row for row in rows if row["prompt_id"] == "promptB.json.generic")
+    rows.append(
+        {
+            **v1,
+            "prompt_version": "v10",
+            "git_relative_path": "json/promptB.json.generic.v1.md",
+            "status": "active",
+        }
+    )
+    v1["status"] = "retired"
+    second = service._resolve_prompt_selection(rows, SimpleNamespace(payload=payload))
+    assert second["json"]["version"] == "v10"
+    assert first["json"]["version"] == "v1"
+    assert first["json"]["content_sha256"] == frozen_hash
 
 
 class _RouteProbe(WorkflowMaterializeMixin):

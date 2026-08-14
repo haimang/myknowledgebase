@@ -1,0 +1,17 @@
+{
+  "context_meta": { "title": "legal fixture" },
+  "layered_content": [
+    {
+      "block_id": 0,
+      "granularity": 0,
+      "original_content": { "title": null, "body": "Article 1 Notice. Article 2 Scope." },
+      "llm_summary": { "title": null, "body": null }
+    },
+    {
+      "block_id": 1,
+      "granularity": 1,
+      "original_content": { "title": null, "body": "Article 1 Notice." },
+      "llm_summary": { "title": null, "body": null }
+    }
+  ]
+}

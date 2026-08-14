@@ -2,16 +2,21 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
 from src.contracts.common.errors import MkbError
 from src.runtime.inference.claude_cli import (
+    CLAUDE_CLI_ARGV_PROMPT_LIMIT_BYTES,
     ClaudeCliRequest,
     ClaudeCliResult,
     RecordingStub,
+    SubprocessClaudeCli,
     _decode_plain_stdout,
     _decode_structured_stdout,
     build_claude_argv,
+    prompt_transport_for,
 )
 
 
@@ -43,6 +48,13 @@ def test_build_argv_uses_bare_system_file_tools_and_schema_only_for_structured()
     assert "--json-schema" in structured
     assert "--api-key" not in structured
     assert all("secret-token" not in item for item in structured)
+    stdin_argv = build_claude_argv(
+        ClaudeCliRequest(user_prompt="x" * (CLAUDE_CLI_ARGV_PROMPT_LIMIT_BYTES + 1), system_prompt_file="p.md"),
+        prompt_transport="stdin",
+    )
+    assert stdin_argv[:2] == ("claude", "-p")
+    assert "x" * 10 not in stdin_argv
+    assert prompt_transport_for("x" * (CLAUDE_CLI_ARGV_PROMPT_LIMIT_BYTES + 1)) == "stdin"
 
 
 def test_structured_output_has_priority_over_result_string() -> None:
@@ -92,3 +104,22 @@ async def test_recording_stub_is_injectable_and_preserves_request_metadata() -> 
 
     assert await stub.run(request) == response
     assert stub.requests == [request]
+
+
+@pytest.mark.asyncio
+async def test_subprocess_cli_transports_large_prompt_on_stdin(tmp_path: Path) -> None:
+    helper = tmp_path / "fake_claude.py"
+    helper.write_text(
+        "#!/usr/bin/env python3\n"
+        "import json\n"
+        "import sys\n"
+        "payload = sys.stdin.read()\n"
+        "print(json.dumps({'is_error': False, 'result': payload[:32], 'session_id': 'large'}))\n",
+        encoding="utf-8",
+    )
+    helper.chmod(0o755)
+    cli = SubprocessClaudeCli(executable=str(helper))
+    material = "Z" * 200_000
+    result = await cli.run(ClaudeCliRequest(user_prompt=material, system_prompt_file=str(tmp_path / "prompt.md")))
+    assert result.text == "Z" * 32
+    assert result.session_id == "large"

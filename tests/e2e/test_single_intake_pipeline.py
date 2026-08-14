@@ -228,7 +228,9 @@ class _LiveEmbeddingFixture:
                 ],
             }
         else:
-            clean = request.input_text
+            from src.runtime.inference.claude_cli import clean_text_from_bjson_material
+
+            clean = clean_text_from_bjson_material(request.input_text)
             midpoint = max(1, len(clean) // 2)
             value = {
                 "context_meta": {},
@@ -302,6 +304,7 @@ def test_live_profile_uses_frozen_binding_for_vector_write_and_query(tmp_path: P
             internal_token=token,
             inference_probe_enabled=False,
             live_inference=True,
+            ns1_cli_mode="disabled",
             rate_limit_ip_per_min=1_000,
             rate_limit_token_per_min=2_000,
         )

@@ -35,9 +35,9 @@ class Settings(BaseSettings):
     inference_secret_file: Path | None = None
     inference_probe_enabled: bool = False
     live_inference: bool = False
-    # NS1 transport is local-stubbed by default for deterministic development
-    # and CI.  A deployment may explicitly select the subprocess port; no
-    # subprocess is created when the existing S11 live profile is enabled.
+    # NS1 A/B.md/B.json/C transport. Independent of live_inference, which only
+    # selects the embed/vectorize facade. ``disabled`` keeps the legacy S11
+    # structured_generate fallback for tests that inject a local fixture.
     ns1_cli_mode: Literal["disabled", "stub", "subprocess"] = "stub"
     ns1_cli_executable: str = "claude"
     inference_max_in_flight: int = Field(default=8, ge=1, le=256)

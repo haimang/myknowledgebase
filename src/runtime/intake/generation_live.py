@@ -16,7 +16,6 @@ from src.contracts.inference.models import (
     InferenceBinding,
     InvocationContext,
     StructuredGenerateRequest,
-    TextGenerateRequest,
 )
 from src.contracts.runtime.models import ProcessCommand
 from src.contracts.storage.models import ObjectHandle
@@ -25,10 +24,6 @@ from src.runtime.intake.types import (
     _digest_bytes,
     _FrozenGenerationConfig,
     _json,
-)
-from src.services.lsrag_compiler import (
-    RetrievalBlockProjection,
-    summary_plan,
 )
 
 
@@ -330,133 +325,6 @@ class IntakeGenerationLiveMixin:
             return output, receipt
 
 
-    async def _live_text_generate(
-            self,
-            command: ProcessCommand,
-            *,
-            stage_key: str,
-            input_text: str,
-            prompt_key: str,
-            prompt_version: str,
-            prompt_role: str | None = None,
-            schema_key: str,
-            schema_version: str,
-            input_digest: str,
-            invocation_ordinal: int = 0,
-        ) -> tuple[str, dict[str, Any]]:
-            """Call ``text_generate`` and return (text, body-free ledger receipt)."""
-
-            if self._inference is None:
-                raise MkbError("GENERATION_INFERENCE_UNAVAILABLE", "Text generation is not configured", 503)
-            config = await self._resolve_frozen_generation_config(
-                command,
-                capability_key="text_generate",
-                prompt_key=prompt_key,
-                prompt_version=prompt_version,
-                prompt_role=prompt_role,
-                schema_key=schema_key,
-                schema_version=schema_version,
-            )
-            generation_uuid = uuid7()
-            request = TextGenerateRequest(
-                team_uuid=command.team_uuid,
-                binding=config.binding,
-                prompt_ref=config.prompt_ref,
-                prompt_digest=config.prompt_digest,
-                input_text=input_text,
-                invocation=InvocationContext(
-                    trace_uuid=command.trace_uuid,
-                    task_uuid=command.task_uuid,
-                    execution_uuid=command.execution_uuid,
-                    process_uuid=command.process_uuid,
-                    generation_invocation_uuid=generation_uuid,
-                    prompt_content_hash=config.prompt_digest,
-                    schema_content_digest=config.schema_digest,
-                    config_snapshot_digest=command.config_snapshot_digest,
-                ),
-            )
-            started = time.monotonic()
-            request_digest = stable_digest(
-                {
-                    "capability": "text_generate",
-                    "binding_digest": config.binding.binding_digest,
-                    "prompt_digest": config.prompt_digest,
-                    "input_digest": input_digest,
-                }
-            )
-            receipt: dict[str, Any] = {
-                "invocation_uuid": generation_uuid,
-                "inference_invocation_uuid": uuid7(),
-                "invocation_ordinal": invocation_ordinal,
-                "process_attempt": command.fencing_generation,
-                "capability_key": "text_generate",
-                "stage_key": stage_key,
-                "input_digest": input_digest,
-                "output_digest": None,
-                "error_digest": None,
-                "status": "succeeded",
-                "error_code": None,
-                "model_key": config.binding.model_key,
-                "model_version": config.binding.model_version,
-                "adapter_kind": config.binding.adapter_kind,
-                "binding_digest": config.binding.binding_digest,
-                "prompt_key": config.prompt_key,
-                "prompt_version": config.prompt_version,
-                "prompt_digest": config.prompt_digest,
-                "schema_key": config.schema_key,
-                "schema_version": config.schema_version,
-                "schema_digest": config.schema_digest,
-                "request_digest": request_digest,
-                "latency_ms": 0,
-                "input_tokens": None,
-                "output_tokens": None,
-                "total_tokens": None,
-            }
-            try:
-                response = await self._inference.text_generate(request)
-                if not isinstance(response.text, str) or not response.text.strip():
-                    raise MkbError("GENERATION_INFERENCE_EMPTY", "Text generation returned empty content", 502)
-            except MkbError as exc:
-                receipt.update(
-                    {
-                        "status": "failed",
-                        "error_code": exc.code,
-                        "error_digest": stable_digest({"error_code": exc.code, "message": exc.message}),
-                        "latency_ms": max(0, int((time.monotonic() - started) * 1000)),
-                    }
-                )
-                await self._persist_failed_generation_invocation(command, receipt)
-                raise
-            except Exception as exc:
-                receipt.update(
-                    {
-                        "status": "failed",
-                        "error_code": "GENERATION_INFERENCE_FAILED",
-                        "error_digest": stable_digest(
-                            {"error_code": "GENERATION_INFERENCE_FAILED", "exc_type": type(exc).__name__}
-                        ),
-                        "latency_ms": max(0, int((time.monotonic() - started) * 1000)),
-                    }
-                )
-                await self._persist_failed_generation_invocation(command, receipt)
-                raise MkbError("GENERATION_INFERENCE_FAILED", "Text generation failed", 503) from exc
-            usage = response.usage
-            receipt.update(
-                {
-                    "inference_invocation_uuid": response.invocation_uuid or receipt["inference_invocation_uuid"],
-                    "output_digest": stable_digest({"text": response.text}),
-                    "request_digest": response.request_digest or request_digest,
-                    "latency_ms": response.latency_ms
-                    if response.latency_ms is not None
-                    else max(0, int((time.monotonic() - started) * 1000)),
-                    "input_tokens": None if usage is None else usage.input_tokens,
-                    "output_tokens": None if usage is None else usage.output_tokens,
-                    "total_tokens": None if usage is None else usage.total_tokens,
-                }
-            )
-            return response.text, receipt
-
-
     async def _persist_failed_generation_invocation(
             self, command: ProcessCommand, invocation: Mapping[str, Any]
         ) -> None:
@@ -469,40 +337,6 @@ class IntakeGenerationLiveMixin:
                 # Audit must not replace the original inference failure as the
                 # Process error surface; the domain failure remains authoritative.
                 return
-
-
-    async def _live_summaries(
-            self, command: ProcessCommand, projection: RetrievalBlockProjection
-        ) -> tuple[dict[str, str], list[dict[str, Any]]]:
-            """Fill every projection block via live ``text_generate`` (S07)."""
-
-            plan = summary_plan(projection)
-            block_by_id = {block.block_id: block for block in projection.blocks}
-            summaries: dict[str, str] = {}
-            receipts: list[dict[str, Any]] = []
-            for ordinal, block_id in enumerate(plan.block_ids):
-                block = block_by_id[block_id]
-                text, receipt = await self._live_text_generate(
-                    command,
-                    stage_key="construct",
-                    input_text=block.original_text,
-                    prompt_key="promptC.default",
-                    prompt_version="v1",
-                    schema_key="lsrag.construction.default",
-                    schema_version="v1",
-                    input_digest=stable_digest(
-                        {
-                            "block_id": block_id,
-                            "original_digest": block.original_digest,
-                            "stage": "construct",
-                        }
-                    ),
-                    prompt_role="summarizer",
-                    invocation_ordinal=ordinal,
-                )
-                summaries[block_id] = text.strip()
-                receipts.append(receipt)
-            return summaries, receipts
 
 
     async def _record_generation_and_inference_invocations(

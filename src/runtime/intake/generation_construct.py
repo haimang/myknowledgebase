@@ -13,7 +13,7 @@ from src.contracts.common.ids import canonical_json, stable_digest, uuid7
 from src.contracts.common.time import utc_now
 from src.contracts.runtime.models import ProcessCommand
 from src.persistence.ports import UnitOfWork
-from src.runtime.inference.claude_cli import ClaudeCliRequest
+from src.runtime.inference.claude_cli import BJSON_MATERIAL_SCHEMA, ClaudeCliRequest
 from src.runtime.intake.types import (
     _is_sha256_digest,
     _json,
@@ -51,11 +51,13 @@ class IntakeGenerationConstructMixin:
 
     @staticmethod
     def _layered_profile(state: Mapping[str, Any], *, error_code: str) -> tuple[int, ...]:
-        raw = state.get("layered_content_profile", state.get("granularity_set", (0, 1, 2)))
+        raw = state.get("layered_content_profile")
+        if raw is None:
+            raw = state.get("granularity_set")
         payload = state.get("payload")
         prompt_selection = payload.get("prompt_selection") if isinstance(payload, Mapping) else None
         json_prompt = prompt_selection.get("json") if isinstance(prompt_selection, Mapping) else None
-        if raw == (0, 1, 2) and isinstance(json_prompt, Mapping) and json_prompt.get("granularity_set") is not None:
+        if raw is None and isinstance(json_prompt, Mapping):
             raw = json_prompt.get("granularity_set")
         if not isinstance(raw, list | tuple) or not raw:
             raise MkbError(error_code, "Layered granularity profile is unavailable", 409)
@@ -63,6 +65,62 @@ class IntakeGenerationConstructMixin:
         if any(isinstance(value, bool) or not isinstance(value, int) or value not in {0, 1, 2} for value in values) or 0 not in values:
             raise MkbError(error_code, "Layered granularity profile is invalid", 409)
         return values
+
+    @staticmethod
+    def _bjson_user_material(*, clean_text: str, markdown_text: str | None) -> str:
+        markdown = markdown_text if isinstance(markdown_text, str) and markdown_text.strip() else None
+        return json.dumps(
+            {"schema_version": BJSON_MATERIAL_SCHEMA, "clean": clean_text, "markdown": markdown},
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+
+    @classmethod
+    def _structurize_input_text(cls, state: Mapping[str, Any], clean_text: str) -> str:
+        markdown = state.get("markdown_text")
+        markdown_text = markdown if isinstance(markdown, str) and markdown.strip() else None
+        return cls._bjson_user_material(clean_text=clean_text, markdown_text=markdown_text)
+
+    def _prompt_relative_path(self, prompt_path: Path) -> str:
+        try:
+            return prompt_path.relative_to(self._prompt_root).as_posix()
+        except ValueError:
+            return prompt_path.name
+
+    def _cli_invocation_from_receipt(
+        self,
+        command: ProcessCommand,
+        receipt: Mapping[str, object],
+        *,
+        stage_key: str,
+        capability_key: str,
+        input_digest: str,
+    ) -> dict[str, Any]:
+        usage = receipt.get("usage") if isinstance(receipt.get("usage"), Mapping) else {}
+        return {
+            "invocation_uuid": uuid7(),
+            "inference_invocation_uuid": uuid7(),
+            "invocation_ordinal": 0,
+            "process_attempt": command.fencing_generation,
+            "capability_key": capability_key,
+            "stage_key": stage_key,
+            "input_digest": input_digest,
+            "output_digest": receipt.get("output_digest"),
+            "status": "succeeded",
+            "adapter_kind": "claude_cli",
+            "prompt_key": receipt.get("prompt_relative_path"),
+            "prompt_version": receipt.get("prompt_version"),
+            "prompt_digest": receipt.get("prompt_sha256"),
+            "schema_key": "lsrag.layered_content.default" if receipt.get("schema_relative_path") else None,
+            "schema_version": "v1" if receipt.get("schema_relative_path") else None,
+            "request_digest": stable_digest(
+                {"transport": "claude_cli", "role": receipt.get("role"), "input_digest": input_digest}
+            ),
+            "input_tokens": usage.get("input_tokens") if isinstance(usage, Mapping) else None,
+            "output_tokens": usage.get("output_tokens") if isinstance(usage, Mapping) else None,
+            "total_tokens": usage.get("total_tokens") if isinstance(usage, Mapping) else None,
+        }
 
     @staticmethod
     def _layered_state_candidate(state: Mapping[str, Any], *, error_code: str) -> Mapping[str, object]:
@@ -107,11 +165,13 @@ class IntakeGenerationConstructMixin:
         cli = getattr(self, "_claude_cli", None)
         if cli is None:
             raise MkbError("STRUCTURE_CANDIDATE_MISSING", "No layered candidate worker is configured", 503)
+        if state is not None and not self._has_frozen_prompt_selection(state, "json"):
+            raise MkbError("PROMPT_NOT_REGISTERED", "Frozen json prompt pointer is unavailable", 503)
         prompt_path, prompt_digest = self._ns1_prompt_file(
             "json/promptB.json.generic.v1.md",
             error_code="PROMPT_HASH_MISMATCH",
             state=state,
-            role="json" if self._has_frozen_prompt_selection(state, "json") else None,
+            role="json" if state is not None else None,
         )
         try:
             schema = json.loads(self._ns1_schema_path().read_text(encoding="utf-8"))
@@ -131,10 +191,14 @@ class IntakeGenerationConstructMixin:
         if not isinstance(result.structured_output, Mapping):
             raise MkbError("STRUCTURE_CANDIDATE_INVALID", "B.json worker did not return structured output", 422)
         candidate = dict(result.structured_output)
+        pointer = None
+        if state is not None:
+            _, pointer = self._frozen_prompt_file(state, role="json", error_code="PROMPT_HASH_MISMATCH")
         receipt: dict[str, object] = {
             "transport": "claude_cli",
             "role": "json",
-            "prompt_relative_path": "json/promptB.json.generic.v1.md",
+            "prompt_relative_path": self._prompt_relative_path(prompt_path),
+            "prompt_version": None if pointer is None else pointer.get("version") or pointer.get("prompt_version"),
             "prompt_sha256": prompt_digest,
             "schema_relative_path": "data/schemas/lsrag.layered_content.v1.json",
             "session_id": result.session_id,
@@ -154,11 +218,13 @@ class IntakeGenerationConstructMixin:
         cli = getattr(self, "_claude_cli", None)
         if cli is None:
             raise MkbError("CONSTRUCT_KERNEL_SUMMARY_INVALID", "No layered summary worker is configured", 503)
+        if state is not None and not self._has_frozen_prompt_selection(state, "summarizer"):
+            raise MkbError("PROMPT_NOT_REGISTERED", "Frozen summarizer prompt pointer is unavailable", 503)
         prompt_path, prompt_digest = self._ns1_prompt_file(
             "summarizer/promptC.summarizer.v1.md",
             error_code="PROMPT_HASH_MISMATCH",
             state=state,
-            role="summarizer" if self._has_frozen_prompt_selection(state, "summarizer") else None,
+            role="summarizer" if state is not None else None,
         )
         try:
             schema = json.loads(self._ns1_schema_path().read_text(encoding="utf-8"))
@@ -178,10 +244,14 @@ class IntakeGenerationConstructMixin:
         if not isinstance(result.structured_output, Mapping):
             raise MkbError("CONSTRUCT_KERNEL_SUMMARY_INVALID", "C worker did not return structured output", 422)
         completed = dict(result.structured_output)
+        pointer = None
+        if state is not None:
+            _, pointer = self._frozen_prompt_file(state, role="summarizer", error_code="PROMPT_HASH_MISMATCH")
         receipt: dict[str, object] = {
             "transport": "claude_cli",
             "role": "summarizer",
-            "prompt_relative_path": "summarizer/promptC.summarizer.v1.md",
+            "prompt_relative_path": self._prompt_relative_path(prompt_path),
+            "prompt_version": None if pointer is None else pointer.get("version") or pointer.get("prompt_version"),
             "prompt_sha256": prompt_digest,
             "schema_relative_path": "data/schemas/lsrag.layered_content.v1.json",
             "session_id": result.session_id,
@@ -200,11 +270,13 @@ class IntakeGenerationConstructMixin:
         cli = getattr(self, "_claude_cli", None)
         if cli is None:
             raise MkbError("MARKDOWN_WORKER_UNAVAILABLE", "Markdown worker is not configured", 503)
+        if not self._has_frozen_prompt_selection(state, "markdown"):
+            raise MkbError("PROMPT_NOT_REGISTERED", "Frozen markdown prompt pointer is unavailable", 503)
         prompt_path, prompt_digest = self._ns1_prompt_file(
             "markdown/promptB.markdown.legal.v1.md",
             error_code="PROMPT_HASH_MISMATCH",
             state=state,
-            role="markdown" if self._has_frozen_prompt_selection(state, "markdown") else None,
+            role="markdown",
         )
         result = await cli.run(
             ClaudeCliRequest(
@@ -216,10 +288,12 @@ class IntakeGenerationConstructMixin:
         markdown = result.text.strip()
         if not markdown:
             raise MkbError("MARKDOWN_OUTPUT_INVALID", "Markdown worker returned empty output", 422)
+        _, pointer = self._frozen_prompt_file(state, role="markdown", error_code="PROMPT_HASH_MISMATCH")
         receipt: dict[str, object] = {
             "transport": "claude_cli",
             "role": "markdown",
-            "prompt_relative_path": "markdown/promptB.markdown.legal.v1.md",
+            "prompt_relative_path": self._prompt_relative_path(prompt_path),
+            "prompt_version": pointer.get("version") or pointer.get("prompt_version"),
             "prompt_sha256": prompt_digest,
             "session_id": result.session_id,
             "usage": None if result.usage is None else dict(result.usage),
@@ -247,7 +321,15 @@ class IntakeGenerationConstructMixin:
         )
 
         async def callback(tx: UnitOfWork, refs: Mapping[str, str]) -> None:
-            del tx, refs
+            del refs
+            invocation = self._cli_invocation_from_receipt(
+                command,
+                receipt,
+                stage_key="transcribe_markdown",
+                capability_key="text_generate",
+                input_digest=state["clean_digest"],
+            )
+            await self._record_generation_and_inference_invocations(tx, command, invocation)
 
         return material, {}, callback
 
@@ -549,12 +631,21 @@ class IntakeGenerationConstructMixin:
             cli_receipt: dict[str, object] | None = None
             layered_candidate: Mapping[str, object] | None = None
             profile = self._layered_profile(state, error_code="STRUCTURE_PROFILE_INVALID")
-            if self._live_inference:
+            structurize_input = self._structurize_input_text(state, clean)
+            if getattr(self, "_claude_cli", None) is not None and state.get("layered_content_candidate") is None:
+                generated_candidate, cli_receipt = await self._cli_layered_candidate(
+                    clean_text=clean,
+                    input_text=structurize_input,
+                    profile=profile,
+                    state=state,
+                )
+                layered_candidate = generated_candidate
+            elif self._live_inference:
                 generation_invocation = await self._live_structured_generate(
                     command,
                     stage_key="structurize",
-                    input_text=clean,
-                    prompt_key="promptB.default",
+                    input_text=structurize_input,
+                    prompt_key="promptB.json.generic",
                     prompt_version="v1",
                     prompt_role="json",
                     schema_key="lsrag.layered_content.default",
@@ -564,14 +655,6 @@ class IntakeGenerationConstructMixin:
                 live_candidate = generation_invocation.pop("_structured_output", None)
                 if isinstance(live_candidate, Mapping):
                     layered_candidate = live_candidate
-            elif getattr(self, "_claude_cli", None) is not None and state.get("layered_content_candidate") is None:
-                generated_candidate, cli_receipt = await self._cli_layered_candidate(
-                    clean_text=clean,
-                    input_text=state.get("markdown_text") if isinstance(state.get("markdown_text"), str) else None,
-                    profile=profile,
-                    state=state,
-                )
-                layered_candidate = generated_candidate
             if layered_candidate is None:
                 layered_candidate = self._layered_state_candidate(
                     state,
@@ -697,6 +780,18 @@ class IntakeGenerationConstructMixin:
                     raise MkbError("REGISTRY_NOT_FOUND", "Structure schema definition is unavailable", 503)
                 if generation_invocation is not None:
                     await self._record_generation_and_inference_invocations(tx, command, generation_invocation)
+                elif cli_receipt is not None:
+                    await self._record_generation_and_inference_invocations(
+                        tx,
+                        command,
+                        self._cli_invocation_from_receipt(
+                            command,
+                            cli_receipt,
+                            stage_key="structurize",
+                            capability_key="structured_generate",
+                            input_digest=stable_digest({"clean_digest": state["clean_digest"], "stage": "structurize"}),
+                        ),
+                    )
                 for asset in (structure_asset, projection_asset, validation_asset):
                     stored_object_uuid = await self._catalog_generation_object(tx, command.team_uuid, asset.stat)
                     await self._insert_generation_artifact(
@@ -748,6 +843,7 @@ class IntakeGenerationConstructMixin:
             generation_invocations: list[dict[str, Any]] = []
             cli_receipt: dict[str, object] | None = None
             completed_layered_candidate: dict[str, object] | None = None
+            accepted_layered_candidate: Mapping[str, object] | None = None
             if construct_mode == "metadata_refresh":
                 compiler, structure, projection, summaries, metadata_headers = await self._reconstruct_metadata_refresh_contract(
                     command, state
@@ -760,7 +856,13 @@ class IntakeGenerationConstructMixin:
                     error_code="CONSTRUCT_BINDING_CANDIDATE_MISSING",
                 )
                 profile = self._layered_profile(state, error_code="CONSTRUCT_BINDING_PROFILE_INVALID")
-                if self._live_inference:
+                if getattr(self, "_claude_cli", None) is not None:
+                    completed_layered_candidate, cli_receipt = await self._cli_layered_summary(
+                        layered_candidate=accepted_layered_candidate,
+                        profile=profile,
+                        state=state,
+                    )
+                elif self._live_inference:
                     completed_value, receipt = await self._live_layered_summary_generate(
                         command,
                         layered_candidate=accepted_layered_candidate,
@@ -769,12 +871,6 @@ class IntakeGenerationConstructMixin:
                         raise MkbError("CONSTRUCT_KERNEL_SUMMARY_INVALID", "C did not return a layered JSON package", 422)
                     completed_layered_candidate = dict(completed_value)
                     generation_invocations = [receipt]
-                elif getattr(self, "_claude_cli", None) is not None:
-                    completed_layered_candidate, cli_receipt = await self._cli_layered_summary(
-                        layered_candidate=accepted_layered_candidate,
-                        profile=profile,
-                        state=state,
-                    )
                 else:
                     summaries = deterministic_summaries(projection)
                     completed_layered_candidate = compiler.fill_layered_summaries(
@@ -914,6 +1010,22 @@ class IntakeGenerationConstructMixin:
                     raise MkbError("REGISTRY_NOT_FOUND", "Construction schema definition is unavailable", 503)
                 for item in generation_invocations:
                     await self._record_generation_and_inference_invocations(tx, command, item)
+                if cli_receipt is not None:
+                    await self._record_generation_and_inference_invocations(
+                        tx,
+                        command,
+                        self._cli_invocation_from_receipt(
+                            command,
+                            cli_receipt,
+                            stage_key="construct",
+                            capability_key="structured_generate",
+                            input_digest=(
+                                stable_digest(accepted_layered_candidate)
+                                if accepted_layered_candidate is not None
+                                else stable_digest({"construct_mode": construct_mode})
+                            ),
+                        ),
+                    )
                 for asset in (construction_asset, dual_asset, validation_asset):
                     stored_object_uuid = await self._catalog_generation_object(tx, command.team_uuid, asset.stat)
                     await self._insert_generation_artifact(

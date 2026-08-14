@@ -1,0 +1,23 @@
+{
+  "context_meta": { "title": "generic fixture" },
+  "layered_content": [
+    {
+      "block_id": 0,
+      "granularity": 0,
+      "original_content": { "title": null, "body": "First paragraph. Second paragraph." },
+      "llm_summary": { "title": null, "body": null }
+    },
+    {
+      "block_id": 1,
+      "granularity": 1,
+      "original_content": { "title": null, "body": "First paragraph." },
+      "llm_summary": { "title": null, "body": null }
+    },
+    {
+      "block_id": 2,
+      "granularity": 2,
+      "original_content": { "title": null, "body": "Second paragraph." },
+      "llm_summary": { "title": null, "body": null }
+    }
+  ]
+}

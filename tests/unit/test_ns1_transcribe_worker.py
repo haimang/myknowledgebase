@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 from pathlib import Path
 
 import pytest
@@ -44,11 +45,24 @@ async def test_transcribe_markdown_uses_plain_cli_without_schema() -> None:
         prompt_root=Path("data/prompts"),
     )
     clean = "source"
+    markdown_path = Path("data/prompts/markdown/promptB.markdown.legal.v1.md")
     material, _, _ = await pipeline._transcribe_markdown(
         _command(),
         {
             "clean_text": clean,
             "clean_digest": stable_digest({"text": clean}),
+            "payload": {
+                "prompt_selection": {
+                    "markdown": {
+                        "prompt_id": "promptB.markdown.legal",
+                        "version": "v1",
+                        "content_sha256": hashlib.sha256(markdown_path.read_bytes()).hexdigest(),
+                        "git_relative_path": "markdown/promptB.markdown.legal.v1.md",
+                        "role": "markdown",
+                        "granularity_set": None,
+                    }
+                }
+            },
         },
     )
 
@@ -56,3 +70,6 @@ async def test_transcribe_markdown_uses_plain_cli_without_schema() -> None:
     request = stub.requests[0]
     assert request.role == "markdown"
     assert request.json_schema is None
+    assert material.envelope["state"]["markdown_cli_receipt"]["prompt_relative_path"] == (
+        "markdown/promptB.markdown.legal.v1.md"
+    )

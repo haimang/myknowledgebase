@@ -175,6 +175,8 @@ class IntakeCoreMixin:
             "GENERATION_INFERENCE_FAILED",
             "VECTORIZE_CONFIG_SNAPSHOT_UNAVAILABLE",
             "INFERENCE_TRANSPORT_RETRYABLE",
+            "CLAUDE_CLI_TIMEOUT",
+            "CLAUDE_CLI_TRANSPORT_FAILED",
             "not-ready",
         }
     )

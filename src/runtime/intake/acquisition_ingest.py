@@ -57,7 +57,7 @@ class IntakeAcquisitionIngestMixin:
             if not isinstance(external_key, str) or not external_key.strip():
                 raise MkbError("SOURCE_EXTERNAL_KEY_INVALID", "Source external_key is required", 422)
             if source_kind == "registered_api":
-                return await self._acquire_registered_api_collection(command, descriptor)
+                return await self._acquire_registered_api_collection(command, descriptor, payload=payload)
             expected_capability = self._expected_acquisition_capability(descriptor)
             if command.process_key != expected_capability:
                 raise MkbError("ACQUISITION_CAPABILITY_MISMATCH", "Source kind does not match the bound acquisition capability", 409)
@@ -96,6 +96,7 @@ class IntakeAcquisitionIngestMixin:
                 "raw_artifact_uuid": uuid7(),
                 "clean_artifact_uuid": uuid7(),
                 "observed_at": now,
+                "payload": payload,
             }
             material = self._material(
                 command,
@@ -160,7 +161,11 @@ class IntakeAcquisitionIngestMixin:
 
 
     async def _acquire_registered_api_collection(
-            self, command: ProcessCommand, descriptor: Mapping[str, Any]
+            self,
+            command: ProcessCommand,
+            descriptor: Mapping[str, Any],
+            *,
+            payload: Mapping[str, Any],
         ) -> tuple[_StageMaterial, dict[str, Any], Callable[[UnitOfWork, Mapping[str, str]], Awaitable[None]]]:
             """Acquire an ordered typed API collection without flattening members.
 
@@ -264,6 +269,7 @@ class IntakeAcquisitionIngestMixin:
                 "change_set_uuid": uuid7(),
                 "raw_artifact_uuid": uuid7(),
                 "observed_at": now,
+                "payload": dict(payload),
             }
             material = self._material(
                 command,

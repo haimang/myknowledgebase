@@ -16,6 +16,9 @@ from typing import Any, Literal, Protocol
 
 from src.contracts.common.errors import MkbError
 
+CLAUDE_CLI_ARGV_PROMPT_LIMIT_BYTES = 16_384
+BJSON_MATERIAL_SCHEMA = "mkb.b-json-material.v1"
+
 
 @dataclass(frozen=True, slots=True)
 class ClaudeCliRequest:
@@ -53,7 +56,32 @@ class ClaudeCliPort(Protocol):
         """Run one CLI request and return parsed transport output."""
 
 
-def build_claude_argv(request: ClaudeCliRequest, *, executable: str = "claude") -> tuple[str, ...]:
+def prompt_transport_for(user_prompt: str) -> Literal["argv", "stdin"]:
+    """Keep small prompts on argv; large material must not hit E2BIG."""
+
+    return "stdin" if len(user_prompt.encode("utf-8")) > CLAUDE_CLI_ARGV_PROMPT_LIMIT_BYTES else "argv"
+
+
+def clean_text_from_bjson_material(user_prompt: str) -> str:
+    """Read the clean SSOT out of a typed B.json package, else the raw prompt."""
+
+    try:
+        package = json.loads(user_prompt)
+    except json.JSONDecodeError:
+        return user_prompt.strip()
+    if isinstance(package, dict) and package.get("schema_version") == BJSON_MATERIAL_SCHEMA:
+        clean = package.get("clean")
+        if isinstance(clean, str) and clean.strip():
+            return clean.strip()
+    return user_prompt.strip()
+
+
+def build_claude_argv(
+    request: ClaudeCliRequest,
+    *,
+    executable: str = "claude",
+    prompt_transport: Literal["argv", "stdin"] = "argv",
+) -> tuple[str, ...]:
     """Build the closed argv contract without a shell or credential flags."""
 
     if not isinstance(request.user_prompt, str) or not request.user_prompt.strip():
@@ -63,16 +91,18 @@ def build_claude_argv(request: ClaudeCliRequest, *, executable: str = "claude") 
         raise MkbError("CLAUDE_CLI_INPUT_INVALID", "Claude CLI system prompt file is required", 422)
     if request.timeout_seconds <= 0:
         raise MkbError("CLAUDE_CLI_INPUT_INVALID", "Claude CLI timeout must be positive", 422)
-    argv: list[str] = [
-        executable,
-        "-p",
-        request.user_prompt,
-        "--bare",
-        "--system-prompt-file",
-        str(prompt_path),
-        "--tools",
-        "",
-    ]
+    argv: list[str] = [executable, "-p"]
+    if prompt_transport == "argv":
+        argv.append(request.user_prompt)
+    argv.extend(
+        [
+            "--bare",
+            "--system-prompt-file",
+            str(prompt_path),
+            "--tools",
+            "",
+        ]
+    )
     if request.model:
         argv.extend(("--model", request.model))
     if request.json_schema is not None:
@@ -141,16 +171,18 @@ class SubprocessClaudeCli:
         self._env = dict(env) if env is not None else None
 
     async def run(self, request: ClaudeCliRequest) -> ClaudeCliResult:
-        argv = build_claude_argv(request, executable=self._executable)
+        transport = prompt_transport_for(request.user_prompt)
+        argv = build_claude_argv(request, executable=self._executable, prompt_transport=transport)
         try:
             process = await asyncio.create_subprocess_exec(
                 *argv,
-                stdin=asyncio.subprocess.DEVNULL,
+                stdin=asyncio.subprocess.PIPE if transport == "stdin" else asyncio.subprocess.DEVNULL,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
                 env=self._env,
             )
-            stdout_bytes, stderr_bytes = await asyncio.wait_for(process.communicate(), request.timeout_seconds)
+            payload = request.user_prompt.encode("utf-8") if transport == "stdin" else None
+            stdout_bytes, stderr_bytes = await asyncio.wait_for(process.communicate(payload), request.timeout_seconds)
         except TimeoutError as exc:
             raise MkbError("CLAUDE_CLI_TIMEOUT", "Claude CLI invocation timed out", 503) from exc
         except OSError as exc:
@@ -260,7 +292,7 @@ class DeterministicNs1Stub:
                         block["llm_summary"]["body"] = original
             value = package
         elif request.role == "json":
-            material = request.user_prompt.strip()
+            material = clean_text_from_bjson_material(request.user_prompt)
             midpoint = max(1, len(material) // 2)
             prefix = material[:midpoint].rstrip() or material
             suffix = material[midpoint:].lstrip() or material
@@ -298,4 +330,8 @@ __all__ = [
     "RecordingStub",
     "SubprocessClaudeCli",
     "build_claude_argv",
+    "clean_text_from_bjson_material",
+    "prompt_transport_for",
+    "BJSON_MATERIAL_SCHEMA",
+    "CLAUDE_CLI_ARGV_PROMPT_LIMIT_BYTES",
 ]

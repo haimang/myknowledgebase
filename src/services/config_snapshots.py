@@ -34,6 +34,7 @@ from src.persistence.ports import PersistencePort, UnitOfWork
 from src.runtime.config import Settings
 from src.services.events import SecurityAuditWriter
 from src.services.intake_lifecycle import IntakeTargetResolver
+from src.services.registry import select_latest_catalog_row
 from src.services.workflow_registry import WorkflowIdentity, WorkflowRegistryService
 from src.storage.ports import ObjectStorePort
 
@@ -48,8 +49,8 @@ _OVERRIDE_CAPS: dict[str, int] = {
 }
 _REGISTERED_PROFILES = frozenset({"clean.web.v1", "clean.document.v1", "clean.default.v1"})
 _DEFAULT_PROMPT_IDS = {
-    "clean": "promptA.default",
-    "summarizer": "promptC.default",
+    "clean": "promptA.clean",
+    "summarizer": "promptC.summarizer",
 }
 # Keys that must never be accepted even if a future DTO loosens extra=forbid.
 _FORBIDDEN_OVERRIDE_KEYS = frozenset(
@@ -580,9 +581,9 @@ class ConfigSnapshotService:
                 selected[role] = None
                 continue
             candidates = [row for row in by_id.get(prompt_id, []) if row.get("status") == "active"]
-            if len(candidates) != 1:
+            if not candidates:
                 raise MkbError("PROMPT_NOT_REGISTERED", f"Active {role} prompt is unavailable", 503)
-            row = candidates[0]
+            row = select_latest_catalog_row(candidates)
             if row.get("role") != role:
                 raise MkbError("PROMPT_ROLE_MISMATCH", f"Prompt id is not registered for role {role}", 422)
             relative_path = row.get("git_relative_path")

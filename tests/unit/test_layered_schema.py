@@ -35,6 +35,31 @@ def test_schema_rejects_unknown_span_and_missing_wire_fields() -> None:
     del bad["llm_summary"]
     with pytest.raises(MkbError, match="STRUCTURE_SCHEMA_INVALID"):
         validate_layered_content({"context_meta": {}, "layered_content": [bad]})
+    with pytest.raises(MkbError, match="granularity 0"):
+        validate_layered_content({"context_meta": {}, "layered_content": [_block(1)]})
+
+
+def test_checked_in_ns1_goldens_adopt_their_closed_profiles() -> None:
+    from src.services.lsrag_compiler import LsragContractCompiler
+
+    cases = (
+        ("generic.layered.v1.json", "First paragraph. Second paragraph.", (0, 1, 2)),
+        ("legal.layered.v1.json", "Article 1 Notice. Article 2 Scope.", (0, 1)),
+        ("realestate.layered.v1.json", "Two bedroom listing near the station.", (0,)),
+    )
+    compiler = LsragContractCompiler()
+    for name, clean, profile in cases:
+        candidate = json.loads(Path("tests/fixtures/ns1", name).read_text(encoding="utf-8"))
+        assert validate_layered_content(candidate, summaries_must_be_null=True)
+        _, projection = compiler.adopt_layered_json(
+            clean_text=clean,
+            layered_json=candidate,
+            generation_artifact_uuid="structure-generation",
+            projection_generation_artifact_uuid="projection-generation",
+            clean_artifact_uuid="clean-artifact",
+            granularity_set=profile,
+        )
+        assert {block.granularity for block in projection.blocks} == set(profile)
 
 
 def test_b_summary_is_null_but_c_summary_requires_body() -> None:

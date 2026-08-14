@@ -1,0 +1,11 @@
+{
+  "context_meta": { "title": "realestate fixture" },
+  "layered_content": [
+    {
+      "block_id": 0,
+      "granularity": 0,
+      "original_content": { "title": null, "body": "Two bedroom listing near the station." },
+      "llm_summary": { "title": null, "body": null }
+    }
+  ]
+}

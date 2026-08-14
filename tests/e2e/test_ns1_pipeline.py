@@ -31,7 +31,9 @@ def _settings(tmp_path: Path) -> Settings:
 
 
 def _task_body(team_uuid: str, task_uuid: str, *, markdown: bool) -> dict[str, object]:
-    prompt_payload: dict[str, object] = {"json_prompt_id": "promptB.json.generic"}
+    prompt_payload: dict[str, object] = {
+        "json_prompt_id": "promptB.json.legal" if markdown else "promptB.json.generic"
+    }
     if markdown:
         prompt_payload["markdown_prompt_id"] = "promptB.markdown.legal"
     prompt_payload["source"] = {
@@ -125,5 +127,6 @@ def test_stub_pipeline_runs_generic_and_markdown_journeys(tmp_path: Path) -> Non
             assert projection_row is not None
             projection = json.loads(_object_bytes(settings.resolved_object_root, team_uuid, projection_row["logical_handle"]))
             blocks = projection["blocks"]
-            assert {block["granularity"] for block in blocks} == {0, 1, 2}
+            expected = {0, 1} if markdown else {0, 1, 2}
+            assert {block["granularity"] for block in blocks} == expected
             assert len({block["original"] for block in blocks}) > 1

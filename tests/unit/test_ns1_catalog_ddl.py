@@ -32,3 +32,22 @@ async def test_prompt_catalog_columns_and_checks_exist_after_fresh_migration(tmp
                 "VALUES ('x','x','v1','x.md',?, 'not-a-role','active','now')",
                 ("a" * 64,),
             )
+        indexes = {
+            row[1]
+            for row in connection.execute("PRAGMA index_list(mkb_prompt_hash_pointers)")
+        }
+        assert "ux_mkb_prompt_catalog_one_active" in indexes
+        with pytest.raises(sqlite3.IntegrityError):
+            connection.execute(
+                "INSERT INTO mkb_prompt_hash_pointers "
+                "(prompt_id,prompt_key,prompt_version,git_relative_path,content_sha256,role,status,granularity_set,registered_at) "
+                "VALUES ('json-missing','json-missing','v1','x.md',?,'json','active',NULL,'now')",
+                ("b" * 64,),
+            )
+        with pytest.raises(sqlite3.IntegrityError):
+            connection.execute(
+                "INSERT INTO mkb_prompt_hash_pointers "
+                "(prompt_id,prompt_key,prompt_version,git_relative_path,content_sha256,role,status,granularity_set,registered_at) "
+                "VALUES ('clean-profile','clean-profile','v1','x.md',?,'clean','active','[0]','now')",
+                ("c" * 64,),
+            )

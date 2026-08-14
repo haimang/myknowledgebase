@@ -20,9 +20,11 @@ async def test_bootstrap_registers_four_roles_and_json_closed_sets(tmp_path: Pat
         await registry.bootstrap()
         entries = await registry.list_prompt_catalog()
         assert {entry.role for entry in entries} == {"clean", "markdown", "json", "summarizer"}
-        json_entries = [entry for entry in entries if entry.role == "json"]
-        assert json_entries
-        assert all(entry.granularity_set for entry in json_entries)
+        json_by_id = {entry.prompt_id: entry for entry in entries if entry.role == "json" and entry.status == "active"}
+        assert json_by_id["promptB.json.generic"].granularity_set == (0, 1, 2)
+        assert json_by_id["promptB.json.legal"].granularity_set == (0, 1)
+        assert json_by_id["promptB.json.realestate"].granularity_set == (0,)
+        assert {entry.prompt_id for entry in entries if entry.role == "clean"} >= {"promptA.clean", "promptA.default"}
         assert all(entry.content_sha256 and len(entry.content_sha256) == 64 for entry in entries)
     finally:
         await persistence.close()
@@ -55,7 +57,22 @@ async def test_catalog_update_is_new_version_and_path_attacks_fail_closed(tmp_pa
             granularity_set=[0, 1, 2],
         )
         assert created.content_sha256 != updated.content_sha256
-        assert (await registry.resolve_prompt("promptB.json.test")).prompt_version == "v2"
+        latest = await registry.resolve_prompt("promptB.json.test")
+        assert latest.prompt_version == "v2"
+        active = [entry for entry in await registry.list_prompt_catalog(prompt_id="promptB.json.test") if entry.status == "active"]
+        assert [entry.prompt_version for entry in active] == ["v2"]
+        retired = await registry.list_prompt_catalog(prompt_id="promptB.json.test", status="retired")
+        assert [entry.prompt_version for entry in retired] == ["v1"]
+        tenth = prompt_root / "prompt-v10.md"
+        tenth.write_text("version ten\n", encoding="utf-8")
+        await registry.register_prompt(
+            prompt_id="promptB.json.test",
+            prompt_version="v10",
+            relative_path="prompt-v10.md",
+            role="json",
+            granularity_set=[0, 1, 2],
+        )
+        assert (await registry.resolve_prompt("promptB.json.test")).prompt_version == "v10"
         with pytest.raises(MkbError, match="PROMPT_CATALOG_PATH_INVALID"):
             await registry.register_prompt(
                 prompt_id="promptB.json.bad",
@@ -111,10 +128,11 @@ async def test_catalog_hash_resolve_soak_is_stable(tmp_path: Path) -> None:
     persistence = SqlitePersistence(tmp_path / "catalog-soak.sqlite3", Path("src/persistence/migrations"))
     registry = RegistryService(persistence, Path("data/prompts"))
     prompt_ids = (
-        "promptA.default",
+        "promptA.clean",
         "promptB.markdown.legal",
         "promptB.json.generic",
-        "promptC.default",
+        "promptB.json.legal",
+        "promptC.summarizer",
     )
     try:
         await persistence.migrate()
@@ -127,5 +145,14 @@ async def test_catalog_hash_resolve_soak_is_stable(tmp_path: Path) -> None:
             for prompt_id in prompt_ids:
                 resolved = await registry.resolve_prompt(prompt_id)
                 assert (resolved.prompt_version, resolved.content_sha256) == expected[prompt_id]
+        generic = Path("data/prompts/json/promptB.json.generic.v1.md")
+        original = generic.read_bytes()
+        try:
+            generic.write_bytes(original + b"\n# drift\n")
+            with pytest.raises(MkbError) as error:
+                await registry.resolve_prompt("promptB.json.generic")
+            assert error.value.code == "PROMPT_HASH_MISMATCH"
+        finally:
+            generic.write_bytes(original)
     finally:
         await persistence.close()

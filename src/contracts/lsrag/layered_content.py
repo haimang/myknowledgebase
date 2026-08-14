@@ -112,6 +112,8 @@ def validate_layered_content(
         if summaries_must_be_null and any(value is not None for value in block["llm_summary"].values()):
             raise MkbError("STRUCTURE_SUMMARY_INVALID", "B candidate summaries must be null", 422)
         validated.append(block)
+    if all(block["granularity"] != 0 for block in validated):
+        raise MkbError("STRUCTURE_SCHEMA_INVALID", "layered_content must contain a granularity 0 block", 422)
     result["layered_content"] = validated
     return result
 

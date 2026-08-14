@@ -278,11 +278,10 @@ def create_container(settings: Settings | None = None) -> Container:
         grace=timedelta(seconds=settings.index_retirement_grace_seconds),
     )
     ns1_cli = None
-    if not settings.live_inference:
-        if settings.ns1_cli_mode == "stub":
-            ns1_cli = DeterministicNs1Stub()
-        elif settings.ns1_cli_mode == "subprocess":
-            ns1_cli = SubprocessClaudeCli(executable=settings.ns1_cli_executable)
+    if settings.ns1_cli_mode == "stub":
+        ns1_cli = DeterministicNs1Stub()
+    elif settings.ns1_cli_mode == "subprocess":
+        ns1_cli = SubprocessClaudeCli(executable=settings.ns1_cli_executable)
     workflow_worker = WorkflowWorker(
         workflow_runtime,
         IntakePipeline(
