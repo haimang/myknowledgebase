@@ -20,7 +20,7 @@
 > - pre-NS1-qna §2 证据审查 + 本 AP §7 内置锚区
 > 关联 reference-anchor:
 > - 见 §7 内置锚区
-> 文档状态: `draft`
+> 文档状态: `executing`
 
 ---
 
@@ -561,4 +561,36 @@ NS1-new-pipeline
 
 ## 11. 执行日志回填（仅 `executed` 状态使用）
 
-文档状态非 `executed`，本节省略。
+本节由执行者按 `.adocs/code-execution-log.md` 在每个 Phase 收口后 append；最终所有 Phase 完成后将文档状态更新为 `executed`。
+
+## 11.1 Phase 1 执行日志
+
+> 执行者：`Codex`
+> 执行时间：`2026-08-14 08:03 UTC`
+> 文档状态：`executing`
+> 代码改动统计：`17 个 tracked 文件修改 / 12 个新文件 / 1 个 schema 版本落点`
+
+- **实际执行摘要**：`P1-01..P1-06` 已完成；新增严格 `layered_content.v1` JSON Schema 与无 span 的 Python 边界校验、四角色 prompt 正文、007 migration、Registry catalog resolve/hash gate、内部 operator CRUD 与 P1 测试台账。
+- **Phase 偏差（计划 vs 实际）**：
+  - `P1-02 (substrate-fit)`：保留既有 `promptA.default`、`promptB.default`、`promptC.default` 兼容指针，同时新增 `markdown`/`json` 四角色路径；理由是当前 ConfigSnapshot、旧 hash 门闩和测试仍以三元 key 读取，先保证不热切与可回归，P3/P4 再切换主链入口。
+  - `P1-05 (security-fit)`：CRUD 路由沿用现有 `/internal` operator token + internal-network router guard；测试通过 dependency override 只绕过测试网络地址，不改变生产 guard。
+- **阻塞与处理**：
+  - `full pytest` 初跑在既有 Turso/SQLite 直接读路径出现 4 个 disk I/O/file-format 失败；P1 定向测试与新 migration/bootstrap 无关联堆栈，已记录为 final full-suite 复验项，不以 degraded 结果冒充绿灯。
+  - 既有 `test_d04_write_paths` 将 migration 尾项硬编码为 006；已按新增 NS1 migration 更新断言并补 catalog 列守卫。
+- **测试发现**：`uv run pytest -q tests/unit/test_layered_schema.py tests/unit/test_ns1_prompt_bodies.py tests/unit/test_ns1_catalog_ddl.py tests/unit/test_ns1_prompt_catalog.py tests/unit/test_ns1_prompt_routes.py tests/unit/test_prompt_hash_mismatch.py tests/unit/test_d04_write_paths.py` → `16 passed`；`uv run ruff check .` → pass；`uv run python -m compileall -q api src` → pass；`git diff --check` → pass。P1 分簇 commits：`40b8ca2`（schema/prompts/contracts/tests）、`1ab1e37`（catalog/migration/CRUD/tests）、`2f81be0`（prompt body contract fix）。
+- **后续 handoff**：P2 读取 P1 产出的 schema、catalog json 行闭集与 prompt hash；实现 `adopt_layered_json`，不得恢复 compiler 假树或按句补层。
+
+### 11.1.1 逐工作项状态
+
+| 工作项 | 状态 | PR | 实际落点（file:line） | 备注 |
+|--------|------|----|------------------------|------|
+| `P1-01` | `✅ done` | `40b8ca2` | `data/schemas/lsrag.layered_content.v1.json`; `src/contracts/lsrag/layered_content.py` | strict/additionalProperties=false；拒绝 span/未知字段 |
+| `P1-02` | `✅ done` | `40b8ca2`, `2f81be0` | `data/prompts/{clean,markdown,json,summarizer}/`; `data/prompts/prompt-*.md` | 四角色正文可 hash；B.json 不含旧交卷字段名 |
+| `P1-03` | `✅ done` | `1ab1e37` | `src/persistence/migrations/007_ns1_prompt_catalog.sql` | 既有指针表列晋升，不新建 required 表 |
+| `P1-04` | `✅ done` | `1ab1e37` | `src/services/registry.py:26-90,190-260` | role/status/granularity_set bootstrap |
+| `P1-05` | `✅ done` | `1ab1e37` | `api/internal/prompts.py`; `api/internal/routes.py:13-90` | CRUD 不接 body；Update 为新 version |
+| `P1-06` | `✅ done` | `1ab1e37` | `src/services/registry.py:350-500` | resolve 与 H(file)==hash fail-closed |
+
+### 11.1.2 文档状态
+
+`draft → executing（P1 closed / 2026-08-14）`；P2 已解锁。residual：Turso/SQLite direct-read full-suite 问题承接 NS1-P5 final verification。
