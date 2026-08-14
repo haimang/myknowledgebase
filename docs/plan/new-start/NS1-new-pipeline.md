@@ -20,7 +20,7 @@
 > - pre-NS1-qna §2 证据审查 + 本 AP §7 内置锚区
 > 关联 reference-anchor:
 > - 见 §7 内置锚区
-> 文档状态: `executing`
+> 文档状态: `executed`
 
 ---
 

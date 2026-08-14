@@ -15,11 +15,12 @@
 
 ## 0. 一句话 verdict
 
-> NS1 的 P1–P5 代码、local unit/domain/mega 测试、prompt catalog truth 回填和 action-plan 日志已完成，以 `close-with-known-issues` 收口；唯一已知残差是既有 pyturso raw database 与标准 sqlite3 inspection 的测试适配问题。
+> NS1 的 P1–P5 代码在第 1 轮三方审查后已补齐 catalog 运营面、CLI 生产接线、Markdown/clean 双物料合同与测试假绿；以 `close-with-known-issues` 收口。仍未关闭的残差只有既有 pyturso inspection harness，以及未授权的 live Claude vendor 验证。
 
 > **本阶段最关键的 known gap（对下游影响）**：
-> 1. 完整 e2e 中 6 个 test-case 在标准 `sqlite3.connect` 读取 pyturso 文件时出现 `disk I/O` / `file is not a database`。
-> 2. 该残差不影响 NS1 production path 的 prompt identity、layered adoption、workflow routing 或 fail-closed contract，但需要 successor test-harness/adapter charter 修复后重跑。
+> 1. 完整 e2e 中若干 test-case 在标准 `sqlite3.connect` 读取 pyturso 文件时出现 `disk I/O` / `file is not a database`（baseline harness，非 NS1 机制）。
+> 2. CLI 大物料 stdin 运输已在本地假 executable 证明不再 E2BIG；真实 `claude` 二进制的 vendor 验证需 owner 授权窗口。
+> 3. 详见 `docs/code-review/new-start/NS1-review-VF-ledger.md` 与 `docs/closure/new-start/deferred-items-ledger.md`。
 
 ---
 
@@ -70,8 +71,8 @@
 
 | 项 | 类型 | 当前状态 | 承接位置 / 触发条件 | 责任方 |
 |----|------|----------|---------------------|--------|
-| Turso inspection parity for six existing e2e cases | `C` | deferred, reproducible known issue | successor test-harness/adapter charter；use Turso port or a legal post-close snapshot, then rerun the six cases | MKB owner + Codex |
-| Live Claude vendor verification | `A` | intentionally not run | owner authorizes a separate live verification charter and supplies approved runtime | MKB owner |
+| Turso inspection parity for existing e2e cases (VF V11) | `C` | deferred, reproducible known issue | successor test-harness/adapter charter；use Turso port or a legal post-close snapshot, then rerun without exclusions | MKB owner |
+| Live Claude stdin/file transport vendor verification (VF V5.r) | `A` | intentionally not run | owner authorizes a separate live verification charter and supplies approved runtime | MKB owner |
 | live migration / worker publish / Pages publish | `A` | prohibited by current owner scope | separate release charter only; no runtime code depends on this verification | MKB owner |
 
 ---
