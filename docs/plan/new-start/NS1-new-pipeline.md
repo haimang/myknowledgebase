@@ -623,3 +623,35 @@ NS1-new-pipeline
 ### 11.2.2 文档状态
 
 `executing（P1/P2 closed / 2026-08-14）`；P3 已解锁。residual：P3 候选工人与 P5 旧 e2e fixture 收口。
+
+## 11.3 Phase 3 执行日志
+
+> 执行者：`Codex`
+> 执行时间：`2026-08-14 08:34 UTC`
+> 文档状态：`executing`
+> 代码改动统计：`11 个文件修改 / 4 个新测试文件 / 0 个 migration/schema bump`
+
+- **实际执行摘要**：`P3-01..P3-05` 已完成。新增无 shell 的 `ClaudeCliPort`、subprocess transport、RecordingStub 与 deterministic local stub；接通 LLM clean、可选 Markdown 转写、B.json structured candidate、C whole-package summary；所有进入 kernel 的 candidate 仍经过 `adopt_layered_json`，C 不改变 original/block_id/granularity。
+- **Phase 偏差（计划 vs 实际）**：
+  - `P3-01 (transport-fit)`：纯文本模式兼容 Claude JSON envelope，并补 typed error/usage/session 解析；理由是实测 `claude -p` plain 与 structured 输出 envelope 形态不同，必须保留两条显式解码路径。
+  - `P3-04 (offline-fit)`：非 live 组合根默认注入 deterministic local stub；理由是 owner 仅授权本地验证且 CI 禁 live vendor，仍需让完整 generation contract 在本地有可重复候选来源。
+  - `P3-05 (registry-fit)`：为 live C 补 bootstrap schema identity `lsrag.layered_content.default@v1`；理由是 C 的 frozen binding 必须有独立 schema registry 坐标，不能借用旧 structure identity。
+- **阻塞与处理**：
+  - 旧 `tests/e2e/test_single_intake_pipeline.py::test_live_profile_uses_frozen_binding_for_vector_write_and_query` 仍提供旧 `{"status":"ok","stage":"structure"}` structured fixture，当前按设计失败 `STRUCTURE_CANDIDATE_INVALID/MISSING`；没有恢复 clean-text 假树 fallback，转交 `P5-02 / NS1-T41/T42` 更新 live fixture。
+  - `full pytest` 的既有 Turso/SQLite direct-read `disk I/O/file-format` residual 延续 P1/P2 记录，交由 P5 final verification 复验。
+- **测试发现**：commit 后重跑 `22 passed`（T20–T24、adopt、guard、hash、D04、offline generation e2e）；`uv run ruff check` → pass；`uv run python -m compileall -q api src tests/...` → pass；`git diff --check` → pass；`rg "compiler\\.structurize\\(" src/runtime/intake` → no match。P3 分簇 commits：`fcb8d31`（CLI/config/transport tests）、`72845a8`（handlers/wiring/registry）、`a6498c2`（worker stage tests）。
+- **后续 handoff**：P4 需在新 payload 中强制 `json_prompt_id`、解析/冻结四 role prompt identity，并把 markdown branch 接入主图及 scatter child；不得让 request 携带 body/path 作为 prompt 指针。
+
+### 11.3.1 逐工作项状态
+
+| 工作项 | 状态 | PR | 实际落点（file:line） | 备注 |
+|--------|------|----|------------------------|------|
+| `P3-01 / NS1-T20` | `✅ done` | `fcb8d31` | `src/runtime/inference/claude_cli.py:20-180`; `tests/unit/test_claude_cli_port.py` | argv 无 credential；structured/plain envelope；typed transport errors |
+| `P3-02 / NS1-T21` | `✅ done` | `72845a8`, `a6498c2` | `src/runtime/intake/clean_preflight.py:72-96`; `tests/unit/test_ns1_clean_dispatch.py` | CLI 仅注入 llm-required clean strategy |
+| `P3-03 / NS1-T22` | `✅ done` | `72845a8`, `a6498c2` | `src/runtime/intake/core.py:301-307`; `src/runtime/intake/generation_construct.py:163-219` | Markdown 输出独立 state/artifact，plain no-schema |
+| `P3-04 / NS1-T23` | `✅ done` | `72845a8`, `a6498c2` | `src/runtime/intake/generation_construct.py:74-117,513-614`; `tests/unit/test_ns1_generation_cli.py` | markdown 优先作为 B.json material，否则 clean；candidate 统一 adopt |
+| `P3-05 / NS1-T24` | `✅ done` | `72845a8`, `a6498c2` | `src/runtime/intake/generation_construct.py:119-161,711-820`; `src/services/registry.py:709-736` | C 一次消费全包；original immutable；live schema identity 已注册 |
+
+### 11.3.2 文档状态
+
+`executing（P1/P2/P3 closed / 2026-08-14）`；P4 已解锁并进入 STEP-1/STEP-2。

@@ -64,23 +64,23 @@ NS1-ENTRY
 
 ## NS1-P3 — CLI 工人与四跳
 
-**Block：仅在 NS1-P2 EXIT 后解除；当前 in_progress。**
+**Block：仅在 NS1-P2 EXIT 后解除；已完成，NS1-P4 解锁。**
 
-- [ ] `P3-01 / NS1-T20`：实现可注入 `ClaudeCliPort`/RecordingStub，argv、schema、error/usage/session 合同。
-- [ ] `P3-02 / NS1-T21`：仅 llm clean strategy 经 CLI；deterministic/API 不调用 CLI。
-- [ ] `P3-03 / NS1-T22`：新增可选 `lsrag.transcribe_markdown`，只产 Markdown。
-- [ ] `P3-04 / NS1-T23`：B.json 使用 schema + adopt，按 markdown/clean 切换物料。
-- [ ] `P3-05 / NS1-T24`：C 整包一次，消费验收 layered，不改 original。
-- [ ] STEP-1：重新读取 P3 锚 A-5/A-6/A-16/A-18、S11/legacy transport reference 及 P2 输出。
-- [ ] STEP-2：重新读取 QNA `T-O-338/T-O-340/T-O-347/T-O-350` 与 claude transport 证据。
-- [ ] STEP-3：开发、unit/spike 测试、审查和修复；CI 禁网络/禁 live vendor。
-- [ ] STEP-4：按模板追加 P3 工作日志。
-- [ ] STEP-6：分簇提交 P3（CLI；handlers/wiring；tests）。
-- [ ] P3 EXIT：T20–T24 green，P4 解锁。
+- [x] `P3-01 / NS1-T20`：实现可注入 `ClaudeCliPort`/RecordingStub，argv、schema、error/usage/session 合同。
+- [x] `P3-02 / NS1-T21`：仅 llm clean strategy 经 CLI；deterministic/API 不调用 CLI。
+- [x] `P3-03 / NS1-T22`：新增可选 `lsrag.transcribe_markdown`，只产 Markdown。
+- [x] `P3-04 / NS1-T23`：B.json 使用 schema + adopt，按 markdown/clean 切换物料。
+- [x] `P3-05 / NS1-T24`：C 整包一次，消费验收 layered，不改 original。
+- [x] STEP-1：重新读取 P3 锚 A-5/A-6/A-16/A-18、S11/legacy transport reference 及 P2 输出。
+- [x] STEP-2：重新读取 QNA `T-O-338/T-O-340/T-O-347/T-O-350` 与 claude transport 证据。
+- [x] STEP-3：开发、unit/spike 测试、审查和修复；CI 禁网络/禁 live vendor。
+- [x] STEP-4：按模板追加 P3 工作日志。
+- [x] STEP-6：分簇提交 P3（CLI；handlers/wiring；tests）。
+- [x] P3 EXIT：T20–T24 green，P4 解锁。
 
 ## NS1-P4 — API 与 Workflow
 
-**Block：仅在 NS1-P3 EXIT 后解除。**
+**Block：NS1-P3 EXIT 已满足；当前 in_progress（先完成 STEP-1/STEP-2，再进入实现）。**
 
 - [ ] `P4-01 / NS1-T30/T31`：`IntakeIngestPayload` strict `*_prompt_id`，json required，拒绝 prompt_ref/path/角色错配。
 - [ ] `P4-02 / NS1-T32`：主图及 scatter child 加可选 markdown 跳；无 id 不创建 transcribe process。
