@@ -55,6 +55,7 @@ def _task_body(
         "trace_uuid": trace_uuid,
         "request_intent": "intake.ingest",
         "payload": {
+            "json_prompt_id": "promptB.json.generic",
             "source": {
                 "source_kind": "registered_api",
                 "external_key": f"collection-{task_uuid}",

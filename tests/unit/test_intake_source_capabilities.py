@@ -384,7 +384,7 @@ def test_config_snapshot_profile_selector_is_descriptor_bounded(source: dict[str
             "task_uuid": task_uuid,
             "trace_uuid": trace_uuid,
             "request_intent": "intake.ingest",
-            "payload": {"source": source},
+            "payload": {"json_prompt_id": "promptB.json.generic", "source": source},
             "audit": {
                 "schema_version": "mkb.task-audit.v1",
                 "team_uuid": team_uuid,

@@ -38,6 +38,8 @@ def _task_body(
     request_intent: str,
     payload: dict[str, Any],
 ) -> dict[str, Any]:
+    if request_intent == "intake.ingest":
+        payload = {"json_prompt_id": "promptB.json.generic", **payload}
     return {
         "schema_version": "mkb.task.v1",
         "team_uuid": team_uuid,

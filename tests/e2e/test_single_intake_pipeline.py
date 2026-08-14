@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import sqlite3
 import time
 from pathlib import Path
@@ -66,6 +67,7 @@ def test_single_intake_publishes_grounded_retrieval_context(tmp_path: Path) -> N
                 "trace_uuid": trace_uuid,
                 "request_intent": "intake.ingest",
                 "payload": {
+                    "json_prompt_id": "promptB.json.generic",
                     "source": {
                         "source_kind": "inline_payload",
                         "external_key": "semantic-golden-document",
@@ -207,9 +209,52 @@ class _LiveEmbeddingFixture:
         assert request.invocation is not None
         assert request.invocation.generation_invocation_uuid
         self.structured_calls += 1
-        value = {"status": "ok", "stage": "structure"}
+        try:
+            submitted = json.loads(request.input_text)
+        except json.JSONDecodeError:
+            submitted = None
+        if isinstance(submitted, dict) and isinstance(submitted.get("layered_content"), list):
+            value = {
+                **submitted,
+                "layered_content": [
+                    {
+                        **block,
+                        "llm_summary": {
+                            "title": block["original_content"].get("title"),
+                            "body": block["original_content"].get("body"),
+                        },
+                    }
+                    for block in submitted["layered_content"]
+                ],
+            }
+        else:
+            clean = request.input_text
+            midpoint = max(1, len(clean) // 2)
+            value = {
+                "context_meta": {},
+                "layered_content": [
+                    {
+                        "block_id": 0,
+                        "granularity": 0,
+                        "original_content": {"title": None, "body": clean},
+                        "llm_summary": {"title": None, "body": None},
+                    },
+                    {
+                        "block_id": 1,
+                        "granularity": 1,
+                        "original_content": {"title": None, "body": clean[:midpoint]},
+                        "llm_summary": {"title": None, "body": None},
+                    },
+                    {
+                        "block_id": 2,
+                        "granularity": 2,
+                        "original_content": {"title": None, "body": clean[midpoint:] or clean},
+                        "llm_summary": {"title": None, "body": None},
+                    },
+                ],
+            }
         response = StructuredGenerateResponse(
-            text='{"status":"ok","stage":"structure"}',
+            text=json.dumps(value, ensure_ascii=False, sort_keys=True),
             value=value,
             model_key=request.binding.model_key,
             model_version=request.binding.model_version,
@@ -289,6 +334,7 @@ def test_live_profile_uses_frozen_binding_for_vector_write_and_query(tmp_path: P
                 "trace_uuid": trace_uuid,
                 "request_intent": "intake.ingest",
                 "payload": {
+                    "json_prompt_id": "promptB.json.generic",
                     "source": {
                         "source_kind": "inline_payload",
                         "external_key": "live-vector-document",
@@ -318,8 +364,9 @@ def test_live_profile_uses_frozen_binding_for_vector_write_and_query(tmp_path: P
                 break
             time.sleep(0.02)
         assert task["status"] == "succeeded", task
-        assert fixture.structured_calls >= 1
-        assert fixture.text_calls >= 1
+        # NS1 uses one structured B.json call and one whole-package C call;
+        # construction no longer fans out through the legacy text channel.
+        assert fixture.structured_calls >= 2
         assert fixture.embed_calls >= 1
 
         search = client.post(
@@ -372,7 +419,6 @@ def test_live_profile_uses_frozen_binding_for_vector_write_and_query(tmp_path: P
     capabilities = {row["capability_key"] for row in inv_rows}
     assert "embed" in capabilities
     assert "structured_generate" in capabilities
-    assert "text_generate" in capabilities
     assert all(row["status"] == "succeeded" for row in inv_rows)
     assert gen_rows, "S11 live path must write generation_invocations"
     assert all(row["output_digest"] for row in gen_rows)

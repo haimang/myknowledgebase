@@ -49,6 +49,7 @@ def test_inline_ingress_is_staged_before_task_audit_and_execution_manifest(tmp_p
         "trace_uuid": trace_uuid,
         "request_intent": "intake.ingest",
         "payload": {
+            "json_prompt_id": "promptB.json.generic",
             "source": {
                 "source_kind": "inline_payload",
                 "external_key": "staged-inline-document",
@@ -134,4 +135,3 @@ def test_inline_ingress_is_staged_before_task_audit_and_execution_manifest(tmp_p
         LocalObjectStore(tmp_path / "objects").read_verified(team_uuid, ObjectHandle(value=source["logical_handle"]))
     )
     assert staged == canonical_content.encode("utf-8")
-

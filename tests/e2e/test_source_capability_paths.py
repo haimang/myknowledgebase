@@ -41,7 +41,7 @@ def _task(team_uuid: str, task_uuid: str, trace_uuid: str, source: dict[str, obj
         "task_uuid": task_uuid,
         "trace_uuid": trace_uuid,
         "request_intent": "intake.ingest",
-        "payload": {"source": source},
+        "payload": {"json_prompt_id": "promptB.json.generic", "source": source},
         "audit": {
             "schema_version": "mkb.task-audit.v1",
             "team_uuid": team_uuid,

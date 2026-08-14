@@ -96,6 +96,7 @@ def test_scoped_index_rebuild_promotes_generation_without_new_intake_revision(tm
                 "trace_uuid": ingest_trace_uuid,
                 "request_intent": "intake.ingest",
                 "payload": {
+                    "json_prompt_id": "promptB.json.generic",
                     "source": {
                         "source_kind": "inline_payload",
                         "external_key": "index-rebuild-document",
@@ -286,6 +287,7 @@ def test_index_rebuild_stale_fence_fails_without_cutover_and_old_generation_rema
                 "trace_uuid": ingest_trace_uuid,
                 "request_intent": "intake.ingest",
                 "payload": {
+                    "json_prompt_id": "promptB.json.generic",
                     "source": {
                         "source_kind": "inline_payload",
                         "external_key": f"index-rebuild-stale-{drift}",

@@ -27,6 +27,7 @@ def _task_request(*, team_uuid: str, task_uuid: str, trace_uuid: str, external_k
         "trace_uuid": trace_uuid,
         "request_intent": "intake.ingest",
         "payload": {
+            "json_prompt_id": "promptB.json.generic",
             "source": {
                 "source_kind": "inline_payload",
                 "external_key": external_key,

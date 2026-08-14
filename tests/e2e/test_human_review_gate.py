@@ -65,6 +65,7 @@ def test_human_review_gate_is_task_scoped_idempotent_and_resumes(tmp_path: Path)
                     "trace_uuid": trace_uuid,
                     "request_intent": "intake.ingest",
                     "payload": {
+                        "json_prompt_id": "promptB.json.generic",
                         "source": {
                             "source_kind": "inline_payload",
                             "external_key": "requires-review",

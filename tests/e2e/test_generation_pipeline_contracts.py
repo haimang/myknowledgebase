@@ -58,6 +58,7 @@ def test_generation_members_are_independent_and_vectorize_every_channel(tmp_path
                 "trace_uuid": trace_uuid,
                 "request_intent": "intake.ingest",
                 "payload": {
+                    "json_prompt_id": "promptB.json.generic",
                     "source": {
                         "source_kind": "inline_payload",
                         "external_key": "generation-contracts",

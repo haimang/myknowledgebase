@@ -65,10 +65,10 @@ async def test_registry_appends_v2_without_mutating_or_rebinding_v1(tmp_path: Pa
                 (registered_v2.workflow_revision_uuid,),
             )
 
-        # Current builtin is revision 3 (metadata-refresh + index.rebuild graph).
+        # Current builtin is revision 4 (metadata-refresh + optional Markdown graph).
         # Registering it after historical v1 appends that declared number without
         # rewriting the immutable v1 step rows.
-        assert [row["revision_number"] for row in revisions] == [1, 3]
+        assert [row["revision_number"] for row in revisions] == [1, 4]
         assert [row["workflow_revision_uuid"] for row in revisions] == [
             registered_v1.workflow_revision_uuid,
             registered_v2.workflow_revision_uuid,

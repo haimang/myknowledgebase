@@ -45,6 +45,7 @@ def _body(team_uuid: str, task_uuid: str, trace_uuid: str, **extra: object) -> d
         "trace_uuid": trace_uuid,
         "request_intent": "intake.ingest",
         "payload": {
+            "json_prompt_id": "promptB.json.generic",
             "source": {
                 "source_kind": "inline_payload",
                 "external_key": "override-doc",

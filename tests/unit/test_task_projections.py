@@ -32,7 +32,10 @@ async def _service(tmp_path: Path) -> tuple[SqlitePersistence, TaskService, str,
             "task_uuid": task_uuid,
             "trace_uuid": trace_uuid,
             "request_intent": "intake.ingest",
-            "payload": {"source": {"source_kind": "inline_payload", "external_key": "one", "content": "hello"}},
+            "payload": {
+                "json_prompt_id": "promptB.json.generic",
+                "source": {"source_kind": "inline_payload", "external_key": "one", "content": "hello"},
+            },
             "audit": {
                 "schema_version": "mkb.task-audit.v1",
                 "team_uuid": team_uuid,
@@ -252,7 +255,10 @@ async def test_task_list_filters_and_cursor_are_opaque_and_filter_bound(tmp_path
                 "request_intent": "intake.ingest",
                 "priority": "low",
                 "deadline_at": "2099-01-01T00:00:00Z",
-                "payload": {"source": {"source_kind": "inline_payload", "external_key": "two", "content": "world"}},
+                "payload": {
+                    "json_prompt_id": "promptB.json.generic",
+                    "source": {"source_kind": "inline_payload", "external_key": "two", "content": "world"},
+                },
                 "audit": {
                     "schema_version": "mkb.task-audit.v1",
                     "team_uuid": team_uuid,
