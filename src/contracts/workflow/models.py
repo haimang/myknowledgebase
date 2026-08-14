@@ -250,6 +250,8 @@ class WorkflowGuardDefinition(StrictModel):
         "registered_admission_result",
         "registered_request_intent",
         "registered_metadata_disposition",
+        "registered_markdown_selection",
+        "registered_admission_markdown_selection",
     ]
     operator: Literal["eq"]
     expected_value: Annotated[str, Field(min_length=1, max_length=128)]
@@ -269,6 +271,8 @@ class WorkflowGuardDefinition(StrictModel):
                 "index.rebuild",
             },
             "registered_metadata_disposition": {"no_change"},
+            "registered_markdown_selection": {"present"},
+            "registered_admission_markdown_selection": {"auto_admitted"},
         }
         if self.expected_value not in allowed[self.predicate_type]:
             raise ValueError("guard expected_value is not registered for its predicate")

@@ -175,6 +175,13 @@ SourceDescriptor = Annotated[
 class IntakeIngestPayload(StrictModel):
     source: SourceDescriptor
     preflight_profile_key: Annotated[str, Field(min_length=1, max_length=128)] = "default"
+    # Prompt selection is an identity-only public surface.  The catalog row
+    # supplies version/hash/path at materialization; callers may not provide
+    # prompt bodies, filesystem paths, or a free-form role guess.
+    json_prompt_id: Annotated[str, Field(pattern=r"^[A-Za-z][A-Za-z0-9_.-]{0,127}$")]
+    markdown_prompt_id: Annotated[str | None, Field(pattern=r"^[A-Za-z][A-Za-z0-9_.-]{0,127}$")] = None
+    clean_prompt_id: Annotated[str | None, Field(pattern=r"^[A-Za-z][A-Za-z0-9_.-]{0,127}$")] = None
+    summarizer_prompt_id: Annotated[str | None, Field(pattern=r"^[A-Za-z][A-Za-z0-9_.-]{0,127}$")] = None
 
 
 class IntakeRebuildPayload(StrictModel):

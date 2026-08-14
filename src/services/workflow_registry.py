@@ -344,6 +344,11 @@ class WorkflowRegistryService:
                 "registered_admission_result": ("admission_result", "candidate_set.admission_result"),
                 "registered_request_intent": ("request_intent", "task.request_intent"),
                 "registered_metadata_disposition": ("metadata_disposition", "intake_item_transition.no_change"),
+                "registered_markdown_selection": ("markdown_selection", "task.prompt_selection.markdown"),
+                "registered_admission_markdown_selection": (
+                    "admission_markdown_selection",
+                    "candidate_set.admission_result+task.prompt_selection.markdown",
+                ),
             }.get(guard.predicate_type, (None, None))
             if operand_kind is None or operand_ref is None:
                 raise MkbError("workflow-guard-unsupported", "Workflow guard declaration is unsupported", 503)

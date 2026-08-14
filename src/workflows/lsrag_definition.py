@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from copy import deepcopy
 from typing import Final
 
 from src.contracts.workflow.models import (
@@ -158,11 +159,22 @@ _STEPS = [
         output_ports=[_ref("gate_decision", "mkb.intake.gate-decision.v1")],
     ),
     _process(
+        step_key="transcribe_markdown",
+        process_key="lsrag.transcribe_markdown",
+        phase_key=WorkflowPhaseKey.STRUCTURIZING,
+        proof_kind="markdown_transcription_proof",
+        input_ports=[_ref("accepted_intake_revision", "mkb.intake.accepted-revision.v1")],
+        output_ports=[_ref("markdown_artifact", "mkb.lsrag.markdown-artifact.v1")],
+    ),
+    _process(
         step_key="structurize",
         process_key="lsrag.structurize",
         phase_key=WorkflowPhaseKey.STRUCTURIZING,
         proof_kind="structure_proof",
-        input_ports=[_ref("accepted_intake_revision", "mkb.intake.accepted-revision.v1")],
+        input_ports=[
+            _ref("accepted_intake_revision", "mkb.intake.accepted-revision.v1"),
+            _optional_ref("markdown_artifact", "mkb.lsrag.markdown-artifact.v1"),
+        ],
         output_ports=[_ref("structure_artifact", "mkb.lsrag.structure-artifact.v1")],
     ),
     _process(
@@ -334,12 +346,21 @@ _ROUTES = [
         guard_key="request_intent_metadata_refresh",
     ),
     WorkflowRouteDefinition(
+        route_key="accept_snapshot.auto_admitted_markdown",
+        from_step_key="accept_snapshot",
+        to_step_key="transcribe_markdown",
+        route_kind=WorkflowRouteKind.BRANCH,
+        outcome_selector=WorkflowOutcomeSelector.SUCCEEDED,
+        priority=10,
+        guard_key="admission_auto_markdown",
+    ),
+    WorkflowRouteDefinition(
         route_key="accept_snapshot.auto_admitted",
         from_step_key="accept_snapshot",
         to_step_key="structurize",
         route_kind=WorkflowRouteKind.BRANCH,
         outcome_selector=WorkflowOutcomeSelector.SUCCEEDED,
-        priority=10,
+        priority=11,
         guard_key="admission_auto_admitted",
     ),
     WorkflowRouteDefinition(
@@ -361,8 +382,25 @@ _ROUTES = [
         guard_key="admission_rejected",
     ),
     WorkflowRouteDefinition(
+        route_key="human_review.to_transcribe_markdown",
+        from_step_key="human_review",
+        to_step_key="transcribe_markdown",
+        route_kind=WorkflowRouteKind.NORMAL,
+        outcome_selector=WorkflowOutcomeSelector.SUCCEEDED,
+        priority=0,
+        guard_key="prompt_markdown_present",
+    ),
+    WorkflowRouteDefinition(
         route_key="human_review.to_structurize",
         from_step_key="human_review",
+        to_step_key="structurize",
+        route_kind=WorkflowRouteKind.NORMAL,
+        outcome_selector=WorkflowOutcomeSelector.SUCCEEDED,
+        priority=1,
+    ),
+    WorkflowRouteDefinition(
+        route_key="transcribe_markdown.to_structurize",
+        from_step_key="transcribe_markdown",
         to_step_key="structurize",
         route_kind=WorkflowRouteKind.NORMAL,
         outcome_selector=WorkflowOutcomeSelector.SUCCEEDED,
@@ -420,6 +458,7 @@ for _step_key in (
     "preflight_validate",
     "accept_snapshot",
     "human_review",
+    "transcribe_markdown",
     "structurize",
     "construct",
     "vectorize",
@@ -512,11 +551,25 @@ _BINDINGS = [
         source_port_name="preflight_outcome",
     ),
     WorkflowBindingDefinition(
+        target_step_key="transcribe_markdown",
+        target_slot_name="accepted_intake_revision",
+        source_kind=WorkflowBindingSourceKind.PRIOR_OUTPUT,
+        source_step_key="accept_snapshot",
+        source_port_name="accepted_intake_revision",
+    ),
+    WorkflowBindingDefinition(
         target_step_key="structurize",
         target_slot_name="accepted_intake_revision",
         source_kind=WorkflowBindingSourceKind.PRIOR_OUTPUT,
         source_step_key="accept_snapshot",
         source_port_name="accepted_intake_revision",
+    ),
+    WorkflowBindingDefinition(
+        target_step_key="structurize",
+        target_slot_name="markdown_artifact",
+        source_kind=WorkflowBindingSourceKind.PRIOR_OUTPUT,
+        source_step_key="transcribe_markdown",
+        source_port_name="markdown_artifact",
     ),
     WorkflowBindingDefinition(
         target_step_key="construct",
@@ -559,9 +612,9 @@ _BINDINGS = [
 BUILTIN_SINGLE_INTAKE_LSRAG_WORKFLOW: Final[WorkflowDefinition] = WorkflowDefinition(
     schema_version="mkb.workflow-definition.v1",
     workflow_key="intake.ingest.single.inline.lsrag.v1",
-    # Revision 3 adds the typed S07 metadata-refresh branch.  Existing
+    # Revision 4 adds the optional Markdown transcription branch.  Existing
     # executions remain pinned to their prior immutable revision.
-    revision_number=3,
+    revision_number=4,
     domain_key="ls_rag",
     purpose_key="intake.ingest",
     execution_role=WorkflowExecutionRole.SINGLE_ROOT,
@@ -581,6 +634,7 @@ BUILTIN_SINGLE_INTAKE_LSRAG_WORKFLOW: Final[WorkflowDefinition] = WorkflowDefini
         "intake.collection.seal",
         "intake.preflight_validate",
         "intake.accept_snapshot",
+        "lsrag.transcribe_markdown",
         "lsrag.structurize",
         "lsrag.construct",
         "lsrag.vectorize",
@@ -633,6 +687,18 @@ BUILTIN_SINGLE_INTAKE_LSRAG_WORKFLOW: Final[WorkflowDefinition] = WorkflowDefini
             expected_value="auto_admitted",
         ),
         WorkflowGuardDefinition(
+            guard_key="admission_auto_markdown",
+            predicate_type="registered_admission_markdown_selection",
+            operator="eq",
+            expected_value="auto_admitted",
+        ),
+        WorkflowGuardDefinition(
+            guard_key="prompt_markdown_present",
+            predicate_type="registered_markdown_selection",
+            operator="eq",
+            expected_value="present",
+        ),
+        WorkflowGuardDefinition(
             guard_key="admission_human_review_required",
             predicate_type="registered_admission_result",
             operator="eq",
@@ -648,15 +714,66 @@ BUILTIN_SINGLE_INTAKE_LSRAG_WORKFLOW: Final[WorkflowDefinition] = WorkflowDefini
 )
 
 
-def _pre_metadata_refresh_execution_document() -> dict[str, object]:
-    """Return the exact revision-2 graph shape before S07 refresh routing.
+def _without_ns1_markdown_branch(document: dict[str, object], *, revision_number: int) -> dict[str, object]:
+    """Restore the exact pre-NS1 graph shape for pinned executions.
 
-    Source-profile workflows remain revision 1 because metadata-only Tasks
-    deliberately resolve the canonical inline skeleton.  Keeping their
-    reviewed graph byte-for-byte stable avoids silently replacing an active
-    source profile just because the canonical metadata branch gained a new
-    S07 mode.
+    The active graph is intentionally additive: removing the optional Markdown
+    hop must also remove its process, routes, bindings, guard declarations, and
+    the optional input port.  Keeping this transformation code-owned gives the
+    runtime a reviewed compiled plan for executions created before revision 4
+    instead of silently routing them through the current graph.
     """
+
+    legacy = deepcopy(document)
+    legacy["revision_number"] = revision_number
+    legacy["steps"] = [step for step in legacy["steps"] if step["step_key"] != "transcribe_markdown"]
+    for step in legacy["steps"]:
+        if step["step_key"] == "structurize":
+            step["input_ports"] = [port for port in step["input_ports"] if port["slot_name"] != "markdown_artifact"]
+    legacy["routes"] = [
+        {
+            **route,
+            **(
+                {"priority": 10}
+                if route["route_key"] == "accept_snapshot.auto_admitted"
+                else {"priority": 0}
+                if route["route_key"] == "human_review.to_structurize"
+                else {}
+            ),
+        }
+        for route in legacy["routes"]
+        if route["from_step_key"] != "transcribe_markdown"
+        and route["to_step_key"] != "transcribe_markdown"
+        and route["route_key"] not in {"accept_snapshot.auto_admitted_markdown", "human_review.to_transcribe_markdown"}
+    ]
+    legacy["bindings"] = [
+        binding
+        for binding in legacy["bindings"]
+        if binding["target_step_key"] != "transcribe_markdown"
+        and not (
+            binding["target_step_key"] == "structurize"
+            and binding["target_slot_name"] == "markdown_artifact"
+        )
+    ]
+    legacy["required_process_keys"] = [
+        key for key in legacy["required_process_keys"] if key != "lsrag.transcribe_markdown"
+    ]
+    legacy["guards"] = [
+        guard
+        for guard in legacy["guards"]
+        if guard["guard_key"] not in {"admission_auto_markdown", "prompt_markdown_present"}
+    ]
+    return legacy
+
+
+def _pre_ns1_execution_document() -> dict[str, object]:
+    """Return the canonical graph exactly as it existed before the NS1 hop."""
+
+    return _without_ns1_markdown_branch(BUILTIN_SINGLE_INTAKE_LSRAG_WORKFLOW.model_dump(), revision_number=3)
+
+
+def _pre_metadata_refresh_execution_document() -> dict[str, object]:
+    """Return the current source-profile graph without metadata refresh."""
 
     _d02_acquire_shortcuts = {
         "acquire.to_succeeded_index_rebuild",
@@ -708,6 +825,59 @@ def _pre_metadata_refresh_execution_document() -> dict[str, object]:
     return document
 
 
+def _pre_ns1_metadata_refresh_execution_document() -> dict[str, object]:
+    """Return the pre-NS1 source-profile graph without metadata refresh."""
+
+    document = _pre_ns1_execution_document()
+    _d02_acquire_shortcuts = {
+        "acquire.to_succeeded_index_rebuild",
+        "acquire.to_succeeded_deactivate",
+        "acquire.to_succeeded_reactivate",
+        "acquire.to_succeeded_delete",
+        "acquire.to_succeeded_metadata_no_change",
+    }
+    _d02_acquire_guards = {
+        "request_intent_deactivate",
+        "request_intent_reactivate",
+        "request_intent_delete",
+        "metadata_no_change",
+    }
+    document["routes"] = [
+        {
+            **route,
+            **({"priority": 0} if route["route_key"] == "acquire.to_decode" else {}),
+        }
+        for route in document["routes"]
+        if route["guard_key"] != "request_intent_metadata_refresh"
+        and route["route_key"] not in _d02_acquire_shortcuts
+    ]
+    document["guards"] = [
+        guard
+        for guard in document["guards"]
+        if guard["guard_key"] != "request_intent_metadata_refresh"
+        and guard["guard_key"] not in _d02_acquire_guards
+    ]
+    document["bindings"] = [
+        binding
+        for binding in document["bindings"]
+        if not (
+            binding["target_step_key"] == "construct"
+            and binding["target_slot_name"] == "accepted_intake_revision"
+        )
+    ]
+    for step in document["steps"]:
+        if step["step_key"] == "construct":
+            step["input_ports"] = [
+                {
+                    **port,
+                    "required": True,
+                }
+                for port in step["input_ports"]
+                if port["slot_name"] == "structure_artifact"
+            ]
+    return document
+
+
 def _source_profile_workflow(
     *,
     workflow_key: str,
@@ -715,7 +885,7 @@ def _source_profile_workflow(
     acquire_process_key: str,
     decode_process_key: str,
     clean_process_key: str = "clean.extract.deterministic",
-    revision_number: int = 1,
+    revision_number: int = 2,
 ) -> WorkflowDefinition:
     """Derive one reviewed, immutable source-profile graph.
 
@@ -784,7 +954,7 @@ BUILTIN_LOCAL_PDF_INTAKE_WORKFLOW: Final[WorkflowDefinition] = _source_profile_w
     acquire_process_key="intake.acquire.local_object",
     decode_process_key="intake.decode.pdf",
     clean_process_key="clean.extract.pdf_text",
-    revision_number=3,
+    revision_number=4,
 )
 
 
@@ -794,7 +964,7 @@ BUILTIN_HTTP_STATIC_INTAKE_WORKFLOW: Final[WorkflowDefinition] = _source_profile
     acquire_process_key="intake.acquire.http_static",
     decode_process_key="intake.decode.text_json_html",
     clean_process_key="clean.extract.web",
-    revision_number=2,
+    revision_number=3,
 )
 
 
@@ -804,7 +974,7 @@ BUILTIN_HTTP_BROWSER_INTAKE_WORKFLOW: Final[WorkflowDefinition] = _source_profil
     acquire_process_key="intake.acquire.http_browser",
     decode_process_key="intake.decode.text_json_html",
     clean_process_key="clean.extract.web",
-    revision_number=2,
+    revision_number=3,
 )
 
 
@@ -814,7 +984,7 @@ BUILTIN_HTTP_PDF_INTAKE_WORKFLOW: Final[WorkflowDefinition] = _source_profile_wo
     acquire_process_key="intake.acquire.http_static",
     decode_process_key="intake.decode.pdf",
     clean_process_key="clean.extract.pdf_text",
-    revision_number=3,
+    revision_number=4,
 )
 
 
@@ -897,4 +1067,15 @@ BUILTIN_SOURCE_PROFILE_WORKFLOWS: Final[tuple[WorkflowDefinition, ...]] = (
     BUILTIN_HTTP_BROWSER_WEB_LLM_INTAKE_WORKFLOW,
     BUILTIN_LOCAL_PDF_LLM_INTAKE_WORKFLOW,
     BUILTIN_BROWSER_PRINT_PDF_INTAKE_WORKFLOW,
+)
+
+
+BUILTIN_NS1_PRE_MARKDOWN_COMPATIBILITY_WORKFLOWS: Final[tuple[WorkflowDefinition, ...]] = tuple(
+    WorkflowDefinition.model_validate(
+        _without_ns1_markdown_branch(
+            definition.model_dump(),
+            revision_number=definition.revision_number - 1,
+        )
+    )
+    for definition in (BUILTIN_SINGLE_INTAKE_LSRAG_WORKFLOW, *BUILTIN_SOURCE_PROFILE_WORKFLOWS)
 )

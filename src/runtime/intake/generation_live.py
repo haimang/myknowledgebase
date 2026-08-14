@@ -64,6 +64,7 @@ class IntakeGenerationLiveMixin:
             capability_key: Literal["structured_generate", "text_generate"],
             prompt_key: str,
             prompt_version: str,
+            prompt_role: str | None = None,
             schema_key: str,
             schema_version: str,
         ) -> _FrozenGenerationConfig:
@@ -82,18 +83,39 @@ class IntakeGenerationLiveMixin:
                 raise MkbError("GENERATION_CONFIG_SNAPSHOT_INVALID", "Frozen generation binding is invalid", 503) from exc
             if mode != "live" or not isinstance(raw_binding, dict) or not isinstance(prompts, list):
                 raise MkbError("GENERATION_CONFIG_SNAPSHOT_INVALID", "Live generation binding is unavailable", 503)
+            if prompt_role is not None:
+                try:
+                    selected_prompts = snapshot["l1"]["selected_prompts"]
+                    selected = selected_prompts[prompt_role]
+                except (KeyError, TypeError) as exc:
+                    raise MkbError("PROMPT_SELECTION_INVALID", "Frozen prompt role selection is unavailable", 503) from exc
+                if not isinstance(selected, dict):
+                    raise MkbError("PROMPT_SELECTION_INVALID", "Frozen prompt role selection is invalid", 503)
+                selected_id = selected.get("prompt_id")
+                selected_version = selected.get("version")
+                selected_role = selected.get("role")
+                if (
+                    not isinstance(selected_id, str)
+                    or not isinstance(selected_version, str)
+                    or selected_role != prompt_role
+                ):
+                    raise MkbError("PROMPT_SELECTION_INVALID", "Frozen prompt role selection is invalid", 503)
+                prompt_key = selected_id
+                prompt_version = selected_version
             pointer = next(
                 (
                     row
                     for row in prompts
                     if isinstance(row, dict)
-                    and row.get("prompt_key") == prompt_key
+                    and (row.get("prompt_id") or row.get("prompt_key")) == prompt_key
                     and row.get("prompt_version") == prompt_version
                 ),
                 None,
             )
             if pointer is None:
                 raise MkbError("PROMPT_HASH_MISMATCH", "Frozen prompt pointer is unavailable", 503)
+            if prompt_role is not None and pointer.get("role") != prompt_role:
+                raise MkbError("PROMPT_ROLE_MISMATCH", "Frozen prompt role does not match its catalog pointer", 503)
             relative_path = pointer.get("git_relative_path")
             expected_sha = pointer.get("content_sha256")
             if not isinstance(relative_path, str) or not isinstance(expected_sha, str):
@@ -159,6 +181,7 @@ class IntakeGenerationLiveMixin:
             input_text: str,
             prompt_key: str,
             prompt_version: str,
+            prompt_role: str | None = None,
             schema_key: str,
             schema_version: str,
             input_digest: str,
@@ -173,6 +196,7 @@ class IntakeGenerationLiveMixin:
                 capability_key="structured_generate",
                 prompt_key=prompt_key,
                 prompt_version=prompt_version,
+                prompt_role=prompt_role,
                 schema_key=schema_key,
                 schema_version=schema_version,
             )
@@ -295,6 +319,7 @@ class IntakeGenerationLiveMixin:
                 input_text=_json(layered_candidate),
                 prompt_key="promptC.default",
                 prompt_version="v1",
+                prompt_role="summarizer",
                 schema_key="lsrag.layered_content.default",
                 schema_version="v1",
                 input_digest=stable_digest({"layered_candidate": layered_candidate, "stage": "construct"}),
@@ -313,6 +338,7 @@ class IntakeGenerationLiveMixin:
             input_text: str,
             prompt_key: str,
             prompt_version: str,
+            prompt_role: str | None = None,
             schema_key: str,
             schema_version: str,
             input_digest: str,
@@ -327,6 +353,7 @@ class IntakeGenerationLiveMixin:
                 capability_key="text_generate",
                 prompt_key=prompt_key,
                 prompt_version=prompt_version,
+                prompt_role=prompt_role,
                 schema_key=schema_key,
                 schema_version=schema_version,
             )
@@ -470,6 +497,7 @@ class IntakeGenerationLiveMixin:
                             "stage": "construct",
                         }
                     ),
+                    prompt_role="summarizer",
                     invocation_ordinal=ordinal,
                 )
                 summaries[block_id] = text.strip()

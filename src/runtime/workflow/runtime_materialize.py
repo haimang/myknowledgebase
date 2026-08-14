@@ -85,6 +85,8 @@ class WorkflowMaterializeMixin:
             "registered_admission_result": "admission_result",
             "registered_request_intent": "request_intent",
             "registered_metadata_disposition": "metadata_disposition",
+            "registered_markdown_selection": "markdown_selection",
+            "registered_admission_markdown_selection": "admission_markdown_selection",
         }.get(guard.predicate_type)
         if context_key is None:
             raise MkbError("workflow-guard-unsupported", "Workflow guard is not supported by the bounded runtime", 409)
@@ -121,6 +123,29 @@ class WorkflowMaterializeMixin:
         )
         if no_change is not None:
             context["metadata_disposition"] = "no_change"
+        audit = await tx.fetchone(
+            "SELECT strict_payload_json FROM mkb_task_audits WHERE team_uuid=? AND task_uuid=? "
+            "ORDER BY received_at DESC LIMIT 1",
+            (execution["team_uuid"], execution["task_uuid"]),
+        )
+        if audit is not None and isinstance(audit.get("strict_payload_json"), str):
+            try:
+                envelope = json.loads(audit["strict_payload_json"])
+                payload = envelope.get("payload") if isinstance(envelope, dict) else None
+                selection = payload.get("prompt_selection") if isinstance(payload, dict) else None
+                markdown = selection.get("markdown") if isinstance(selection, dict) else None
+                markdown_id = markdown.get("prompt_id") if isinstance(markdown, dict) else None
+                if not markdown_id and isinstance(payload, dict):
+                    markdown_id = payload.get("markdown_prompt_id")
+                if isinstance(markdown_id, str) and markdown_id:
+                    context["markdown_selection"] = "present"
+                    if context.get("admission_result") == "auto_admitted":
+                        context["admission_markdown_selection"] = "auto_admitted"
+            except (TypeError, ValueError, json.JSONDecodeError):
+                # A missing/invalid optional fact leaves the unguarded
+                # no-markdown route as the only static fallback; it never
+                # manufactures a markdown Process.
+                pass
         return context
 
 

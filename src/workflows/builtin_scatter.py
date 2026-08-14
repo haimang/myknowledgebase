@@ -7,6 +7,7 @@ Task payload nor a Process input may name these workflow keys directly.
 
 from __future__ import annotations
 
+from copy import deepcopy
 from typing import Final
 
 from src.contracts.workflow.models import (
@@ -35,6 +36,15 @@ def _ref(slot_name: str, schema_ref: str) -> WorkflowPortDefinition:
         slot_name=slot_name,
         value_type=WorkflowValueType.LOGICAL_REF,
         schema_ref=schema_ref,
+    )
+
+
+def _optional_ref(slot_name: str, schema_ref: str) -> WorkflowPortDefinition:
+    return WorkflowPortDefinition(
+        slot_name=slot_name,
+        value_type=WorkflowValueType.LOGICAL_REF,
+        schema_ref=schema_ref,
+        required=False,
     )
 
 
@@ -385,11 +395,22 @@ BUILTIN_REGISTERED_API_SCATTER_ROOT_WORKFLOW: Final[WorkflowDefinition] = Workfl
 _CHILD_STEPS = [
     WorkflowStepDefinition(step_key="start", step_kind=WorkflowStepKind.START),
     _process(
+        step_key="transcribe_markdown",
+        process_key="lsrag.transcribe_markdown",
+        phase_key=WorkflowPhaseKey.STRUCTURIZING,
+        proof_kind="markdown_transcription_proof",
+        input_ports=[_ref("accepted_intake_revision", "mkb.intake.accepted-revision.v1")],
+        output_ports=[_ref("markdown_artifact", "mkb.lsrag.markdown-artifact.v1")],
+    ),
+    _process(
         step_key="structurize",
         process_key="lsrag.structurize",
         phase_key=WorkflowPhaseKey.STRUCTURIZING,
         proof_kind="structure_proof",
-        input_ports=[_ref("accepted_intake_revision", "mkb.intake.accepted-revision.v1")],
+        input_ports=[
+            _ref("accepted_intake_revision", "mkb.intake.accepted-revision.v1"),
+            _optional_ref("markdown_artifact", "mkb.lsrag.markdown-artifact.v1"),
+        ],
         output_ports=[_ref("structure_artifact", "mkb.lsrag.structure-artifact.v1")],
     ),
     _process(
@@ -438,11 +459,28 @@ _CHILD_STEPS = [
 
 _CHILD_ROUTES = [
     WorkflowRouteDefinition(
+        route_key="start.to_transcribe_markdown",
+        from_step_key="start",
+        to_step_key="transcribe_markdown",
+        route_kind=WorkflowRouteKind.NORMAL,
+        outcome_selector=WorkflowOutcomeSelector.ALWAYS,
+        priority=0,
+        guard_key="prompt_markdown_present",
+    ),
+    WorkflowRouteDefinition(
         route_key="start.to_structurize",
         from_step_key="start",
         to_step_key="structurize",
         route_kind=WorkflowRouteKind.NORMAL,
         outcome_selector=WorkflowOutcomeSelector.ALWAYS,
+        priority=10,
+    ),
+    WorkflowRouteDefinition(
+        route_key="transcribe_markdown.to_structurize",
+        from_step_key="transcribe_markdown",
+        to_step_key="structurize",
+        route_kind=WorkflowRouteKind.NORMAL,
+        outcome_selector=WorkflowOutcomeSelector.SUCCEEDED,
         priority=0,
     ),
     WorkflowRouteDefinition(
@@ -478,15 +516,28 @@ _CHILD_ROUTES = [
         priority=0,
     ),
 ]
-for _step_key in ("structurize", "construct", "vectorize", "validate_publication"):
+for _step_key in ("transcribe_markdown", "structurize", "construct", "vectorize", "validate_publication"):
     _CHILD_ROUTES.extend(_terminal_routes(_step_key))
 
 _CHILD_BINDINGS = [
+    WorkflowBindingDefinition(
+        target_step_key="transcribe_markdown",
+        target_slot_name="accepted_intake_revision",
+        source_kind=WorkflowBindingSourceKind.EXECUTION_CONTEXT,
+        source_ref_key="accepted_intake_revision",
+    ),
     WorkflowBindingDefinition(
         target_step_key="structurize",
         target_slot_name="accepted_intake_revision",
         source_kind=WorkflowBindingSourceKind.EXECUTION_CONTEXT,
         source_ref_key="accepted_intake_revision",
+    ),
+    WorkflowBindingDefinition(
+        target_step_key="structurize",
+        target_slot_name="markdown_artifact",
+        source_kind=WorkflowBindingSourceKind.PRIOR_OUTPUT,
+        source_step_key="transcribe_markdown",
+        source_port_name="markdown_artifact",
     ),
     WorkflowBindingDefinition(
         target_step_key="construct",
@@ -520,7 +571,7 @@ _CHILD_BINDINGS = [
 BUILTIN_REGISTERED_API_SCATTER_CHILD_WORKFLOW: Final[WorkflowDefinition] = WorkflowDefinition(
     schema_version="mkb.workflow-definition.v1",
     workflow_key=SCATTER_CHILD_WORKFLOW_KEY,
-    revision_number=1,
+    revision_number=2,
     domain_key="ls_rag",
     purpose_key="intake.ingest",
     execution_role=WorkflowExecutionRole.SCATTER_CHILD,
@@ -528,6 +579,7 @@ BUILTIN_REGISTERED_API_SCATTER_CHILD_WORKFLOW: Final[WorkflowDefinition] = Workf
     description="Publish one accepted registered-API member under its exact root Snapshot and ChangeSet binding.",
     context_slots=[_ref("accepted_intake_revision", "mkb.intake.accepted-revision.v1")],
     required_process_keys=[
+        "lsrag.transcribe_markdown",
         "lsrag.structurize",
         "lsrag.construct",
         "lsrag.vectorize",
@@ -536,6 +588,54 @@ BUILTIN_REGISTERED_API_SCATTER_CHILD_WORKFLOW: Final[WorkflowDefinition] = Workf
     steps=_CHILD_STEPS,
     routes=_CHILD_ROUTES,
     bindings=_CHILD_BINDINGS,
+    guards=[
+        WorkflowGuardDefinition(
+            guard_key="prompt_markdown_present",
+            predicate_type="registered_markdown_selection",
+            operator="eq",
+            expected_value="present",
+        ),
+    ],
+)
+
+
+def _pre_ns1_scatter_child_workflow() -> WorkflowDefinition:
+    """Return the immutable scatter-child graph from before the Markdown hop."""
+
+    legacy = deepcopy(BUILTIN_REGISTERED_API_SCATTER_CHILD_WORKFLOW.model_dump())
+    legacy["revision_number"] = 1
+    legacy["steps"] = [step for step in legacy["steps"] if step["step_key"] != "transcribe_markdown"]
+    for step in legacy["steps"]:
+        if step["step_key"] == "structurize":
+            step["input_ports"] = [port for port in step["input_ports"] if port["slot_name"] != "markdown_artifact"]
+    legacy["routes"] = [
+        {
+            **route,
+            **({"priority": 0} if route["route_key"] == "start.to_structurize" else {}),
+        }
+        for route in legacy["routes"]
+        if route["from_step_key"] != "transcribe_markdown"
+        and route["to_step_key"] != "transcribe_markdown"
+        and route["route_key"] != "start.to_transcribe_markdown"
+    ]
+    legacy["bindings"] = [
+        binding
+        for binding in legacy["bindings"]
+        if binding["target_step_key"] != "transcribe_markdown"
+        and not (
+            binding["target_step_key"] == "structurize"
+            and binding["target_slot_name"] == "markdown_artifact"
+        )
+    ]
+    legacy["required_process_keys"] = [
+        key for key in legacy["required_process_keys"] if key != "lsrag.transcribe_markdown"
+    ]
+    legacy["guards"] = [guard for guard in legacy["guards"] if guard["guard_key"] != "prompt_markdown_present"]
+    return WorkflowDefinition.model_validate(legacy)
+
+
+BUILTIN_NS1_PRE_MARKDOWN_SCATTER_COMPATIBILITY_WORKFLOW: Final[WorkflowDefinition] = (
+    _pre_ns1_scatter_child_workflow()
 )
 
 
@@ -549,6 +649,7 @@ __all__ = [
     "BUILTIN_REGISTERED_API_SCATTER_CHILD_WORKFLOW",
     "BUILTIN_REGISTERED_API_SCATTER_ROOT_WORKFLOW",
     "BUILTIN_SCATTER_WORKFLOWS",
+    "BUILTIN_NS1_PRE_MARKDOWN_SCATTER_COMPATIBILITY_WORKFLOW",
     "SCATTER_CHILD_WORKFLOW_KEY",
     "SCATTER_ROOT_WORKFLOW_KEY",
 ]

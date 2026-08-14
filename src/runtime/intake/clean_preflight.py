@@ -71,18 +71,23 @@ class IntakeCleanPreflightMixin:
             }.get(command.process_key)
             if strategy is None:
                 raise MkbError("CLEAN_STRATEGY_UNSUPPORTED", "Process has no registered clean strategy", 409)
-            prompt = await self._clean_prompt_material(command, strategy)
+            prompt = await self._clean_prompt_material(command, strategy, state=state)
             llm = self._clean_language_model()
             if llm is None and resolve_clean_strategy(strategy).llm_required and getattr(self, "_claude_cli", None) is not None:
-                prompt_path = (self._prompt_root / "prompt-a-clean-v1.md").resolve()
                 if prompt is None:
                     raise MkbError("PROMPT_HASH_MISMATCH", "CLI clean path lacks its frozen prompt pointer", 503)
+                payload = state.get("payload")
+                has_selection = isinstance(payload, Mapping) and isinstance(payload.get("prompt_selection"), Mapping)
+                if has_selection:
+                    prompt_path, _ = self._frozen_prompt_file(state, role="clean")
+                else:
+                    prompt_path = (self._prompt_root / "prompt-a-clean-v1.md").resolve()
                 try:
-                    prompt_path.relative_to(self._prompt_root)
-                    if hashlib.sha256(prompt_path.read_bytes()).hexdigest() != prompt.content_sha256:
-                        raise MkbError("PROMPT_HASH_MISMATCH", "CLI clean prompt bytes do not match the frozen pointer", 503)
+                    prompt_digest = hashlib.sha256(prompt_path.read_bytes()).hexdigest()
                 except OSError as exc:
                     raise MkbError("PROMPT_HASH_MISMATCH", "CLI clean prompt bytes are unavailable", 503) from exc
+                if prompt_digest != prompt.content_sha256:
+                    raise MkbError("PROMPT_HASH_MISMATCH", "CLI clean prompt bytes do not match the frozen pointer", 503)
                 llm = ClaudeCliCleanLanguageModel(self._claude_cli, system_prompt_file=prompt_path)
             result = await dispatch_clean(
                 command.process_key,
@@ -129,7 +134,13 @@ class IntakeCleanPreflightMixin:
         injected = getattr(self, "_clean_llm", None)
         return injected if injected is not None else None
 
-    async def _clean_prompt_material(self, command: ProcessCommand, strategy: str) -> CleanPrompt | None:
+    async def _clean_prompt_material(
+        self,
+        command: ProcessCommand,
+        strategy: str,
+        *,
+        state: Mapping[str, Any] | None = None,
+    ) -> CleanPrompt | None:
         definition = resolve_clean_strategy(strategy)
         if not definition.llm_required or (
             self._clean_language_model() is None and getattr(self, "_claude_cli", None) is None
@@ -144,6 +155,21 @@ class IntakeCleanPreflightMixin:
             ):
                 raise MkbError("PROMPT_HASH_MISMATCH", "Injected clean prompt does not match the strategy", 503)
             return injected
+        if state is not None and isinstance(state.get("payload"), Mapping):
+            prompt_selection = state["payload"].get("prompt_selection")
+            if isinstance(prompt_selection, Mapping) and prompt_selection.get("clean") is not None:
+                path, pointer = self._frozen_prompt_file(state, role="clean")
+                try:
+                    prompt_bytes = path.read_bytes()
+                    prompt_text = prompt_bytes.decode("utf-8")
+                except (OSError, UnicodeDecodeError) as exc:
+                    raise MkbError("PROMPT_HASH_MISMATCH", "Frozen clean prompt bytes are unavailable", 503) from exc
+                return CleanPrompt(
+                    key=str(pointer.get("prompt_id")),
+                    version=str(pointer.get("version")),
+                    text=prompt_text,
+                    content_sha256=str(pointer.get("content_sha256")),
+                )
         snapshot = await self._load_config_snapshot(command)
         prompts = (snapshot.get("l1") or {}).get("prompts")
         if not isinstance(prompts, list):

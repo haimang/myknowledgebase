@@ -8,14 +8,14 @@ from src.contracts.workflow.models import (
     WorkflowDefinition,
 )
 from src.workflows.lsrag_definition import (
-    _pre_metadata_refresh_execution_document,
+    _pre_ns1_metadata_refresh_execution_document,
 )
 
 
 def _historical_v2_execution_plan() -> WorkflowDefinition:
     """Return the exact pre-S07-refresh graph for pinned revision-2 work."""
 
-    document = _pre_metadata_refresh_execution_document()
+    document = _pre_ns1_metadata_refresh_execution_document()
     document["revision_number"] = 2
     return WorkflowDefinition.model_validate(document)
 
@@ -65,4 +65,3 @@ BUILTIN_EXECUTION_COMPATIBILITY_WORKFLOWS: Final[tuple[WorkflowDefinition, ...]]
     HISTORICAL_SINGLE_INTAKE_LSRAG_WORKFLOW_V1,
     HISTORICAL_SINGLE_INTAKE_LSRAG_WORKFLOW_V2,
 )
-

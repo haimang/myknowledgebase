@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 from collections.abc import Awaitable, Callable, Mapping
 from pathlib import Path
@@ -82,6 +83,38 @@ class IntakeCoreMixin:
             # enter L4/output manifests or either invocation ledger.
             self._prompt_root = (prompt_root or Path(__file__).resolve().parents[3] / "data" / "prompts").resolve()
             self._vector_purger = VectorGenerationPurger(persistence)
+
+    def _frozen_prompt_file(
+        self,
+        state: Mapping[str, Any],
+        *,
+        role: str,
+        error_code: str = "PROMPT_HASH_MISMATCH",
+    ) -> tuple[Path, dict[str, Any]]:
+        """Read one materialized prompt pointer and re-prove its bytes."""
+
+        payload = state.get("payload")
+        selection = payload.get("prompt_selection") if isinstance(payload, Mapping) else None
+        pointer = selection.get(role) if isinstance(selection, Mapping) else None
+        if not isinstance(pointer, Mapping):
+            raise MkbError(error_code, f"Frozen {role} prompt pointer is unavailable", 503)
+        relative_path = pointer.get("git_relative_path")
+        expected_sha = pointer.get("content_sha256")
+        pointer_role = pointer.get("role")
+        if not isinstance(relative_path, str) or not isinstance(expected_sha, str) or pointer_role != role:
+            raise MkbError(error_code, f"Frozen {role} prompt pointer is invalid", 503)
+        path_fragment = Path(relative_path)
+        if path_fragment.is_absolute() or ".." in path_fragment.parts:
+            raise MkbError(error_code, f"Frozen {role} prompt path is invalid", 503)
+        path = (self._prompt_root / path_fragment).resolve()
+        try:
+            path.relative_to(self._prompt_root)
+            prompt_bytes = path.read_bytes()
+        except (OSError, ValueError) as exc:
+            raise MkbError(error_code, f"Frozen {role} prompt bytes are unavailable", 503) from exc
+        if hashlib.sha256(prompt_bytes).hexdigest() != expected_sha:
+            raise MkbError(error_code, f"Frozen {role} prompt bytes do not match the pointer", 503)
+        return path, dict(pointer)
 
     async def run(self, command: ProcessCommand) -> ProcessOutcome:
             """Run one Process with no direct Task/Execution/Process mutation."""

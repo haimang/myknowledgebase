@@ -42,8 +42,21 @@ class IntakeGenerationConstructMixin:
     """Structurize/construct stages and reconstruct contracts."""
 
     @staticmethod
+    def _has_frozen_prompt_selection(state: Mapping[str, Any] | None, role: str) -> bool:
+        if state is None:
+            return False
+        payload = state.get("payload")
+        selection = payload.get("prompt_selection") if isinstance(payload, Mapping) else None
+        return isinstance(selection, Mapping) and isinstance(selection.get(role), Mapping)
+
+    @staticmethod
     def _layered_profile(state: Mapping[str, Any], *, error_code: str) -> tuple[int, ...]:
         raw = state.get("layered_content_profile", state.get("granularity_set", (0, 1, 2)))
+        payload = state.get("payload")
+        prompt_selection = payload.get("prompt_selection") if isinstance(payload, Mapping) else None
+        json_prompt = prompt_selection.get("json") if isinstance(prompt_selection, Mapping) else None
+        if raw == (0, 1, 2) and isinstance(json_prompt, Mapping) and json_prompt.get("granularity_set") is not None:
+            raw = json_prompt.get("granularity_set")
         if not isinstance(raw, list | tuple) or not raw:
             raise MkbError(error_code, "Layered granularity profile is unavailable", 409)
         values = tuple(sorted(set(raw)))
@@ -58,7 +71,19 @@ class IntakeGenerationConstructMixin:
             raise MkbError(error_code, "Accepted layered JSON candidate is unavailable", 409)
         return candidate
 
-    def _ns1_prompt_file(self, relative_path: str, *, error_code: str) -> tuple[Path, str]:
+    def _ns1_prompt_file(
+        self,
+        relative_path: str,
+        *,
+        error_code: str,
+        state: Mapping[str, Any] | None = None,
+        role: str | None = None,
+    ) -> tuple[Path, str]:
+        if role is not None:
+            if state is None:
+                raise MkbError(error_code, f"Frozen {role} prompt state is unavailable", 503)
+            path, pointer = self._frozen_prompt_file(state, role=role, error_code=error_code)
+            return path, str(pointer["content_sha256"])
         path = (self._prompt_root / relative_path).resolve()
         try:
             path.relative_to(self._prompt_root)
@@ -77,6 +102,7 @@ class IntakeGenerationConstructMixin:
         clean_text: str,
         input_text: str | None = None,
         profile: tuple[int, ...],
+        state: Mapping[str, Any] | None = None,
     ) -> tuple[dict[str, object], dict[str, object]]:
         cli = getattr(self, "_claude_cli", None)
         if cli is None:
@@ -84,6 +110,8 @@ class IntakeGenerationConstructMixin:
         prompt_path, prompt_digest = self._ns1_prompt_file(
             "json/promptB.json.generic.v1.md",
             error_code="PROMPT_HASH_MISMATCH",
+            state=state,
+            role="json" if self._has_frozen_prompt_selection(state, "json") else None,
         )
         try:
             schema = json.loads(self._ns1_schema_path().read_text(encoding="utf-8"))
@@ -93,7 +121,7 @@ class IntakeGenerationConstructMixin:
             raise MkbError("STRUCTURE_SCHEMA_UNAVAILABLE", "Layered content schema is invalid", 503)
         result = await cli.run(
             ClaudeCliRequest(
-                user_prompt=input_text or clean_text,
+                user_prompt=clean_text if input_text is None else input_text,
                 system_prompt_file=prompt_path,
                 json_schema=schema,
                 role="json",
@@ -121,6 +149,7 @@ class IntakeGenerationConstructMixin:
         *,
         layered_candidate: Mapping[str, object],
         profile: tuple[int, ...],
+        state: Mapping[str, Any] | None = None,
     ) -> tuple[dict[str, object], dict[str, object]]:
         cli = getattr(self, "_claude_cli", None)
         if cli is None:
@@ -128,6 +157,8 @@ class IntakeGenerationConstructMixin:
         prompt_path, prompt_digest = self._ns1_prompt_file(
             "summarizer/promptC.summarizer.v1.md",
             error_code="PROMPT_HASH_MISMATCH",
+            state=state,
+            role="summarizer" if self._has_frozen_prompt_selection(state, "summarizer") else None,
         )
         try:
             schema = json.loads(self._ns1_schema_path().read_text(encoding="utf-8"))
@@ -172,6 +203,8 @@ class IntakeGenerationConstructMixin:
         prompt_path, prompt_digest = self._ns1_prompt_file(
             "markdown/promptB.markdown.legal.v1.md",
             error_code="PROMPT_HASH_MISMATCH",
+            state=state,
+            role="markdown" if self._has_frozen_prompt_selection(state, "markdown") else None,
         )
         result = await cli.run(
             ClaudeCliRequest(
@@ -523,7 +556,8 @@ class IntakeGenerationConstructMixin:
                     input_text=clean,
                     prompt_key="promptB.default",
                     prompt_version="v1",
-                    schema_key="lsrag.structure.default",
+                    prompt_role="json",
+                    schema_key="lsrag.layered_content.default",
                     schema_version="v1",
                     input_digest=stable_digest({"clean_digest": state["clean_digest"], "stage": "structurize"}),
                 )
@@ -535,6 +569,7 @@ class IntakeGenerationConstructMixin:
                     clean_text=clean,
                     input_text=state.get("markdown_text") if isinstance(state.get("markdown_text"), str) else None,
                     profile=profile,
+                    state=state,
                 )
                 layered_candidate = generated_candidate
             if layered_candidate is None:
@@ -738,6 +773,7 @@ class IntakeGenerationConstructMixin:
                     completed_layered_candidate, cli_receipt = await self._cli_layered_summary(
                         layered_candidate=accepted_layered_candidate,
                         profile=profile,
+                        state=state,
                     )
                 else:
                     summaries = deterministic_summaries(projection)

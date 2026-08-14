@@ -9,9 +9,11 @@ partially visible Execution or mutable configuration alias.
 from __future__ import annotations
 
 import hashlib
+import json
 import tomllib
 import unicodedata
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
 import yaml
@@ -45,6 +47,10 @@ _OVERRIDE_CAPS: dict[str, int] = {
     "pack_budget": 32_000,
 }
 _REGISTERED_PROFILES = frozenset({"clean.web.v1", "clean.document.v1", "clean.default.v1"})
+_DEFAULT_PROMPT_IDS = {
+    "clean": "promptA.default",
+    "summarizer": "promptC.default",
+}
 # Keys that must never be accepted even if a future DTO loosens extra=forbid.
 _FORBIDDEN_OVERRIDE_KEYS = frozenset(
     {
@@ -137,6 +143,7 @@ class ConfigSnapshotService:
         inline_ingress = await self._stage_inline_ingress(request)
         l0 = self._load_l0()
         l1 = await self._load_l1()
+        prompt_selection = self._resolve_prompt_selection(l1["prompts"], request)
         bindings = self._resolve_bindings(l1["bindings"])
         # The local/offline profile is a first-class, frozen binding rather
         # than hash vectors labelled as a production model.  Once promoted,
@@ -172,6 +179,7 @@ class ConfigSnapshotService:
             "l0": l0,
             "l1": {
                 "prompts": l1["prompts"],
+                "selected_prompts": prompt_selection,
                 "models": l1["models"],
                 "bindings": bindings,
             },
@@ -209,7 +217,7 @@ class ConfigSnapshotService:
             raise MkbError("SNAPSHOT_INCONSISTENT", "Config snapshot digest is inconsistent", 503)
 
         intent_context = await self._resolve_intent_context(request)
-        execution_payload = self._execution_payload(request, inline_ingress)
+        execution_payload = self._execution_payload(request, inline_ingress, prompt_selection)
         audit_envelope = self.redacted_request_envelope(request, inline_ingress)
         input_manifest_body = {
             "schema_version": "mkb.execution-input-manifest.v1",
@@ -371,10 +379,17 @@ class ConfigSnapshotService:
         )
 
     @classmethod
-    def _execution_payload(cls, request: TaskCreateRequest, inline_ingress: ObjectStat | None) -> dict[str, Any]:
+    def _execution_payload(
+        cls,
+        request: TaskCreateRequest,
+        inline_ingress: ObjectStat | None,
+        prompt_selection: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
         """Return the only payload shape a Process is allowed to receive."""
 
         payload = request.payload.model_dump(mode="json")
+        if prompt_selection:
+            payload["prompt_selection"] = prompt_selection
         if inline_ingress is None:
             return payload
         source = payload.get("source")
@@ -538,6 +553,85 @@ class ConfigSnapshotService:
         if not prompts or not models:
             raise MkbError("REGISTRY_NOT_FOUND", "Registry bootstrap rows are unavailable", 503)
         return {"prompts": prompts, "models": models, "bindings": bindings}
+
+    def _resolve_prompt_selection(
+        self,
+        prompt_rows: list[dict[str, Any]],
+        request: TaskCreateRequest,
+    ) -> dict[str, Any]:
+        """Resolve the four role identities into one immutable input object."""
+
+        if not isinstance(request.payload, IntakeIngestPayload):
+            return {}
+        requested: dict[str, str | None] = {
+            "clean": request.payload.clean_prompt_id or _DEFAULT_PROMPT_IDS["clean"],
+            "markdown": request.payload.markdown_prompt_id,
+            "json": request.payload.json_prompt_id,
+            "summarizer": request.payload.summarizer_prompt_id or _DEFAULT_PROMPT_IDS["summarizer"],
+        }
+        by_id: dict[str, list[dict[str, Any]]] = {}
+        for row in prompt_rows:
+            prompt_id = row.get("prompt_id") or row.get("prompt_key")
+            if isinstance(prompt_id, str):
+                by_id.setdefault(prompt_id, []).append(row)
+        selected: dict[str, Any] = {}
+        for role, prompt_id in requested.items():
+            if prompt_id is None:
+                selected[role] = None
+                continue
+            candidates = [row for row in by_id.get(prompt_id, []) if row.get("status") == "active"]
+            if len(candidates) != 1:
+                raise MkbError("PROMPT_NOT_REGISTERED", f"Active {role} prompt is unavailable", 503)
+            row = candidates[0]
+            if row.get("role") != role:
+                raise MkbError("PROMPT_ROLE_MISMATCH", f"Prompt id is not registered for role {role}", 422)
+            relative_path = row.get("git_relative_path")
+            expected_sha = row.get("content_sha256")
+            version = row.get("prompt_version")
+            if not isinstance(relative_path, str) or not isinstance(expected_sha, str) or not isinstance(version, str):
+                raise MkbError("PROMPT_CATALOG_INVALID", "Prompt catalog identity is incomplete", 503)
+            path_fragment = Path(relative_path)
+            if path_fragment.is_absolute() or ".." in path_fragment.parts:
+                raise MkbError("PROMPT_CATALOG_PATH_INVALID", "Prompt catalog path is invalid", 503)
+            path = (self.settings.prompt_root / path_fragment).resolve()
+            try:
+                path.relative_to(self.settings.prompt_root.resolve())
+                prompt_bytes = path.read_bytes()
+            except (OSError, ValueError) as exc:
+                raise MkbError("PROMPT_HASH_MISMATCH", "Prompt bytes are unavailable", 503) from exc
+            actual_sha = hashlib.sha256(prompt_bytes).hexdigest()
+            if actual_sha != expected_sha:
+                raise MkbError("PROMPT_HASH_MISMATCH", "Prompt bytes do not match the catalog pointer", 503)
+            granularity_set = row.get("granularity_set")
+            if role == "json":
+                if not isinstance(granularity_set, str):
+                    raise MkbError("PROMPT_CATALOG_GRANULARITY_INVALID", "json prompt profile is unavailable", 503)
+                try:
+                    parsed_profile = json.loads(granularity_set)
+                except json.JSONDecodeError as exc:
+                    raise MkbError("PROMPT_CATALOG_GRANULARITY_INVALID", "json prompt profile is invalid", 503) from exc
+                if (
+                    not isinstance(parsed_profile, list)
+                    or not parsed_profile
+                    or any(isinstance(item, bool) or not isinstance(item, int) for item in parsed_profile)
+                    or tuple(parsed_profile) != tuple(sorted(set(parsed_profile)))
+                    or any(item not in {0, 1, 2} for item in parsed_profile)
+                ):
+                    raise MkbError("PROMPT_CATALOG_GRANULARITY_INVALID", "json prompt profile is invalid", 503)
+                normalized_profile: list[int] | None = parsed_profile
+            elif granularity_set is not None:
+                raise MkbError("PROMPT_CATALOG_GRANULARITY_INVALID", "non-json prompt has a profile", 503)
+            else:
+                normalized_profile = None
+            selected[role] = {
+                "prompt_id": str(row.get("prompt_id") or row.get("prompt_key")),
+                "version": version,
+                "content_sha256": expected_sha,
+                "git_relative_path": relative_path,
+                "role": role,
+                "granularity_set": normalized_profile,
+            }
+        return selected
 
     def _resolve_bindings(self, rows: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
         selected: dict[str, dict[str, Any]] = {}
