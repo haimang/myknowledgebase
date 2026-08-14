@@ -15,6 +15,7 @@ from src.contracts.common.time import utc_now
 from src.contracts.intake.strategies import CleanStrategyKey, resolve_clean_strategy
 from src.contracts.runtime.models import ProcessCommand
 from src.persistence.ports import UnitOfWork
+from src.runtime.inference.claude_cli import ClaudeCliCleanLanguageModel
 from src.runtime.intake.types import (
     _digest_bytes,
     _StageMaterial,
@@ -71,6 +72,18 @@ class IntakeCleanPreflightMixin:
             if strategy is None:
                 raise MkbError("CLEAN_STRATEGY_UNSUPPORTED", "Process has no registered clean strategy", 409)
             prompt = await self._clean_prompt_material(command, strategy)
+            llm = self._clean_language_model()
+            if llm is None and resolve_clean_strategy(strategy).llm_required and getattr(self, "_claude_cli", None) is not None:
+                prompt_path = (self._prompt_root / "prompt-a-clean-v1.md").resolve()
+                if prompt is None:
+                    raise MkbError("PROMPT_HASH_MISMATCH", "CLI clean path lacks its frozen prompt pointer", 503)
+                try:
+                    prompt_path.relative_to(self._prompt_root)
+                    if hashlib.sha256(prompt_path.read_bytes()).hexdigest() != prompt.content_sha256:
+                        raise MkbError("PROMPT_HASH_MISMATCH", "CLI clean prompt bytes do not match the frozen pointer", 503)
+                except OSError as exc:
+                    raise MkbError("PROMPT_HASH_MISMATCH", "CLI clean prompt bytes are unavailable", 503) from exc
+                llm = ClaudeCliCleanLanguageModel(self._claude_cli, system_prompt_file=prompt_path)
             result = await dispatch_clean(
                 command.process_key,
                 text=decoded if isinstance(decoded, str) else None,
@@ -80,7 +93,7 @@ class IntakeCleanPreflightMixin:
                 url=self._clean_source_url(state),
                 representation=representation,
                 strategy=strategy,
-                llm=self._clean_language_model(),
+                llm=llm,
                 prompt=prompt,
                 http_fetch=self._http_fetcher,
                 browser_fetch=self._browser_fetcher,
@@ -118,7 +131,9 @@ class IntakeCleanPreflightMixin:
 
     async def _clean_prompt_material(self, command: ProcessCommand, strategy: str) -> CleanPrompt | None:
         definition = resolve_clean_strategy(strategy)
-        if not definition.llm_required or self._clean_language_model() is None:
+        if not definition.llm_required or (
+            self._clean_language_model() is None and getattr(self, "_claude_cli", None) is None
+        ):
             return None
         injected = getattr(self, "_clean_prompt", None)
         if injected is not None:

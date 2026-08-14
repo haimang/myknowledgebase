@@ -13,6 +13,7 @@ from src.contracts.common.ids import canonical_json, stable_digest
 from src.contracts.runtime.models import ProcessCommand, ProcessOutcome
 from src.contracts.storage.models import ObjectHandle
 from src.persistence.ports import PersistencePort, UnitOfWork
+from src.runtime.inference.claude_cli import ClaudeCliPort
 from src.runtime.inference.facade import InferenceFacade
 from src.runtime.intake.types import (
     BrowserFetcher,
@@ -43,6 +44,7 @@ class IntakeCoreMixin:
             http_fetcher: HttpFetcher | None = None,
             browser_fetcher: BrowserFetcher | None = None,
             inference: InferenceFacade | None = None,
+            claude_cli: ClaudeCliPort | None = None,
             live_inference: bool = False,
             clean_llm: object | None = None,
             clean_prompt: CleanPrompt | None = None,
@@ -63,6 +65,7 @@ class IntakeCoreMixin:
             # provenance and hide a missing browser profile from preflight.
             self._browser_fetcher = browser_fetcher
             self._inference = inference
+            self._claude_cli = claude_cli
             self._live_inference = live_inference
             self._clean_llm = clean_llm
             self._clean_prompt = clean_prompt
@@ -298,6 +301,7 @@ class IntakeCoreMixin:
                 "intake.collection.seal": self._seal,
                 "intake.preflight_validate": self._preflight,
                 "intake.accept_snapshot": self._accept_snapshot,
+                "lsrag.transcribe_markdown": self._transcribe_markdown,
                 "lsrag.structurize": self._structurize,
                 "lsrag.construct": self._construct,
                 "lsrag.vectorize": self._vectorize,

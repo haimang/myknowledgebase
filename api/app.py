@@ -24,6 +24,7 @@ from src.runtime.config import Settings
 from src.runtime.health import HealthAggregator
 from src.runtime.http_acquisition import HttpAcquirer
 from src.runtime.index_retirement import IndexGenerationRetirementScanner, IndexGenerationRetirementSchedule
+from src.runtime.inference.claude_cli import DeterministicNs1Stub, SubprocessClaudeCli
 from src.runtime.inference.facade import InferenceFacade
 from src.runtime.inference.supply import SupplyBinding, SupplyFence
 from src.runtime.intake_pipeline import IntakePipeline
@@ -276,6 +277,12 @@ def create_container(settings: Settings | None = None) -> Container:
         persistence,
         grace=timedelta(seconds=settings.index_retirement_grace_seconds),
     )
+    ns1_cli = None
+    if not settings.live_inference:
+        if settings.ns1_cli_mode == "stub":
+            ns1_cli = DeterministicNs1Stub()
+        elif settings.ns1_cli_mode == "subprocess":
+            ns1_cli = SubprocessClaudeCli(executable=settings.ns1_cli_executable)
     workflow_worker = WorkflowWorker(
         workflow_runtime,
         IntakePipeline(
@@ -284,6 +291,7 @@ def create_container(settings: Settings | None = None) -> Container:
             outcome_committer,
             http_fetcher=http_acquirer,
             inference=inference,
+            claude_cli=ns1_cli,
             live_inference=settings.live_inference,
             lifecycle=lifecycle,
             index_retirement=index_retirement,

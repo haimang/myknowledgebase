@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 from collections.abc import Awaitable, Callable, Mapping
+from pathlib import Path
 from typing import Any
 
 from src.contracts.common.errors import MkbError
@@ -11,6 +13,7 @@ from src.contracts.common.ids import canonical_json, stable_digest, uuid7
 from src.contracts.common.time import utc_now
 from src.contracts.runtime.models import ProcessCommand
 from src.persistence.ports import UnitOfWork
+from src.runtime.inference.claude_cli import ClaudeCliRequest
 from src.runtime.intake.types import (
     _is_sha256_digest,
     _json,
@@ -54,6 +57,166 @@ class IntakeGenerationConstructMixin:
         if not isinstance(candidate, Mapping):
             raise MkbError(error_code, "Accepted layered JSON candidate is unavailable", 409)
         return candidate
+
+    def _ns1_prompt_file(self, relative_path: str, *, error_code: str) -> tuple[Path, str]:
+        path = (self._prompt_root / relative_path).resolve()
+        try:
+            path.relative_to(self._prompt_root)
+            data = path.read_bytes()
+        except (OSError, ValueError) as exc:
+            raise MkbError(error_code, "NS1 prompt bytes are unavailable", 503) from exc
+        return path, hashlib.sha256(data).hexdigest()
+
+    @staticmethod
+    def _ns1_schema_path() -> Path:
+        return Path(__file__).resolve().parents[3] / "data" / "schemas" / "lsrag.layered_content.v1.json"
+
+    async def _cli_layered_candidate(
+        self,
+        *,
+        clean_text: str,
+        input_text: str | None = None,
+        profile: tuple[int, ...],
+    ) -> tuple[dict[str, object], dict[str, object]]:
+        cli = getattr(self, "_claude_cli", None)
+        if cli is None:
+            raise MkbError("STRUCTURE_CANDIDATE_MISSING", "No layered candidate worker is configured", 503)
+        prompt_path, prompt_digest = self._ns1_prompt_file(
+            "json/promptB.json.generic.v1.md",
+            error_code="PROMPT_HASH_MISMATCH",
+        )
+        try:
+            schema = json.loads(self._ns1_schema_path().read_text(encoding="utf-8"))
+        except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+            raise MkbError("STRUCTURE_SCHEMA_UNAVAILABLE", "Layered content schema bytes are unavailable", 503) from exc
+        if not isinstance(schema, Mapping):
+            raise MkbError("STRUCTURE_SCHEMA_UNAVAILABLE", "Layered content schema is invalid", 503)
+        result = await cli.run(
+            ClaudeCliRequest(
+                user_prompt=input_text or clean_text,
+                system_prompt_file=prompt_path,
+                json_schema=schema,
+                role="json",
+                granularity_set=profile,
+            )
+        )
+        if not isinstance(result.structured_output, Mapping):
+            raise MkbError("STRUCTURE_CANDIDATE_INVALID", "B.json worker did not return structured output", 422)
+        candidate = dict(result.structured_output)
+        receipt: dict[str, object] = {
+            "transport": "claude_cli",
+            "role": "json",
+            "prompt_relative_path": "json/promptB.json.generic.v1.md",
+            "prompt_sha256": prompt_digest,
+            "schema_relative_path": "data/schemas/lsrag.layered_content.v1.json",
+            "session_id": result.session_id,
+            "usage": None if result.usage is None else dict(result.usage),
+            "exit_code": result.exit_code,
+            "output_digest": stable_digest(candidate),
+        }
+        return candidate, receipt
+
+    async def _cli_layered_summary(
+        self,
+        *,
+        layered_candidate: Mapping[str, object],
+        profile: tuple[int, ...],
+    ) -> tuple[dict[str, object], dict[str, object]]:
+        cli = getattr(self, "_claude_cli", None)
+        if cli is None:
+            raise MkbError("CONSTRUCT_KERNEL_SUMMARY_INVALID", "No layered summary worker is configured", 503)
+        prompt_path, prompt_digest = self._ns1_prompt_file(
+            "summarizer/promptC.summarizer.v1.md",
+            error_code="PROMPT_HASH_MISMATCH",
+        )
+        try:
+            schema = json.loads(self._ns1_schema_path().read_text(encoding="utf-8"))
+        except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+            raise MkbError("CONSTRUCT_SCHEMA_UNAVAILABLE", "Layered content schema bytes are unavailable", 503) from exc
+        if not isinstance(schema, Mapping):
+            raise MkbError("CONSTRUCT_SCHEMA_UNAVAILABLE", "Layered content schema is invalid", 503)
+        result = await cli.run(
+            ClaudeCliRequest(
+                user_prompt=_json(layered_candidate),
+                system_prompt_file=prompt_path,
+                json_schema=schema,
+                role="summarizer",
+                granularity_set=profile,
+            )
+        )
+        if not isinstance(result.structured_output, Mapping):
+            raise MkbError("CONSTRUCT_KERNEL_SUMMARY_INVALID", "C worker did not return structured output", 422)
+        completed = dict(result.structured_output)
+        receipt: dict[str, object] = {
+            "transport": "claude_cli",
+            "role": "summarizer",
+            "prompt_relative_path": "summarizer/promptC.summarizer.v1.md",
+            "prompt_sha256": prompt_digest,
+            "schema_relative_path": "data/schemas/lsrag.layered_content.v1.json",
+            "session_id": result.session_id,
+            "usage": None if result.usage is None else dict(result.usage),
+            "exit_code": result.exit_code,
+            "output_digest": stable_digest(completed),
+        }
+        return completed, receipt
+
+    async def _transcribe_markdown(
+        self,
+        command: ProcessCommand,
+        state: dict[str, Any],
+    ) -> tuple[_StageMaterial, dict[str, Any], Callable[[UnitOfWork, Mapping[str, str]], Awaitable[None]]]:
+        clean = self._generation_clean_text(state, error_code="MARKDOWN_INPUT_INVALID")
+        cli = getattr(self, "_claude_cli", None)
+        if cli is None:
+            raise MkbError("MARKDOWN_WORKER_UNAVAILABLE", "Markdown worker is not configured", 503)
+        prompt_path, prompt_digest = self._ns1_prompt_file(
+            "markdown/promptB.markdown.legal.v1.md",
+            error_code="PROMPT_HASH_MISMATCH",
+        )
+        result = await cli.run(
+            ClaudeCliRequest(
+                user_prompt=clean,
+                system_prompt_file=prompt_path,
+                role="markdown",
+            )
+        )
+        markdown = result.text.strip()
+        if not markdown:
+            raise MkbError("MARKDOWN_OUTPUT_INVALID", "Markdown worker returned empty output", 422)
+        receipt: dict[str, object] = {
+            "transport": "claude_cli",
+            "role": "markdown",
+            "prompt_relative_path": "markdown/promptB.markdown.legal.v1.md",
+            "prompt_sha256": prompt_digest,
+            "session_id": result.session_id,
+            "usage": None if result.usage is None else dict(result.usage),
+            "exit_code": result.exit_code,
+            "output_digest": stable_digest({"text": markdown}),
+        }
+        next_state = dict(state)
+        next_state.update(
+            {
+                "markdown_text": markdown,
+                "markdown_digest": stable_digest({"text": markdown}),
+                "markdown_cli_receipt": receipt,
+            }
+        )
+        material = self._material(
+            command,
+            next_state,
+            {
+                "markdown_artifact": {
+                    "content_digest": next_state["markdown_digest"],
+                    "char_count": len(markdown),
+                    "transport": "claude_cli",
+                }
+            },
+        )
+
+        async def callback(tx: UnitOfWork, refs: Mapping[str, str]) -> None:
+            del tx, refs
+
+        return material, {}, callback
 
     async def _reconstruct_metadata_refresh_contract(
             self,
@@ -350,7 +513,9 @@ class IntakeGenerationConstructMixin:
             # clean-text compiler fallback: a missing or malformed candidate is a
             # typed structure failure.
             generation_invocation: dict[str, Any] | None = None
+            cli_receipt: dict[str, object] | None = None
             layered_candidate: Mapping[str, object] | None = None
+            profile = self._layered_profile(state, error_code="STRUCTURE_PROFILE_INVALID")
             if self._live_inference:
                 generation_invocation = await self._live_structured_generate(
                     command,
@@ -365,6 +530,13 @@ class IntakeGenerationConstructMixin:
                 live_candidate = generation_invocation.pop("_structured_output", None)
                 if isinstance(live_candidate, Mapping):
                     layered_candidate = live_candidate
+            elif getattr(self, "_claude_cli", None) is not None and state.get("layered_content_candidate") is None:
+                generated_candidate, cli_receipt = await self._cli_layered_candidate(
+                    clean_text=clean,
+                    input_text=state.get("markdown_text") if isinstance(state.get("markdown_text"), str) else None,
+                    profile=profile,
+                )
+                layered_candidate = generated_candidate
             if layered_candidate is None:
                 layered_candidate = self._layered_state_candidate(
                     state,
@@ -433,6 +605,8 @@ class IntakeGenerationConstructMixin:
                     "layered_adoption_report": adoption_report,
                 }
             )
+            if cli_receipt is not None:
+                next_state["structure_cli_receipt"] = cli_receipt
             if generation_invocation is not None:
                 # Body-free receipt only: digests, identity, and token counts.
                 next_state["structure_generation_invocation"] = {
@@ -537,6 +711,7 @@ class IntakeGenerationConstructMixin:
         ) -> tuple[_StageMaterial, dict[str, Any], Callable[[UnitOfWork, Mapping[str, str]], Awaitable[None]]]:
             construct_mode = self._construct_mode(state)
             generation_invocations: list[dict[str, Any]] = []
+            cli_receipt: dict[str, object] | None = None
             completed_layered_candidate: dict[str, object] | None = None
             if construct_mode == "metadata_refresh":
                 compiler, structure, projection, summaries, metadata_headers = await self._reconstruct_metadata_refresh_contract(
@@ -559,6 +734,11 @@ class IntakeGenerationConstructMixin:
                         raise MkbError("CONSTRUCT_KERNEL_SUMMARY_INVALID", "C did not return a layered JSON package", 422)
                     completed_layered_candidate = dict(completed_value)
                     generation_invocations = [receipt]
+                elif getattr(self, "_claude_cli", None) is not None:
+                    completed_layered_candidate, cli_receipt = await self._cli_layered_summary(
+                        layered_candidate=accepted_layered_candidate,
+                        profile=profile,
+                    )
                 else:
                     summaries = deterministic_summaries(projection)
                     completed_layered_candidate = compiler.fill_layered_summaries(
@@ -637,6 +817,8 @@ class IntakeGenerationConstructMixin:
                         "layered_content_constructed_digest": stable_digest(completed_layered_candidate),
                     }
                 )
+            if cli_receipt is not None:
+                next_state["construct_cli_receipt"] = cli_receipt
             if generation_invocations:
                 next_state["construction_generation_invocations"] = [
                     {

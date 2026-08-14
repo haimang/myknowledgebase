@@ -706,6 +706,34 @@ class RegistryService:
                     now,
                 ),
             )
+        layered_body = {
+            "schema_key": "lsrag.layered_content.default",
+            "version": "v1",
+            "artifact": "layered_content",
+        }
+        layered_digest = stable_digest(layered_body)
+        row = await tx.fetchone(
+            "SELECT schema_digest FROM mkb_structure_schema_definitions "
+            "WHERE schema_key='lsrag.layered_content.default' AND schema_version='v1'"
+        )
+        if row is not None and row["schema_digest"] != layered_digest:
+            raise MkbError("REGISTRY_DIGEST_MISMATCH", "Layered content schema definition conflicts", 503)
+        if row is None:
+            await tx.execute(
+                "INSERT INTO mkb_structure_schema_definitions "
+                "(schema_key,schema_version,schema_digest,schema_dialect,deterministic_kernel_schema_digest,"
+                "semantic_invariant_manifest_digest,artifact_type,media_contracts_digest,registration_origin,"
+                "definition_body_json,registered_at,payload_extra) "
+                "VALUES ('lsrag.layered_content.default','v1',?,'json',?,?, 'layered_content',?,'code_bootstrap',?,?,'{}')",
+                (
+                    layered_digest,
+                    stable_digest({"kernel": "lsrag.layered_content.v1"}),
+                    stable_digest({"invariants": "layered_content.v1"}),
+                    stable_digest({"media": "application/json"}),
+                    __import__("json").dumps(layered_body, sort_keys=True, separators=(",", ":")),
+                    now,
+                ),
+            )
         construction_body = {
             "schema_key": "lsrag.construction.default",
             "version": "v1",
