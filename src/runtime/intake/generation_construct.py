@@ -26,6 +26,8 @@ from src.services.lsrag_compiler import (
     construction_payload,
     deterministic_summaries,
     dual_channel_payload,
+    parse_retrieval_projection_payload,
+    parse_structure_payload,
     projection_digest,
     retrieval_projection_payload,
     structure_document_digest,
@@ -35,6 +37,23 @@ from src.services.lsrag_compiler import (
 
 class IntakeGenerationConstructMixin:
     """Structurize/construct stages and reconstruct contracts."""
+
+    @staticmethod
+    def _layered_profile(state: Mapping[str, Any], *, error_code: str) -> tuple[int, ...]:
+        raw = state.get("layered_content_profile", state.get("granularity_set", (0, 1, 2)))
+        if not isinstance(raw, list | tuple) or not raw:
+            raise MkbError(error_code, "Layered granularity profile is unavailable", 409)
+        values = tuple(sorted(set(raw)))
+        if any(isinstance(value, bool) or not isinstance(value, int) or value not in {0, 1, 2} for value in values) or 0 not in values:
+            raise MkbError(error_code, "Layered granularity profile is invalid", 409)
+        return values
+
+    @staticmethod
+    def _layered_state_candidate(state: Mapping[str, Any], *, error_code: str) -> Mapping[str, object]:
+        candidate = state.get("layered_content_candidate")
+        if not isinstance(candidate, Mapping):
+            raise MkbError(error_code, "Accepted layered JSON candidate is unavailable", 409)
+        return candidate
 
     async def _reconstruct_metadata_refresh_contract(
             self,
@@ -73,19 +92,31 @@ class IntakeGenerationConstructMixin:
             )
             clean = self._generation_clean_text(state, error_code="METADATA_REFRESH_SOURCE_INVALID")
             compiler = LsragContractCompiler()
-            structure, projection = compiler.structurize(
-                clean_text=clean,
-                generation_artifact_uuid=str(structure_receipt["generation_artifact_uuid"]),
-                projection_generation_artifact_uuid=str(projection_receipt["generation_artifact_uuid"]),
-                clean_artifact_uuid=str(source["source_clean_artifact_uuid"]),
-                clean_digest=str(source["source_clean_digest"]),
-            )
             structure_data = await self._read_metadata_refresh_member(
                 command, structure_receipt, error_code="METADATA_REFRESH_SOURCE_INVALID"
             )
             projection_data = await self._read_metadata_refresh_member(
                 command, projection_receipt, error_code="METADATA_REFRESH_SOURCE_INVALID"
             )
+            try:
+                structure_payload_value = json.loads(structure_data)
+                projection_payload_value = json.loads(projection_data)
+                if not isinstance(structure_payload_value, Mapping) or not isinstance(projection_payload_value, Mapping):
+                    raise ValueError("generation members must be objects")
+                structure = parse_structure_payload(structure_payload_value)
+                projection = parse_retrieval_projection_payload(projection_payload_value)
+                compiler.validate_structure(
+                    document=structure,
+                    projection=projection,
+                    clean_text=clean,
+                    required_granularities=frozenset(block.granularity for block in projection.blocks),
+                )
+            except (TypeError, ValueError, KeyError, json.JSONDecodeError, MkbError) as exc:
+                raise MkbError(
+                    "METADATA_REFRESH_SOURCE_INVALID",
+                    "Frozen source structure members cannot be re-proven",
+                    409,
+                ) from exc
             if (
                 structure_data != canonical_json(structure_payload(structure))
                 or projection_data != canonical_json(retrieval_projection_payload(projection))
@@ -253,10 +284,20 @@ class IntakeGenerationConstructMixin:
                 compiler, structure, projection, summaries, metadata_headers = await self._reconstruct_metadata_refresh_contract(
                     command, state
                 )
+                required_granularities = frozenset(block.granularity for block in projection.blocks)
             else:
                 compiler, structure, projection = await self._reconstruct_structure_contract(command, state)
-                summaries = deterministic_summaries(projection)
+                accepted = self._layered_state_candidate(state, error_code="CONSTRUCT_TO_VECTORIZE_GATE")
+                completed = state.get("layered_content_constructed")
+                if not isinstance(completed, Mapping):
+                    raise MkbError("CONSTRUCT_TO_VECTORIZE_GATE", "Completed layered summary package is unavailable", 409)
+                summaries = compiler.layered_summary_map(
+                    layered_json=completed,
+                    projection=projection,
+                    accepted_layered_json=accepted,
+                )
                 metadata_headers = None
+                required_granularities = frozenset(self._layered_profile(state, error_code="CONSTRUCT_TO_VECTORIZE_GATE"))
             construction_uuid = self._generation_state_text(
                 state, "construction_artifact_uuid", "CONSTRUCT_TO_VECTORIZE_GATE"
             )
@@ -269,6 +310,7 @@ class IntakeGenerationConstructMixin:
                 dual_channel_generation_artifact_uuid=dual_uuid,
                 summaries_by_block_id=summaries,
                 metadata_headers=metadata_headers,
+                required_granularities=required_granularities,
             )
             construction_data = await self._read_frozen_generation_asset(
                 command,
@@ -304,11 +346,11 @@ class IntakeGenerationConstructMixin:
             projection_artifact_uuid = uuid7()
             validation_artifact_uuid = uuid7()
             # S11 live profile freezes binding/prompt/schema, calls the facade once,
-            # then commits generation+inference ledgers with the structure package.
-            # The deterministic kernel still produces the authoritative tree so CI
-            # and offline deployments share one fail-closed shape after a successful
-            # live gate; the model call is never skipped when live_inference is on.
+            # then the kernel admits the returned layered candidate.  There is no
+            # clean-text compiler fallback: a missing or malformed candidate is a
+            # typed structure failure.
             generation_invocation: dict[str, Any] | None = None
+            layered_candidate: Mapping[str, object] | None = None
             if self._live_inference:
                 generation_invocation = await self._live_structured_generate(
                     command,
@@ -320,13 +362,29 @@ class IntakeGenerationConstructMixin:
                     schema_version="v1",
                     input_digest=stable_digest({"clean_digest": state["clean_digest"], "stage": "structurize"}),
                 )
+                live_candidate = generation_invocation.pop("_structured_output", None)
+                if isinstance(live_candidate, Mapping):
+                    layered_candidate = live_candidate
+            if layered_candidate is None:
+                layered_candidate = self._layered_state_candidate(
+                    state,
+                    error_code="STRUCTURE_CANDIDATE_MISSING",
+                )
+            profile = self._layered_profile(state, error_code="STRUCTURE_PROFILE_INVALID")
             compiler = LsragContractCompiler()
-            structure, projection = compiler.structurize(
+            accepted_candidate = compiler.normalize_layered_candidate(
                 clean_text=clean,
+                layered_json=layered_candidate,
+                granularity_set=profile,
+            )
+            structure, projection, adoption_report = compiler.adopt_layered_json_with_report(
+                clean_text=clean,
+                layered_json=accepted_candidate,
                 generation_artifact_uuid=structure_artifact_uuid,
                 projection_generation_artifact_uuid=projection_artifact_uuid,
                 clean_artifact_uuid=clean_artifact_uuid,
                 clean_digest=state["clean_digest"],
+                granularity_set=profile,
             )
             structure_semantic_digest = structure_document_digest(structure)
             projection_semantic_digest = projection_digest(projection)
@@ -369,6 +427,10 @@ class IntakeGenerationConstructMixin:
                     "structure_validation_artifact_ref": validation_asset.stat.handle.value,
                     "structure_validation_artifact_content_digest": validation_asset.stat.sha256,
                     "structure_validation_artifact_size_bytes": validation_asset.stat.size_bytes,
+                    "layered_content_candidate": accepted_candidate,
+                    "layered_content_candidate_digest": stable_digest(accepted_candidate),
+                    "layered_content_profile": list(profile),
+                    "layered_adoption_report": adoption_report,
                 }
             )
             if generation_invocation is not None:
@@ -475,16 +537,43 @@ class IntakeGenerationConstructMixin:
         ) -> tuple[_StageMaterial, dict[str, Any], Callable[[UnitOfWork, Mapping[str, str]], Awaitable[None]]]:
             construct_mode = self._construct_mode(state)
             generation_invocations: list[dict[str, Any]] = []
+            completed_layered_candidate: dict[str, object] | None = None
             if construct_mode == "metadata_refresh":
                 compiler, structure, projection, summaries, metadata_headers = await self._reconstruct_metadata_refresh_contract(
                     command, state
                 )
+                required_granularities = frozenset(block.granularity for block in projection.blocks)
             else:
                 compiler, structure, projection = await self._reconstruct_structure_contract(command, state)
+                accepted_layered_candidate = self._layered_state_candidate(
+                    state,
+                    error_code="CONSTRUCT_BINDING_CANDIDATE_MISSING",
+                )
+                profile = self._layered_profile(state, error_code="CONSTRUCT_BINDING_PROFILE_INVALID")
                 if self._live_inference:
-                    summaries, generation_invocations = await self._live_summaries(command, projection)
+                    completed_value, receipt = await self._live_layered_summary_generate(
+                        command,
+                        layered_candidate=accepted_layered_candidate,
+                    )
+                    if not isinstance(completed_value, Mapping):
+                        raise MkbError("CONSTRUCT_KERNEL_SUMMARY_INVALID", "C did not return a layered JSON package", 422)
+                    completed_layered_candidate = dict(completed_value)
+                    generation_invocations = [receipt]
                 else:
                     summaries = deterministic_summaries(projection)
+                    completed_layered_candidate = compiler.fill_layered_summaries(
+                        accepted_layered_json=accepted_layered_candidate,
+                        projection=projection,
+                        summaries_by_block_id=summaries,
+                    )
+                if completed_layered_candidate is None:
+                    raise MkbError("CONSTRUCT_KERNEL_SUMMARY_INVALID", "Completed layered JSON package is unavailable", 422)
+                summaries = compiler.layered_summary_map(
+                    layered_json=completed_layered_candidate,
+                    projection=projection,
+                    accepted_layered_json=accepted_layered_candidate,
+                )
+                required_granularities = frozenset(profile)
                 metadata_headers = None
             construction_artifact_uuid = uuid7()
             dual_channel_artifact_uuid = uuid7()
@@ -497,6 +586,7 @@ class IntakeGenerationConstructMixin:
                 dual_channel_generation_artifact_uuid=dual_channel_artifact_uuid,
                 summaries_by_block_id=summaries,
                 metadata_headers=metadata_headers,
+                required_granularities=required_granularities,
             )
             construction_semantic_digest = construction_document_digest(construction)
             construction_asset = await self._promote_generation_member(
@@ -540,6 +630,13 @@ class IntakeGenerationConstructMixin:
                     "construction_validation_artifact_size_bytes": validation_asset.stat.size_bytes,
                 }
             )
+            if completed_layered_candidate is not None:
+                next_state.update(
+                    {
+                        "layered_content_constructed": completed_layered_candidate,
+                        "layered_content_constructed_digest": stable_digest(completed_layered_candidate),
+                    }
+                )
             if generation_invocations:
                 next_state["construction_generation_invocations"] = [
                     {
@@ -672,4 +769,3 @@ class IntakeGenerationConstructMixin:
                 )
 
             return material, {}, callback
-

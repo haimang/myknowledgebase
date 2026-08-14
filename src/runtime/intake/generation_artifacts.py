@@ -408,13 +408,17 @@ class IntakeGenerationArtifactsMixin:
             projection_uuid = self._generation_state_text(
                 state, "retrieval_block_projection_artifact_uuid", "CONSTRUCT_BINDING_PROJECTION_MISSING"
             )
+            layered_candidate = self._layered_state_candidate(state, error_code="CONSTRUCT_BINDING_CANDIDATE_MISSING")
+            profile = self._layered_profile(state, error_code="CONSTRUCT_BINDING_PROFILE_INVALID")
             compiler = LsragContractCompiler()
-            structure, projection = compiler.structurize(
+            structure, projection = compiler.adopt_layered_json(
                 clean_text=clean,
+                layered_json=layered_candidate,
                 generation_artifact_uuid=structure_uuid,
                 projection_generation_artifact_uuid=projection_uuid,
                 clean_artifact_uuid=clean_artifact_uuid,
                 clean_digest=state["clean_digest"],
+                granularity_set=profile,
             )
             expected_structure = canonical_json(structure_payload(structure))
             expected_projection = canonical_json(retrieval_projection_payload(projection))
@@ -770,4 +774,3 @@ class IntakeGenerationArtifactsMixin:
                     "pointer_revision": actual_revision,
                 },
             )
-

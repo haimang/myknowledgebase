@@ -274,7 +274,35 @@ class IntakeGenerationLiveMixin:
                     "total_tokens": None if usage is None else usage.total_tokens,
                 }
             )
+            # The value is a transient handoff to the kernel caller.  The
+            # durable invocation receipt remains body-free because callers
+            # select only the ledger fields below when building stage state.
+            base_receipt["_structured_output"] = response.value
             return base_receipt
+
+
+    async def _live_layered_summary_generate(
+            self,
+            command: ProcessCommand,
+            *,
+            layered_candidate: Mapping[str, object],
+        ) -> tuple[dict[str, object], dict[str, Any]]:
+            """Run C once for the complete adopted layered package."""
+
+            receipt = await self._live_structured_generate(
+                command,
+                stage_key="construct",
+                input_text=_json(layered_candidate),
+                prompt_key="promptC.default",
+                prompt_version="v1",
+                schema_key="lsrag.layered_content.default",
+                schema_version="v1",
+                input_digest=stable_digest({"layered_candidate": layered_candidate, "stage": "construct"}),
+            )
+            output = receipt.pop("_structured_output", None)
+            if not isinstance(output, dict):
+                raise MkbError("CONSTRUCT_KERNEL_SUMMARY_INVALID", "C did not return a layered JSON package", 422)
+            return output, receipt
 
 
     async def _live_text_generate(
@@ -551,4 +579,3 @@ class IntakeGenerationLiveMixin:
                 process_uuid=command.process_uuid,
                 payload={"invocation_uuid": invocation["invocation_uuid"]},
             )
-
