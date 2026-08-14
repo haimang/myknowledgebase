@@ -151,3 +151,16 @@ def test_current_graph_selects_optional_markdown_and_legacy_graph_is_registered(
     assert stable_digest(BUILTIN_NS1_PRE_MARKDOWN_SCATTER_COMPATIBILITY_WORKFLOW.model_dump()) != stable_digest(
         BUILTIN_REGISTERED_API_SCATTER_CHILD_WORKFLOW.model_dump()
     )
+
+
+def test_structurize_failure_routes_terminal_without_opening_human_review() -> None:
+    probe = _RouteProbe()
+    decision = probe._route_decision(
+        plan=BUILTIN_SINGLE_INTAKE_LSRAG_WORKFLOW,
+        execution=_execution(),
+        source_step_key="structurize",
+        selector=WorkflowOutcomeSelector.FAILED,
+        route_context={"admission_result": "auto_admitted"},
+    )
+    assert [route.route_key for route in decision["routes"]] == ["structurize.failed"]
+    assert decision["routes"][0].to_step_key == "failed"
