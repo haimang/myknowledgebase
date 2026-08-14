@@ -522,7 +522,8 @@ class ConfigSnapshotService:
     async def _load_l1(self) -> dict[str, list[dict[str, Any]]]:
         async with self.persistence.transaction() as tx:
             prompts = await tx.fetchall(
-                "SELECT prompt_key,prompt_version,git_relative_path,content_sha256 FROM mkb_prompt_hash_pointers "
+                "SELECT prompt_id,prompt_key,prompt_version,git_relative_path,content_sha256,role,status,granularity_set "
+                "FROM mkb_prompt_hash_pointers "
                 "ORDER BY prompt_key,prompt_version"
             )
             models = await tx.fetchall(

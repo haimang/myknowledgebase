@@ -3,8 +3,12 @@
 from __future__ import annotations
 
 import hashlib
+import json
+import re
+from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any, Literal
 
 from intake.api.registry import registered_provider_manifest_digest
 from src.contracts.common.errors import MkbError
@@ -23,6 +27,30 @@ class PromptPointer:
     content_sha256: str
 
 
+@dataclass(frozen=True, slots=True)
+class PromptCatalogEntry:
+    prompt_id: str
+    prompt_key: str
+    prompt_version: str
+    relative_path: str
+    content_sha256: str
+    role: Literal["clean", "markdown", "json", "summarizer"]
+    status: Literal["active", "retired"]
+    granularity_set: tuple[int, ...] | None
+
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            "prompt_id": self.prompt_id,
+            "prompt_key": self.prompt_key,
+            "prompt_version": self.prompt_version,
+            "git_relative_path": self.relative_path,
+            "content_sha256": self.content_sha256,
+            "role": self.role,
+            "status": self.status,
+            "granularity_set": None if self.granularity_set is None else list(self.granularity_set),
+        }
+
+
 DEFAULT_PROMPTS = (
     # The durable identity is rendered as ``promptA.default.v1`` from the
     # explicit key/version pair; the database never stores prompt bodies.
@@ -30,6 +58,22 @@ DEFAULT_PROMPTS = (
     ("promptB.default", "v1", "prompt-b-structure-v1.md"),
     ("promptC.default", "v1", "prompt-c-summary-v1.md"),
 )
+
+
+# The legacy-compatible promptA/B/C rows remain addressable by the existing
+# runtime until the later NS1 wiring phase.  The four-role rows below are the
+# catalog defaults used by new callers; no row contains prompt body text.
+DEFAULT_CATALOG_PROMPTS = (
+    ("promptA.default", "v1", "prompt-a-clean-v1.md", "clean", None),
+    ("promptB.markdown.legal", "v1", "markdown/promptB.markdown.legal.v1.md", "markdown", None),
+    ("promptB.json.generic", "v1", "json/promptB.json.generic.v1.md", "json", (0, 1, 2)),
+    ("promptB.default", "v1", "prompt-b-structure-v1.md", "json", (0, 1, 2)),
+    ("promptC.default", "v1", "prompt-c-summary-v1.md", "summarizer", None),
+)
+
+_PROMPT_ID = re.compile(r"^[A-Za-z][A-Za-z0-9_.-]{0,127}$")
+_PROMPT_VERSION = re.compile(r"^v[0-9]+(?:[.-][A-Za-z0-9_.-]+)?$")
+_PROMPT_ROLES = frozenset({"clean", "markdown", "json", "summarizer"})
 
 
 DEFAULT_MODELS = (
@@ -166,28 +210,39 @@ class RegistryService:
         return PromptPointer(key, version, relative_path, hashlib.sha256(path.read_bytes()).hexdigest())
 
     async def bootstrap(self) -> None:
-        pointers = [self._pointer(*definition) for definition in DEFAULT_PROMPTS]
+        pointers = [
+            (self._pointer(prompt_id, version, relative_path), role, granularity_set)
+            for prompt_id, version, relative_path, role, granularity_set in DEFAULT_CATALOG_PROMPTS
+        ]
         async with self.persistence.transaction() as tx:
-            for pointer in pointers:
+            for pointer, role, granularity_set in pointers:
                 row = await tx.fetchone(
-                    "SELECT content_sha256, git_relative_path FROM mkb_prompt_hash_pointers "
-                    "WHERE prompt_key=? AND prompt_version=?",
+                    "SELECT content_sha256, git_relative_path, role, status, granularity_set FROM mkb_prompt_hash_pointers "
+                    "WHERE prompt_id=? AND prompt_version=?",
                     (pointer.prompt_key, pointer.prompt_version),
                 )
                 if row and (
-                    row["content_sha256"] != pointer.content_sha256 or row["git_relative_path"] != pointer.relative_path
+                    row["content_sha256"] != pointer.content_sha256
+                    or row["git_relative_path"] != pointer.relative_path
+                    or row["role"] != role
+                    or row["status"] != "active"
+                    or self._decode_granularity_set(row["granularity_set"]) != granularity_set
                 ):
                     raise MkbError("REGISTRY_DIGEST_MISMATCH", "Prompt pointer digest conflicts", 503)
                 if not row:
                     await tx.execute(
                         "INSERT INTO mkb_prompt_hash_pointers "
-                        "(prompt_key,prompt_version,git_relative_path,content_sha256,registered_at,payload_extra) "
-                        "VALUES (?,?,?,?,?, '{}')",
+                        "(prompt_id,prompt_key,prompt_version,git_relative_path,content_sha256,role,status,"
+                        "granularity_set,registered_at,payload_extra) VALUES (?,?,?,?,?,?,?,?,?, '{}')",
                         (
+                            pointer.prompt_key,
                             pointer.prompt_key,
                             pointer.prompt_version,
                             pointer.relative_path,
                             pointer.content_sha256,
+                            role,
+                            "active",
+                            None if granularity_set is None else json.dumps(granularity_set, separators=(",", ":")),
                             utc_now(),
                         ),
                     )
@@ -257,6 +312,195 @@ class RegistryService:
                         ),
                     )
             await self._bootstrap_domain_definitions(tx)
+
+    @staticmethod
+    def _decode_granularity_set(value: object) -> tuple[int, ...] | None:
+        if value is None:
+            return None
+        try:
+            parsed = json.loads(str(value))
+        except (TypeError, ValueError, json.JSONDecodeError) as exc:
+            raise MkbError("REGISTRY_DIGEST_MISMATCH", "Prompt granularity set is invalid", 503) from exc
+        if not isinstance(parsed, list) or any(isinstance(item, bool) or not isinstance(item, int) for item in parsed):
+            raise MkbError("REGISTRY_DIGEST_MISMATCH", "Prompt granularity set is invalid", 503)
+        normalized = tuple(sorted(set(parsed)))
+        if list(normalized) != parsed or any(item not in {0, 1, 2} for item in normalized):
+            raise MkbError("REGISTRY_DIGEST_MISMATCH", "Prompt granularity set is invalid", 503)
+        return normalized
+
+    @classmethod
+    def _validate_catalog_input(
+        cls,
+        *,
+        prompt_id: str,
+        prompt_version: str,
+        relative_path: str,
+        role: str,
+        granularity_set: list[int] | tuple[int, ...] | None,
+    ) -> tuple[str, str, str, str, tuple[int, ...] | None]:
+        if not _PROMPT_ID.fullmatch(prompt_id) or not _PROMPT_VERSION.fullmatch(prompt_version):
+            raise MkbError("PROMPT_CATALOG_INVALID", "Prompt id/version is invalid", 422)
+        if role not in _PROMPT_ROLES:
+            raise MkbError("PROMPT_CATALOG_INVALID", "Prompt role is invalid", 422)
+        path = Path(relative_path)
+        if path.is_absolute() or not relative_path or ".." in path.parts or path.suffix != ".md":
+            raise MkbError("PROMPT_CATALOG_PATH_INVALID", "Prompt path must be a relative Markdown path", 422)
+        if granularity_set is None:
+            normalized = None
+        else:
+            if role != "json" or any(isinstance(item, bool) or not isinstance(item, int) for item in granularity_set):
+                raise MkbError("PROMPT_CATALOG_GRANULARITY_INVALID", "Only json prompts may declare granularity_set", 422)
+            normalized = tuple(sorted(set(granularity_set)))
+            if not normalized or list(normalized) != list(granularity_set) or any(item not in {0, 1, 2} for item in normalized):
+                raise MkbError("PROMPT_CATALOG_GRANULARITY_INVALID", "granularity_set must be sorted and closed", 422)
+        if role == "json" and normalized is None:
+            raise MkbError("PROMPT_CATALOG_GRANULARITY_INVALID", "json prompts require granularity_set", 422)
+        return prompt_id, prompt_version, path.as_posix(), role, normalized
+
+    def _catalog_entry(self, row: Mapping[str, Any]) -> PromptCatalogEntry:
+        role = row.get("role")
+        status = row.get("status")
+        if role not in _PROMPT_ROLES or status not in {"active", "retired"}:
+            raise MkbError("REGISTRY_DIGEST_MISMATCH", "Prompt catalog row is invalid", 503)
+        return PromptCatalogEntry(
+            prompt_id=str(row["prompt_id"] or row["prompt_key"]),
+            prompt_key=str(row["prompt_key"]),
+            prompt_version=str(row["prompt_version"]),
+            relative_path=str(row["git_relative_path"]),
+            content_sha256=str(row["content_sha256"]),
+            role=role,
+            status=status,
+            granularity_set=self._decode_granularity_set(row.get("granularity_set")),
+        )
+
+    async def list_prompt_catalog(
+        self, *, prompt_id: str | None = None, role: str | None = None, status: str | None = "active"
+    ) -> list[PromptCatalogEntry]:
+        clauses: list[str] = []
+        params: list[Any] = []
+        if prompt_id is not None:
+            if not _PROMPT_ID.fullmatch(prompt_id):
+                raise MkbError("PROMPT_CATALOG_INVALID", "Prompt id is invalid", 422)
+            clauses.append("prompt_id=?")
+            params.append(prompt_id)
+        if role is not None:
+            if role not in _PROMPT_ROLES:
+                raise MkbError("PROMPT_CATALOG_INVALID", "Prompt role is invalid", 422)
+            clauses.append("role=?")
+            params.append(role)
+        if status is not None:
+            if status not in {"active", "retired"}:
+                raise MkbError("PROMPT_CATALOG_INVALID", "Prompt status is invalid", 422)
+            clauses.append("status=?")
+            params.append(status)
+        where = f" WHERE {' AND '.join(clauses)}" if clauses else ""
+        async with self.persistence.transaction() as tx:
+            rows = await tx.fetchall(
+                "SELECT prompt_id,prompt_key,prompt_version,git_relative_path,content_sha256,role,status,granularity_set "
+                "FROM mkb_prompt_hash_pointers" + where + " ORDER BY prompt_id,prompt_version",
+                tuple(params),
+            )
+        return [self._catalog_entry(row) for row in rows]
+
+    async def resolve_prompt(self, prompt_id: str, *, version: str | None = None) -> PromptCatalogEntry:
+        if not _PROMPT_ID.fullmatch(prompt_id):
+            raise MkbError("PROMPT_CATALOG_INVALID", "Prompt id is invalid", 422)
+        if version is not None and not _PROMPT_VERSION.fullmatch(version):
+            raise MkbError("PROMPT_CATALOG_INVALID", "Prompt version is invalid", 422)
+        async with self.persistence.transaction() as tx:
+            if version is None:
+                row = await tx.fetchone(
+                    "SELECT prompt_id,prompt_key,prompt_version,git_relative_path,content_sha256,role,status,granularity_set "
+                    "FROM mkb_prompt_hash_pointers WHERE prompt_id=? AND status='active' "
+                    "ORDER BY prompt_version DESC LIMIT 1",
+                    (prompt_id,),
+                )
+            else:
+                row = await tx.fetchone(
+                    "SELECT prompt_id,prompt_key,prompt_version,git_relative_path,content_sha256,role,status,granularity_set "
+                    "FROM mkb_prompt_hash_pointers WHERE prompt_id=? AND prompt_version=? AND status='active'",
+                    (prompt_id, version),
+                )
+        if row is None:
+            raise MkbError("PROMPT_NOT_REGISTERED", "Prompt is not registered or active", 503)
+        entry = self._catalog_entry(row)
+        self._assert_prompt_bytes(entry)
+        return entry
+
+    def _assert_prompt_bytes(self, entry: PromptCatalogEntry) -> bytes:
+        path = (self.prompt_root / entry.relative_path).resolve()
+        try:
+            path.relative_to(self.prompt_root)
+            contents = path.read_bytes()
+        except (OSError, ValueError) as exc:
+            raise MkbError("PROMPT_HASH_MISMATCH", "Prompt bytes are unavailable", 503) from exc
+        if hashlib.sha256(contents).hexdigest() != entry.content_sha256:
+            raise MkbError("PROMPT_HASH_MISMATCH", "Prompt bytes do not match the registered digest", 503)
+        return contents
+
+    async def register_prompt(
+        self,
+        *,
+        prompt_id: str,
+        prompt_version: str,
+        relative_path: str,
+        role: str,
+        granularity_set: list[int] | tuple[int, ...] | None = None,
+    ) -> PromptCatalogEntry:
+        prompt_id, prompt_version, relative_path, role, granularity = self._validate_catalog_input(
+            prompt_id=prompt_id,
+            prompt_version=prompt_version,
+            relative_path=relative_path,
+            role=role,
+            granularity_set=granularity_set,
+        )
+        pointer = self._pointer(prompt_id, prompt_version, relative_path)
+        async with self.persistence.transaction() as tx:
+            existing = await tx.fetchone(
+                "SELECT prompt_id,prompt_key,prompt_version,git_relative_path,content_sha256,role,status,granularity_set "
+                "FROM mkb_prompt_hash_pointers WHERE prompt_id=? AND prompt_version=?",
+                (prompt_id, prompt_version),
+            )
+            if existing is not None:
+                entry = self._catalog_entry(existing)
+                if entry.content_sha256 != pointer.content_sha256 or entry.relative_path != relative_path or entry.role != role:
+                    raise MkbError("PROMPT_VERSION_EXISTS", "Prompt version already points to different bytes", 409)
+                return entry
+            await tx.execute(
+                "INSERT INTO mkb_prompt_hash_pointers "
+                "(prompt_id,prompt_key,prompt_version,git_relative_path,content_sha256,role,status,granularity_set,registered_at,payload_extra) "
+                "VALUES (?,?,?,?,?,?,?,?,?, '{}')",
+                (
+                    prompt_id,
+                    prompt_id,
+                    prompt_version,
+                    relative_path,
+                    pointer.content_sha256,
+                    role,
+                    "active",
+                    None if granularity is None else json.dumps(granularity, separators=(",", ":")),
+                    utc_now(),
+                ),
+            )
+        return PromptCatalogEntry(prompt_id, prompt_id, prompt_version, relative_path, pointer.content_sha256, role, "active", granularity)
+
+    async def retire_prompt(self, prompt_id: str, *, version: str | None = None) -> PromptCatalogEntry:
+        entry = await self.resolve_prompt(prompt_id, version=version)
+        async with self.persistence.transaction() as tx:
+            await tx.execute(
+                "UPDATE mkb_prompt_hash_pointers SET status='retired' WHERE prompt_id=? AND prompt_version=?",
+                (entry.prompt_id, entry.prompt_version),
+            )
+        return PromptCatalogEntry(
+            entry.prompt_id,
+            entry.prompt_key,
+            entry.prompt_version,
+            entry.relative_path,
+            entry.content_sha256,
+            entry.role,
+            "retired",
+            entry.granularity_set,
+        )
 
     async def active_inference_bindings(self) -> tuple[InferenceBinding, ...]:
         """Resolve the global L1 winners used by newly frozen executions.
@@ -502,9 +746,11 @@ class RegistryService:
         if pointer is None:
             raise MkbError("PROMPT_NOT_REGISTERED", "Prompt is not registered", 503)
         path = (self.prompt_root / pointer["git_relative_path"]).resolve()
-        if self.prompt_root not in path.parents or not path.is_file():
-            raise MkbError("PROMPT_HASH_MISMATCH", "Prompt bytes are unavailable", 503)
-        contents = path.read_text(encoding="utf-8")
+        try:
+            path.relative_to(self.prompt_root)
+            contents = path.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError, ValueError) as exc:
+            raise MkbError("PROMPT_HASH_MISMATCH", "Prompt bytes are unavailable", 503) from exc
         if hashlib.sha256(contents.encode("utf-8")).hexdigest() != pointer["content_sha256"]:
             raise MkbError("PROMPT_HASH_MISMATCH", "Prompt bytes no longer match the registered digest", 503)
         return contents, pointer["content_sha256"]

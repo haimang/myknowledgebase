@@ -35,13 +35,16 @@ async def test_migration_chain_includes_scatter_identity_columns(tmp_path: Path)
     persistence = await _db(tmp_path)
     try:
         ids = [item.migration_id for item in discover_migrations(Path("src/persistence/migrations"))]
-        assert ids[-1] == "006_scatter_child_identity"
+        assert ids[-1] == "007_ns1_prompt_catalog"
         async with persistence.transaction() as tx:
             columns = await tx.fetchall("PRAGMA table_info(mkb_executions)")
         names = {row["name"] for row in columns}
         assert "scatter_intake_revision_uuid" in names
         assert "scatter_member_ordinal" in names
         assert "scatter_change_set_uuid" in names
+        async with persistence.transaction() as tx:
+            prompt_columns = await tx.fetchall("PRAGMA table_info(mkb_prompt_hash_pointers)")
+        assert {"prompt_id", "role", "status", "granularity_set"} <= {row["name"] for row in prompt_columns}
     finally:
         await persistence.close()
 

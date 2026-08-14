@@ -5,12 +5,89 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, Request
 
 from api.dependencies import OperatorToken, require_operator_token
+from api.internal.prompts import PromptCatalogPatch, PromptCatalogWrite
 from src.contracts.common.ids import validate_external_uuid
 
 # Keep the router-level guard even while the bounded v1 operator surface is
 # empty.  Any future read/repair endpoint therefore inherits token plus
 # internal-network admission instead of accidentally becoming public.
 router = APIRouter(prefix="/internal", tags=["internal"], dependencies=[Depends(require_operator_token)])
+
+
+@router.get("/prompts")
+async def list_prompts(
+    request: Request,
+    token: OperatorToken,
+    prompt_id: str | None = None,
+    role: str | None = None,
+    status: str | None = "active",
+) -> dict[str, object]:
+    del token
+    entries = await request.app.state.container.registry.list_prompt_catalog(
+        prompt_id=prompt_id, role=role, status=status
+    )
+    return {"items": [entry.as_dict() for entry in entries]}
+
+
+@router.get("/prompts/{prompt_id}")
+async def get_prompt(
+    request: Request,
+    prompt_id: str,
+    token: OperatorToken,
+    version: str | None = None,
+) -> dict[str, object]:
+    del token
+    entry = await request.app.state.container.registry.resolve_prompt(prompt_id, version=version)
+    return entry.as_dict()
+
+
+@router.post("/prompts", status_code=201)
+async def create_prompt(
+    request: Request,
+    payload: PromptCatalogWrite,
+    token: OperatorToken,
+) -> dict[str, object]:
+    del token
+    # The service computes the digest from the checked-in bytes; the API never
+    # accepts a body or caller-supplied hash as an alternate source of truth.
+    entry = await request.app.state.container.registry.register_prompt(
+        prompt_id=payload.prompt_id,
+        prompt_version=payload.prompt_version,
+        relative_path=payload.git_relative_path,
+        role=payload.role,
+        granularity_set=payload.granularity_set,
+    )
+    return entry.as_dict()
+
+
+@router.patch("/prompts/{prompt_id}")
+async def update_prompt(
+    request: Request,
+    prompt_id: str,
+    payload: PromptCatalogPatch,
+    token: OperatorToken,
+) -> dict[str, object]:
+    del token
+    entry = await request.app.state.container.registry.register_prompt(
+        prompt_id=prompt_id,
+        prompt_version=payload.prompt_version,
+        relative_path=payload.git_relative_path,
+        role=payload.role,
+        granularity_set=payload.granularity_set,
+    )
+    return entry.as_dict()
+
+
+@router.delete("/prompts/{prompt_id}")
+async def retire_prompt(
+    request: Request,
+    prompt_id: str,
+    token: OperatorToken,
+    version: str | None = None,
+) -> dict[str, object]:
+    del token
+    entry = await request.app.state.container.registry.retire_prompt(prompt_id, version=version)
+    return entry.as_dict()
 
 
 @router.get("/teams/{team_uuid}/traces/{trace_uuid}/timeline")
