@@ -594,3 +594,32 @@ NS1-new-pipeline
 ### 11.1.2 文档状态
 
 `draft → executing（P1 closed / 2026-08-14）`；P2 已解锁。residual：Turso/SQLite direct-read full-suite 问题承接 NS1-P5 final verification。
+
+## 11.2 Phase 2 执行日志
+
+> 执行者：`Codex`
+> 执行时间：`2026-08-14 08:19 UTC`
+> 文档状态：`executing`
+> 代码改动统计：`4 个 tracked 文件修改 / 2 个新测试文件 / 0 个 schema bump`
+
+- **实际执行摘要**：`P2-01..P2-03` 已完成。kernel 新增 `normalize_layered_candidate`、`adopt_layered_json`/report、profile 闭集校验、g0 确定性回填、g≥1 精确子串首次锚定与 occurrence_count，并生成一块 layered 对应一块 projection；generation runtime、construct、metadata refresh 已移除旧 `compiler.structurize` 生产调用；C 改为整包 layered summary 对齐，original/block_id/granularity 变更会 fail-closed。
+- **Phase 偏差（计划 vs 实际）**：
+  - `P2-02 (substrate-fit)`：metadata refresh 不再从 clean 重新编树，而是解析并复验冻结的 structure/projection artifact；理由是 refresh 的来源是历史 full-valid immutable family，不具备 B 候选 JSON，直接重建会违反 source freeze。
+  - `P2-03 (offline-fit)`：offline profile 用同一 projection block 集合生成确定性 C-shaped summary package，以保持无 live vendor 的本地证明；没有恢复按句摘要循环，live C 已改为整包单次 structured handoff，CLI 运输由 P3 继续收口。
+- **阻塞与处理**：
+  - 旧 generation e2e 在 P3 候选工人尚未落地时显式失败 `STRUCTURE_CANDIDATE_MISSING`；这是删除假树 fallback 后的预期 contract break，已转交 P3/P5 更新 fixture/stub，不以假树或静默补层恢复。
+  - P1 已记录的 Turso/SQLite direct-read `disk I/O/file-format` full-suite 问题仍作为 P5 final verification residual；本 Phase 定向测试未复现该问题。
+- **测试发现**：`uv run pytest -q tests/unit/test_adopt_layered_json.py tests/unit/test_lsrag_compiler.py tests/domain/test_ns1_guards.py tests/unit/test_prompt_hash_mismatch.py tests/unit/test_d04_write_paths.py` → `19 passed`；`uv run ruff check`（P2 touched files/tests）→ pass；`uv run python -m compileall -q api src` → pass；`git diff --check` → pass；`rg "compiler\\.structurize\\(" src/runtime/intake` → no match。P2 分簇 commits：`1971033`（kernel/adopt/T10-T11）、`1cc7d2e`（generation wiring/metadata/C mapping/T12-T13）。
+- **后续 handoff**：P3 读取本 Phase 的 accepted layered state contract；实现可注入 Claude CLI A/B.md/B.json/C 四跳和 local RecordingStub，使 `_structurize` 在无 live vendor 时也只接收显式候选 JSON；不得回退 `structurize(clean_text)`。
+
+### 11.2.1 逐工作项状态
+
+| 工作项 | 状态 | PR | 实际落点（file:line） | 备注 |
+|--------|------|----|------------------------|------|
+| `P2-01` | `✅ done` | `1971033` | `src/services/lsrag_compiler.py`; `tests/unit/test_adopt_layered_json.py` | profile/anchor/report/projection 已由 kernel 统一计算 |
+| `P2-02` | `✅ done` | `1cc7d2e` | `src/runtime/intake/generation_construct.py`; `src/runtime/intake/generation_artifacts.py`; `tests/domain/test_ns1_guards.py` | runtime 无旧 fixture compiler 调用；refresh 解析冻结 artifact |
+| `P2-03` | `✅ done` | `1cc7d2e` | `src/services/lsrag_compiler.py`; `src/runtime/intake/generation_construct.py`; `src/runtime/intake/generation_live.py` | whole-package summary map；original mutation/缺块 fail-closed |
+
+### 11.2.2 文档状态
+
+`executing（P1/P2 closed / 2026-08-14）`；P3 已解锁。residual：P3 候选工人与 P5 旧 e2e fixture 收口。

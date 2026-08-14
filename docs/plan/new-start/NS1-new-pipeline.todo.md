@@ -50,21 +50,21 @@ NS1-ENTRY
 
 ## NS1-P2 — Kernel 验收
 
-**Block：仅在 NS1-P1 EXIT 后解除；当前 in_progress。**
+**Block：仅在 NS1-P1 EXIT 后解除；已完成。**
 
-- [ ] `P2-01 / NS1-T10/T11`：实现 `adopt_layered_json`，NFC/LF、schema、闭集、g0 回填、精确子串首次命中、失败码、projection。
-- [ ] `P2-02 / NS1-T12`：`_structurize` 只接受/采用候选 JSON；生产不再调用 compiler 假树；metadata refresh 同步修复。
-- [ ] `P2-03 / NS1-T13`：construct 按 `block_id` 使用 C 整包 summary；原文不可变。
-- [ ] STEP-1：重新读取 P2 锚 A-1/A-2/A-3/A-13/A-14、S06/S07 真相及 P1 输出。
-- [ ] STEP-2：重新读取 QNA `T-O-343..347`，确认不静默补层、不退回假树、C 只吃验收 layered。
-- [ ] STEP-3：开发、unit/domain 测试、审查和修复。
-- [ ] STEP-4：按模板追加 P2 工作日志。
-- [ ] STEP-6：分簇提交 P2（kernel；generation wiring；tests/fixture）。
-- [ ] P2 EXIT：T10–T13 green，源码守卫 green，P3 解锁。
+- [x] `P2-01 / NS1-T10/T11`：实现 `adopt_layered_json`，NFC/LF、schema、闭集、g0 回填、精确子串首次命中、失败码、projection。
+- [x] `P2-02 / NS1-T12`：`_structurize` 只接受/采用候选 JSON；生产不再调用 compiler 假树；metadata refresh 同步修复。
+- [x] `P2-03 / NS1-T13`：construct 按 `block_id` 使用 C 整包 summary；原文不可变。
+- [x] STEP-1：重新读取 P2 锚 A-1/A-2/A-3/A-13/A-14、S06/S07 真相及 P1 输出。
+- [x] STEP-2：重新读取 QNA `T-O-343..347`，确认不静默补层、不退回假树、C 只吃验收 layered。
+- [x] STEP-3：开发、unit/domain 测试、审查和修复。
+- [x] STEP-4：按模板追加 P2 工作日志。
+- [x] STEP-6：分簇提交 P2（kernel；generation wiring；tests/fixture）。
+- [x] P2 EXIT：T10–T13 green，源码守卫 green，P3 解锁。
 
 ## NS1-P3 — CLI 工人与四跳
 
-**Block：仅在 NS1-P2 EXIT 后解除。**
+**Block：仅在 NS1-P2 EXIT 后解除；当前 in_progress。**
 
 - [ ] `P3-01 / NS1-T20`：实现可注入 `ClaudeCliPort`/RecordingStub，argv、schema、error/usage/session 合同。
 - [ ] `P3-02 / NS1-T21`：仅 llm clean strategy 经 CLI；deterministic/API 不调用 CLI。
