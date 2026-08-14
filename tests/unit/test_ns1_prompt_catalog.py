@@ -104,3 +104,28 @@ async def test_catalog_hash_drift_is_fail_closed_and_retire_keeps_history(tmp_pa
             await registry.resolve_prompt("promptA.test")
     finally:
         await persistence.close()
+
+
+@pytest.mark.asyncio
+async def test_catalog_hash_resolve_soak_is_stable(tmp_path: Path) -> None:
+    persistence = SqlitePersistence(tmp_path / "catalog-soak.sqlite3", Path("src/persistence/migrations"))
+    registry = RegistryService(persistence, Path("data/prompts"))
+    prompt_ids = (
+        "promptA.default",
+        "promptB.markdown.legal",
+        "promptB.json.generic",
+        "promptC.default",
+    )
+    try:
+        await persistence.migrate()
+        await registry.bootstrap()
+        expected: dict[str, tuple[str, str]] = {}
+        for prompt_id in prompt_ids:
+            entry = await registry.resolve_prompt(prompt_id)
+            expected[prompt_id] = (entry.prompt_version, entry.content_sha256)
+        for _ in range(32):
+            for prompt_id in prompt_ids:
+                resolved = await registry.resolve_prompt(prompt_id)
+                assert (resolved.prompt_version, resolved.content_sha256) == expected[prompt_id]
+    finally:
+        await persistence.close()

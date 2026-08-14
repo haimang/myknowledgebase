@@ -73,7 +73,13 @@ class IntakeCleanPreflightMixin:
                 raise MkbError("CLEAN_STRATEGY_UNSUPPORTED", "Process has no registered clean strategy", 409)
             prompt = await self._clean_prompt_material(command, strategy, state=state)
             llm = self._clean_language_model()
-            if llm is None and resolve_clean_strategy(strategy).llm_required and getattr(self, "_claude_cli", None) is not None:
+            cli_clean_supported = command.process_key not in {"clean.ocr.local", "clean.extract.vision"}
+            if (
+                llm is None
+                and cli_clean_supported
+                and resolve_clean_strategy(strategy).llm_required
+                and getattr(self, "_claude_cli", None) is not None
+            ):
                 if prompt is None:
                     raise MkbError("PROMPT_HASH_MISMATCH", "CLI clean path lacks its frozen prompt pointer", 503)
                 payload = state.get("payload")

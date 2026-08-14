@@ -260,13 +260,18 @@ class DeterministicNs1Stub:
                         block["llm_summary"]["body"] = original
             value = package
         elif request.role == "json":
+            material = request.user_prompt.strip()
+            midpoint = max(1, len(material) // 2)
+            prefix = material[:midpoint].rstrip() or material
+            suffix = material[midpoint:].lstrip() or material
+            bodies = {0: material, 1: prefix, 2: suffix}
             value = {
                 "context_meta": {},
                 "layered_content": [
                     {
                         "block_id": block_id,
                         "granularity": granularity,
-                        "original_content": {"title": None, "body": request.user_prompt},
+                        "original_content": {"title": None, "body": bodies.get(granularity, material)},
                         "llm_summary": {"title": None, "body": None},
                     }
                     for block_id, granularity in enumerate(request.granularity_set)

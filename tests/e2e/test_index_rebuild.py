@@ -389,9 +389,13 @@ def test_index_rebuild_stale_fence_fails_without_cutover_and_old_generation_rema
             },
         )
         assert search.status_code == 200, search.text
-        assert search.json()["results"][0]["payload_content"] == (
-            "The old active generation remains grounded after a rejected rebuild."
-        )
+        old_text = "The old active generation remains grounded after a rejected rebuild."
+        old_layers = {
+            old_text,
+            old_text[: max(1, len(old_text) // 2)].rstrip(),
+            old_text[max(1, len(old_text) // 2) :].lstrip(),
+        }
+        assert search.json()["results"][0]["payload_content"] in old_layers
 
     connection = sqlite3.connect(database_path)
     try:
