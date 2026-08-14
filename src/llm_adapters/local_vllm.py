@@ -97,7 +97,13 @@ class LocalVllmAdapter:
 
     async def embed(self, request: EmbeddingRequest) -> EmbeddingResponse:
         self._assert_binding(request.binding)
-        response = await self._request("/v1/embeddings", {"model": request.binding.model_key, "input": request.texts})
+        payload: dict[str, Any] = {
+            "model": request.binding.model_key,
+            "input": request.texts,
+        }
+        if request.expected_dimension is not None:
+            payload["dimensions"] = request.expected_dimension
+        response = await self._request("/v1/embeddings", payload)
         self._assert_provider_model(response, request.binding)
         raw_data = response.get("data")
         if not isinstance(raw_data, list) or len(raw_data) != len(request.texts):

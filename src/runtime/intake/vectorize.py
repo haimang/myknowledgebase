@@ -380,7 +380,12 @@ class IntakeVectorizeMixin:
             started = time.monotonic()
             try:
                 response = await self._inference.embed(
-                    EmbeddingRequest(team_uuid=command.team_uuid, binding=binding, texts=texts)
+                    EmbeddingRequest(
+                        team_uuid=command.team_uuid,
+                        binding=binding,
+                        texts=texts,
+                        expected_dimension=int(layer_a["dimension"]),
+                    )
                 )
             except Exception as exc:
                 raise MkbError("VECTORIZE_INFERENCE_FAILED", "Embedding inference failed", 503) from exc

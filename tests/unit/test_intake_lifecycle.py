@@ -21,7 +21,7 @@ from src.contracts.common.time import utc_now
 from src.persistence.sqlite_port import SqlitePersistence
 from src.services.events import DomainEventWriter
 from src.services.intake_lifecycle import IntakeLifecycleCommand, IntakeLifecycleService, IntakeTargetResolver
-from src.services.registry import RegistryService
+from src.services.registry import SPARK_VL_EMBED_MODEL_KEY, RegistryService
 from src.services.teams import TeamService
 
 
@@ -114,7 +114,7 @@ async def seeded_intake(tmp_path: Path) -> SeededIntake:
             "INSERT INTO mkb_vector_namespaces "
             "(namespace_uuid,team_uuid,namespace_key,embedding_model,embedding_model_key,embedding_model_version,adapter_kind,"
             "dimension,index_generation,created_at,updated_at,payload_extra) "
-            "VALUES (?,?,'default','qwen-vl-2b','qwen-vl-2b','v1','local_vllm',64,1,?,?, '{}')",
+            f"VALUES (?,?,'default','{SPARK_VL_EMBED_MODEL_KEY}','{SPARK_VL_EMBED_MODEL_KEY}','v1','local_vllm',64,1,?,?, '{{}}')",
             (namespace_uuid, team_uuid, now, now),
         )
         await tx.execute(
@@ -130,7 +130,7 @@ async def seeded_intake(tmp_path: Path) -> SeededIntake:
             "channel,intake_source_uuid,intake_item_uuid,intake_revision_uuid,content_digest,embedding_model,embedding_model_key,"
             "embedding_model_version,adapter_kind,dimension,embedding,publication_state,index_generation,embedded_at,created_at,"
             "updated_at,payload_extra) "
-            "VALUES (?, ?, ?, ?, 'dual_channel_projection','u0','original',?,?,?,?, 'qwen-vl-2b','qwen-vl-2b','v1',"
+            f"VALUES (?, ?, ?, ?, 'dual_channel_projection','u0','original',?,?,?,?, '{SPARK_VL_EMBED_MODEL_KEY}','{SPARK_VL_EMBED_MODEL_KEY}','v1',"
             "'local_vllm',64,?,'indexed',1,?,?,?,'{}')",
             (
                 uuid7(),

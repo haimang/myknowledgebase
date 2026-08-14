@@ -95,16 +95,18 @@ def select_latest_catalog_row(rows: list[Mapping[str, Any]]) -> Mapping[str, Any
     return max(rows, key=lambda row: prompt_version_sort_key(str(row.get("prompt_version") or "")))
 
 
+SPARK_VL_EMBED_MODEL_KEY = "LifetimeMistake/Qwen3-VL-Embedding-2B-NVFP4"
+
 DEFAULT_MODELS = (
     ("deterministic-hash-v1", "v1", "embed", 64),
-    ("qwen-vl-2b", "v1", "embed", 64),
+    (SPARK_VL_EMBED_MODEL_KEY, "v1", "embed", 1024),
     ("qwen35-a3b", "v1", "generate", None),
     ("qwen-rerank-2b", "v1", "rerank", None),
 )
 
 
 DEFAULT_BINDINGS = (
-    ("embed", "qwen-vl-2b", "v1", 10, True),
+    ("embed", SPARK_VL_EMBED_MODEL_KEY, "v1", 10, True),
     ("structured_generate", "qwen35-a3b", "v1", 10, True),
     ("text_generate", "qwen35-a3b", "v1", 10, True),
     # Rerank is intentionally disabled by default. Retrieval reports an honest

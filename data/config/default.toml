@@ -10,7 +10,7 @@ native_vector_required = true
 [inference]
 vllm_base_url = "http://127.0.0.1:668"
 probe_enabled = false
-embed_model = "qwen-vl-2b"
+embed_model = "LifetimeMistake/Qwen3-VL-Embedding-2B-NVFP4"
 generate_model = "qwen35-a3b"
 
 [storage]

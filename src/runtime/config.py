@@ -5,7 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Literal
 
-from pydantic import Field
+from pydantic import Field, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -28,9 +28,11 @@ class Settings(BaseSettings):
     prompt_root_path: Path | None = None
     config_root_path: Path | None = None
     inference_vllm_base_url: str = "http://127.0.0.1:668"
-    # Model credentials are mounted/injected outside L0/L1/L4.  The runtime
-    # keeps only this logical slot and reads its current value from the
-    # explicitly configured secret file during composition.
+    # Deploy-injected inference bearer.  T-O-333 env primary path: contracts
+    # only carry a logical slot; this value never enters L4 or DB rows.
+    # ``MKB_INFERENCE_VLLM_TOKEN`` and ``MKB_INFERENCE_VLLM_token`` both bind.
+    inference_vllm_token: SecretStr | None = None
+    # Optional file fallback.  Used only when the env token is unset.
     inference_secret_slot: str | None = None
     inference_secret_file: Path | None = None
     inference_probe_enabled: bool = False

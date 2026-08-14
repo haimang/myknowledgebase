@@ -128,15 +128,21 @@ def _public_request_id(request: Request) -> str:
     return safe_request_id(request.headers.get("x-request-id")) or uuid7()
 
 
+_INFERENCE_VLLM_TOKEN_SLOT = "INFERENCE_VLLM_TOKEN"
+
+
 def _model_secret_resolver(settings: Settings) -> tuple[str | None, SecretResolver | None]:
     """Resolve one mounted inference credential without putting it in L4.
 
-    The public Settings surface carries a logical slot plus a mount path, never
-    a bearer value.  Reading the secret during composition gives the adapter a
-    short-lived in-memory resolver while keeping it out of config snapshots,
-    diagnostics, and database rows.
+    Env token is the T-O-333 primary path.  A secret file remains a fallback
+    when the env value is unset.  Neither value enters snapshots or DB rows.
     """
 
+    env_token = settings.inference_vllm_token
+    env_value = env_token.get_secret_value().strip() if env_token is not None else ""
+    if env_value:
+        slot = settings.inference_secret_slot or _INFERENCE_VLLM_TOKEN_SLOT
+        return slot, SecretResolver({slot: env_value})
     if settings.inference_secret_slot is None:
         if settings.inference_secret_file is not None:
             raise ValueError("inference_secret_file requires inference_secret_slot")

@@ -30,6 +30,7 @@ from src.runtime.inference.invocations import SqlInferenceInvocationRecorder
 from src.runtime.inference.supply import SupplyBinding, SupplyFence
 from src.runtime.metrics import MetricRegistry
 from src.runtime.security import SecretResolver
+from src.services.registry import SPARK_VL_EMBED_MODEL_KEY
 
 _DIGEST = "a" * 64
 _OTHER_DIGEST = "b" * 64
@@ -306,6 +307,8 @@ async def test_local_adapter_uses_logical_secret_slot_and_classifies_http_errors
     def success_handler(request: httpx.Request) -> httpx.Response:
         seen_headers.update(request.headers)
         assert request.url == "https://models.example:8443/v1/embeddings"
+        body = json.loads(request.content)
+        assert body["model"] == "embedder"
         return httpx.Response(
             200,
             json={
@@ -346,6 +349,59 @@ async def test_local_adapter_uses_logical_secret_slot_and_classifies_http_errors
     with pytest.raises(MkbError) as retryable:
         await overloaded.embed(_embedding_request())
     assert retryable.value.code == "INFERENCE_TRANSPORT_RETRYABLE"
+
+
+@pytest.mark.asyncio
+async def test_local_adapter_sends_catalog_model_and_mrl_dimensions() -> None:
+    captured: dict[str, object] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured["url"] = str(request.url)
+        captured["body"] = json.loads(request.content)
+        return httpx.Response(
+            200,
+            json={
+                "model": "LifetimeMistake/Qwen3-VL-Embedding-2B-NVFP4",
+                "data": [{"embedding": [0.5] * 1024}],
+            },
+        )
+
+    adapter = LocalVllmAdapter(
+        "https://models.example:8443/",
+        transport=httpx.MockTransport(handler),
+    )
+    response = await adapter.embed(
+        _embedding_request(
+            binding=_binding(model_key=SPARK_VL_EMBED_MODEL_KEY),
+            expected_dimension=1024,
+        )
+    )
+
+    assert captured["url"] == "https://models.example:8443/v1/embeddings"
+    assert captured["body"] == {
+        "model": SPARK_VL_EMBED_MODEL_KEY,
+        "input": ["private source text"],
+        "dimensions": 1024,
+    }
+    assert response.model_key == SPARK_VL_EMBED_MODEL_KEY
+    assert response.dimension == 1024
+
+
+def test_env_inference_token_composes_a_logical_slot(tmp_path) -> None:
+    from pydantic import SecretStr
+
+    from api.app import _INFERENCE_VLLM_TOKEN_SLOT, _model_secret_resolver
+    from src.runtime.config import Settings
+
+    settings = Settings(
+        inference_vllm_token=SecretStr("spark-token"),
+        database_path=tmp_path / "unused.sqlite3",
+    )
+    slot, resolver = _model_secret_resolver(settings)
+    assert slot == _INFERENCE_VLLM_TOKEN_SLOT
+    assert resolver is not None
+    assert resolver.resolve(slot) == "spark-token"
+    assert "spark-token" not in repr(resolver)
 
 
 class _CaptureUnitOfWork:

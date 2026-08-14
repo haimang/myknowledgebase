@@ -21,6 +21,7 @@ from src.contracts.inference.models import (
     TextGenerateResponse,
 )
 from src.runtime.config import Settings
+from src.services.registry import SPARK_VL_EMBED_MODEL_KEY
 from tests.local_runtime import local_mock_settings
 
 
@@ -183,15 +184,16 @@ class _LiveEmbeddingFixture:
         binding = request.binding
         texts = request.texts
         assert binding.adapter_kind == "local_vllm"
-        assert binding.model_key == "qwen-vl-2b"
+        assert binding.model_key == SPARK_VL_EMBED_MODEL_KEY
         assert binding.model_version == "v1"
         self.embed_calls += 1
-        vectors = [[1.0, *([0.0] * 63)] for _ in texts]
+        dimension = request.expected_dimension or 1024
+        vectors = [[1.0, *([0.0] * (dimension - 1))] for _ in texts]
         return EmbeddingResponse(
             vectors=vectors,
-            model_key="qwen-vl-2b",
+            model_key=SPARK_VL_EMBED_MODEL_KEY,
             model_version="v1",
-            dimension=64,
+            dimension=dimension,
             adapter_kind="local_vllm",
             latency_ms=1,
             request_digest=stable_digest({"capability": "embed", "n": len(texts)}),
@@ -412,10 +414,10 @@ def test_live_profile_uses_frozen_binding_for_vector_write_and_query(tmp_path: P
     namespace = dict(namespace_row)
     proof = dict(proof_row)
     expected = {
-        "embedding_model_key": "qwen-vl-2b",
+        "embedding_model_key": SPARK_VL_EMBED_MODEL_KEY,
         "embedding_model_version": "v1",
         "adapter_kind": "local_vllm",
-        "dimension": 64,
+        "dimension": 1024,
     }
     assert namespace == expected
     assert proof == expected
