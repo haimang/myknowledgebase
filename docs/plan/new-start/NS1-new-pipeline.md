@@ -534,14 +534,14 @@ NS1-new-pipeline
 
 | 收口目标 | 工作项 | Test-ID | PASS 证据 | 状态 |
 |----------|--------|---------|-----------|------|
-| schema 冻 | P1-01 | T01 | 未观察 | `未观察` |
-| 正文可 hash | P1-02 | T02 | 未观察 | `未观察` |
-| catalog DDL+CRUD+门闩 | P1-03..06 | T03–T07 T46 | 未观察 | `未观察` |
-| adopt 权威 | P2-01..03 | T10–T13 T12 | 未观察 | `未观察` |
-| 四跳通道 | P3-01..05 | T20–T24 | 未观察 | `未观察` |
-| API/图 | P4-01..04 | T30–T34 T32 | 未观察 | `未观察` |
-| 旅程/隔离 | P5-02..03 | T41–T43 | 未观察 | `未观察` |
-| domain 守卫 | P5-01 | T40 | 未观察 | `未观察` |
+| schema 冻 | P1-01 | T01 | `40b8ca2` + layered schema/prompt contract tests | `observed-OK-at-closure` |
+| 正文可 hash | P1-02 | T02 | `40b8ca2`, `2f81be0` + prompt body/hash tests | `observed-OK-at-closure` |
+| catalog DDL+CRUD+门闩 | P1-03..06 | T03–T07 T46 | `1ab1e37` + catalog/hash tests + 32-round soak | `observed-OK-at-closure` |
+| adopt 权威 | P2-01..03 | T10–T13 T12 | `1971033`, `1cc7d2e` + adopt/compiler/generation tests | `observed-OK-at-closure` |
+| 四跳通道 | P3-01..05 | T20–T24 | `fcb8d31`, `72845a8`, `a6498c2` + CLI/stage tests | `observed-OK-at-closure` |
+| API/图 | P4-01..04 | T30–T34 T32 | `07e585b`, `b3022f8`, `a6d838b` + 51 targeted tests | `observed-OK-at-closure` |
+| 旅程/隔离 | P5-02..03 | T41–T43 | `d7cf742` + two journeys/scatter failure e2e | `observed-OK-at-closure` |
+| domain 守卫 | P5-01 | T40 | `d7cf742` + domain architecture guards | `observed-OK-at-closure` |
 
 ### 10.3 Definition of Done
 
@@ -655,3 +655,80 @@ NS1-new-pipeline
 ### 11.3.2 文档状态
 
 `executing（P1/P2/P3 closed / 2026-08-14）`；P4 已解锁并进入 STEP-1/STEP-2。
+
+## 11.4 Phase 4 执行日志
+
+> 执行者：`Codex`
+> 执行时间：`2026-08-14 09:10 UTC`
+> 文档状态：`executing`
+> 代码改动统计：`13 个实现文件 / 17 个测试文件（含 1 个新建）/ 0 个 migration；workflow revision bump 4→4/2`
+
+- **实际执行摘要**：`P4-01..P4-04` 已完成。`IntakeIngestPayload` 现在只接受四 role 的 prompt identity（`json_prompt_id` 必填）；materialize 从既有 catalog row 解析并冻结 `{prompt_id, version, content_sha256, git_relative_path, role, granularity_set}`；主图与 registered-api scatter child 均支持可选 Markdown 转写跳；B 结构失败使用 terminal failed route，不开启 human review；live structured/text resolver 按 frozen role pointer 复验路径与 hash。
+- **Phase 偏差（计划 vs 实际）**：
+  - `P4-02 (compatibility-fit)`：主图 revision 从 3 升至 4，scatter child 从 1 升至 2，并登记去掉 Markdown branch 的 pre-NS1 compatibility definitions；理由是既有 workflow digest 必须保持可解析，历史 revision 不能被当前图静默重写。
+  - `P4-04 (optional-selection-fit)`：未提供 Markdown identity 时不写入 markdown selection fact，而是让 typed guard 缺失并 fail closed 到无 Markdown route；理由是 optional branch 不能由默认值或 payload_extra 猜测开启。
+- **阻塞与处理**：
+  - P4 无阶段内 blocker；此前 Turso/SQLite direct-read `disk I/O` 间歇性问题在 P5 全量复验中继续观察，不以 degraded 结果宣称全绿。
+  - 没有执行 live migration、worker 发布或 Pages 发布；所有验证使用本地 SQLite/Turso 适配器与 deterministic stub。
+- **测试发现**：P4 commit 后定向合同/运行时集合为 `51 passed`（`tests/unit/test_ns1_api_workflow.py`、prompt catalog/CLI/route/worker、workflow runtime/registry/revision compatibility、D02、Task API、source capability）；`tests/e2e/test_single_intake_pipeline.py::test_live_profile_uses_frozen_binding_for_vector_write_and_query` 与 generation contracts 为 `2 passed`；targeted `ruff`、`git diff --check` 通过。P4 分簇 commits：`07e585b`（API/快照/主图/scatter/compatibility）、`b3022f8`（payload 与 e2e/unit 合同）、`a6d838b`（结构失败不转 human review）。
+- **后续 handoff**：P5 继续完成 domain architecture fences、无 Markdown/有 Markdown 两条 stub CLI mega 旅程、scatter child failure isolation、既有 generation/intake 回归与 hash soak，并回填 S14/D04/README；不得改变 prompt body git-only、JSON closed profile、no-live/no-publish 约束。
+
+### 11.4.1 逐工作项状态
+
+| 工作项 | 状态 | PR | 实际落点（file:line） | 备注 |
+|--------|------|----|------------------------|------|
+| `P4-01 / NS1-T30/T31` | `✅ done` | `07e585b`, `b3022f8` | `src/contracts/api/models.py:175`; `src/services/config_snapshots.py:557`; `tests/unit/test_ns1_api_workflow.py:29` | json required；extra=forbid；role/path/hash/profile 校验 |
+| `P4-02 / NS1-T32` | `✅ done` | `07e585b` | `src/workflows/lsrag_definition.py:162,349-403`; `src/workflows/builtin_scatter.py:398,462-480` | optional Markdown branch 与 pre-NS1 compatibility graph |
+| `P4-03 / NS1-T33` | `✅ done` | `a6d838b` | `src/workflows/lsrag_definition.py:67`; `tests/unit/test_ns1_api_workflow.py:151` | structurize failed 直接 terminal failed，无 human fallback |
+| `P4-04 / NS1-T34` | `✅ done` | `07e585b` | `src/runtime/workflow/runtime_materialize.py:130`; `src/runtime/intake/generation_live.py:67-117` | frozen selected pointers/input manifest；retry 不热切 |
+
+### 11.4.2 文档状态
+
+`executing（P1/P2/P3/P4 closed / 2026-08-14）`；P5 已解锁并进入 STEP-1/STEP-2/STEP-3。residual：Turso/SQLite direct-read full-suite stability 与 P5 最终 closure 证据。
+
+## 11.5 Phase 5 执行日志
+
+> 执行者：`Codex`
+> 执行时间：`2026-08-14 09:23 UTC`
+> 文档状态：`executing`
+> 代码改动统计：`6 个代码/测试文件（含 1 个新 e2e 文件）/ 5 个文档文件待 docs cluster / 0 个 migration`
+
+- **实际执行摘要**：`P5-01..P5-04` 与 `NS1-T44/T45/T46` 已完成。新增 domain architecture fences 与 generic/no-Markdown、legal/with-Markdown 两条本地 deterministic-stub 旅程；scatter 失败隔离复用现有 collect-all/fail-closed e2e；补充 32 轮四 role hash resolve soak；S14/D04 追加 catalog 窄附录，README 追加 identity-only payload 示例，QNA 未修改。
+- **Phase 偏差（计划 vs 实际）**：
+  - `P5-01 (guard-location-fit)`：守卫落在 `tests/domain/test_ns1_guards.py`，并保留 `test_architecture.py` 作为 D03 总守卫；理由是 NS1 规则需要在不导入运行时的情况下扫描 production source/migration/API boundary。
+  - `P5-02 (semantic-fixture-fit)`：index-rebuild 旧断言从“必须返回 g0 全文”改为接受冻结 projection 的有效层原文；理由是 NS1 退出假树后，召回命中 g1/g2 是合法 layered semantics，不可为旧断言恢复全文复制。
+  - `P5-03 (reuse-fit)`：没有复制 scatter runtime；直接复验既有 child failure / sibling completion / root fail-closed acceptance test，并额外用 NS1 graph failure route unit proof 锁定结构失败不转人审。
+- **阻塞与处理**：
+  - 完整 `tests/e2e` 在本地 `pyturso==0.7.2` raw inspection 路径仍有 6 个 test-case 失败（index rebuild 3、reactivate 1、intake rebuild/metadata 1、scatter auto-zero 1），均发生在测试用标准 `sqlite3.connect` 读取 Turso `mkb.sqlite3` 时，错误为 `disk I/O` / `file is not a database`；同类 residual 已在 P1–P4 日志记录，非 NS1 生产逻辑失败。
+  - 处理方式是保留 fail-fast 证据并将该适配器/测试 harness 问题作为 closure known issue；没有把全量结果改写为 success，也没有用 SQLite fallback 改写 Turso 物理验证语义。
+  - 没有执行 live migration、worker 发布或 Pages 发布；NS1 mega 使用 local deterministic stub。
+- **测试发现**：`pytest -q tests/unit` → 100% pass；`pytest -q tests/domain` → `9 passed`；P5 targeted guards/mega/scatter/hash 集合 → `10 passed`；`pytest -q tests/e2e -k 'not ...'`（排除上述 pre-existing raw inspection cases）→ `12 passed`；`ruff check .`、`compileall -q api src tests`、`git diff --check` → pass。生产扫描仅在 domain guard 测试字符串中保留禁止模式，`src/runtime/intake`/`src/persistence/migrations`/API payload production scan 无违规。P5 代码/测试 commit：`d7cf742`。
+- **后续 handoff**：NS1 closure 以 `close-with-known-issues` 收口；下游 test-harness/adapter charter 需要让 Turso inspection 使用 Turso port 或在 app close 后做合法 snapshot，再重跑 6 个 raw-sqlite cases。该 residual 不改变 NS1 prompt identity、layered adoption、workflow fail-closed 或 no-live/no-publish 结论。
+
+### 11.5.1 逐工作项状态
+
+| 工作项 | 状态 | PR | 实际落点（file:line） | 备注 |
+|--------|------|----|------------------------|------|
+| `P5-01 / NS1-T40` | `✅ done` | `d7cf742` | `tests/domain/test_ns1_guards.py:13-38` | 无 runtime 假树调用、无 migration `body_text`、无 caller prompt_ref/path |
+| `P5-02 / NS1-T41/T42` | `✅ done` | `d7cf742` | `tests/e2e/test_ns1_pipeline.py:73-130` | generic/no-md 与 legal/with-md 均 succeeded；projection 覆盖 g0/g1/g2 且原文不全相同 |
+| `P5-03 / NS1-T43` | `✅ done` | `d7cf742` | `tests/e2e/test_registered_api_scatter.py:484-499` | 一 child failed、sibling succeeded、root `scatter-required-child-failed` |
+| `P5-04` | `✅ done` | `docs cluster pending` | `docs/baseline/domain-truth/S14-config-prompt-model-registry.md:1070`; `docs/baseline/domain-truth/D04-turso-physical-schema.md:1920`; `README.md:22` | 窄附录与 payload 示例；不改 QNA |
+| `NS1-T44/T45/T46` | `🟩 partial` | `d7cf742` | `tests/unit`; `tests/domain`; `tests/unit/test_ns1_prompt_catalog.py:108` | unit/domain/hash soak 与非 residual e2e 通过；6 个 Turso raw inspection cases deferred |
+
+### 11.5.2 关键指标演进
+
+| 指标 | P4 land | P5 land | Δ |
+|------|----------|----------|---|
+| deterministic mega journeys | 0 | 2 | +2（no-md / with-md） |
+| architecture fences | 1 legacy compiler guard | 3 NS1 fences | +2（body_text / caller coordinates） |
+| hash resolve soak | single drift/resolve cases | 32 rounds × 4 role IDs | +128 stable resolutions |
+
+### 11.5.3 pre-existing 失败甩锅
+
+| 失败项 | 证据（git / 命令） | 判断 |
+|--------|---------------------|------|
+| Turso file inspected with standard sqlite3 during existing e2e | `git show e118192:tests/e2e/test_index_rebuild.py:21`、`git show e118192:tests/e2e/test_intake_reactivate.py:21` both already use `persistence_backend="turso"` and raw `sqlite3.connect`; current full `pytest -q tests/e2e` errors are `disk I/O` / `file is not a database` at those inspection lines | `pre-existing adapter/test-harness issue; non-NS1 functional blocker, deferred to successor harness charter` |
+
+### 11.5.4 文档状态
+
+`executing（P1/P2/P3/P4/P5 implementation closed / 2026-08-14）`；closure 待生成。residual → successor test-harness/adapter charter（Turso inspection port parity）。

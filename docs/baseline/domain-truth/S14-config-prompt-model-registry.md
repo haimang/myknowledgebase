@@ -1061,3 +1061,24 @@ next free global   T-O-337
 | legacy 证据树 | **仅** `context/legacy-family/**` |
 | dual SSOT（QNA 执行） | **无**（QNA 明确非 SSOT） |
 | 新增全局 T-O 改写 263..286 | **无** |
+
+## 附录 E · NS1 窄回填：四 role prompt catalog
+
+> 本附录只记录 NS1 的实现落点，不改写 S14 已冻结的产品句，也不把 QNA
+> 升格为执行 SSOT。
+
+- `intake.ingest` 的外部 payload 只接收 catalog identity：`json_prompt_id` 必填，
+  `markdown_prompt_id`、`clean_prompt_id`、`summarizer_prompt_id` 可选；请求不得携带
+  prompt 正文、文件路径或自由格式 `prompt_ref`。未指定的 clean/summarizer 使用
+  catalog 默认项。
+- catalog 仍由既有 `mkb_prompt_hash_pointers` 承载并晋升
+  `prompt_id / prompt_version / role / status / granularity_set`；每个 resolved row
+  同时冻结 `git_relative_path` 与 `content_sha256`。正文只存在于 git 的
+  `data/prompts/**`，数据库不保存正文或 `body_text`。
+- L4 materialize 将四 role 的 identity、版本、字节 hash、相对路径和 JSON 粒度闭集
+  写入 frozen `selected_prompts` 与 execution input manifest。重试只复用该冻结选择；
+  运行时重新校验 role、路径和 hash，漂移即 fail-closed，不热切换 catalog 新版本。
+- `markdown` 是可选的独立转写跳；`json` 必须声明闭集粒度（当前为 `[0,1,2]`），
+  B.json 经过 layered kernel adoption 后才可进入 C；C 只消费已验收的 layered JSON。
+- catalog CRUD 仅是内部 registry service / internal-token 面，版本不可原位覆盖，
+  不提供 public、agent 或 marketplace authoring 面。

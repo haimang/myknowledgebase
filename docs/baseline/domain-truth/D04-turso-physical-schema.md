@@ -1908,3 +1908,20 @@ GROUP BY channel, embedding_model;
 | `vector_purge_generation` | team + generation_artifact_uuid | soft-delete 该 generation 向量（对齐 S08 purge mode） |
 | `vectorize_structure` | （保留名） | **v1 forbid consumer**（S08-T003）；不得实现成功路径 |
 | （其它 wake 类） | 见 S03/S12 | 非本附录展开 |
+
+## Appendix E — NS1 narrow prompt catalog promotion
+
+NS1 does not add a required table or a prompt-body table. It promotes the
+existing `mkb_prompt_hash_pointers` row with the catalog metadata columns
+`prompt_id`, `role`, `status`, and `granularity_set`; the existing
+`prompt_version`, `git_relative_path`, and `content_sha256` remain the durable
+identity/version/path/hash facts. Prompt bytes remain under the git-tracked
+`data/prompts/**` tree. `body_text` remains forbidden.
+
+The API passes only role-specific prompt IDs (`json_prompt_id` is required;
+`markdown_prompt_id`, `clean_prompt_id`, and `summarizer_prompt_id` are optional).
+Materialization resolves the active catalog rows and freezes the four selected
+pointer facts into the execution snapshot/input manifest. Retry and in-flight
+execution therefore cannot observe a later catalog version, and path/hash
+drift fails closed. The JSON row alone owns the closed granularity set
+`[0,1,2]`; Markdown is an optional workflow hop, not a new persistence domain.

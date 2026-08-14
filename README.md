@@ -23,3 +23,25 @@ worker (or use the test runner), then poll the Task or issue synchronous retriev
 `/live` is dependency-free. `/ready` reports whether migrations, registries,
 object storage, configured capabilities, and the active internal token set are
 available.
+
+An internal `intake.ingest` payload selects prompt catalog identities rather
+than shipping prompt bytes or filesystem paths. `json_prompt_id` is required;
+`markdown_prompt_id` is optional:
+
+```json
+{
+  "request_intent": "intake.ingest",
+  "payload": {
+    "json_prompt_id": "promptB.json.generic",
+    "markdown_prompt_id": "promptB.markdown.legal",
+    "source": {
+      "source_kind": "inline_payload",
+      "external_key": "example-1",
+      "content": "source material"
+    }
+  }
+}
+```
+
+The catalog resolves version, git-relative path, role, granularity profile, and
+content hash during materialization; the execution keeps that selection frozen.

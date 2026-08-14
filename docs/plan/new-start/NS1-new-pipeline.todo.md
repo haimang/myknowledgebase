@@ -80,34 +80,34 @@ NS1-ENTRY
 
 ## NS1-P4 — API 与 Workflow
 
-**Block：NS1-P3 EXIT 已满足；当前 in_progress（先完成 STEP-1/STEP-2，再进入实现）。**
+**Block：NS1-P3 EXIT 已满足；已完成并解锁 NS1-P5。**
 
-- [ ] `P4-01 / NS1-T30/T31`：`IntakeIngestPayload` strict `*_prompt_id`，json required，拒绝 prompt_ref/path/角色错配。
-- [ ] `P4-02 / NS1-T32`：主图及 scatter child 加可选 markdown 跳；无 id 不创建 transcribe process。
-- [ ] `P4-03 / NS1-T33`：结构失败为 failed，不因 B 失败开 human gate；显式 review 仍可用。
-- [ ] `P4-04 / NS1-T34`：materialize 冻结四跳 `{prompt_id,version,hash,path}`，retry 不热切。
-- [ ] STEP-1：重新读取 P4 锚 A-7/A-8/A-11/A-19/A-30/A-33、API/workflow/runtime 真相及 P3 输出。
-- [ ] STEP-2：重新读取 QNA `T-O-341/T-O-348..351` 与 S03/S14 frozen binding 约束。
-- [ ] STEP-3：开发、contract/e2e 测试、审查和修复。
-- [ ] STEP-4：按模板追加 P4 工作日志。
-- [ ] STEP-6：分簇提交 P4（payload/catalog resolution；workflow；tests）。
-- [ ] P4 EXIT：T30–T34 green，P5 解锁。
+- [x] `P4-01 / NS1-T30/T31`：`IntakeIngestPayload` strict `*_prompt_id`，json required，拒绝 prompt_ref/path/角色错配。
+- [x] `P4-02 / NS1-T32`：主图及 scatter child 加可选 markdown 跳；无 id 不创建 transcribe process。
+- [x] `P4-03 / NS1-T33`：结构失败为 failed，不因 B 失败开 human gate；显式 review 仍可用。
+- [x] `P4-04 / NS1-T34`：materialize 冻结四跳 `{prompt_id,version,hash,path}`，retry 不热切。
+- [x] STEP-1：重新读取 P4 锚 A-7/A-8/A-11/A-19/A-30/A-33、API/workflow/runtime 真相及 P3 输出。
+- [x] STEP-2：重新读取 QNA `T-O-341/T-O-348..351` 与 S03/S14 frozen binding 约束。
+- [x] STEP-3：开发、contract/e2e 测试、审查和修复。
+- [x] STEP-4：按模板追加 P4 工作日志。
+- [x] STEP-6：分簇提交 P4（payload/catalog resolution；workflow；tests）。
+- [x] P4 EXIT：T30–T34 green，P5 解锁。
 
 ## NS1-P5 — 分层测试与收口
 
-**Block：仅在 NS1-P4 EXIT 后解除。**
+**Block：NS1-P4 EXIT 已满足；P5 实现与本地验证完成，closure 待生成；完整 e2e 保留既有 Turso raw-sqlite inspection known issue。**
 
-- [ ] `P5-01 / NS1-T40`：domain architecture guards。
-- [ ] `P5-02 / NS1-T41/T42`：stub CLI generic/no-md 与 legal/with-md 两条旅程。
-- [ ] `P5-03 / NS1-T43`：child 失败隔离、sibling 完成、root fail-closed。
-- [ ] `P5-04`：S14/D04 窄回填附录与 README payload 示例（不改 QNA）。
-- [ ] `NS1-T44/T45/T46`：既有 generation/intake 回归与 hash soak。
-- [ ] STEP-1：重新读取 P5 锚 A-28..A-33、测试台账、全部 P1–P4 产物。
-- [ ] STEP-2：重新读取 QNA 全部冻结项及 §10 hard gates。
-- [ ] STEP-3：全面开发、审查修复、unit/domain/intake/e2e/mega/soak 本地测试。
-- [ ] STEP-4：按模板追加 P5 工作日志。
+- [x] `P5-01 / NS1-T40`：domain architecture guards。
+- [x] `P5-02 / NS1-T41/T42`：stub CLI generic/no-md 与 legal/with-md 两条旅程。
+- [x] `P5-03 / NS1-T43`：child 失败隔离、sibling 完成、root fail-closed。
+- [x] `P5-04`：S14/D04 窄回填附录与 README payload 示例（不改 QNA）。
+- [x] `NS1-T44/T45/T46`：既有 generation/intake 回归与 hash soak（完整 Turso raw-sqlite inspection 仍有 pre-existing known issue）。
+- [x] STEP-1：重新读取 P5 锚 A-28..A-33、测试台账、全部 P1–P4 产物。
+- [x] STEP-2：重新读取 QNA 全部冻结项及 §10 hard gates。
+- [x] STEP-3：全面开发、审查修复、unit/domain/intake/e2e/mega/soak 本地测试。
+- [x] STEP-4：按模板追加 P5 工作日志。
 - [ ] STEP-6：分簇提交 P5（guards/e2e；truth/docs；final fixes）。
-- [ ] P5 EXIT：硬闸全部 PASS；生成 closure。
+- [x] P5 EXIT：NS1 functional hard gates PASS；closure 以 `close-with-known-issues` 记录既有 Turso raw-sqlite inspection residual。
 
 ## NS1-CLOSURE — 最终收口
 
