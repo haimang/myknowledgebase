@@ -37,6 +37,7 @@ from src.services.lsrag_compiler import (
     structure_document_digest,
     structure_payload,
 )
+from src.services.lsrag_structurize import LsragStructurizeService, bind_structurize
 from src.services.prompt_profiles import COMPRESSION_CHANNELS, DEFAULT_COMPRESSION_CHANNEL
 
 # Lightning returned no usable C result.  One explicit non-interactive salvage
@@ -930,21 +931,21 @@ class IntakeGenerationConstructMixin:
                     error_code="STRUCTURE_CANDIDATE_MISSING",
                 )
             profile = self._layered_profile(state, error_code="STRUCTURE_PROFILE_INVALID")
-            compiler = LsragContractCompiler()
-            accepted_candidate = compiler.normalize_layered_candidate(
-                clean_text=clean,
-                layered_json=layered_candidate,
-                granularity_set=profile,
+            admitted = LsragStructurizeService().admit(
+                bind_structurize(
+                    clean_text=clean,
+                    clean_artifact_uuid=clean_artifact_uuid,
+                    clean_digest=state["clean_digest"],
+                    layered_candidate=layered_candidate,
+                    granularity_set=profile,
+                    structure_artifact_uuid=structure_artifact_uuid,
+                    projection_artifact_uuid=projection_artifact_uuid,
+                )
             )
-            structure, projection, adoption_report = compiler.adopt_layered_json_with_report(
-                clean_text=clean,
-                layered_json=accepted_candidate,
-                generation_artifact_uuid=structure_artifact_uuid,
-                projection_generation_artifact_uuid=projection_artifact_uuid,
-                clean_artifact_uuid=clean_artifact_uuid,
-                clean_digest=state["clean_digest"],
-                granularity_set=profile,
-            )
+            accepted_candidate = admitted.accepted_candidate
+            structure = admitted.structure
+            projection = admitted.projection
+            adoption_report = admitted.adoption_report
             structure_semantic_digest = structure_document_digest(structure)
             projection_semantic_digest = projection_digest(projection)
             structure_asset = await self._promote_generation_member(

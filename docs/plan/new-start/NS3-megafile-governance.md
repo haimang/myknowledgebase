@@ -823,6 +823,9 @@ NS3-megafile-governance
 |--------|------|------------------------|------|
 | P1-01 | `✅ done` | `tests/domain/test_architecture.py` NS3 守卫 | YAML / contracts models / 新 Mixin / TxHandler |
 | P1-02 | `✅ done` | 同文件 T04/T05/T07 | MRO 与 generate keys 源码冻结 |
+| P2-01 | `✅ done` | `src/services/lsrag_structurize/{binder,admit,service}.py` | 无 I/O；wrap compiler |
+| P2-02 | `✅ done` | `generation_construct.py` `_structurize` | 改调 `LsragStructurizeService.admit` |
+| P2-03 | `✅ done` | `tests/unit/test_lsrag_structurize_service.py` | T10–T25 + NS1 e2e 出闸 |
 
 ### 11.2 时序执行日志
 
@@ -831,7 +834,11 @@ NS3-megafile-governance
 | P1-T0 | 拉取 architecture / runtime.py / pipeline.py / intake Mixin 名单 | 守卫用 AST，不 import 应用模块 |
 | P1-T1 | 落地 NS3-T01–T07 | T03 初版扫到 dataclass，收窄为 `*Mixin` |
 | P1-T2 | `uv run pytest tests/domain/test_architecture.py tests/unit/test_dispatch_policy.py` | PASS |
+| P2-T0 | 拉取 `_structurize` / compiler adopt / artifacts promote | 保持 normalize→adopt 双步 |
+| P2-T1 | 新建 `lsrag_structurize` + 改 Mixin | Mixin 不再出现 `adopt_layered_json_with_report` |
+| P2-T2 | P2 短途 + `test_ns1_pipeline.py` | 短途 45 passed；NS1 e2e 1 passed |
 
 - **Phase 1 偏差**：T04/T05 不用 `WorkflowRuntime.__mro__` 运行时 import，改 AST 读基类（substrate-fit：architecture 测试禁止拉应用依赖）。
+- **Phase 2 偏差**：无产品语义偏差；binder 对缺 candidate 用 409，与 Mixin `_layered_state_candidate` 对齐。
 - **阻塞与处理**：无。
-- **测试发现**：23 passed（architecture + dispatch_policy）。
+- **测试发现**：P1 23 passed；P2 短途 45 passed；NS1 e2e 1 passed。
