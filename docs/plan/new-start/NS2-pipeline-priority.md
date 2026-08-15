@@ -816,6 +816,28 @@ NS2-pipeline-priority
 
 ---
 
-## 11. 执行日志回填（仅 `executed` 状态使用）
+## 11. 执行日志回填
 
-文档状态非 `executed`，本节省略。
+> 执行者：Antigravity
+> 执行时间：2026-08-15
+> 文档状态：executing
+
+### 11.1 Phase 1 执行日志 — 合同、枚举、端口
+
+- **实际执行摘要**：
+  - `P1-01 / NS2-T01/T02`：全量将 `api-inference` 改名为 `local-inference`，`IntakeIngestPayload` 仅允许 `non-interactive` | `local-inference` | None，增加 `test_no_api_inference_in_production_or_test_sources` 架构守卫。
+  - `P1-02 / NS2-T03/T04/T05`：新建纯函数调度策略模块 `src/runtime/workflow/dispatch.py`，实现三池占用常数、`choose_pool`、`pool_kind`，单元测试覆盖四车道 × 占用边界。
+  - `P1-03 / NS2-T06`：更新 `config_snapshots.py`，L2 记录 `compression_channel` 及 `channel_source: "priority" | "explicit"`，非 ingest 任务不写生成通道。
+  - `P1-04 / NS2-T07`：新建 `src/services/billing.py`，定义 `BillingPort` 与默认恒真服务。
+  - `P1-05 / NS2-T08`：`registry.py` 中 `DEFAULT_BINDINGS` 将 Qwen 提升为 generate winner（priority=5），Lightning 为 10。
+  - `P1-06 / NS2-T09`：`config.py` 增加三池 settings，`app.py` 中 Facade `max_in_flight=12` 并传递 `capability_limits`。
+- **逐工作项状态**：
+  - `P1-01`：`✅ done` (`models.py`, `prompt_profiles.py`, `generation_construct.py`)
+  - `P1-02`：`✅ done` (`src/runtime/workflow/dispatch.py`)
+  - `P1-03`：`✅ done` (`src/services/config_snapshots.py`)
+  - `P1-04`：`✅ done` (`src/services/billing.py`)
+  - `P1-05`：`✅ done` (`src/services/registry.py`)
+  - `P1-06`：`✅ done` (`config.py`, `api/app.py`, `default.toml`)
+- **测试结果**：
+  - `NS2-T01`..`NS2-T09` 全 PASS，42 passed in 0.85s，全量 unit 268 passed in 13.85s。
+

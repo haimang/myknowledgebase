@@ -341,7 +341,7 @@ def test_live_profile_uses_frozen_binding_for_vector_write_and_query(tmp_path: P
                 "request_intent": "intake.ingest",
                 "payload": {
                     "json_prompt_id": "promptB.json.generic",
-                    "compression_channel": "api-inference",
+                    "compression_channel": "local-inference",
                     "source": {
                         "source_kind": "inline_payload",
                         "external_key": "live-vector-document",

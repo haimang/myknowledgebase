@@ -425,3 +425,34 @@ def test_public_routes_do_not_expose_ui_workflow_or_oauth_surface() -> None:
             violations.append(f"{_relative(path)}:{line} uses OAuth in api/public")
 
     assert not violations, "D03 public API expansion is forbidden:\n" + "\n".join(violations)
+
+
+def test_no_api_inference_in_production_or_test_sources() -> None:
+    """NS2-T02: api-inference is completely replaced by local-inference in production.
+
+    In tests, only negative validation test cases in test_compression_channel.py
+    and test_ns1_api_workflow.py (NS2-T01) are allowed to test legacy rejection.
+    """
+
+    src_violations: list[str] = []
+    for py_path in (REPOSITORY_ROOT / "src").rglob("*.py"):
+        text = py_path.read_text(encoding="utf-8")
+        if "api-inference" in text:
+            src_violations.append(str(py_path.relative_to(REPOSITORY_ROOT)))
+    for py_path in (REPOSITORY_ROOT / "api").rglob("*.py"):
+        text = py_path.read_text(encoding="utf-8")
+        if "api-inference" in text:
+            src_violations.append(str(py_path.relative_to(REPOSITORY_ROOT)))
+
+    assert not src_violations, "api-inference string found in production sources:\n" + "\n".join(src_violations)
+
+    allowed_test_files = {"test_architecture.py", "test_compression_channel.py", "test_ns1_api_workflow.py"}
+    test_violations: list[str] = []
+    for py_path in (REPOSITORY_ROOT / "tests").rglob("*.py"):
+        if py_path.name in allowed_test_files:
+            continue
+        text = py_path.read_text(encoding="utf-8")
+        if "api-inference" in text:
+            test_violations.append(str(py_path.relative_to(REPOSITORY_ROOT)))
+
+    assert not test_violations, "api-inference string found in non-allowlisted test sources:\n" + "\n".join(test_violations)

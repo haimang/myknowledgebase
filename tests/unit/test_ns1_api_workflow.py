@@ -68,11 +68,15 @@ def test_ingest_payload_accepts_documentation_domain_and_flavor_defaults() -> No
     assert domain_only.flavor is None
     assert domain_only.compression_channel is None
 
-    spark = IntakeIngestPayload.model_validate(_payload(compression_channel="api-inference"))
-    assert spark.compression_channel == "api-inference"
+    local_ch = IntakeIngestPayload.model_validate(_payload(compression_channel="local-inference"))
+    assert local_ch.compression_channel == "local-inference"
     claude = IntakeIngestPayload.model_validate(_payload(compression_channel="non-interactive"))
     assert claude.compression_channel == "non-interactive"
 
+    with pytest.raises(ValidationError):
+        IntakeIngestPayload.model_validate(_payload(compression_channel="api-inference"))
+    with pytest.raises(ValidationError):
+        IntakeIngestPayload.model_validate(_payload(compression_channel="cloud-inference"))
     with pytest.raises(ValidationError):
         IntakeIngestPayload.model_validate(_payload(compression_channel="spark"))
     with pytest.raises(ValidationError):

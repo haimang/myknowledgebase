@@ -1,4 +1,4 @@
-"""Intake compression channel: Claude -p vs Spark Lightning generate."""
+"""Intake compression channel: Claude -p vs Local vLLM generate."""
 
 from __future__ import annotations
 
@@ -22,7 +22,12 @@ from src.llm_adapters.local_vllm import LocalVllmAdapter
 from src.runtime.inference.claude_cli import DeterministicNs1Stub
 from src.runtime.inference.facade import coerce_json_object_text
 from src.runtime.intake.pipeline import IntakePipeline
-from src.services.registry import SPARK_LIGHTNING_GENERATE_MODEL_KEY
+from src.services.registry import (
+    DEFAULT_BINDINGS,
+    SPARK_LIGHTNING_GENERATE_MODEL_KEY,
+    SPARK_QWEN_GENERATE_MODEL_KEY,
+    default_enabled_inference_bindings,
+)
 
 
 def _payload(**extra: object) -> dict[str, object]:
@@ -42,13 +47,13 @@ def _binding() -> InferenceBinding:
     return InferenceBinding(
         capability_key="structured_generate",
         adapter_kind="local_vllm",
-        model_key=SPARK_LIGHTNING_GENERATE_MODEL_KEY,
+        model_key=SPARK_QWEN_GENERATE_MODEL_KEY,
         model_version="v1",
         binding_digest=stable_digest(
             {
                 "capability": "structured_generate",
                 "adapter_kind": "local_vllm",
-                "model_key": SPARK_LIGHTNING_GENERATE_MODEL_KEY,
+                "model_key": SPARK_QWEN_GENERATE_MODEL_KEY,
                 "model_version": "v1",
             }
         ),
@@ -61,9 +66,15 @@ def test_payload_defaults_to_non_interactive_and_rejects_unknown_channel() -> No
     assert IntakeIngestPayload.model_validate(_payload(compression_channel="non-interactive")).compression_channel == (
         "non-interactive"
     )
-    assert IntakeIngestPayload.model_validate(_payload(compression_channel="api-inference")).compression_channel == (
-        "api-inference"
+    assert IntakeIngestPayload.model_validate(_payload(compression_channel="local-inference")).compression_channel == (
+        "local-inference"
     )
+    with pytest.raises(ValidationError):
+        IntakeIngestPayload.model_validate(_payload(compression_channel="api-inference"))
+    with pytest.raises(ValidationError):
+        IntakeIngestPayload.model_validate(_payload(compression_channel="cloud-inference"))
+    with pytest.raises(ValidationError):
+        IntakeIngestPayload.model_validate(_payload(compression_channel="spark"))
     with pytest.raises(ValidationError):
         IntakeIngestPayload.model_validate(_payload(compression_channel="claude"))
 
@@ -75,14 +86,14 @@ def test_summary_transport_keeps_claude_cli_as_the_default() -> None:
     assert pipeline._compression_channel({"payload": {}}) == "non-interactive"
 
 
-def test_summary_transport_uses_spark_only_when_api_inference_is_live() -> None:
+def test_summary_transport_uses_spark_only_when_local_inference_is_live() -> None:
     offline = IntakePipeline(None, None, None, claude_cli=object())  # type: ignore[arg-type]
     with pytest.raises(MkbError) as rejected:
-        offline._summary_transport({"payload": {"compression_channel": "api-inference"}})
+        offline._summary_transport({"payload": {"compression_channel": "local-inference"}})
     assert rejected.value.code == "COMPRESSION_CHANNEL_UNAVAILABLE"
 
     live = IntakePipeline(None, None, None, inference=object(), live_inference=True)  # type: ignore[arg-type]
-    assert live._summary_transport({"payload": {"compression_channel": "api-inference"}}) == "api_inference"
+    assert live._summary_transport({"payload": {"compression_channel": "local-inference"}}) == "api_inference"
     # A live facade must not steal the default Claude path.
     live_with_cli = IntakePipeline(
         None,
@@ -95,22 +106,25 @@ def test_summary_transport_uses_spark_only_when_api_inference_is_live() -> None:
     assert live_with_cli._summary_transport({"payload": {}}) == "claude_cli"
 
 
-def test_snapshot_rejects_api_inference_when_live_inference_is_off() -> None:
+def test_snapshot_rejects_explicit_local_inference_when_live_inference_is_off() -> None:
     from src.services.config_snapshots import ConfigSnapshotService
 
     service = object.__new__(ConfigSnapshotService)
     service.settings = SimpleNamespace(live_inference=False)
-    request = SimpleNamespace(payload=IntakeIngestPayload.model_validate(_payload(compression_channel="api-inference")))
-    assert ConfigSnapshotService._resolve_compression_channel(request) == "api-inference"
+    request = SimpleNamespace(
+        payload=IntakeIngestPayload.model_validate(_payload(compression_channel="local-inference")),
+        priority="normal",
+    )
+    assert ConfigSnapshotService._resolve_compression_channel(request) == ("local-inference", "explicit")
     with pytest.raises(MkbError) as rejected:
         service._require_compression_channel(request)
     assert rejected.value.code == "COMPRESSION_CHANNEL_UNAVAILABLE"
     service.settings = SimpleNamespace(live_inference=True)
-    assert service._require_compression_channel(request) == "api-inference"
+    assert service._require_compression_channel(request) == ("local-inference", "explicit")
 
 
 @pytest.mark.asyncio
-async def test_local_adapter_sends_system_prompt_and_json_object_for_lightning() -> None:
+async def test_local_adapter_sends_system_prompt_and_json_object_for_qwen() -> None:
     captured: dict[str, object] = {}
 
     def handler(request: httpx.Request) -> httpx.Response:
@@ -119,7 +133,7 @@ async def test_local_adapter_sends_system_prompt_and_json_object_for_lightning()
         return httpx.Response(
             200,
             json={
-                "model": SPARK_LIGHTNING_GENERATE_MODEL_KEY,
+                "model": SPARK_QWEN_GENERATE_MODEL_KEY,
                 "choices": [
                     {
                         "message": {
@@ -148,7 +162,7 @@ async def test_local_adapter_sends_system_prompt_and_json_object_for_lightning()
 
     assert captured["url"] == "https://models.example:8443/v1/chat/completions"
     assert captured["body"] == {
-        "model": SPARK_LIGHTNING_GENERATE_MODEL_KEY,
+        "model": SPARK_QWEN_GENERATE_MODEL_KEY,
         "messages": [
             {"role": "system", "content": "You are the summarizer worker."},
             {"role": "user", "content": '{"layered_content":[]}'},
@@ -159,7 +173,7 @@ async def test_local_adapter_sends_system_prompt_and_json_object_for_lightning()
     assert "max_tokens" not in captured["body"]
     assert "chat_template_kwargs" not in captured["body"]
     assert "enable_thinking" not in captured["body"]
-    assert response.model_key == SPARK_LIGHTNING_GENERATE_MODEL_KEY
+    assert response.model_key == SPARK_QWEN_GENERATE_MODEL_KEY
     assert response.text == '{"ok":true}'
 
 
@@ -200,7 +214,7 @@ def test_coerce_json_object_text_strips_fences() -> None:
     assert coerce_json_object_text('prefix {"ok": true} suffix') == '{"ok": true}'
 
 
-def test_lightning_result_errors_are_salvageable_only_with_cli() -> None:
+def test_local_inference_errors_are_salvageable_only_with_cli() -> None:
     bare = IntakePipeline(None, None, None, inference=object(), live_inference=True)  # type: ignore[arg-type]
     with_cli = IntakePipeline(
         None,
@@ -211,14 +225,14 @@ def test_lightning_result_errors_are_salvageable_only_with_cli() -> None:
         live_inference=True,
     )  # type: ignore[arg-type]
     empty = MkbError("INFERENCE_VALIDATION_RESPONSE", "empty content", 502)
-    assert bare._can_salvage_api_inference(empty) is False
-    assert with_cli._can_salvage_api_inference(empty) is True
-    assert with_cli._can_salvage_api_inference(MkbError("PROMPT_HASH_MISMATCH", "drift", 503)) is False
-    assert with_cli._can_salvage_api_inference(MkbError("CONSTRUCT_KERNEL_SUMMARY_INVALID", "bad json", 422)) is True
+    assert bare._can_salvage_local_inference(empty) is False
+    assert with_cli._can_salvage_local_inference(empty) is True
+    assert with_cli._can_salvage_local_inference(MkbError("PROMPT_HASH_MISMATCH", "drift", 503)) is False
+    assert with_cli._can_salvage_local_inference(MkbError("CONSTRUCT_KERNEL_SUMMARY_INVALID", "bad json", 422)) is True
 
 
 @pytest.mark.asyncio
-async def test_invalid_lightning_result_salvages_once_via_claude_cli() -> None:
+async def test_invalid_local_inference_result_salvages_once_via_claude_cli() -> None:
     from src.contracts.common.ids import uuid7
     from src.services.lsrag_compiler import LsragContractCompiler
 
@@ -230,7 +244,7 @@ async def test_invalid_lightning_result_salvages_once_via_claude_cli() -> None:
         nonlocal live_calls
         live_calls += 1
         del layered_candidate
-        raise MkbError("INFERENCE_VALIDATION_RESPONSE", "Lightning content was empty", 502)
+        raise MkbError("INFERENCE_VALIDATION_RESPONSE", "Local inference content was empty", 502)
 
     pipeline._live_layered_summary_generate = boom  # type: ignore[method-assign]
     compiler = LsragContractCompiler()
@@ -258,7 +272,7 @@ async def test_invalid_lightning_result_salvages_once_via_claude_cli() -> None:
     prompt = Path("data/prompts/summarizer/promptC.summarizer.v1.md")
     state = {
         "payload": {
-            "compression_channel": "api-inference",
+            "compression_channel": "local-inference",
             "prompt_selection": {
                 "summarizer": {
                     "prompt_id": "promptC.summarizer",
@@ -286,14 +300,14 @@ async def test_invalid_lightning_result_salvages_once_via_claude_cli() -> None:
     assert cli_receipt is not None
     assert cli_receipt["transport"] == "claude_cli"
     assert cli_receipt["compression_channel"] == "non-interactive"
-    assert cli_receipt["salvage_from"] == "api-inference"
+    assert cli_receipt["salvage_from"] == "local-inference"
     assert cli_receipt["salvage_error_code"] == "INFERENCE_VALIDATION_RESPONSE"
     assert completed["layered_content"][0]["llm_summary"]["body"]
     assert summaries
 
 
 @pytest.mark.asyncio
-async def test_kernel_rejected_lightning_package_salvages_once() -> None:
+async def test_kernel_rejected_local_inference_package_salvages_once() -> None:
     from src.contracts.common.ids import uuid7
     from src.services.lsrag_compiler import LsragContractCompiler
 
@@ -335,7 +349,7 @@ async def test_kernel_rejected_lightning_package_salvages_once() -> None:
         SimpleNamespace(),  # type: ignore[arg-type]
         {
             "payload": {
-                "compression_channel": "api-inference",
+                "compression_channel": "local-inference",
                 "prompt_selection": {
                     "summarizer": {
                         "prompt_id": "promptC.summarizer",
@@ -359,7 +373,7 @@ async def test_kernel_rejected_lightning_package_salvages_once() -> None:
 
 
 @pytest.mark.asyncio
-async def test_api_inference_without_cli_does_not_invent_a_second_channel() -> None:
+async def test_local_inference_without_cli_does_not_invent_a_second_channel() -> None:
     pipeline = IntakePipeline(None, None, None, inference=object(), live_inference=True)  # type: ignore[arg-type]
 
     async def boom(_command, *, layered_candidate):
@@ -393,7 +407,7 @@ async def test_api_inference_without_cli_does_not_invent_a_second_channel() -> N
     with pytest.raises(MkbError) as rejected:
         await pipeline._complete_construct_summaries(
             SimpleNamespace(),  # type: ignore[arg-type]
-            {"payload": {"compression_channel": "api-inference"}},
+            {"payload": {"compression_channel": "local-inference"}},
             compiler=compiler,
             projection=projection,
             accepted_layered_candidate=accepted,
@@ -403,7 +417,7 @@ async def test_api_inference_without_cli_does_not_invent_a_second_channel() -> N
 
 
 @pytest.mark.asyncio
-async def test_successful_lightning_does_not_call_cli() -> None:
+async def test_successful_local_inference_does_not_call_cli() -> None:
     from src.contracts.common.ids import uuid7
     from src.services.lsrag_compiler import LsragContractCompiler
 
@@ -447,7 +461,7 @@ async def test_successful_lightning_does_not_call_cli() -> None:
     pipeline._live_layered_summary_generate = ok  # type: ignore[method-assign]
     completed, _summaries, invocations, cli_receipt = await pipeline._complete_construct_summaries(
         SimpleNamespace(),  # type: ignore[arg-type]
-        {"payload": {"compression_channel": "api-inference"}},
+        {"payload": {"compression_channel": "local-inference"}},
         compiler=compiler,
         projection=projection,
         accepted_layered_candidate=accepted,
@@ -460,9 +474,9 @@ async def test_successful_lightning_does_not_call_cli() -> None:
 
 
 @pytest.mark.asyncio
-async def test_bootstrap_registers_qwen_as_spare_generate_model(tmp_path: Path) -> None:
+async def test_bootstrap_registers_qwen_as_winner_generate_model(tmp_path: Path) -> None:
     from src.persistence.sqlite_port import SqlitePersistence
-    from src.services.registry import SPARK_QWEN_GENERATE_MODEL_KEY, RegistryService
+    from src.services.registry import RegistryService
 
     persistence = SqlitePersistence(tmp_path / "qwen.sqlite3", Path("src/persistence/migrations"))
     registry = RegistryService(persistence, Path("data/prompts"))
@@ -483,24 +497,18 @@ async def test_bootstrap_registers_qwen_as_spare_generate_model(tmp_path: Path) 
         assert model["modality"] == "generate"
         assert model["status"] == "active"
         assert [(row["capability_key"], row["priority"], row["enabled"]) for row in bindings] == [
-            ("structured_generate", 10, 1),
-            ("text_generate", 10, 1),
+            ("structured_generate", 5, 1),
+            ("text_generate", 5, 1),
         ]
         winners = await registry.active_inference_bindings()
         generate = {item.capability_key: item.model_key for item in winners}
-        assert generate["structured_generate"] == SPARK_LIGHTNING_GENERATE_MODEL_KEY
-        assert generate["text_generate"] == SPARK_LIGHTNING_GENERATE_MODEL_KEY
+        assert generate["structured_generate"] == SPARK_QWEN_GENERATE_MODEL_KEY
+        assert generate["text_generate"] == SPARK_QWEN_GENERATE_MODEL_KEY
     finally:
         await persistence.close()
 
 
-def test_default_generate_binding_is_spark_lightning() -> None:
-    from src.services.registry import (
-        DEFAULT_BINDINGS,
-        SPARK_QWEN_GENERATE_MODEL_KEY,
-        default_enabled_inference_bindings,
-    )
-
+def test_default_generate_binding_is_qwen_winner() -> None:
     generate = {
         (binding.capability_key, binding.model_key)
         for binding in default_enabled_inference_bindings()
@@ -518,8 +526,8 @@ def test_default_generate_binding_is_spark_lightning() -> None:
         if capability in {"structured_generate", "text_generate"} and enabled and priority == 5
     }
     assert winners == {
-        "structured_generate": SPARK_LIGHTNING_GENERATE_MODEL_KEY,
-        "text_generate": SPARK_LIGHTNING_GENERATE_MODEL_KEY,
+        "structured_generate": SPARK_QWEN_GENERATE_MODEL_KEY,
+        "text_generate": SPARK_QWEN_GENERATE_MODEL_KEY,
     }
     spares = {
         (capability, model)
@@ -527,6 +535,6 @@ def test_default_generate_binding_is_spark_lightning() -> None:
         if capability in {"structured_generate", "text_generate"} and enabled and priority == 10
     }
     assert spares == {
-        ("structured_generate", SPARK_QWEN_GENERATE_MODEL_KEY),
-        ("text_generate", SPARK_QWEN_GENERATE_MODEL_KEY),
+        ("structured_generate", SPARK_LIGHTNING_GENERATE_MODEL_KEY),
+        ("text_generate", SPARK_LIGHTNING_GENERATE_MODEL_KEY),
     }

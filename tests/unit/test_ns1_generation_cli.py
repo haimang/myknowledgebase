@@ -89,7 +89,7 @@ def test_live_app_composition_wires_ns1_cli(tmp_path) -> None:
         assert isinstance(handler._claude_cli, DeterministicNs1Stub)
         assert handler._live_inference is True
         assert handler._summary_transport({"payload": {}}) == "claude_cli"
-        assert handler._summary_transport({"payload": {"compression_channel": "api-inference"}}) == "api_inference"
+        assert handler._summary_transport({"payload": {"compression_channel": "local-inference"}}) == "api_inference"
 
 
 def test_layered_profile_does_not_invent_generic_set() -> None:
