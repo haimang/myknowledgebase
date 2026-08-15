@@ -888,6 +888,22 @@ NS2-pipeline-priority
 - **测试结果**：
   - `NS2-T30`..`NS2-T35` 全 PASS，4 passed in 0.23s，compression 19 passed in 0.35s。
 
+### 11.5 Phase 5 执行日志 — 向量化接线与门闸收敛
+
+- **实际执行摘要**：
+  - `P5-01 / NS2-T50`：`lsrag.vectorize` 在 live 模式准确分类为 `embed` 池，在 deterministic 模式分类为 `unpooled`。
+  - `P5-02 / NS2-T51`：验证 `embed` 池并发与 FIFO 机制（running 上限 8，queued 上限 20；排序完全去除优先级权重，严格先到先得）。
+  - `P5-03 / NS2-T52`：验证 `InferenceFacade` 末闸（全局 12，embed 8，structured_generate 2，text_generate 2；满闸立即非阻塞拒绝返回 `None`）。
+  - `P5-04 / NS2-T53`：验证背压可恢复性（满闸拒绝不修改持久化状态，释放租约后再次可申请）。
+- **逐工作项状态**：
+  - `P5-01`：`✅ done` (`dispatch.py`, `tests/unit/test_dispatch_embed_and_gates.py`)
+  - `P5-02`：`✅ done` (`runtime_core.py`, `tests/unit/test_dispatch_embed_and_gates.py`)
+  - `P5-03`：`✅ done` (`facade.py`, `tests/unit/test_dispatch_embed_and_gates.py`)
+  - `P5-04`：`✅ done` (`facade.py`, `tests/unit/test_dispatch_embed_and_gates.py`)
+- **测试结果**：
+  - `NS2-T50`..`NS2-T53` 全 PASS，3 passed in 0.30s。
+
+
 
 
 

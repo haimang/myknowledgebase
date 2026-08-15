@@ -105,20 +105,20 @@ NS2-ENTRY
 
 ---
 
-## NS2-P5 — Embed 池接线
+## NS2-P5 — 向量化接线与门闸收敛
 
-**Block：仅在 NS2-P3 EXIT 后解除；NS2-P6 blocked until P4+P5 exit gates。**
+**Block：NS2-P5 已完成；NS2-P6 已解锁。**
 
-- [ ] `P5-01 / NS2-T50`：live vectorize 分类入 embed 池（`lsrag.vectorize`）。
-- [ ] `P5-02 / NS2-T51`：vectorize Process 整段占槽（一 Process 一槽，内部多 batch 不重复占槽）。
-- [ ] `P5-03 / NS2-T52`：确定性向量化（`live_inference=false`）跳过池（unpooled）。
-- [ ] `P5-04 / NS2-T53/T54`：embed 会计独立于生成池（满员不溢 NI，不与 local 抢槽）。
-- [ ] STEP-1：重新拉取 P5 上下文（`vectorize.py`, `dispatch.py`, `lsrag_definition.py`）。
-- [ ] STEP-2：重新拉取 S08/S11 真相，确认 embed 8+20 规则。
-- [ ] STEP-3：开发、embed 池化测试（`NS2-T50..T54`）、审查和修复。
-- [ ] STEP-4：按模板追加 P5 工作日志。
-- [ ] STEP-6：分簇提交 P5（embed wiring/batch occupancy/tests）。
-- [ ] P5 EXIT：P5 tests 绿。
+- [x] `P5-01 / NS2-T50`：`vectorize` 步池化（`lsrag.vectorize` 在 live 模式进 `embed` 池，deterministic 不入池）。
+- [x] `P5-02 / NS2-T51`：向量化并发与 FIFO（running 上限 8，queued 上限 20；无优先级权重，纯 FIFO 先到先得）。
+- [x] `P5-03 / NS2-T52`：InferenceFacade 末闸（`max_in_flight=12`，`embed=8`，`structured_generate=2`，`text_generate=2`；S11 非阻塞拒绝与指标）。
+- [x] `P5-04 / NS2-T53`：背压可恢复性（Facade 满闸时立即返回 `BACKPRESSURE`，不影响 orchestrator 的 durable 状态，下个 tick 或租约恢复后可继续）。
+- [x] STEP-1：重新拉取 P5 上下文（`vectorize.py`, `facade.py`, `dispatch.py`）。
+- [x] STEP-2：重新拉取 S08/S11 真相，确认 embed 适配器与 Facade 闸门参数。
+- [x] STEP-3：开发、向量化与门闸测试（`NS2-T50..T53`）、审查和修复。
+- [x] STEP-4：按模板追加 P5 工作日志。
+- [x] STEP-6：分簇提交 P5（vectorize wiring/facade gate/backpressure/tests）。
+- [x] P5 EXIT：P5 tests 绿，P6 解锁。
 
 ---
 
