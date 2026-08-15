@@ -124,17 +124,17 @@ NS2-ENTRY
 
 ## NS2-P6 — 测试、文档与全量收口
 
-**Block：仅在 NS2-P4 EXIT 与 NS2-P5 EXIT 均满足后解除。**
+**Block：NS2 全部 6 个 Phase 均已完成。**
 
-- [ ] `P6-01`：短途与集成测试台账（`NS2-T01..T54` 全绿）。
-- [ ] `P6-02 / NS2-T60/T61/T62`：e2e 四车道旅程、NS1 金样回归、embed FIFO 旅程。
-- [ ] `P6-03 / NS2-T70`：soak 32 并发 claim 竞态无超卖测试。
-- [ ] `P6-04 / NS2-T71`：domain 架构守卫（无新表、无 extra 派发态）。
-- [ ] `P6-05`：真相文档窄回填附录（S02/S03/S11/S14/S15/D04）。
-- [ ] `P6-06 / NS2-T72`：输出最终阶段 closure 至 `docs/closure/new-start/NS2-pipeline-priority-closure.md`。
-- [ ] STEP-1：拉取全量测试和文档上下文。
-- [ ] STEP-2：核对 §10 所有收口硬闸。
-- [ ] STEP-3：运行全量 pytest、ruff、静态扫描。
-- [ ] STEP-4：完成 action-plan §9 执行日志回填并改状态为 `executed`。
-- [ ] STEP-6：分簇提交 P6（e2e/soak/guards/docs/closure）。
-- [ ] P6 EXIT：NS2 收口完成，汇报用户。
+- [x] `P6-01`：短途与集成测试台账（`NS2-T01..T54` 全绿）。
+- [x] `P6-02 / NS2-T60/T61/T62`：e2e 四车道旅程、NS1 金样回归、embed FIFO 旅程。
+- [x] `P6-03 / NS2-T70`：soak 32 并发 claim 竞态无超卖测试。
+- [x] `P6-04 / NS2-T71`：domain 架构守卫（无新表、无 extra 派发态）。
+- [x] `P6-05`：真相文档窄回填附录（S02/S03/S11/S14/S15/D04）。
+- [x] `P6-06 / NS2-T72`：输出最终阶段 closure 至 `docs/closure/new-start/NS2-pipeline-priority-closure.md`。
+- [x] STEP-1：拉取全量测试和文档上下文。
+- [x] STEP-2：核对 §10 所有收口硬闸。
+- [x] STEP-3：运行全量 pytest、ruff、静态扫描。
+- [x] STEP-4：完成 action-plan §11 执行日志回填并改状态为 `executed`。
+- [x] STEP-6：分簇提交 P6（e2e/soak/guards/docs/closure）。
+- [x] P6 EXIT：NS2 收口完成，汇报用户。

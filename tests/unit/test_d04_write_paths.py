@@ -35,7 +35,8 @@ async def test_migration_chain_includes_scatter_identity_columns(tmp_path: Path)
     persistence = await _db(tmp_path)
     try:
         ids = [item.migration_id for item in discover_migrations(Path("src/persistence/migrations"))]
-        assert ids[-1] == "010_spark_vl_embed_model_key"
+        assert "010_spark_vl_embed_model_key" in ids
+        assert ids[-1] == "011_process_dispatch_pools"
         async with persistence.transaction() as tx:
             columns = await tx.fetchall("PRAGMA table_info(mkb_executions)")
         names = {row["name"] for row in columns}

@@ -162,6 +162,7 @@ def test_rebuild_and_metadata_lifecycle_paths_complete_through_public_http(tmp_p
         )
         assert response.status_code == 201, response.text
         rebuild = _wait_for_terminal(client, team_uuid=team_uuid, task_uuid=rebuild_task_uuid, headers=headers)
+        print("REBUILD TASK:", rebuild)
         assert rebuild["status"] == "succeeded", rebuild
 
         with sqlite3.connect(database_path) as connection:

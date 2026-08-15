@@ -21,7 +21,10 @@ from src.contracts.inference.models import (
     TextGenerateResponse,
 )
 from src.runtime.config import Settings
-from src.services.registry import SPARK_LIGHTNING_GENERATE_MODEL_KEY, SPARK_VL_EMBED_MODEL_KEY
+from src.services.registry import (
+    SPARK_QWEN_GENERATE_MODEL_KEY,
+    SPARK_VL_EMBED_MODEL_KEY,
+)
 from tests.local_runtime import local_mock_settings
 
 
@@ -205,7 +208,7 @@ class _LiveEmbeddingFixture:
     ) -> tuple[StructuredGenerateResponse, object | None]:
         del validator
         assert request.binding.capability_key == "structured_generate"
-        assert request.binding.model_key == SPARK_LIGHTNING_GENERATE_MODEL_KEY
+        assert request.binding.model_key == SPARK_QWEN_GENERATE_MODEL_KEY
         assert request.prompt_digest
         assert request.json_schema_digest
         assert request.system_text
@@ -272,7 +275,7 @@ class _LiveEmbeddingFixture:
 
     async def text_generate(self, request: TextGenerateRequest) -> TextGenerateResponse:
         assert request.binding.capability_key == "text_generate"
-        assert request.binding.model_key == SPARK_LIGHTNING_GENERATE_MODEL_KEY
+        assert request.binding.model_key == SPARK_QWEN_GENERATE_MODEL_KEY
         assert request.prompt_digest
         assert request.invocation is not None
         assert request.invocation.generation_invocation_uuid

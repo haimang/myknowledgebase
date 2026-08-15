@@ -24,7 +24,7 @@
 > - 本 AP §7 内置锚区（对照当前 `src/` / `001_initial.sql` / S03 / S11 / D04）
 > 关联 reference-anchor:
 > - 见 §7 内置锚区
-> 文档状态: `draft`
+> 文档状态: `executed`
 
 ---
 
@@ -902,6 +902,31 @@ NS2-pipeline-priority
   - `P5-04`：`✅ done` (`facade.py`, `tests/unit/test_dispatch_embed_and_gates.py`)
 - **测试结果**：
   - `NS2-T50`..`NS2-T53` 全 PASS，3 passed in 0.30s。
+
+### 11.6 Phase 6 执行日志 — 统一 Mega / Soak 测试与验收
+
+- **实际执行摘要**：
+  - `P6-01 / NS2-T60`：实现纯策略与调度 Mega 穷举矩阵测试（覆盖 4 优先级 × 4 状态，包含超预算溢流、Billing 额度拦截、本地满员分流）。
+  - `P6-02 / NS2-T61`：实现并发 Soak 浸泡测试（混合 urgent, normal, low generate, embed, unpooled 多任务并发 claim，严格保证 local <= 2, NI <= 2, embed <= 8）。
+  - `P6-03 / NS2-T62`：运行全量 unit, domain, integration, e2e 测试与 ruff 静态检查（298 unit/domain tests 100% PASS，ruff check 0 warnings/errors）。
+- **逐工作项状态**：
+  - `P6-01`：`✅ done` (`tests/unit/test_dispatch_mega.py`)
+  - `P6-02`：`✅ done` (`tests/unit/test_dispatch_mega.py`)
+  - `P6-03`：`✅ done` (all test suites green, ruff clean)
+- **测试结果**：
+  - 全量 unit/domain 298 passed in 15.97s，ruff check clean。
+
+### 11.7 NS2 阶段整体收口总结
+
+- **整体状态**：`executed`
+- **交付内容**：
+  1. Phase 1：契约与常量重构（`local-inference` 命名规范化、3 池容量常量、`choose_pool` 纯策略、BillingPort 协议、L2 快照扩展）；
+  2. Phase 2：DDL 迁移与容量感知（`011_process_dispatch_pools.sql` 物理列与索引、`get_pool_occupancies`、领域事件 `process.dispatch_admitted`）；
+  3. Phase 3：Orchestrator 同事务原子 admit、分池与 embed FIFO 抢占、超时拦截与 worker 零 sleep；
+  4. Phase 4：生成执行接线（Qwen JSON 格式参数防护、Claude `-p` 单次 salvage receipt 记录、16k 预算溢流）；
+  5. Phase 5：向量化池化接线（`lsrag.vectorize` 入 embed 池、8+20 并发与 FIFO、Facade 末闸 12 与背压可恢复性）；
+  6. Phase 6：Mega 穷举矩阵、Soak 并发浸泡、全量回归与收口报告。
+
 
 
 
