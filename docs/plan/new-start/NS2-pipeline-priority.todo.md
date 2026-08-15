@@ -72,19 +72,19 @@ NS2-ENTRY
 
 ## NS2-P3 — Orchestrator admit + 分池 claim
 
-**Block：仅在 NS2-P2 EXIT 后解除；NS2-P4/P5 blocked until P3 exit gate。**
+**Block：NS2-P3 已完成；NS2-P4 / NS2-P5 已解锁（可并行）。**
 
-- [ ] `P3-01 / NS2-T20/T21/T22`：同事务 admit 算法（`claim_next` 内部在领取前对 waiting 做 admit，不超过各池 queued cap）。
-- [ ] `P3-02 / NS2-T23/T24`：分池 `claim_next`（未 admit 永不 claim；unpooled 保持 S03 序；生成按池）。
-- [ ] `P3-03 / NS2-T25`：embed FIFO claim（排序去除 `priority_rank`，先到先得）。
-- [ ] `P3-04 / NS2-T26`：orchestrator waiting 仍受 deadline 约束（超时标记 `deadline-exceeded-before-start`）。
-- [ ] `P3-05 / NS2-T27`：worker 不睡租约（无槽立即返回 False；facade BACKPRESSURE 作为末闸）。
-- [ ] STEP-1：重新拉取 P3 上下文（`runtime_core.py`, `worker.py`, `facade.py`）。
-- [ ] STEP-2：重新拉取 S03 claim 序真相及 `T-O-353..361`。
-- [ ] STEP-3：开发、claim 逻辑测试（`NS2-T20..T27`）、审查和修复。
-- [ ] STEP-4：按模板追加 P3 工作日志。
-- [ ] STEP-6：分簇提交 P3（admit/claim/FIFO/worker/tests）。
-- [ ] P3 EXIT：P3 tests 绿，P4 与 P5 解锁。
+- [x] `P3-01 / NS2-T20/T21/T22`：同事务 admit 算法（在 `claim_next` 事务内对 waiting 做 admit；按策略赋 `dispatch_pool`，置 `dispatch_admitted=1`，记 `process.dispatch_admitted`；满员或无配额保持 `admitted=0` 留在 orchestrator）。
+- [x] `P3-02 / NS2-T23/T24`：分池 `claim_next`（未 admit 永不被 claim；unpooled 保持 S03 排序；local/NI 仅 claim 已 admit 且 running 未满行）。
+- [x] `P3-03 / NS2-T25`：embed FIFO claim（embed 分支去除 `priority_rank`，按 `available_at ASC, created_at ASC, process_uuid ASC` 领取）。
+- [x] `P3-04 / NS2-T26`：orchestrator waiting 仍受 deadline 约束（`admitted=0` 到期变 failed，错误码 `deadline-exceeded-before-start`）。
+- [x] `P3-05 / NS2-T27`：worker 不睡租约（`run_once` 在无槽或无可领任务时立即退出）。
+- [x] STEP-1：重新拉取 P3 上下文（`runtime_core.py`, `worker.py`, `facade.py`）。
+- [x] STEP-2：重新拉取 S03 claim 序真相（S03:854-866）及 `T-O-353..361`。
+- [x] STEP-3：开发、orchestrator 与 claim 测试（`NS2-T20..T27`）、审查和修复。
+- [x] STEP-4：按模板追加 P3 工作日志。
+- [x] STEP-6：分簇提交 P3（admit 算法/claim 逻辑/FIFO/tests）。
+- [x] P3 EXIT：P3 tests 绿，P4/P5 解锁。
 
 ---
 

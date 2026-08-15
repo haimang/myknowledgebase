@@ -856,4 +856,22 @@ NS2-pipeline-priority
 - **测试结果**：
   - `NS2-T10`..`NS2-T13` 全 PASS，23 passed in 1.88s。
 
+### 11.3 Phase 3 执行日志 — Orchestrator admit + 分池 claim
+
+- **实际执行摘要**：
+  - `P3-01 / NS2-T20/T21/T22`：在 `runtime_core.py` 的 `claim_next` 事务中实现原子 admit 逻辑 `_admit_waiting_processes_tx`，按 `choose_pool` 策略与池容量上限（local 6、NI 4、embed 20）批量 admit，并记录 `process.dispatch_admitted` 领域事件；容量满员或无配额时留在 orchestrator。
+  - `P3-02 / NS2-T23/T24`：分池 `claim_next` 严格约束 `dispatch_admitted = 1`，unpooled 保持 S03 优先级排序，local/NI 仅领取 running 未满（cap=2）的候选。
+  - `P3-03 / NS2-T25`：embed claim 单独处理为严格 FIFO 排序（去除 `priority_rank`，按 `available_at ASC, created_at ASC, process_uuid ASC` 领取）。
+  - `P3-04 / NS2-T26`：在领取前统一检查超时，waiting（即使 `admitted=0`）进程到期正确置为 `deadline-exceeded-before-start` 失败态。
+  - `P3-05 / NS2-T27`：worker 无槽时立即返回 `None`/`False`，绝不在内存中 sleep 等槽。
+- **逐工作项状态**：
+  - `P3-01`：`✅ done` (`runtime_core.py`, `tests/unit/test_dispatch_claim.py`)
+  - `P3-02`：`✅ done` (`runtime_core.py`, `tests/unit/test_dispatch_claim.py`)
+  - `P3-03`：`✅ done` (`runtime_core.py`, `tests/unit/test_dispatch_claim.py`)
+  - `P3-04`：`✅ done` (`runtime_core.py`, `tests/unit/test_dispatch_claim.py`)
+  - `P3-05`：`✅ done` (`runtime_core.py`, `tests/unit/test_dispatch_claim.py`)
+- **测试结果**：
+  - `NS2-T20`..`NS2-T27` 全 PASS，7 passed in 0.80s。
+
+
 
