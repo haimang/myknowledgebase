@@ -25,6 +25,9 @@ from src.runtime.intake.types import (
 )
 from src.services.deterministic_embedding import deterministic_embedding
 
+# Spark VL context is 8192 tokens. 16k chars stayed under that in live probes.
+_LIVE_EMBED_CHAR_BUDGET = 16_000
+
 
 class IntakeVectorizeMixin:
     """S08 vectorize stage, Layer-A profile, and embedding invocation."""
@@ -179,10 +182,28 @@ class IntakeVectorizeMixin:
                 )
             invocation: dict[str, Any] | None = None
             vector_inputs = list(plan.required)
-            texts = [item.content_full for item in vector_inputs]
             if mode == "live":
+                over_budget = [item for item in vector_inputs if len(item.content_full) > _LIVE_EMBED_CHAR_BUDGET]
+                if any(item.granularity == 0 and item.channel == "summary" for item in over_budget):
+                    raise MkbError(
+                        "VECTORIZE_BUDGET_CONTENT_FULL",
+                        "g0 summary exceeds the live embedding context budget",
+                        422,
+                    )
+                embeddable = [
+                    item for item in vector_inputs if len(item.content_full) <= _LIVE_EMBED_CHAR_BUDGET
+                ]
+                if not embeddable:
+                    raise MkbError(
+                        "VECTORIZE_INFERENCE_FAILED",
+                        "No vector units fit the live embedding context budget",
+                        503,
+                    )
+                texts = [item.content_full for item in embeddable]
                 vectors, layer_a, invocation = await self._live_embeddings(command, texts, frozen_layer_a)
+                vector_inputs = embeddable
             else:
+                texts = [item.content_full for item in vector_inputs]
                 vectors = [deterministic_embedding(text, dimension=int(frozen_layer_a["dimension"])) for text in texts]
                 layer_a = frozen_layer_a
             if len(vectors) != len(vector_inputs):
@@ -379,14 +400,32 @@ class IntakeVectorizeMixin:
             )
             started = time.monotonic()
             try:
-                response = await self._inference.embed(
-                    EmbeddingRequest(
-                        team_uuid=command.team_uuid,
-                        binding=binding,
-                        texts=texts,
-                        expected_dimension=int(layer_a["dimension"]),
+                packed_vectors: list[list[float]] = []
+                last_response = None
+                offset = 0
+                while offset < len(texts):
+                    size = 0
+                    end = offset
+                    while end < len(texts) and (end == offset or size + len(texts[end]) <= _LIVE_EMBED_CHAR_BUDGET):
+                        size += len(texts[end])
+                        end += 1
+                    response = await self._inference.embed(
+                        EmbeddingRequest(
+                            team_uuid=command.team_uuid,
+                            binding=binding,
+                            texts=texts[offset:end],
+                            expected_dimension=int(layer_a["dimension"]),
+                        )
                     )
-                )
+                    last_response = response
+                    packed_vectors.extend(response.vectors)
+                    offset = end
+                response = last_response
+                if response is None:
+                    raise MkbError("VECTORIZE_INFERENCE_FAILED", "Embedding inference returned no batches", 503)
+                response = response.model_copy(update={"vectors": packed_vectors, "dimension": int(layer_a["dimension"])})
+            except MkbError as exc:
+                raise MkbError("VECTORIZE_INFERENCE_FAILED", exc.message, 503) from exc
             except Exception as exc:
                 raise MkbError("VECTORIZE_INFERENCE_FAILED", "Embedding inference failed", 503) from exc
             latency_ms = max(0, int((time.monotonic() - started) * 1000))

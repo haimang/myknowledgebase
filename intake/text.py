@@ -10,6 +10,8 @@ from typing import Any
 from src.contracts.common.errors import MkbError
 
 _SPACE = re.compile(r"\s+")
+_HORIZONTAL_SPACE = re.compile(r"[^\S\n]+")
+_EXTRA_BLANKS = re.compile(r"\n{3,}")
 
 
 class DeterministicHtmlTextExtractor(HTMLParser):
@@ -92,7 +94,9 @@ def canonical_text(value: str) -> str:
 
 
 def clean_plain_text(value: str) -> str:
-    return _SPACE.sub(" ", canonical_text(value)).strip()
+    """Keep line structure for Markdown/plain documents; collapse only horizontal space."""
+
+    return _EXTRA_BLANKS.sub("\n\n", _HORIZONTAL_SPACE.sub(" ", canonical_text(value))).strip()
 
 
 def extract_html_text(value: str) -> tuple[str, dict[str, Any]]:

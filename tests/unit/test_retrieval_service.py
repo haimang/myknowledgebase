@@ -31,6 +31,7 @@ class FixtureBodies:
             ("g1:revenue", "summary"): {"content": "summary revenue evidence", "granularity": 1},
             ("g1:revenue", "original"): {"content": "original revenue evidence /tmp/private.txt", "granularity": 1},
             ("g0:root", "original"): {"content": "root document evidence", "granularity": 0},
+            ("g0:root", "summary"): {"content": "summary of root document", "granularity": 0},
             ("g1:missing", "summary"): {"content": "summary without original", "granularity": 1},
             ("g1:revenue-alt", "original"): {"content": "second original revenue evidence", "granularity": 1},
         }.get((unit_id, channel))
@@ -280,6 +281,24 @@ async def test_search_applies_fences_traceback_redaction_and_honest_rerank_fallb
     assert "answer" not in result
     assert "embedding" not in str(result)
     assert "/tmp/" not in str(result)
+
+
+async def test_g0_summary_tracebacks_to_construct_original_without_original_vector(
+    retrieval_db: SqlitePersistence,
+) -> None:
+    connection = retrieval_db._connect()
+    connection.execute("UPDATE mkb_vector_records SET channel='summary' WHERE block_or_unit_id='g0:root'")
+    connection.commit()
+
+    result = await RetrievalService(retrieval_db, body_port=FixtureBodies()).search(
+        {"team_uuid": TEAM, "query": "root", "return_k": 10}
+    )
+
+    g0 = next(item for item in result["results"] if item["coordinate"]["unit_id"] == "g0:root")
+    assert g0["hit_channel"] == "summary"
+    assert g0["traceback_status"] == "resolved"
+    assert g0["payload_content"] == "root document evidence"
+    assert g0["hit_content"] == "summary of root document"
 
 
 async def test_summary_without_original_is_not_claimed_as_original(retrieval_db: SqlitePersistence) -> None:

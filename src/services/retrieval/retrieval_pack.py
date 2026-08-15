@@ -68,21 +68,20 @@ class RetrievalPackMixin:
         if row["channel"] == "original":
             traceback_status = "not_needed"
         else:
-            original = traceback_rows.get((str(row["generation_artifact_uuid"]), str(row["block_or_unit_id"])))
-            if original is None:
-                traceback_status = "failed"
+            # T-O-352: g0 original is construct-only. Hydrate original from the
+            # dual-channel artifact at the same coordinate; do not require an
+            # original vector row.
+            original_material = await self._load_material(query.team_uuid, row, "original")
+            original_vector = traceback_rows.get((str(row["generation_artifact_uuid"]), str(row["block_or_unit_id"])))
+            if original_material.hydrated and original_material.available:
+                payload_material = original_material
+                if original_material.granularity is not None:
+                    granularity = original_material.granularity
+                traceback_status = "resolved"
+            elif original_vector is not None:
+                traceback_status = "degraded"
             else:
-                original_material = await self._load_material(query.team_uuid, original, "original")
-                # A fallback reference derived from a vector row is not an
-                # authoritative original body.  Only a successful port
-                # hydration may resolve a summary traceback.
-                if original_material.hydrated and original_material.available:
-                    payload_material = original_material
-                    if original_material.granularity is not None:
-                        granularity = original_material.granularity
-                    traceback_status = "resolved"
-                else:
-                    traceback_status = "degraded"
+                traceback_status = "failed"
 
         coordinate = GenerationScopedCoordinate(
             generation_artifact_uuid=str(row["generation_artifact_uuid"]),
@@ -202,7 +201,6 @@ class RetrievalPackMixin:
                     namespace,
                     query,
                     generation_artifact_ids=targets,
-                    force_channel="original",
                 )
         except Exception:
             # Inflation is a bounded enhancement.  A failure is observable per
