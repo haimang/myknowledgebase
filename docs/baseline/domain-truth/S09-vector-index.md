@@ -348,7 +348,7 @@ materialize 后冻结 `command_input_digest`；retry 同 digest。
 
 ```text
 1. Load & verify Handoff binding (disposition, digests, model, namespace, required_units)
-2. Enumerate expected required-set (S08-isomorphic; g=0 rules inherited)
+2. Enumerate expected required-set (S08-isomorphic; g=0 **summary** required, g=0 original excluded; T-O-352)
 3. Scan actual rows:
      deleted_at IS NULL
      generation_artifact_uuid / namespace / model match

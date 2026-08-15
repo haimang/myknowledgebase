@@ -32,7 +32,7 @@
 
 > **Legacy 边界（T-O-42 / T-O-131）**：不继承 SMCP wire、R2 key 成功语义、`smind_vec_process` 作 SSOT、blind INSERT、step-name meta-only、flat layered wire 兼容。
 
-> **D05校准声明（T-O-202..210）**：S07 服从 D05。Construct 内 Summarizer 绑定 **`promptC.<variant>.<version>` + content_hash**；**默认双通道根本**；默认粒度语义 **0/1/2** 且 **g=0 必入向量候选**；**仅 full_valid dual-channel 完备后** 才 `vectorize_construct`（ConstructToVectorizeGate）；失败 **仅** S03 max_retries（T-O-207）。
+> **D05校准声明（T-O-202..210 / T-O-352）**：S07 服从 D05。Construct 内 Summarizer 绑定 **`promptC.<variant>.<version>` + content_hash**；**默认双通道根本**；默认粒度语义 **0/1/2** 且 **g=0 summary 必入向量候选**（g=0 original 必须装回在 construct，不进 required-set）；**仅 full_valid dual-channel 完备后** 才 `vectorize_construct`（ConstructToVectorizeGate）；失败 **仅** S03 max_retries（T-O-207）。
 
 > **S08校准声明（2026-08-12）**：`S08-v1.0` 为向量写侧唯一执行 SSOT。S07 outbox `vectorize_construct` 消费方为 Process **`lsrag.vectorize`**（非 `vectorize_index`）；S08 强制 ContentFull 对账、整包 required-set 成败、original 装回 HARD；**不**在 S07 内 embed。Layer B facet 权威仍在 S04；S07 投影 + S08 抄写。publication 归 S09。
 ---

@@ -16,9 +16,9 @@
 >
 > **工作笔记（非 Truth）**：`docs/eval/new-start/non-interactive-agentic-pipeline.md`、`agent-in-the-loop-repair.md`、`proposed-workflow-imagined.md`
 >
-> **问答结构**：Round 1–3 = `Q1–Q9` **全部冻结**（`T-O-337..351`）。**不生成 Round 4**。进入收口 / 执行方案。
+> **问答结构**：Round 1–3 = `Q1–Q9` **全部冻结**（`T-O-337..351`）。**不生成 Round 4**。进入收口 / 执行方案。`T-O-352` 为后续业主修订（g=0 仅 summary 入向量）。
 >
-> **文档状态**：`locked / Q1–Q9 frozen / T-O-337..351 / ready for NS1 execution plan`
+> **文档状态**：`locked / Q1–Q9 frozen / T-O-337..352 / ready for NS1 execution plan`
 >
 > **版本 / 日期**：`v0.4 / 2026-08-14`
 >
@@ -77,7 +77,7 @@
 | `T-O-341` | `foundational / failure product` | clean / structure **失败必须显式**（typed `error_code` + 本文件 Execution/Process failed）。**不以** `ExecutionGate` / `waiting(human_review)` 作为该失败的恢复手段。多文件时 **不因一份失败而取消或暂停 sibling**（collect-all，非 fail-fast）。 | 本会话业主口头；`runtime_scatter.py` collect-all 已实现 sibling 侧 | Q3 | 人审节点可留 historical；生产默认不得因结构失败而开门 |
 | `T-O-342` | `foundational / evidence fence` | 本 campaign 唯一 legacy 证据：`legacy-family` 行为 + `legacy-prompt` 正文。现实现锚：`generation_construct.py` `_structurize` 丢弃模型 JSON、`lsrag_compiler.structurize` 以全文+断句编树。`claude -p` 五次绿灯只证明运输，不证明 schema/分层质量。 | Owner 授权；代码事实 2026-08-14 | Q1–Q2, Q4 | 零 legacy runtime；eval 笔记非 Truth |
 | `T-O-343` | `foundational / B contract + current` | B 交卷唯一形状为 **`layered_content.v1`**（当时 Zod 同源：`context_meta` + `layered_content[]`）。模型 JSON 是候选。kernel **校验并投影** 后 CAS structure current。退役 `semantic_block`。digest/anchor 由 kernel 计算，模型不得填 span 当权威。g=0 `original_content.body` 若空，kernel **用 clean 全文确定性回填**。B 的 `llm_summary` 必须空/null。`LsragContractCompiler.structurize(clean_text)` **退出生产 current**（可留 fixture）。 | Round 1 / Q1 · owner 接受推荐 B · 2026-08-14 | Q4–Q5 | `--json-schema`、`adopt_layered_json`、promptB 迁入 |
-| `T-O-344` | `foundational / granularity profile` | 每个 structurize **profile** 显式声明 `granularity_set`（进 `command_input_digest`）。首批：`generic={0,1,2}`、`legal={0,1}`、`realestate={0}`。未登记 variant 不得跑。少交/多交声明层 = **kernel 失败**；**禁止**按句或复制静默补层。此为对 `T-O-204` 的 **窄执行解释**（generic 仍三层；领域减层必须登记），不是废除 handbook。声明集合内的 g=0（含回填）必须进入向量候选（`T-O-205`）。 | Round 1 / Q2 · owner 接受推荐 B · 2026-08-14 | Q6, Q9 | profile 挂在 catalog 还是独立 id 见 Q9 |
+| `T-O-344` | `foundational / granularity profile` | 每个 structurize **profile** 显式声明 `granularity_set`（进 `command_input_digest`）。首批：`generic={0,1,2}`、`legal={0,1}`、`realestate={0}`。未登记 variant 不得跑。少交/多交声明层 = **kernel 失败**；**禁止**按句或复制静默补层。此为对 `T-O-204` 的 **窄执行解释**（generic 仍三层；领域减层必须登记），不是废除 handbook。声明集合内的 g=0（含回填）必须进入向量候选（`T-O-205`；通道见 `T-O-352`：仅 summary）。 | Round 1 / Q2 · owner 接受推荐 B · 2026-08-14 | Q6, Q9 | profile 挂在 catalog 还是独立 id 见 Q9 |
 | `T-O-345` | `foundational / aggregate fail-closed` | 维持 `T-O-341`。每个 child 独立跑完。失败 child 显式 failed，不开人审。全部 terminal 后，任一 **required** 失败/取消 → **root Task 失败**（现 `scatter-required-child-failed`）。**不** reopen `T-O-53`。单文件 Task：该 Execution 失败，不牵连其他 Task。生产默认 `auto_admitted`；`require_human_review` 不得因 B schema 失败置位。 | Round 1 / Q3 · owner 接受推荐 B · 2026-08-14 | — | scatter fan-in 本轮不改 |
 | `T-O-346` | `foundational / kernel anchor` | g≥1 `original_content.body` 与 clean 均按 S05 配方规范化（UTF-8 / LF / NFC）后，body 必须是 clean 的 **精确子串**。命中按阅读序取 **第一次**；report 记 `occurrence_count`。找不到 = `STRUCTURE_ANCHOR_MISSING`（kernel 失败）。g=0 回填 span = 整份 clean。`layered_content.v1` **不收录** 模型 span 字段。禁止模糊/覆盖率/embedding 放宽。 | Round 2 / Q4 · owner 接受推荐 A · 2026-08-14 | — | `adopt_layered_json` 可编码 |
 | `T-O-347` | `foundational / C material` | C 的 `-p` = kernel **已验收**（含 g=0 回填）的 layered JSON；只填 `llm_summary.*`；不得改 original / block_id / granularity。整包一次。`--json-schema` 可用同一份 `layered_content.v1`（此时 summary 必填）。**CAS current 仍是 S07** construction / dual-channel 投影，layered **不是** construction SSOT。 | Round 2 / Q5 · owner 接受推荐 A · 2026-08-14 | Q8 | 消费主体 = B.json 产物（`T-O-350`） |
@@ -85,6 +85,7 @@
 | `T-O-349` | `foundational / catalog CRUD` | Catalog CRUD 只改 **指针目录**：Create/Read/List/Deactivate；Update = **新不可变版本**（新 `content_hash`+path，同 `prompt_id` 新 `version` 或新 id），旧行保留。CRUD **不写** md 正文。接口走内部 token，非公网 marketplace，非 agent 写。已 materialize 的 Execution **只认冻结 hash**。Delete = `retired`，不删 git、不删历史行。 | Round 3 / Q7 · owner 接受推荐 A · 2026-08-14 | — | 窄解释 S14 RegistryPort「非公网 CRUD」 |
 | `T-O-350` | `foundational / four prompt roles` | Catalog **角色闭集四档**（不是第四个生产字母，是 B 拆成两跳）：`clean`=`promptA`；`markdown`=`promptB.md`；`json`=`promptB.json`；`summarizer`=`promptC`。文档 API：**必填** `json_prompt_id`（角色必须是 `json`，**不可跳过**）；`markdown_prompt_id` **可省=跳过 markdown 跳**；`clean_prompt_id` / `summarizer_prompt_id` **可省**，走该 role 的 catalog default。链路：`A → [B.md?] → B.json → C`。有 markdown 时 B.json 的 `-p` = markdown 正文；无则 = clean 正文。**C 只消费 B.json 经 kernel 验收后的 layered JSON**（`T-O-347`），不消费 markdown、不以 markdown 当结构 SSOT。B.md 只出 Markdown，**无** `--json-schema`。`--json-schema` / `T-O-343/346` 只约束 B.json。禁止单 id 猜角色。 | Round 3 / Q8 · owner 扩充推荐 A · 2026-08-14 | — | 工作流可多一跳 B.md；trinity 执行面变为四 role |
 | `T-O-351` | `foundational / profile on json row` | `granularity_set`（及规范化配方 digest）是角色为 **`json`** 的 catalog 版本行的 **必填** 字段。解析 `json_prompt_id` 即得到闭集。API **不**收 `profile_id`。换闭集 = 新版本行（`T-O-349`）。`markdown` / `clean` / `summarizer` 行 **不**要求 `granularity_set`。 | Round 3 / Q9 · owner 接受推荐 A，并随 Q8 收窄到 json 行 · 2026-08-14 | — | kernel 只对 B.json 验收粒度 |
+| `T-O-352` | `product / g0 summary-only vector` | **业主修订 `T-O-205`/`T-O-213`/`T-O-222`（2026-08-14）**：g=0 仍是 dual-channel construct 必在场（original 必须装回，供 Traceback/Inflation）。**向量候选只强制 g=0 summary**：g=0 original 不进入 required-set；g=0 summary 非空强制 required，禁止 empty-skip / live budget-skip 消灭。g≥1 两通道不变。此修订 **窄 reopen** S08 required-set 谓词，不废除 g=0 必入候选，也不废除 construct 双通道。 | 本会话业主口头 · 2026-08-14 | — | S08 compiler / vectorize / S09 expected-set |
 
 ---
 

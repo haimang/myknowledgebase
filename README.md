@@ -25,15 +25,17 @@ object storage, configured capabilities, and the active internal token set are
 available.
 
 An internal `intake.ingest` payload selects prompt catalog identities rather
-than shipping prompt bytes or filesystem paths. `json_prompt_id` is required;
-`markdown_prompt_id` is optional:
+than shipping prompt bytes or filesystem paths. Provide `json_prompt_id`, a
+closed `domain` (+ optional `flavor`), and/or `granularity`. Explicit
+`*_prompt_id` fields override domain defaults. `markdown_prompt_id` is optional.
 
 ```json
 {
   "request_intent": "intake.ingest",
   "payload": {
-    "json_prompt_id": "promptB.json.generic",
-    "markdown_prompt_id": "promptB.markdown.legal",
+    "domain": "documentation",
+    "flavor": "qna",
+    "granularity": "g1",
     "source": {
       "source_kind": "inline_payload",
       "external_key": "example-1",
@@ -42,6 +44,20 @@ than shipping prompt bytes or filesystem paths. `json_prompt_id` is required;
   }
 }
 ```
+
+`domain=documentation` resolves to `promptA.documentation.default`,
+`promptB.documentation.g1`, and `promptC.documentation.default`.
+A flavor of `qna` / `eval` / `closure` / `plan` / `code-review` also selects
+`promptB.documentation.{flavor}` as the optional markdown hop.
+
+`granularity` is a closed level that picks the json template:
+
+- `g0` → `{0}` (`promptB.documentation.g0` or `promptB.json.g0`)
+- `g1` → `{0,1}` (default)
+- `g2` → `{0,1,2}`
+
+If both `json_prompt_id` and `granularity` are sent, the catalog row must
+match that level or materialize fails closed.
 
 The catalog resolves version, git-relative path, role, granularity profile, and
 content hash during materialization; the execution keeps that selection frozen.

@@ -287,7 +287,7 @@ Revision 回答“来源业务事实是否改变”；build generation 回答“
 
 | Canonical term | 成熟度 | 定义 | 边界 |
 |---|---|---|---|
-| `LS-RAG` | `frozen / D05-v1.0` | GenerationScopedCoordinate 为轴；**默认双通道**；**默认粒度 0/1/2**；g=0 必入向量候选；construct 合法后 vectorize；召回 Traceback + ContextTier | 不自建 max_retries；不新增 StateFamily |
+| `LS-RAG` | `frozen / D05-v1.0` | GenerationScopedCoordinate 为轴；**默认双通道**；**默认粒度 0/1/2**；g=0 **summary** 必入向量候选（g=0 original 留在 construct）；construct 合法后 vectorize；召回 Traceback + ContextTier | 不自建 max_retries；不新增 StateFamily |
 | `LSRagProductionChain` | `frozen / D05-v1.0` | Intake→structurize→construct→**(gate)**→vectorize→publication→Retrieve | 禁跳过 construct |
 | `DualChannel` | `frozen / D05-v1.0` | **LS-RAG 根本**：Original+Summary 默认可索引、共坐标 | 非可选插件 |
 | `Granularity0` / `FullDocumentLayer` | `frozen / D05-v1.0` | **粒度 0**：整份文档根层全文检索单元；**必须**进入向量候选 | 生产 g=0；inflation 目标 |

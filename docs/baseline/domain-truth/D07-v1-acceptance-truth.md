@@ -354,7 +354,7 @@
 | ID | HARD 断言摘要 | 证据/方法 |
 |---|---|---|
 | `D07-D05-A01` | 生产链强制双通道 original+summary | 集成/golden |
-| `D07-D05-A02` | 默认粒度 0/1/2；g=0 必为向量候选 | 集成 |
+| `D07-D05-A02` | 默认粒度 0/1/2；g=0 **summary** 必为向量候选 | 集成 |
 | `D07-D05-A03` | ConstructToVectorizeGate：非 full-valid construct 不可 vectorize | 集成（S07/S08） |
 | `D07-D05-A04` | promptA/B/C identity+hash 绑定；DB 无第二正文 | 集成（S14/S05–S07） |
 | `D07-D05-A05` | structure 失败仅走 D01/S03 max_retries 上卷 | 集成 |
@@ -810,7 +810,7 @@
 |---|---|---|
 | `S08-A01` | construct 未 full_valid 不能 full_valid vectorize | 集成 / 门闩单测 |
 | `S08-A02` | dual-channel required 缺一失败 | 集成 |
-| `S08-A03` | g=0 original 缺失/stripped → fail | 单测 |
+| `S08-A03` | construct 中 g=0 original 缺失/stripped → fail；g=0 original 不在 required；缺 g=0 summary → fail | 单测 |
 | `S08-A04` | ContentFull 错 digest → CONTENT_MISMATCH | 单测 |
 | `S08-A05` | 同 command_input_digest 重放幂等 | 集成 |
 | `S08-A06` | 半写后失败 → 无 publication；重试覆盖成功 | 故障注入 |

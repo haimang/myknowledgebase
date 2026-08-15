@@ -10,7 +10,7 @@
 >
 > **Truth 版本 / 日期**：`D05-v1.0 / 2026-08-12`
 >
-> **冻结 Truth-ID**：`T-O-202..210`（见 §0.0）
+> **冻结 Truth-ID**：`T-O-202..210`（见 §0.0）；`T-O-352` 修订 g=0 向量通道
 >
 > **作者 / 裁决者**：`MKB owner + Codex`
 >
@@ -20,25 +20,25 @@
 >
 > **下游强制服从**：`S05–S10`、`S11`、`S14`（prompt）、`D03/D04`、拓扑 `17`、验收 `18`
 
-> **★ 裁决等级**：`D*` > `S*`。实现只依赖 domain-truth + contracts。  
+> **★ 裁决等级**：`D*` > `S*`。实现只依赖 domain-truth + contracts。
 > **★ 本文不拥有**：Process 八态、`max_retries` 账本、Outcome 上报形状——**必须引用** `D01` / `S03`（见 §0.5、§2.5）。
 
-> **★ Owner 冻结摘要（2026-08-12 · T-O-202..210）**  
-> 1. 默认 **双通道** = LS-RAG 根本；  
-> 2. 默认三粒度 **0/1/2**；  
-> 3. **FullDocument（0）必入向量候选**；  
-> 4. 向量化失败 **仅** 服从 D01/S03 max_retries + 上报；  
-> 5. **construct 合法原料后门闩** 才 vectorize；  
-> 6. 生产三 Prompt：**promptA=Clean · promptB=Structurizer · promptC=Summarizer**（`variant.version` + DB hash）；  
+> **★ Owner 冻结摘要（2026-08-12 · T-O-202..210）**
+> 1. 默认 **双通道** = LS-RAG 根本；
+> 2. 默认三粒度 **0/1/2**；
+> 3. **FullDocument（0）必入向量候选，且仅通过 summary 通道**（g=0 original 留在 construct，不进 required-set）；
+> 4. 向量化失败 **仅** 服从 D01/S03 max_retries + 上报；
+> 5. **construct 合法原料后门闩** 才 vectorize；
+> 6. 生产三 Prompt：**promptA=Clean · promptB=Structurizer · promptC=Summarizer**（`variant.version` + DB hash）；
 > 7. Traceback 默认可观测 degraded；Inflation 允许；v1 默认仅 construct 后 vectorize。
 
-> **★ 骨架**  
-> §0 业务逻辑·粒度·**三生产 Prompt**·债务·失败引用  
-> §1 Intake·Artifact·D01/D02  
-> §2 Recall·双通道·多粒度上下文  
-> §3 glossary 引用  
-> §4 D04 映射  
-> §5 typed schema 详例 ↔ D03 contracts  
+> **★ 骨架**
+> §0 业务逻辑·粒度·**三生产 Prompt**·债务·失败引用
+> §1 Intake·Artifact·D01/D02
+> §2 Recall·双通道·多粒度上下文
+> §3 glossary 引用
+> §4 D04 映射
+> §5 typed schema 详例 ↔ D03 contracts
 
 ---
 
@@ -49,12 +49,13 @@
 | `T-O-202` | `foundational / authority` | **D05** 是 LS-RAG 产品与执行心智 **高等级 handbook**；`D*` 裁决高于 `S*`；冲突以最新 frozen D05 为准并回填 S；不拥有 Process 状态机/`max_retries`（归 D01/S03）。 | 全 S05–S10/S14 |
 | `T-O-203` | `product / dual-channel` | **默认双通道**（Original+Summary 共 GenerationScopedCoordinate、默认可索引）是 LS-RAG **根本**，非可选插件。 | S07/S08/S10 |
 | `T-O-204` | `product / granularity` | v1 **默认粒度集合 {0,1,2}**：0=FullDocument 全文层；1=Section 章节层；2=Paragraph 段落层；定义与举例以 §0.3 为准；更细层须 profile 显式注册。 | S06/S07/S08 |
-| `T-O-205` | `product / full-document vector` | **粒度 0（FullDocument）必须进入向量候选**（original 非空则必有 original 向量意图；summary 在 dual-channel 完备规则下进入 summary 意图）。 | S07/S08 |
+| `T-O-205` | `product / full-document vector` | **粒度 0（FullDocument）必须进入向量候选**。向量通道条款由 `T-O-352` 修订：g=0 original 保留在 construct dual-channel，**不**进入 VectorizationUnit required-set；**仅** g=0 summary 强制 required。 | S07/S08 |
 | `T-O-206` | `product / construct-gate` | **仅** `lsrag.construct` full_valid + dual-channel 完备 + g=0 在场 + multi-pointer CAS 后，才可交付 `vectorize_construct`；禁止跳过 construct 直接 vectorize。 | S07/S08/S03 |
 | `T-O-207` | `product / failure-ref` | 向量化/结构/构造/清洗叶失败的 retry、max_retries、向上归约 **只引用 D01/S03**（及 S11 transport 分账）；**D05 不新建**重试真相。 | S03/S05–S08/S11 |
 | `T-O-208` | `product / prompt-trinity` | 生产主链模型指令 **三身份闭集**：**promptA=Clean**、**promptB=Structurizer**、**promptC=Summarizer**；命名 `prompt{A\|B\|C}.variant.version`；正文 git `data/prompts/**`；DB 仅 content_hash 指针；运行 hash 校验 fail-fast；锚定 §0.2/§0.6。 | S05/S06/S07/S14/D03 |
 | `T-O-209` | `product / recall` | 召回：summary 可增强命中；Traceback 还原 original；Hit/Payload 分账；TracebackStatus 默认可观测；DocumentInflation 允许有界 g=0；ContextTier 交付多等级上下文。 | S10 |
 | `T-O-210` | `product / pipeline` | 规范链：promptA@clean → promptB@structurize → promptC@construct → gate → vectorize → publication → retrieve；阶段成功分账；存在≠可服务。 | S05–S10 |
+| `T-O-352` | `product / g0 summary-only vector` | **业主修订 `T-O-205`/`T-O-213`/`T-O-222` 向量通道（2026-08-14）**：g=0 仍是 dual-channel construct 必在场单位（original 必须 `reattached\|native_full`，供 Traceback/Inflation/SSOT）。**向量候选只强制 g=0 summary**：g=0 original **不**进入 required-set，也不得记成 empty-skip。g=0 summary 非空时强制 required，禁止 empty-skip 或 live budget-skip 消灭。g≥1 两通道规则不变。 | S07/S08/S09/S10 |
 
 ---
 
@@ -66,10 +67,10 @@
 
 **LS-RAG 根本不变量（Owner）**：
 
-1. **双通道默认开启**：每个应索引单元同时具备 **OriginalChannel** 与 **SummaryChannel** 的可索引资格（body 非空才物化向量行；construct 成功要求 dual-channel 完备——S07）。  
-2. **默认三粒度** `0 | 1 | 2`（见 §0.3）；可 profile 扩展更细，但 v1 **系统默认只要求这三层**。  
-3. **粒度 0（FullDocument）必须进入向量候选**（original 非空则必 embed；其 summary 在 dual-channel 完备规则下亦进入候选）。  
-4. **construct 合法完成后** 才 fanout 给 vectorize（§0.4）。  
+1. **双通道默认开启**：每个应索引单元同时具备 **OriginalChannel** 与 **SummaryChannel** 的可索引资格（body 非空才物化向量行；construct 成功要求 dual-channel 完备——S07）。
+2. **默认三粒度** `0 | 1 | 2`（见 §0.3）；可 profile 扩展更细，但 v1 **系统默认只要求这三层**。
+3. **粒度 0（FullDocument）必须进入向量候选，且仅通过 summary 通道**（g=0 original 留在 construct dual-channel，不进 required-set；`T-O-352`）。
+4. **construct 合法完成后** 才 fanout 给 vectorize（§0.4）。
 5. 召回：summary 可增强命中；**PayloadContent 优先 original**（Traceback）。
 
 **一句话（冻结）**：
@@ -78,9 +79,9 @@
 
 ### 0.2 端到端业务链（规范 · 含三生产 Prompt 锚定）
 
-> **生产链上的模型指令只有三类产品身份**（Owner 冻结命名）：  
-> **`promptA`** = Clean · **`promptB`** = Structurizer · **`promptC`** = Summarizer。  
-> 身份格式：`prompt{A|B|C}.<variant>.<version>`；运行真值 = **DB hash 指针** 校验的 git 正文（D03）。  
+> **生产链上的模型指令只有三类产品身份**（Owner 冻结命名）：
+> **`promptA`** = Clean · **`promptB`** = Structurizer · **`promptC`** = Summarizer。
+> 身份格式：`prompt{A|B|C}.<variant>.<version>`；运行真值 = **DB hash 指针** 校验的 git 正文（D03）。
 > 详语义见 **§0.6**。
 
 ```text
@@ -134,9 +135,9 @@
 
 #### 0.3.1 粒度 0 — FullDocument 详解
 
-- **必须存在**：每个成功 structure/construct 投影中，至少有一个 FullDocument 单元（S06 projection profile 强制 full-document block 语义）。  
-- **向量候选**：Owner 冻结——**必须进入 vectorize 候选集**（original 非空 → 必有 original 向量意图；summary 在 dual-channel 完备后进入 summary 向量意图）。  
-- **召回角色**：DocumentInflation 的目标层；直接命中 g=0 时 ContextTier=`document_root`。  
+- **必须存在**：每个成功 structure/construct 投影中，至少有一个 FullDocument 单元（S06 projection profile 强制 full-document block 语义）。
+- **向量候选**：Owner 冻结——**必须进入 vectorize 候选集**（original 非空 → 必有 original 向量意图；summary 在 dual-channel 完备后进入 summary 向量意图）。
+- **召回角色**：DocumentInflation 的目标层；直接命中 g=0 时 ContextTier=`document_root`。
 - **body 内容**：整文 original（可截断仅受 profile 预算约束，不得默认省略该 unit）。
 
 #### 0.3.2 粒度 1 — 章节层举例
@@ -169,29 +170,30 @@
 
 ```text
 同一文档 construct 后（默认）:
-  ≥1 × (granularity=0, channel=original|summary)
+  ≥1 × (granularity=0, channel=original|summary)   # construct 双通道
   N₁ × (granularity=1, ...)
   N₂ × (granularity=2, ...)
 每个 (unit, channel) 在 body 非空时 → 一个 VectorizationUnit
+例外：g=0 original 保留在 construct，不形成 VectorizationUnit（`T-O-352`）
 ```
 
-- 三层 **共享同一 EmbeddingSpace（Layer A）**；粒度不是 namespace。  
+- 三层 **共享同一 EmbeddingSpace（Layer A）**；粒度不是 namespace。
 - v1 **不要求** g>2；若 profile 产出更细层，须显式注册，否则 validation fail-loud。
 
 ### 0.4 Construct → Vectorize 交付门闩（Owner 冻结）
 
 **仅当** 同时满足，才允许 enqueue / 消费 `vectorize_construct`：
 
-1. `lsrag.construct` ProcessOutcome 表示 **成功**（S07：`disposition=full_valid`）；  
-2. per-type **current** 已 CAS：`construction_document` + `dual_channel_projection`（+ validation 面）；  
-3. DualChannelProjection 满足 **整包 dual-channel 完备**（S07-T028：每个 non-empty original 位有 grounded summary）；  
-4. 粒度默认集合中 **含 FullDocument（0）** 且其 original 可进入候选；  
+1. `lsrag.construct` ProcessOutcome 表示 **成功**（S07：`disposition=full_valid`）；
+2. per-type **current** 已 CAS：`construction_document` + `dual_channel_projection`（+ validation 面）；
+3. DualChannelProjection 满足 **整包 dual-channel 完备**（S07-T028：每个 non-empty original 位有 grounded summary）；
+4. 粒度默认集合中 **含 FullDocument（0）** 且其 **summary** 可进入向量候选（original 必须装回在 construct，但不进 required-set）；
 5. outbox payload 仅 **exact construct generation refs + digests**（无全文）。
 
 **禁止**：
 
-- structurize 成功后直接 vectorize（跳过 construct）；  
-- 半包 dual-channel、缺 g=0、缺 summary 完备仍投递 vectorize；  
+- structurize 成功后直接 vectorize（跳过 construct）；
+- 半包 dual-channel、缺 g=0、缺 summary 完备仍投递 vectorize；
 - 以 pending 队列表行冒充「合法原料」。
 
 ### 0.5 向量化失败：只引用既有流程真相（禁止 D05 自建）
@@ -207,13 +209,13 @@
 | 背压 | S11 `INFERENCE_BACKPRESSURE` | Outcome `retryability=retryable`；S03 调度 |
 | construct 失败 | **S07** 整包失败不 CAS + S03 max-retries | 无 vectorize 原料则 **不得** 进入 vectorize |
 
-**vectorize 失败语义（产品层一句话，机制归 S03）**：  
+**vectorize 失败语义（产品层一句话，机制归 S03）**：
 向量化是叶 Process；失败不得静默丢意图；是否再试、何时终态 failed、如何上卷 Task，**全部由 S03/D01 状态机与 max_retries 决定**。
 
 ### 0.6 生产三 Prompt 身份冻结（`promptA` / `promptB` / `promptC`）
 
-> **Owner 强制（v0.4）**：凡进入「可检索知识生产主链」的模型指令，必须先归入下列 **三产品身份** 之一并完成命名；  
-> **Clean 与 Structurizer / Summarizer 同属生产环节**，不得把 Clean Prompt 排除在生产链标定之外。  
+> **Owner 强制（v0.4）**：凡进入「可检索知识生产主链」的模型指令，必须先归入下列 **三产品身份** 之一并完成命名；
+> **Clean 与 Structurizer / Summarizer 同属生产环节**，不得把 Clean Prompt 排除在生产链标定之外。
 > 查询侧 rewrite/rerank 等 **不是** promptA/B/C。
 
 #### 0.6.1 命名与真值模型（冻结）
@@ -317,24 +319,24 @@ promptC + Construction dual-channel rules       →  Summary 通道完备
 ContentFullRecipe（确定性，非 Prompt）         →  embed 输入文本
 ```
 
-- **多粒度的主工具是 promptB**（+ schema），不是 promptA/C。  
-- **双通道 Summary 侧主工具是 promptC**。  
+- **多粒度的主工具是 promptB**（+ schema），不是 promptA/C。
+- **双通道 Summary 侧主工具是 promptC**。
 - **Original 保真**依赖 promptA 输出质量 + promptB 不改写 + S06 kernel。
 
 #### 0.6.6 强制与禁止
 
 **强制**：
 
-1. 主链 Clean / Structurize / full_construct 必须解析到 **promptA / promptB / promptC** 之一的 `PromptRefV1`；  
-2. hash 校验失败 = 配置/依赖失败（readiness 或 Process non_retryable/依赖类错误，按 S03/S05 错误轴）；  
+1. 主链 Clean / Structurize / full_construct 必须解析到 **promptA / promptB / promptC** 之一的 `PromptRefV1`；
+2. hash 校验失败 = 配置/依赖失败（readiness 或 Process non_retryable/依赖类错误，按 S03/S05 错误轴）；
 3. S14 registry 登记 identity→path→hash；S05/S06/S07 只引 ref。
 
 **禁止**：
 
-1. 无名 Prompt 字符串散落 services；  
-2. 把 Clean 排除在「生产 Prompt」之外；  
-3. 用 promptC 改 original，或用 promptB 做 HTML 清洗；  
-4. DB 存第二份可独立编辑的 Prompt 正文；  
+1. 无名 Prompt 字符串散落 services；
+2. 把 Clean 排除在「生产 Prompt」之外；
+3. 用 promptC 改 original，或用 promptB 做 HTML 清洗；
+4. DB 存第二份可独立编辑的 Prompt 正文；
 5. vectorize 冒充第四生产 Prompt 身份挤进 A/B/C。
 
 ### 0.7 债务 / 风险 → MKB 方案（摘要）
@@ -460,7 +462,7 @@ Query → Layer B filter → embed (Layer A)
 |---|---|
 | 双通道 | `mkb_vector_records.channel` |
 | 粒度 unit | `block_or_unit_id` + 应用层 granularity 元数据（payload_extra 或晋升列；**产品语义 0/1/2**） |
-| FullDocument 必索引 | S08 验收：存在 g=0 original 向量意图/行（在 construct 完备前提下） |
+| FullDocument 必索引 | S08 验收：存在 g=0 **summary** 向量意图/行；g=0 original 在 construct 完备，不写向量行（`T-O-352`） |
 | 交付门闩 | outbox 仅在 construct CAS 后 |
 | 禁 vec_process / content_full 列 | 已确认 |
 | Traceback | 同 generation+unit，不同 channel |
@@ -581,9 +583,9 @@ data/prompts/lsrag/construct/** # SummaryPrompt 正文
 
 **校验规则（contracts + S07）摘录**：
 
-- `full_document_present == true`  
-- `granularity_set` ⊇ `{0,1,2}`（若文档过短可无 g=1/2，但 **不得无 g=0**；无中层时须显式 `not_applicable` 审计——**短文例外**须 profile 声明，默认期望三层）  
-- 每个 `original` 非空 unit 的 `summary.disposition == present_grounded`  
+- `full_document_present == true`
+- `granularity_set` ⊇ `{0,1,2}`（若文档过短可无 g=1/2，但 **不得无 g=0**；无中层时须显式 `not_applicable` 审计——**短文例外**须 profile 声明，默认期望三层）
+- 每个 `original` 非空 unit 的 `summary.disposition == present_grounded`
 - 禁止 `channel` 缺失的向量意图
 
 #### 5.2.4 `VectorizationUnitV1` 扇出（由上例生成）
@@ -653,8 +655,8 @@ for unit in units:
 
 生产 JSON Schema 对模型声明（锚：`getStructuredJsonSchemaAsObject`）：
 
-- `granularity`：**0 = 全文，1 = 章节，依此类推**  
-- 每块必有 `original_content` + `llm_summary` 对象（结构阶段 summary 内字段可为 null）  
+- `granularity`：**0 = 全文，1 = 章节，依此类推**
+- 每块必有 `original_content` + `llm_summary` 对象（结构阶段 summary 内字段可为 null）
 - `layered_content.minItems ≥ 1`（至少全文块）
 
 MKB contracts + **promptB** 正文须等价约束 **0/1/2 三层**（短文 profile 例外另册）。
@@ -677,7 +679,7 @@ MKB contracts + **promptB** 正文须等价约束 **0/1/2 三层**（短文 prof
 | D05 高等级权威 / D>S | T-O-202 | **frozen** |
 | 双通道根本 | T-O-203 | **frozen** |
 | 粒度 0/1/2 | T-O-204 | **frozen** |
-| FullDocument 必向量候选 | T-O-205 | **frozen** |
+| FullDocument 必向量候选 | T-O-205 / T-O-352 | **frozen**（向量通道仅 summary） |
 | construct→vectorize 门闩 | T-O-206 | **frozen** |
 | 失败仅引 D01/S03 | T-O-207 | **frozen** |
 | promptA/B/C + hash | T-O-208 | **frozen** |

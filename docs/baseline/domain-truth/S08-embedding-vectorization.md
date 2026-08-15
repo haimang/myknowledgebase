@@ -28,7 +28,7 @@
 
 > **Owner 产品边界**：S08 是 **document-side 向量化写侧**。在 ConstructToVectorizeGate 之后，将 dual-channel 合法原料展开为 VectorizationUnit，经 S11 `embed` 生成向量，幂等 upsert 到同库 `mkb_vector_records`。**不**拥有：serving/PublicationProof（S09）；召回/Traceback/Rerank（S10）；Process 八态/`max_retries`（S03/D01）；filter/facet **产品**定义与 wire map（**S04**）；promptA/B/C（D05/S14）；推理 transport 细节（S11）。
 
-> **D05 校准（T-O-202..210）**：默认双通道；粒度 0/1/2；g=0 必入向量候选；construct 合法后才 vectorize；失败只引 D01/S03；vectorize **无**第四生产 Prompt。
+> **D05 校准（T-O-202..210 / T-O-352）**：默认双通道；粒度 0/1/2；g=0 **summary** 必入向量候选；g=0 original 留在 construct 不进 required-set；construct 合法后才 vectorize；失败只引 D01/S03；vectorize **无**第四生产 Prompt。
 
 > **S04 分账（T-O-229 HARD）**：filter/facet 权威 **只在 S04**。S08 **仅**执行写面：把已解析 facet **抄写**到向量行；**禁止**在 S08 内 map `industry-type` 等 wire 键或发明 domain。
 
@@ -50,11 +50,11 @@
 
 S08 把 **已构造完备的 dual-channel 知识** 变成 **可检索的同库原生向量行**，并保证：
 
-1. 只有 construct 合法原料可进入向量化（ConstructToVectorizeGate）；  
-2. original/summary 在 generation-scoped 坐标上可索引且可对账；  
-3. g=0 FullDocument 不被 skip 掏空；  
-4. 失败可恢复（S03 max-retries + 幂等 upsert），半写不可服务；  
-5. 业务 filter 与空间隔离分账，且不抢 S04 权威；  
+1. 只有 construct 合法原料可进入向量化（ConstructToVectorizeGate）；
+2. original/summary 在 generation-scoped 坐标上可索引且可对账；
+3. g=0 FullDocument 不被 skip 掏空；
+4. 失败可恢复（S03 max-retries + 幂等 upsert），半写不可服务；
+5. 业务 filter 与空间隔离分账，且不抢 S04 权威；
 6. 实现者 **无需** 打开 QNA 即可编码与验收。
 
 ### 1.2 在整体拓扑中的位置
@@ -83,17 +83,17 @@ S09 index.validate_publication  →  S10 retrieve
 
 **S08 负责：**
 
-- ProcessCapability `lsrag.vectorize` 与 mode 闭集；  
-- ProcessCommand / ProcessOutcome / command_input_digest 合同；  
-- outbox `vectorize_construct` 消费语义（at-least-once + 幂等）；  
-- required VectorizationUnit 展开与整包二元成败；  
-- ContentFullRecipe 重算与对账；  
-- 有界 batch、渐进幂等 upsert、最终 gate；  
-- `purge_generation` 逻辑 soft-delete；  
-- metadata_refresh 后 digest 变/短路策略（消费侧）；  
-- original 装回 HARD 校验；  
-- Layer B **执行抄写**；  
-- 错误码 / readiness / OOS；  
+- ProcessCapability `lsrag.vectorize` 与 mode 闭集；
+- ProcessCommand / ProcessOutcome / command_input_digest 合同；
+- outbox `vectorize_construct` 消费语义（at-least-once + 幂等）；
+- required VectorizationUnit 展开与整包二元成败；
+- ContentFullRecipe 重算与对账；
+- 有界 batch、渐进幂等 upsert、最终 gate；
+- `purge_generation` 逻辑 soft-delete；
+- metadata_refresh 后 digest 变/短路策略（消费侧）；
+- original 装回 HARD 校验；
+- Layer B **执行抄写**；
+- 错误码 / readiness / OOS；
 - 向 S09 的 VectorizeHandoff。
 
 **S08 不负责：**
@@ -123,14 +123,14 @@ S09 index.validate_publication  →  S10 retrieve
 
 ### 1.5 完成定义
 
-1. §2 全部 Truth 被 contracts、迁移与 transition 实现；  
-2. construct 门闩前无法进入成功 vectorize；  
-3. dual-channel required-set 整包成败 + g=0 强制可验收；  
-4. ContentFull 对账失败 fail-loud；  
-5. 渐进 upsert + 最终 gate + 半写不可 publication；  
-6. Layer B 只抄写 S04 权威；  
-7. 零 legacy vectorizer runtime dependency；  
-8. 实现 **无需** 打开 QNA；  
+1. §2 全部 Truth 被 contracts、迁移与 transition 实现；
+2. construct 门闩前无法进入成功 vectorize；
+3. dual-channel required-set 整包成败 + g=0 **summary** 强制可验收；
+4. ContentFull 对账失败 fail-loud；
+5. 渐进 upsert + 最终 gate + 半写不可 publication；
+6. Layer B 只抄写 S04 权威；
+7. 零 legacy vectorizer runtime dependency；
+8. 实现 **无需** 打开 QNA；
 9. §6 验收矩阵通过。
 
 ---
@@ -143,7 +143,7 @@ S09 index.validate_publication  →  S10 retrieve
 |---|---|---|
 | `T-O-211` | S08 = 向量写侧域；不吞 S09/S10/S04 产品 | scope fence |
 | `T-O-212` | ConstructToVectorizeGate；禁 structure 直通 | gate |
-| `T-O-213` | 双通道 + g0/1/2；g=0 必候选 | expand |
+| `T-O-213` | 双通道 + g0/1/2；g=0 **summary** 必候选（`T-O-352`） | expand |
 | `T-O-214` | 最终本体 = records.embedding；禁 content_full 列 / 外置 SSOT / vec_process | physical |
 | `T-O-215` | 单 outbox；payload 无全文 | queue |
 | `T-O-216` | 失败只引 D01/S03；transport 内环分账 | retry |
@@ -152,12 +152,12 @@ S09 index.validate_publication  →  S10 retrieve
 | `T-O-219` | 存在 ≠ serving | publication fence |
 | `T-O-220` | legacy-family only 证据 | greenfield |
 | `T-O-221` | `lsrag.vectorize` + mode；v1 仅 from_construct；S09 publication | capability |
-| `T-O-222` | required-set 整包二元成败；g=0 不可 skip 消灭 | outcome |
+| `T-O-222` | required-set 整包二元成败；g=0 **summary** 不可 skip 消灭（`T-O-352`） | outcome |
 | `T-O-223` | I1 recipe；T1 fail-loud 预算；G1 不自动 purge 旧代；P1 不强制 granularity 列 | write contract |
 | `T-O-224` | original detach/reattach；S08 original 只吃装回后文本 | fidelity |
 | `T-O-225` | Command/Outcome/outbox at-least-once；digest 含 model/namespace | command |
 | `T-O-226` | 有界 batch + 渐进幂等 upsert + 最终 gate；失败不补偿删 | batch |
-| `T-O-227` | purge soft-delete；refresh digest 短路；original HARD | purge/refresh |
+| `T-O-227` | purge soft-delete；refresh digest 短路；construct g=0 original HARD（不进 required） | purge/refresh |
 | `T-O-228` | 错误码闭集 + readiness + OOS | ops |
 | `T-O-229` | Layer B **只抄写** S04；零 map | filter write |
 | `T-O-230` | VectorizeHandoff；S09 独立；Round 4 waived | closure |
@@ -174,9 +174,9 @@ S09 index.validate_publication  →  S10 retrieve
 | `S08-T006` | materialize 后 `command_input_digest` 冻结（含 mode+generation+recipe+model+namespace）；retry 同 digest。 | T-O-225 | 不可热切 |
 | `S08-T007` | outbox `vectorize_construct` 与 construct CAS 同 TX 入队；投递 at-least-once；S08 claim 对齐 digests。 | T-O-215/225 | Transactional Outbox |
 | `S08-T008` | 成功 **仅** Outcome `disposition=full_valid`；禁 outbox done/ACK/path/正文。 | T-O-225/230 | |
-| `S08-T009` | required unit = trim 后 content_full/body 非空的 unit×channel；g=0 original（non-empty）强制 required。 | T-O-213/222 | |
+| `S08-T009` | required unit = trim 后 content_full/body 非空的 unit×channel，**排除** g=0 original；g=0 summary（non-empty）强制 required。 | T-O-213/222/352 | |
 | `S08-T010` | 整包二元：全部 required upsert 成功才 full_valid；禁止 partial success。 | T-O-222 | |
-| `S08-T011` | 空配方 skip 可观测；**不得**用 skip 消灭 g=0 original。 | T-O-222 | |
+| `S08-T011` | 空配方 skip 可观测；**不得**用 skip 消灭 g=0 summary。g=0 original 不是 vector unit，不记 empty-skip。 | T-O-222/352 | |
 | `S08-T012` | ContentFullRecipe **强制重算**；有 digest 则 `H(recomputed)==digest` 否则 `CONTENT_MISMATCH`。 | T-O-223/217 | |
 | `S08-T013` | 超预算 fail-loud（`BUDGET_*`）；禁静默截断冒充成功。 | T-O-223 | |
 | `S08-T014` | 稳定 unit 序 `(granularity, unit_id, channel)`；有界 batch；provider 拒绝可 bisect。 | T-O-226 | |
@@ -189,7 +189,7 @@ S09 index.validate_publication  →  S10 retrieve
 | `S08-T021` | `from_construct` 只写 command 绑定的 **新** construct generation；不自动 purge 旧代。 | T-O-223 G1 | |
 | `S08-T022` | `purge_generation`：按 generation soft-delete；可选 channel_filter；≠ 物理销毁。 | T-O-227 | |
 | `S08-T023` | refresh 后：content_full 相关 digest 变 → 必须新 vectorize；未变且 model/ns 未变可短路。 | T-O-227 | |
-| `S08-T024` | original 通道 HARD：g=0 非空 + reattach/native_full；禁 detach 中间态。 | T-O-224/227 | |
+| `S08-T024` | construct 中 g=0 original HARD：非空 + reattach/native_full；禁 detach 中间态。该通道不进入 required-set。 | T-O-224/227/352 | |
 | `S08-T025` | 只经 S11 embed；Layer A fail-closed；禁 silent 跨 model。 | T-O-218 | |
 | `S08-T026` | Layer B **只抄写** S04 已解析 facet；S08 零 wire map。 | T-O-229 | |
 | `S08-T027` | 强制写 team/item/revision/generation/unit/channel + Layer A。 | T-O-229 | |
@@ -207,28 +207,28 @@ S09 index.validate_publication  →  S10 retrieve
 
 ### 2.3 继承上游（不重开）
 
-- **D01/S03**：Process 八态、claim/fence、max_retries、Outcome 上卷。  
-- **D05**：双通道/g0/门闩/失败引用/无第四 Prompt。  
-- **S07**：dual_channel full_valid、recipe、outbox 同 TX。  
-- **S04**：filter/facet 权威与 map。  
-- **S11**：embed Port、transport、闸、Layer A。  
-- **D04/S12**：records/namespaces/outbox/TX。  
-- **S13**：object handle（若 content 字节经对象存）。  
+- **D01/S03**：Process 八态、claim/fence、max_retries、Outcome 上卷。
+- **D05**：双通道/g0/门闩/失败引用/无第四 Prompt。
+- **S07**：dual_channel full_valid、recipe、outbox 同 TX。
+- **S04**：filter/facet 权威与 map。
+- **S11**：embed Port、transport、闸、Layer A。
+- **D04/S12**：records/namespaces/outbox/TX。
+- **S13**：object handle（若 content 字节经对象存）。
 - **D02**：六 StateFamily；pointer/proof 分账。
 
 ---
 
 ## 3. 总体方案陈述
 
-1. **门闩在前**：无 construct full_valid + dual-channel 完备 + g=0，不得成功 vectorize。  
-2. **单 capability + mode**：与 S07 同构；publication 外置 S09。  
-3. **整包 required-set 二元成败**：与 S07 T-O-138 同构。  
-4. **配方可对账**：ContentFull 派生；禁向量表存全文。  
-5. **有界批 + 渐进幂等写 + 最终 gate**：半写可留、不可服务。  
-6. **失败归 S03**：无 S08 私有状态机；transport 内环分账。  
-7. **世代显式**：新 generation 只写新；旧代 soft-delete 显式 purge。  
-8. **原文保真**：只索引装回后 original。  
-9. **Layer B 抄写**：S04 权威，S08 零 map。  
+1. **门闩在前**：无 construct full_valid + dual-channel 完备 + g=0，不得成功 vectorize。
+2. **单 capability + mode**：与 S07 同构；publication 外置 S09。
+3. **整包 required-set 二元成败**：与 S07 T-O-138 同构。
+4. **配方可对账**：ContentFull 派生；禁向量表存全文。
+5. **有界批 + 渐进幂等写 + 最终 gate**：半写可留、不可服务。
+6. **失败归 S03**：无 S08 私有状态机；transport 内环分账。
+7. **世代显式**：新 generation 只写新；旧代 soft-delete 显式 purge。
+8. **原文保真**：只索引装回后 original。
+9. **Layer B 抄写**：S04 权威，S08 零 map。
 10. **QNA 零依赖**：执行细节全部在本文 §4 E 包。
 
 ---
@@ -321,12 +321,12 @@ outbox mark done 可与成功 TX 同事务或严格后置；done ≠ 业务成�
 | 2 | 校验 command_input_digest | BINDING |
 | 3 | load exact dual_channel current + digests | BINDING |
 | 4 | 确认 S07 full_valid 语义仍成立（current 指针、完备证明） | BINDING / DEPENDENCY |
-| 5 | Original HARD（E07） | ORIGINAL_NOT_REATTACHED |
-| 6 | 枚举 unit×channel；算 ContentFull（E05）；形成 required 集 | CONTENT_MISMATCH / BUDGET |
-| 7 | 断言 g=0 original 在 required（若应有） | BINDING / ORIGINAL_* |
+| 5 | Construct g=0 original HARD（E07；不进 required） | ORIGINAL_NOT_REATTACHED |
+| 6 | 枚举 unit×channel；算 ContentFull（E05）；形成 required 集；**排除** g=0 original | CONTENT_MISMATCH / BUDGET |
+| 7 | 断言 g=0 **summary** 在 required | G0_SUMMARY_REQUIRED |
 
-**应索引谓词**：trim 后 body/content_full **非空**。  
-**g=0**：non-empty original 必须 required；缺失 → fail。
+**应索引谓词**：trim 后 body/content_full **非空**，且不是 g=0 original。
+**g=0**：non-empty **summary** 必须 required；缺失 → fail。g=0 original 必须已装回在 construct，但不形成 VectorizationUnit。
 
 **小结**：门闩可复验；闭包完整。
 
@@ -402,10 +402,12 @@ else:
 
 | 检查 | 失败 |
 |---|---|
-| g=0 original unit 存在 | ORIGINAL_NOT_REATTACHED |
-| body/content_full 非空（应有时） | 同上 |
+| construct 中 g=0 original unit 存在且已装回 | ORIGINAL_NOT_REATTACHED |
+| body/content_full 非空（construct 侧） | 同上 |
 | proof `reattach_status` ∈ {`reattached`,`native_full`}（若字段存在） | 同上 |
-| 标记 detached / stripped | 禁止 embed |
+| 标记 detached / stripped | 禁止进入 vectorize |
+| g=0 original **不**进入 required-set | — |
+| g=0 summary 在 required | G0_SUMMARY_REQUIRED |
 
 **禁止**：S08 从 clean Artifact 重切 original 充当权威（O-c）；全信标签不校验（O-b）。
 
@@ -457,9 +459,9 @@ S08 = 抄写已解析值到可索引字段；零 map
 
 **Facet 抄写**
 
-1. S04 权威有 `industry_domain`（等）→ **必须**写入可索引落点（列或 typed 结构；DDL 以 D04 为准）。  
-2. 权威无该键 → NULL；**不**读 Task wire；**不**发明。  
-3. 配置要求强制有值而缺失 → `FILTER_PROJECTION_*` / BINDING。  
+1. S04 权威有 `industry_domain`（等）→ **必须**写入可索引落点（列或 typed 结构；DDL 以 D04 为准）。
+2. 权威无该键 → NULL；**不**读 Task wire；**不**发明。
+3. 配置要求强制有值而缺失 → `FILTER_PROJECTION_*` / BINDING。
 4. 禁止 payload_extra 当 filter SSOT；禁止模型发明键。
 
 **industry-type 示例（引用 S04，非本域产品定义）**
@@ -523,9 +525,9 @@ outbox_dedupe_key?
 
 **Readiness=false 当**（S08-T032）：
 
-1. 默认 local embed binding/catalog 不可用；  
-2. vector migration / native vector / ANN 能力缺失（D04/S12）；  
-3. namespace bootstrap 策略缺失且配置强制；  
+1. 默认 local embed binding/catalog 不可用；
+2. vector migration / native vector / ANN 能力缺失（D04/S12）；
+3. namespace bootstrap 策略缺失且配置强制；
 4. Vectorize contracts 未注册。
 
 **OOS（S08-T033）**：无公网 vector CRUD；无 S08 内 ANN/serving；无 silent 跨 model；无 unit 微 Process；无 from_structure；无默认物理 hard-delete；无 S08 内 facet 产品 map。
@@ -596,7 +598,7 @@ outbox_dedupe_key?
 |---|---|---|
 | S08-A01 | construct 未 full_valid 不能 full_valid vectorize | 集成 / 门闩单测 |
 | S08-A02 | dual-channel required 缺一失败 | 集成 |
-| S08-A03 | g=0 original 缺失/stripped → fail | 单测 |
+| S08-A03 | construct 中 g=0 original 缺失/stripped → fail；g=0 original 不在 required；缺 g=0 summary → fail | 单测 |
 | S08-A04 | ContentFull 错 digest → CONTENT_MISMATCH | 单测 |
 | S08-A05 | 同 command_input_digest 重放幂等 | 集成 |
 | S08-A06 | 半写后失败 → 无 publication；重试覆盖成功 | 故障注入 |
@@ -650,11 +652,11 @@ S08-v1.0 将 progressive `T-O-211..230` 升格为 **唯一可编码执行真相*
 
 ### 8.3 对下游约束
 
-- **S03**：注册 `lsrag.vectorize`；phase 可保留 `vectorizing_indexing` 但不包办 publication。  
-- **S07**：继续同 TX outbox；Handoff 消费面稳定。  
-- **S04**：facet map 产品 formal 可独立推进；S08 不 reopen。  
-- **S09**：必须消费 Handoff；过滤 soft-deleted。  
-- **S10**：Layer B 过滤依赖 S08 抄写完整性。  
+- **S03**：注册 `lsrag.vectorize`；phase 可保留 `vectorizing_indexing` 但不包办 publication。
+- **S07**：继续同 TX outbox；Handoff 消费面稳定。
+- **S04**：facet map 产品 formal 可独立推进；S08 不 reopen。
+- **S09**：必须消费 Handoff；过滤 soft-deleted。
+- **S10**：Layer B 过滤依赖 S08 抄写完整性。
 - **实现**：只读本文 + contracts + D04 DDL。
 
 ### 8.4 完成状态
