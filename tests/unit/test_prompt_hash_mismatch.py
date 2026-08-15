@@ -27,17 +27,17 @@ async def test_prompt_byte_drift_after_bootstrap_is_prompt_hash_mismatch(tmp_pat
     try:
         await persistence.migrate()
         await registry.bootstrap()
-        body, digest = await registry.load_prompt("promptB.default", "v1")
+        body, digest = await registry.load_prompt("promptB.json.generic", "v1")
         assert body
         assert len(digest) == 64
         assert await registry.readiness() is True
 
-        target = prompt_root / "prompt-b-structure-v1.md"
+        target = prompt_root / "json" / "promptB.json.generic.v1.md"
         original = target.read_text(encoding="utf-8")
         target.write_text(original + "\n# drifted without pointer update\n", encoding="utf-8")
 
         with pytest.raises(MkbError) as exc_info:
-            await registry.load_prompt("promptB.default", "v1")
+            await registry.load_prompt("promptB.json.generic", "v1")
         assert exc_info.value.code == "PROMPT_HASH_MISMATCH"
         assert await registry.readiness() is False
     finally:

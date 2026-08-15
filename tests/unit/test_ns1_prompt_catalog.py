@@ -24,7 +24,27 @@ async def test_bootstrap_registers_four_roles_and_json_closed_sets(tmp_path: Pat
         assert json_by_id["promptB.json.generic"].granularity_set == (0, 1, 2)
         assert json_by_id["promptB.json.legal"].granularity_set == (0, 1)
         assert json_by_id["promptB.json.realestate"].granularity_set == (0,)
-        assert {entry.prompt_id for entry in entries if entry.role == "clean"} >= {"promptA.clean", "promptA.default"}
+        assert json_by_id["promptB.documentation.default"].granularity_set == (0, 1, 2)
+        assert json_by_id["promptB.documentation.g0"].granularity_set == (0,)
+        assert json_by_id["promptB.documentation.g1"].granularity_set == (0, 1)
+        assert json_by_id["promptB.documentation.g2"].granularity_set == (0, 1, 2)
+        assert json_by_id["promptB.json.g0"].granularity_set == (0,)
+        assert json_by_id["promptB.json.g1"].granularity_set == (0, 1)
+        assert json_by_id["promptB.json.g2"].granularity_set == (0, 1, 2)
+        assert {entry.prompt_id for entry in entries if entry.role == "clean"} >= {
+            "promptA.clean",
+            "promptA.default",
+            "promptA.documentation.default",
+        }
+        markdown_ids = {entry.prompt_id for entry in entries if entry.role == "markdown" and entry.status == "active"}
+        assert markdown_ids >= {
+            "promptB.markdown.legal",
+            "promptB.documentation.qna",
+            "promptB.documentation.eval",
+            "promptB.documentation.closure",
+            "promptB.documentation.plan",
+            "promptB.documentation.code-review",
+        }
         assert all(entry.content_sha256 and len(entry.content_sha256) == 64 for entry in entries)
     finally:
         await persistence.close()
@@ -133,6 +153,11 @@ async def test_catalog_hash_resolve_soak_is_stable(tmp_path: Path) -> None:
         "promptB.json.generic",
         "promptB.json.legal",
         "promptC.summarizer",
+        "promptA.documentation.default",
+        "promptB.documentation.default",
+        "promptB.documentation.g1",
+        "promptB.documentation.qna",
+        "promptC.documentation.default",
     )
     try:
         await persistence.migrate()
