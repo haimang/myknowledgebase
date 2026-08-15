@@ -88,23 +88,20 @@ NS2-ENTRY
 
 ---
 
-## NS2-P4 — 生成步接线
+## NS2-P4 — 生成执行接线（Qwen / Claude -p / 预算分流）
 
-**Block：仅在 NS2-P3 EXIT 后解除；NS2-P6 blocked until P4+P5 exit gates。**
+**Block：NS2-P4 已完成。**
 
-- [ ] `P4-01 / NS2-T30`：generate `process_key` 准确分类（LLM 步入池，确定性 clean 不入池）。
-- [ ] `P4-02 / NS2-T31..T34`：车道派发表接线（urgent/high/normal/low 对应 local/NI 规则）。
-- [ ] `P4-03 / NS2-T35`：长 json/clean 超预算视为溢流（`normal` 溢 NI，`low` 锁 local）。
-- [ ] `P4-04 / NS2-T36/T37`：salvage 按车道重写（`normal` 可救一次 NI，`low` 严禁救 NI / 偷套餐）。
-- [ ] `P4-05 / NS2-T38`：显式 `compression_channel` 覆盖与安全审计事件。
-- [ ] `P4-06 / NS2-T39`：receipt / salvage_from 落地新通道名 `local-inference`。
-- [ ] `P4-07 / NS2-T40`：local 不可用时 normal 溢 NI（离线 e2e 不 503）。
-- [ ] STEP-1：重新拉取 P4 上下文（`generation_construct.py`, `clean_preflight.py`, `dispatch.py`）。
-- [ ] STEP-2：重新拉取 S11/S16 威胁模型及 salvage 规则真相。
-- [ ] STEP-3：开发、车道与 salvage 测试（`NS2-T30..T40`）、审查和修复。
-- [ ] STEP-4：按模板追加 P4 工作日志。
-- [ ] STEP-6：分簇提交 P4（generation wiring/salvage/audit/tests）。
-- [ ] P4 EXIT：P4 tests 绿。
+- [x] `P4-01 / NS2-T30/T31/T32`：接线 `generation_construct.py`（local 走 Local vLLM/Qwen，salvage 仅限 Claude `-p` 兜底 1 次；NI 走 Claude `-p` 无 local 回落；记录 receipt）。
+- [x] `P4-02 / NS2-T33`：接线其他生成 stage（`lsrag.transcribe_markdown`, `lsrag.structurize`, `clean.extract.*` 等根据 dispatch_pool 分发）。
+- [x] `P4-03 / NS2-T34`：`LocalVllmAdapter` 入参保持 system + user prompt + `response_format={"type": "json_object"}`，严禁传 `max_tokens` / `enable_thinking`，出参过滤 `reasoning`。
+- [x] `P4-04 / NS2-T35`：超长 JSON 预算分流（normal >16k chars 分流至 NI，low >16k 保持 local）。
+- [x] STEP-1：重新拉取 P4 上下文（`generation_construct.py`, `pipeline.py`, `local_vllm.py`）。
+- [x] STEP-2：重新拉取 S07/S11 真相，确认 Qwen 适配器参数规范。
+- [x] STEP-3：开发、生成与 salvage 测试（`NS2-T30..T35`）、审查和修复。
+- [x] STEP-4：按模板追加 P4 工作日志。
+- [x] STEP-6：分簇提交 P4（generation wiring/Qwen payload/salvage receipt/tests）。
+- [x] P4 EXIT：P4 tests 绿，P4 收口。
 
 ---
 

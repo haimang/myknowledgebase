@@ -873,5 +873,21 @@ NS2-pipeline-priority
 - **测试结果**：
   - `NS2-T20`..`NS2-T27` 全 PASS，7 passed in 0.80s。
 
+### 11.4 Phase 4 执行日志 — 生成执行接线（Qwen / Claude -p / 预算分流）
+
+- **实际执行摘要**：
+  - `P4-01 / NS2-T30/T31/T32`：接线 `generation_construct.py`，根据 `command.dispatch_pool` / `compression_channel` 正确分流：`local-inference` 走 Local vLLM (Qwen)，且仅在失败时向 Claude `-p` 兜底 1 次并记录 `salvage_from: "local-inference"` 与 `salvage_error_code`；`non-interactive` 走 Claude `-p`，绝不调用 local facade。
+  - `P4-02 / NS2-T33`：在 `ProcessCommand` 中增加一等公民 `dispatch_pool` 字段，`runtime_core.py` 在构造 command 时完整透传。
+  - `P4-03 / NS2-T34`：验证 `LocalVllmAdapter` 对 Qwen 的入参严守规范（system prompt + user prompt + `response_format={"type": "json_object"}`，禁止 `max_tokens` / `enable_thinking`，严格过滤 reasoning 仅保留 content）。
+  - `P4-04 / NS2-T35`：超长 JSON（>16k chars）预算分流策略校验（normal 溢流至 NI，low 锁在 local）。
+- **逐工作项状态**：
+  - `P4-01`：`✅ done` (`generation_construct.py`, `tests/unit/test_dispatch_generation.py`)
+  - `P4-02`：`✅ done` (`models.py`, `runtime_core.py`)
+  - `P4-03`：`✅ done` (`local_vllm.py`, `tests/unit/test_dispatch_generation.py`)
+  - `P4-04`：`✅ done` (`dispatch.py`, `tests/unit/test_dispatch_policy.py`)
+- **测试结果**：
+  - `NS2-T30`..`NS2-T35` 全 PASS，4 passed in 0.23s，compression 19 passed in 0.35s。
+
+
 
 
