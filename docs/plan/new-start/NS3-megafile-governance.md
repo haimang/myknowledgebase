@@ -829,6 +829,8 @@ NS3-megafile-governance
 | P3-01 | `✅ done` | `src/services/lsrag_construct/{binder,reconstruct,admit,service}.py` | 再证 + construct wrap |
 | P3-02 | `✅ done` | `generation_construct.py` / `generation_artifacts.py` | 无裸 `compiler.construct(`；salvage 留下 |
 | P3-03 | `✅ done` | `tests/unit/test_lsrag_construct_service.py` | P3 短途 + NS1/generation e2e |
+| P4-01 | `✅ done` | `src/services/lsrag_compiler/` 包；删除单文件 | 公开 import 0 差 |
+| P4-02 | `✅ done` | `tests/unit/test_lsrag_compiler_package.py` | 金样 + 包面测试 |
 
 ### 11.2 时序执行日志
 
@@ -840,6 +842,9 @@ NS3-megafile-governance
 | P2-T0 | 拉取 `_structurize` / compiler adopt / artifacts promote | 保持 normalize→adopt 双步 |
 | P2-T1 | 新建 `lsrag_structurize` + 改 Mixin | Mixin 不再出现 `adopt_layered_json_with_report` |
 | P2-T2 | P2 短途 + `test_ns1_pipeline.py` | 短途 45 passed；NS1 e2e 1 passed |
+| P3-T0 | 拉取 `_construct` / reconstruct / `compiler.construct` | I/O 与 salvage 留下 |
+| P3-T1 | 新建 `lsrag_construct` 并接线 | Mixin 无 `compiler.construct(` |
+| P3-T2 | P3 短途 + NS1 + generation e2e | 短途全绿；e2e 2 passed |
 
 - **Phase 1 偏差**：T04/T05 不用 `WorkflowRuntime.__mro__` 运行时 import，改 AST 读基类（substrate-fit：architecture 测试禁止拉应用依赖）。
 - **Phase 2 偏差**：无产品语义偏差；binder 对缺 candidate 用 409，与 Mixin `_layered_state_candidate` 对齐。

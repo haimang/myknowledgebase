@@ -28,7 +28,6 @@ from src.services.lsrag_compiler import (
     StructureDocument,
     construction_document_digest,
     projection_digest,
-    retrieval_projection_payload,
     structure_document_digest,
 )
 from src.services.lsrag_construct import LsragConstructService
