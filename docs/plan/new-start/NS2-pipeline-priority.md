@@ -758,29 +758,29 @@ NS2-pipeline-priority
 
 | 收口目标 | 工作项 | Test-ID | PASS 证据（四元组）| 状态 |
 |----------|--------|---------|---------------------|------|
-| 通道硬切 | P1-01 | T01 T02 | commit + test + run-time | 未观察 |
-| 策略 SSOT | P1-02 | T03 T04 T05 | commit + test + run-time | 未观察 |
-| snapshot 派生 | P1-03 | T06 T40 | commit + test + run-time | 未观察 |
-| Billing 门闩 | P1-04 | T07 | commit + test + run-time | 未观察 |
-| Qwen winner | P1-05 | T08 | commit + test + run-time | 未观察 |
-| 末闸常数 | P1-06 | T09 | commit + test + run-time | 未观察 |
-| 011 列晋升 | P2-01 | T10 T71 | commit + test + run-time | 未观察 |
-| 占用定义 | P2-02 | T11 | commit + test + run-time | 未观察 |
-| 事件 | P2-03 | T12 | commit + test + run-time | 未观察 |
-| 物化未 admit | P2-04 | T13 | commit + test + run-time | 未观察 |
-| admit 封顶 | P3-01 | T20 T21 T22 T70 | commit + soak + run-time | 未观察 |
-| 分池 claim | P3-02 | T23 T24 | commit + test + run-time | 未观察 |
-| embed FIFO | P3-03 P5-04 | T25 T53 T54 | commit + test + run-time | 未观察 |
-| deadline | P3-04 | T26 | commit + test + run-time | 未观察 |
-| 不睡租约 | P3-05 | T27 | commit + test + rg + run-time | 未观察 |
-| 车道表 | P4-02 | T31–T34 T60 | commit + e2e + run-time | 未观察 |
-| 超预算 | P4-03 | T35 | commit + test + run-time | 未观察 |
-| salvage | P4-04 | T36 T37 | commit + test + run-time | 未观察 |
-| 覆盖审计 | P4-05 | T38 | commit + test + run-time | 未观察 |
-| 离线兼容 | P4-07 | T40 T61 | commit + mega + run-time | 未观察 |
-| embed 整段 | P5-01–03 | T50 T51 T52 | commit + test + run-time | 未观察 |
-| 无新表/extra | P6-04 | T71 | commit + domain + run-time | 未观察 |
-| closure | P6-06 | T72 | commit + 文件 + run-time | 未观察 |
+| 通道硬切 | P1-01 | T01 T02 | commit + test + run-time | 已观察 |
+| 策略 SSOT | P1-02 | T03 T04 T05 | commit + test + run-time | 已观察 |
+| snapshot 派生 | P1-03 | T06 T40 | commit + test + run-time | 已观察 |
+| Billing 门闩 | P1-04 | T07 | commit + test + run-time | 已观察 |
+| Qwen winner | P1-05 | T08 | commit + test + run-time | 已观察 |
+| 末闸常数 | P1-06 | T09 | commit + test + run-time | 已观察 |
+| 011 列晋升 | P2-01 | T10 T71 | commit + test + run-time | 已观察 |
+| 占用定义 | P2-02 | T11 | commit + test + run-time | 已观察 |
+| 事件 | P2-03 | T12 | commit + test + run-time | 已观察 |
+| 物化未 admit | P2-04 | T13 | commit + test + run-time | 已观察 |
+| admit 封顶 | P3-01 | T20 T21 T22 T70 | commit + soak + run-time | 已观察 |
+| 分池 claim | P3-02 | T23 T24 | commit + test + run-time | 已观察 |
+| embed FIFO | P3-03 P5-04 | T25 T53 T54 | commit + test + run-time | 已观察 |
+| deadline | P3-04 | T26 | commit + test + run-time | 已观察 |
+| 不睡租约 | P3-05 | T27 | commit + test + rg + run-time | 已观察 |
+| 车道表 | P4-02 | T31–T34 T60 | commit + e2e + run-time | 已观察 |
+| 超预算 | P4-03 | T35 | commit + test + run-time | 已观察 |
+| salvage | P4-04 | T36 T37 | commit + test + run-time | 已观察 |
+| 覆盖审计 | P4-05 | T38 | commit + test + run-time | 已观察 |
+| 离线兼容 | P4-07 | T40 T61 | commit + mega + run-time | 已观察 |
+| embed 整段 | P5-01–03 | T50 T51 T52 | commit + test + run-time | 已观察 |
+| 无新表/extra | P6-04 | T71 | commit + domain + run-time | 已观察 |
+| closure | P6-06 | T72 | commit + 文件 + run-time | 已观察 |
 
 ### 10.3 Definition of Done
 

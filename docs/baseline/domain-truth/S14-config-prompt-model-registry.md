@@ -1082,3 +1082,9 @@ next free global   T-O-337
   B.json 经过 layered kernel adoption 后才可进入 C；C 只消费已验收的 layered JSON。
 - catalog CRUD 仅是内部 registry service / internal-token 面，版本不可原位覆盖，
   不提供 public、agent 或 marketplace authoring 面。
+
+## 附录 F · NS2 窄回填：L2 `channel_source`
+
+- ingest L2 增加 `compression_channel` 与 `channel_source`（`priority|explicit`）。omit 时由 `Task.priority` 派生，不再默认 `non-interactive`。
+- 显式 `compression_channel` 写入 `channel_source=explicit`，并在 Task 创建 UoW 写 `mkb_security_audit_events`（`config.compression_channel_override`，outcome=`allowed`，禁正文）。
+- execution payload 同步写入派生通道，避免 handler 再从 omit 回落 NI。

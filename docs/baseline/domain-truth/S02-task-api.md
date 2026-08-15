@@ -754,6 +754,12 @@ S02 将 Task 固定为可轮询、可线性化、可散射聚合且可完整追�
 
 ---
 
+## 附录 · NS2 窄回填：priority 双用
+
+公开 `Task.priority` 仍是封闭的 `low|normal|high|urgent`，不新增 `inference_lane` 字段。NS2 把它双用为：全局领取序（`priority_rank`）以及 generate 通道路由（见 S03 Priority 节 NS2 句）。Process 物化后禁止 PATCH 改 priority，以免行上 rank 与 Task 车道分叉。显式 `compression_channel` 仍可覆盖车道，但必须写 security audit。
+
+---
+
 ## 9. 修订历史
 
 | 版本 | 日期 | 作者 | 状态 | 主要变更 |

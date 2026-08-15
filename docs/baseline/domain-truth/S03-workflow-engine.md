@@ -865,6 +865,8 @@ priority_rank DESC
 
 priority 只影响调度顺序，不绕过 dependency/claim/concurrency/tenant isolation，也不改变成功语义。
 
+NS2 窄回填：对 `lsrag.construct` / `structurize` / `transcribe_markdown` / LLM clean，同一 `Task.priority` 另外选择 generate 池（urgent/high→`non-interactive`；normal 先 `local-inference` 再溢 NI；low 锁 local）。`lsrag.vectorize` live 走独立 embed FIFO，不看 priority。unpooled 步仍只按上表排序。
+
 #### Deadline/timeout
 
 - `deadline_at` 的 v1 语义是 latest claim time；ready Process 在 deadline 后不得新 claim，转 failed `deadline-exceeded-before-start`；

@@ -2,7 +2,7 @@
 
 > **文档性质**：跨阶段后延项承接台账。只登记经核实、且本阶段诚实不修的项。
 > **维护人**：实现者在 review-fix / closure 时 append。
-> **关联**：`docs/code-review/new-start/NS1-review-VF-ledger.md` · `docs/closure/new-start/NS1-new-pipeline-closure.md`
+> **关联**：`docs/code-review/new-start/NS1-review-VF-ledger.md` · `docs/code-review/new-start/NS2-review-VF-ledger.md` · `docs/closure/new-start/NS1-new-pipeline-closure.md` · `docs/closure/new-start/NS2-pipeline-priority-closure.md`
 
 ---
 
@@ -21,3 +21,15 @@
 - `reactivate_restores_active_lifecycle_but_not_stale_serving_state`
 - `rebuild_and_metadata_lifecycle_paths_complete_through_public_http`
 - `registered_api_scatter_auto_zero_and_fanin_recovery`
+
+## NS2 — 2026-08-15 第 1 轮审查后
+
+| ID | 来源 | 归属 | 摘要 | 后延原因 | reopen 触发器 | 承接 |
+|----|------|------|------|----------|----------------|------|
+| `NS2-V14.r` | VF-ledger V14 剩余切片 | `[partial-delivery] 剩余切片` | 011 未加表级状态耦合 CHECK；Turso 真机 010→011 未跑 | SQLite ALTER 无法廉价加表级 CHECK；本环境无 Turso 升级 harness。写路径已在 retry/recovery 清空 admission | 需要表重建约束，或授权 Turso 升级窗口 | NS2 closure §4 B |
+| `NS2-O1` | AP O1 / T-O-357 | `[true-deferred]` | 真实 billing 套餐计量/扣减 | 本阶段只承诺恒真端口 | billing AP 立项 | billing AP |
+| `NS2-O2` | AP O2 / T-O-358 | `[true-deferred]` | `cloud-inference` 适配器/路由/密钥 | 本阶段禁止当泄洪 | cloud AP | cloud AP |
+| `NS2-O3` | AP O3 | `[true-deferred]` | MiniMax 替换 Claude `-p` | NI 抽象保持线上质量通道 | 模型选型 charter | owner |
+| `NS2-O4` | AP O4 | `[true-deferred]` | urgent 插队老化 | 本阶段只提供 priority_rank 队头 | 若 high 被持续饿死 | 后继调度 charter |
+| `NS2-O7` | AP O7 / NS1-V11 | `[true-deferred]` | pyturso raw sqlite inspection I/O | 非 NS2 引入；owner 禁止本阶段改 harness | harness charter 落地后重跑 `tests/e2e` | `NS1-V11` |
+| `NS2-GPU` | AP §8.4 | `[true-deferred]` | 真机 GPU 双流争用 soak | 无稳定 GPU CI；AP 明确不假装覆盖 | owner 授权手工 soak | owner |

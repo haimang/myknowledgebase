@@ -485,6 +485,12 @@ S11-v1.1 把推理从「原则」升格为 **可编码执行台账**，并独占
 
 ---
 
+## 附录 · NS2 窄回填：orchestrator 配额 vs facade 末闸
+
+NS2 收窄 `T-O-200`：三池 running/queued 配额的 SSOT 是 orchestrator 在 `claim_next` 同一写事务里的 admit（`dispatch_admitted=1` 才可领）。`InferenceFacade.max_in_flight` / capability_limits 是末闸，默认对齐 12=2+2+8，不是三池会计。`claimed` 不等于已获 GPU/NI 配额。
+
+---
+
 ## 9. 修订历史
 
 | 版本 | 日期 | 状态 | 变更 |

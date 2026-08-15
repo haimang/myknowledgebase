@@ -1054,6 +1054,12 @@ S15: mkb_outbox_dead_* metric + ALERT_OUTBOX_DEAD (+ oldest age)
 
 ---
 
+## 附录 · NS2 窄回填：`process.dispatch_admitted`
+
+`ALLOWED_TYPES` 登记 `process.dispatch_admitted`。payload 只含 `pool` / `priority` / `channel_source`，禁止 prompt / 正文 / token。显式通道覆盖另走 `mkb_security_audit_events`（`config.compression_channel_override`）。
+
+---
+
 ## 附录 A · Domain-local ↔ Global Truth 速查
 
 | S15-T | T-O | 主题 |
