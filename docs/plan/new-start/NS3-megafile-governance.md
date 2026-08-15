@@ -28,7 +28,7 @@
 > - 本 AP §7 内置锚区（对照当前 NS2 后 `src/` / `tests/`）
 > 关联 reference-anchor:
 > - 见 §7 内置锚区
-> 文档状态: `executing`
+> 文档状态: `executed`
 
 ---
 
@@ -776,16 +776,16 @@ NS3-megafile-governance
 
 | 收口目标 | 工作项 | Test-ID | PASS 证据（四元组）| 状态 |
 |----------|--------|---------|---------------------|------|
-| 错误拆法进不了 CI | P1-01 | NS3-T01–T06 T08 | commit + test + run-time | `未观察` |
-| Mixin 根与 generate keys 冻结 | P1-02 | NS3-T04 T05 T07 T73 | commit + test + run-time | `未观察` |
-| S06 服务无 I/O 且 digest 一致 | P2-01 P2-02 | NS3-T10–T22 T24 T25 | commit + test + run-time | `未观察` |
-| P2 出闸 NS1 | P2-03 | NS3-T23 | commit + test + run-time | `未观察` |
-| S07 服务再证/construct 正确 | P3-01 | NS3-T30–T33 T45 T46 | commit + test + run-time | `未观察` |
-| salvage/I/O 仍在 Mixin | P3-02 | NS3-T35 T36 T39 T40 | commit + test + run-time | `未观察` |
-| P3 出闸 + P2 不回退 | P3-03 | NS3-T41–T44 T47 T48 | commit + test + run-time | `未观察` |
-| compiler 包公开面 0 差 | P4-01 P4-02 | NS3-T50–T58 | commit + test + run-time | `未观察` |
-| 产品金样与 NS2 调度 | P5-01 | NS3-T60–T66 T70 T71 | commit + test + run-time | `未观察` |
-| 文档与诚实 closure | P5-02 P5-03 | NS3-T67–T69 T72 T74 T75 | commit + 人工检 + test | `未观察` |
+| 错误拆法进不了 CI | P1-01 | NS3-T01–T06 T08 | `e29e293` + architecture + 2026-08-15 | `verified` |
+| Mixin 根与 generate keys 冻结 | P1-02 | NS3-T04 T05 T07 T73 | `e29e293` + architecture + 2026-08-15 | `verified` |
+| S06 服务无 I/O 且 digest 一致 | P2-01 P2-02 | NS3-T10–T22 T24 T25 | `5b9b265` + structurize 单测 + 2026-08-15 | `verified` |
+| P2 出闸 NS1 | P2-03 | NS3-T23 | `5b9b265` + `test_ns1_pipeline.py` + 2026-08-15 | `verified` |
+| S07 服务再证/construct 正确 | P3-01 | NS3-T30–T33 T45 T46 | `32523c8` + construct 单测 + 2026-08-15 | `verified` |
+| salvage/I/O 仍在 Mixin | P3-02 | NS3-T35 T36 T39 T40 | `32523c8` + `test_dispatch_generation.py` + 2026-08-15 | `verified` |
+| P3 出闸 + P2 不回退 | P3-03 | NS3-T41–T44 T47 T48 | `32523c8` + NS1/generation e2e + 2026-08-15 | `verified` |
+| compiler 包公开面 0 差 | P4-01 P4-02 | NS3-T50–T58 | `0451e90` + compiler 金样 + 2026-08-15 | `verified` |
+| 产品金样与 NS2 调度 | P5-01 | NS3-T60–T66 T70 T71 | NS1/NS2/generation/soak + 2026-08-15 | `verified` |
+| 文档与诚实 closure | P5-02 P5-03 | NS3-T67–T69 T72 T74 T75 | closure + S06/S07 一句 + 2026-08-15 | `verified` |
 
 ### 10.3 Definition of Done
 
@@ -814,7 +814,7 @@ NS3-megafile-governance
 
 > 执行者：`Grok`
 > 执行时间：`2026-08-15`
-> 文档状态：`draft → executing`
+> 文档状态：`draft → executing → executed（2026-08-15）`
 > 模板：`.adocs/code-execution-log.md`
 
 ### 11.1 逐工作项状态
@@ -831,6 +831,9 @@ NS3-megafile-governance
 | P3-03 | `✅ done` | `tests/unit/test_lsrag_construct_service.py` | P3 短途 + NS1/generation e2e |
 | P4-01 | `✅ done` | `src/services/lsrag_compiler/` 包；删除单文件 | 公开 import 0 差 |
 | P4-02 | `✅ done` | `tests/unit/test_lsrag_compiler_package.py` | 金样 + 包面测试 |
+| P5-01 | `✅ done` | NS1/NS2/generation e2e + soak + unit/domain + ruff | mega 绿 |
+| P5-02 | `✅ done` | S06:438 段 / S07:260 段 各一句 | 路径回填 |
+| P5-03 | `✅ done` | `docs/closure/new-start/NS3-megafile-governance-closure.md` | 非 LOC 收口 |
 
 ### 11.2 时序执行日志
 
@@ -845,8 +848,18 @@ NS3-megafile-governance
 | P3-T0 | 拉取 `_construct` / reconstruct / `compiler.construct` | I/O 与 salvage 留下 |
 | P3-T1 | 新建 `lsrag_construct` 并接线 | Mixin 无 `compiler.construct(` |
 | P3-T2 | P3 短途 + NS1 + generation e2e | 短途全绿；e2e 2 passed |
+| P4-T0 | 从 git HEAD 切片拆包 | 同 commit 删除 `lsrag_compiler.py` |
+| P4-T1 | models/adopt/validate/payloads/construct/compiler | 算法 wrap，不改 digest |
+| P4-T2 | compiler 金样 + 包面 + P2/P3 集 | 52 passed |
+| P5-T0 | mega/soak/NS2 短途 | 59 passed |
+| P5-T1 | `tests/unit tests/domain` | 全绿；NS1 guard 扩扫 services |
+| P5-T2 | ruff + S06/S07 一句 + closure | ruff 0；closure 落盘 |
 
-- **Phase 1 偏差**：T04/T05 不用 `WorkflowRuntime.__mro__` 运行时 import，改 AST 读基类（substrate-fit：architecture 测试禁止拉应用依赖）。
-- **Phase 2 偏差**：无产品语义偏差；binder 对缺 candidate 用 409，与 Mixin `_layered_state_candidate` 对齐。
-- **阻塞与处理**：无。
-- **测试发现**：P1 23 passed；P2 短途 45 passed；NS1 e2e 1 passed。
+- **Phase 1 偏差**：T04/T05 不用运行时 `__mro__` import，改 AST 读基类（substrate-fit）。
+- **Phase 2 偏差**：无产品语义偏差；binder 缺 candidate 用 409。
+- **Phase 3 偏差**：无产品语义偏差。
+- **Phase 4 偏差**：validate/adopt 抽成模块函数，class 变薄 facade（substrate-fit）。
+- **Phase 5 偏差**：`test_ns1_guards.py` 把 `adopt_layered_json` 存在性检查扩到叶服务（substrate-fit）。
+- **阻塞与处理**：全库 unit+domain 初跑因 NS1 guard 红一次，扩扫描后绿。
+- **测试发现**：P5 mega/soak/NS2 59 passed；`pytest tests/unit tests/domain` 全绿；`ruff check src tests api` All checks passed。
+- **后续 handoff**：S04 TX / 去 Mixin / YAML 工作流见 closure §4 A。不把 Gemini `D-MEGA-*` 写入 deferred ledger。

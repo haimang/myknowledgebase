@@ -264,6 +264,8 @@ Task / Execution (single document / content child)            [S01-S03]
 | 经 S12 ports | generation artifacts / pointers / outbox / UoW |
 | 经 S13 ObjectStorePort | promote construction bytes |
 
+NS3 已落地 `src/services/lsrag_construct/`（binder / reconstruct / admit / service）。Command 仍为 `ProcessCommand`。C 摘要运输与 salvage 仍在 runtime Mixin。
+
 | 规则 | 验收 |
 |---|---|
 | 无 S07 私有 job/status 表 | architecture / schema test |

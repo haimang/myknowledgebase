@@ -443,6 +443,8 @@ v1 默认 profile 必须能从 structure 生成：
 | 经 S12 ports | generation artifacts / pointers / UoW TX-06 |
 | 经 S13 ObjectStorePort | promote structure/projection bytes |
 
+NS3 已落地 `src/services/lsrag_structurize/`（binder / admit / service）。Command 仍为 `ProcessCommand`；wire candidate 仍为 `src/contracts/lsrag/layered_content.py`。推理 I/O 与 TX callback 仍在 `IntakeGenerationConstructMixin`。
+
 | 规则 | 验收 |
 |---|---|
 | 无 S06 私有 job/retry 状态机 | architecture |

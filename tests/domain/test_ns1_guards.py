@@ -7,8 +7,14 @@ from pathlib import Path
 def test_generation_runtime_has_no_fixture_structurize_call() -> None:
     root = Path("src/runtime/intake")
     source = "\n".join(path.read_text(encoding="utf-8") for path in root.glob("generation_*.py"))
-    assert "compiler.structurize(" not in source
-    assert "adopt_layered_json" in source
+    service_source = "\n".join(
+        path.read_text(encoding="utf-8")
+        for package in ("src/services/lsrag_structurize", "src/services/lsrag_construct")
+        for path in Path(package).glob("*.py")
+    )
+    combined = source + "\n" + service_source
+    assert "compiler.structurize(" not in combined
+    assert "adopt_layered_json" in combined
 
 
 def test_ns1_production_architecture_fences() -> None:
