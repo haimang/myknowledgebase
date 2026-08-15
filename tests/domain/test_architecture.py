@@ -481,3 +481,139 @@ def test_ns2_dispatch_does_not_add_required_tables_or_payload_extra_keys() -> No
             if extra_key.search(text):
                 extra_hits.append(str(py_path.relative_to(REPOSITORY_ROOT)))
     assert extra_hits == [], "dispatch_* must not be written into payload_extra:\n" + "\n".join(extra_hits)
+
+
+# NS3-P1 classification guards.  These lock the extraction seams so later
+# phases cannot slide back into YAML workflows, contract IR dumps, extra
+# intake mixins, or a second command bus.
+_NS3_ALLOWED_INTAKE_MIXINS = frozenset(
+    {
+        "IntakeAcceptanceLifecycleMixin",
+        "IntakeAcceptanceMixin",
+        "IntakeAcceptanceScatterMixin",
+        "IntakeAcceptanceSnapshotMixin",
+        "IntakeAcquisitionIngestMixin",
+        "IntakeAcquisitionIntentsMixin",
+        "IntakeAcquisitionMixin",
+        "IntakeCleanPreflightMixin",
+        "IntakeCoreMixin",
+        "IntakeGenerationArtifactsMixin",
+        "IntakeGenerationConstructMixin",
+        "IntakeGenerationLiveMixin",
+        "IntakeGenerationMixin",
+        "IntakeIndexRebuildCommitMixin",
+        "IntakeIndexRebuildMixin",
+        "IntakeIndexRebuildPlanMixin",
+        "IntakeVectorPublishCommitMixin",
+        "IntakeVectorPublishMixin",
+        "IntakeVectorizeMixin",
+    }
+)
+_NS3_FORBIDDEN_NEW_MIXIN = re.compile(r"(Structurize|Construct|Markdown|Executor)Mixin$")
+_NS3_WORKFLOW_RUNTIME_MIXINS = (
+    "WorkflowCoreMixin",
+    "WorkflowOutcomeMixin",
+    "WorkflowMaterializeMixin",
+    "WorkflowScatterMixin",
+    "WorkflowGatesMixin",
+    "WorkflowOutboxMixin",
+    "WorkflowRepairMixin",
+)
+_NS3_INTAKE_PIPELINE_MIXINS = (
+    "IntakeCoreMixin",
+    "IntakeAcquisitionMixin",
+    "IntakeIndexRebuildMixin",
+    "IntakeCleanPreflightMixin",
+    "IntakeAcceptanceMixin",
+    "IntakeGenerationMixin",
+    "IntakeVectorPublishMixin",
+    "ProcessStageHandler",
+)
+_NS3_FORBIDDEN_COMMAND_TYPES = frozenset({"TxHandler", "TransactionalCommand"})
+
+
+def test_ns3_workflows_have_no_yaml_resources() -> None:
+    """NS3-T01: workflow definitions stay code-registered, not YAML resources."""
+
+    hits = sorted(
+        _relative(path)
+        for path in (REPOSITORY_ROOT / "src/workflows").rglob("*")
+        if path.is_file() and path.suffix.lower() in {".yaml", ".yml"}
+    )
+    assert hits == [], "S03 forbids YAML workflow resources:\n" + "\n".join(hits)
+
+
+def test_ns3_does_not_dump_compiler_ir_into_contracts_lsrag_models() -> None:
+    """NS3-T02: compiler IR must not land in a contracts grab-bag."""
+
+    assert not (REPOSITORY_ROOT / "src/contracts/lsrag/models.py").exists()
+
+
+def test_ns3_does_not_add_s06_s07_intake_mixins() -> None:
+    """NS3-T03: S06/S07 extraction must not grow new intake mixins."""
+
+    found: list[str] = []
+    forbidden: list[str] = []
+    for path in _python_files("src/runtime/intake"):
+        for node in ast.walk(_parse(path)):
+            if not isinstance(node, ast.ClassDef) or not node.name.endswith("Mixin"):
+                continue
+            found.append(node.name)
+            if node.name in _NS3_ALLOWED_INTAKE_MIXINS:
+                continue
+            if _NS3_FORBIDDEN_NEW_MIXIN.search(node.name):
+                forbidden.append(f"{_relative(path)}:{node.lineno}:{node.name}")
+    unexpected = sorted(set(found) - _NS3_ALLOWED_INTAKE_MIXINS)
+    assert unexpected == [], "intake mixin allow-list drifted:\n" + "\n".join(unexpected)
+    assert forbidden == [], "NS3 forbids new S06/S07 intake mixins:\n" + "\n".join(forbidden)
+
+
+def _class_bases(path: Path, class_name: str) -> tuple[str, ...]:
+    for node in _parse(path).body:
+        if isinstance(node, ast.ClassDef) and node.name == class_name:
+            names: list[str] = []
+            for base in node.bases:
+                if isinstance(base, ast.Name):
+                    names.append(base.id)
+                elif isinstance(base, ast.Attribute):
+                    names.append(base.attr)
+            return tuple(names)
+    raise AssertionError(f"{_relative(path)} does not define {class_name}")
+
+
+def test_ns3_workflow_runtime_mixin_root_is_frozen() -> None:
+    """NS3-T04: WorkflowRuntime keeps the NS2 composition root."""
+
+    bases = _class_bases(REPOSITORY_ROOT / "src/runtime/workflow/runtime.py", "WorkflowRuntime")
+    assert bases == _NS3_WORKFLOW_RUNTIME_MIXINS
+
+
+def test_ns3_intake_pipeline_composition_root_is_frozen() -> None:
+    """NS3-T05: IntakePipeline stays the single ProcessStageHandler type."""
+
+    bases = _class_bases(REPOSITORY_ROOT / "src/runtime/intake/pipeline.py", "IntakePipeline")
+    assert bases == _NS3_INTAKE_PIPELINE_MIXINS
+
+
+def test_ns3_does_not_introduce_txhandler_framework() -> None:
+    """NS3-T06: do not invent a second command bus beside UnitOfWork callbacks."""
+
+    hits: list[str] = []
+    for directory in ("src", "api"):
+        for path in _python_files(directory):
+            for node in ast.walk(_parse(path)):
+                if isinstance(node, ast.ClassDef) and node.name in _NS3_FORBIDDEN_COMMAND_TYPES:
+                    hits.append(f"{_relative(path)}:{node.lineno}:{node.name}")
+    assert hits == [], "NS3 forbids TxHandler/TransactionalCommand:\n" + "\n".join(hits)
+
+
+def test_ns3_generate_process_keys_remain_classified() -> None:
+    """NS3-T07: NS2 generate classification is not reopened by extraction."""
+
+    text = (REPOSITORY_ROOT / "src/runtime/workflow/dispatch.py").read_text(encoding="utf-8")
+    for process_key in (
+        "lsrag.transcribe_markdown",
+        "lsrag.structurize",
+        "lsrag.construct",
+    ):
+        assert f'"{process_key}"' in text
