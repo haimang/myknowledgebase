@@ -55,18 +55,18 @@ NS2-ENTRY
 
 ## NS2-P2 — DDL 与占用会计
 
-**Block：仅在 NS2-P1 EXIT 后解除；NS2-P3 blocked until P2 exit gate。**
+**Block：NS2-P2 已完成；NS2-P3 已解锁。**
 
-- [ ] `P2-01 / NS2-T10`：新增 migration `011_process_dispatch_pools.sql`，给 `mkb_processes` 增加 `dispatch_pool`、`dispatch_admitted`、`dispatch_enqueued_at` 列及索引。
-- [ ] `P2-02 / NS2-T11`：实现 occupancy 占用查询纯函数 / SQL helper（`running`, `queued`, `waiting` 定义）。
-- [ ] `P2-03 / NS2-T12`：`events.py` 登记 `process.dispatch_admitted` 事件类型并做负载校验。
-- [ ] `P2-04 / NS2-T13`：Process 物化默认 `dispatch_admitted=0`，`process_spec_digest` 不含 pool。
-- [ ] STEP-1：重新拉取 P2 上下文（`001_initial.sql`, `004_*.sql`, `runtime_materialize.py`, `events.py`）。
-- [ ] STEP-2：重新拉取 D04 真相，确认禁止 `payload_extra` 承载 state。
-- [ ] STEP-3：开发、DDL 与 occupancy 测试（`NS2-T10..T13`）、审查和修复。
-- [ ] STEP-4：按模板追加 P2 工作日志。
-- [ ] STEP-6：分簇提交 P2（migration/occupancy/events/materialize/tests）。
-- [ ] P2 EXIT：P2 tests 绿，P3 解锁。
+- [x] `P2-01 / NS2-T10`：新增 migration `011_process_dispatch_pools.sql`，给 `mkb_processes` 增加 `dispatch_pool`、`dispatch_admitted`、`dispatch_enqueued_at` 列及索引。
+- [x] `P2-02 / NS2-T11`：实现 occupancy 占用查询纯函数 / SQL helper（`running`, `queued`, `waiting` 定义）。
+- [x] `P2-03 / NS2-T12`：`events.py` 登记 `process.dispatch_admitted` 事件类型并做负载校验。
+- [x] `P2-04 / NS2-T13`：Process 物化默认 `dispatch_admitted=0`，`process_spec_digest` 不含 pool。
+- [x] STEP-1：重新拉取 P2 上下文（`001_initial.sql`, `004_*.sql`, `runtime_materialize.py`, `events.py`）。
+- [x] STEP-2：重新拉取 D04 真相，确认禁止 `payload_extra` 承载 state。
+- [x] STEP-3：开发、DDL 与 occupancy 测试（`NS2-T10..T13`）、审查和修复。
+- [x] STEP-4：按模板追加 P2 工作日志。
+- [x] STEP-6：分簇提交 P2（migration/occupancy/events/materialize/tests）。
+- [x] P2 EXIT：P2 tests 绿，P3 解锁。
 
 ---
 

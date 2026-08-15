@@ -203,3 +203,45 @@ async def test_retention_failure_is_counted_and_diagnosed_without_business_mutat
         assert tasks == {"count": 0}
     finally:
         await persistence.close()
+
+
+@pytest.mark.asyncio
+async def test_domain_event_writer_accepts_dispatch_admitted_and_rejects_unregistered(tmp_path: Path) -> None:
+    from src.services.events import DomainEventWriter
+
+    persistence = SqlitePersistence(tmp_path / "events.sqlite", Path("src/persistence/migrations"))
+    await persistence.migrate()
+    writer = DomainEventWriter()
+    team_uuid = uuid7()
+    trace_uuid = uuid7()
+    try:
+        async with persistence.transaction() as tx:
+            await tx.execute(
+                "INSERT INTO mkb_teams (team_uuid,name,creation_fingerprint,created_at,updated_at) VALUES (?,?,?,?,?)",
+                (team_uuid, "events-team", stable_digest({"team": "events"}), utc_now(), utc_now()),
+            )
+            # Registered process.dispatch_admitted
+            event_id = await writer.write(
+                tx,
+                team_uuid=team_uuid,
+                trace_uuid=trace_uuid,
+                event_type="process.dispatch_admitted",
+                aggregate="process",
+                summary="Process admitted to local-inference pool",
+                payload={"pool": "local-inference", "priority": "normal", "channel_source": "priority"},
+            )
+            assert event_id is not None
+
+            # Unregistered event type
+            with pytest.raises(MkbError) as rejected:
+                await writer.write(
+                    tx,
+                    team_uuid=team_uuid,
+                    trace_uuid=trace_uuid,
+                    event_type="process.unregistered_custom_event",
+                    aggregate="process",
+                    summary="Invalid event",
+                )
+            assert rejected.value.code == "OBS_EVENT_PAYLOAD_INVALID"
+    finally:
+        await persistence.close()

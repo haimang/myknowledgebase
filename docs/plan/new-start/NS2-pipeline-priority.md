@@ -841,3 +841,19 @@ NS2-pipeline-priority
 - **测试结果**：
   - `NS2-T01`..`NS2-T09` 全 PASS，42 passed in 0.85s，全量 unit 268 passed in 13.85s。
 
+### 11.2 Phase 2 执行日志 — DDL 与占用会计
+
+- **实际执行摘要**：
+  - `P2-01 / NS2-T10`：新建迁移 `src/persistence/migrations/011_process_dispatch_pools.sql`，给 `mkb_processes` 增加 `dispatch_pool`、`dispatch_admitted`、`dispatch_enqueued_at` 列与部分索引 `ix_mkb_proc_dispatch_ready`，CHECK 约束闭集拒绝非法 pool。
+  - `P2-02 / NS2-T11`：在 `src/runtime/workflow/dispatch.py` 中增加 `PoolOccupancy`、`get_pool_occupancies` 与 `get_waiting_count` 占用查询 helpers。
+  - `P2-03 / NS2-T12`：在 `src/services/events.py` 中将 `process.dispatch_admitted` 纳入 `ALLOWED_TYPES`。
+  - `P2-04 / NS2-T13`：验证 Process 物化默认 `dispatch_admitted=0` 且 `process_spec_digest` 不包含派发态。
+- **逐工作项状态**：
+  - `P2-01`：`✅ done` (`011_process_dispatch_pools.sql`, `tests/unit/test_dispatch_ddl.py`)
+  - `P2-02`：`✅ done` (`dispatch.py`, `tests/unit/test_dispatch_occupancy.py`)
+  - `P2-03`：`✅ done` (`events.py`, `tests/unit/test_observability_contracts.py`)
+  - `P2-04`：`✅ done` (`test_workflow_runtime.py`)
+- **测试结果**：
+  - `NS2-T10`..`NS2-T13` 全 PASS，23 passed in 1.88s。
+
+

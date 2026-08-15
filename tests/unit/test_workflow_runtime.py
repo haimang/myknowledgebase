@@ -328,10 +328,15 @@ async def test_materialized_processes_copy_task_priority_and_latest_claim_deadli
     assert await runtime.materialize_root(ids["execution_uuid"])
     async with persistence.transaction() as tx:
         process = await tx.fetchone(
-            "SELECT priority_rank,deadline_at FROM mkb_processes WHERE execution_uuid=?",
+            "SELECT priority_rank,deadline_at,dispatch_admitted,dispatch_pool FROM mkb_processes WHERE execution_uuid=?",
             (ids["execution_uuid"],),
         )
-    assert process == {"priority_rank": 400, "deadline_at": deadline_at}
+    assert process == {
+        "priority_rank": 400,
+        "deadline_at": deadline_at,
+        "dispatch_admitted": 0,
+        "dispatch_pool": None,
+    }
     await persistence.close()
 
 
