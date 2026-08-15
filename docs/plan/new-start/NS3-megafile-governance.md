@@ -826,6 +826,9 @@ NS3-megafile-governance
 | P2-01 | `✅ done` | `src/services/lsrag_structurize/{binder,admit,service}.py` | 无 I/O；wrap compiler |
 | P2-02 | `✅ done` | `generation_construct.py` `_structurize` | 改调 `LsragStructurizeService.admit` |
 | P2-03 | `✅ done` | `tests/unit/test_lsrag_structurize_service.py` | T10–T25 + NS1 e2e 出闸 |
+| P3-01 | `✅ done` | `src/services/lsrag_construct/{binder,reconstruct,admit,service}.py` | 再证 + construct wrap |
+| P3-02 | `✅ done` | `generation_construct.py` / `generation_artifacts.py` | 无裸 `compiler.construct(`；salvage 留下 |
+| P3-03 | `✅ done` | `tests/unit/test_lsrag_construct_service.py` | P3 短途 + NS1/generation e2e |
 
 ### 11.2 时序执行日志
 

@@ -30,13 +30,12 @@ from src.services.lsrag_compiler import (
     construction_payload,
     deterministic_summaries,
     dual_channel_payload,
-    parse_retrieval_projection_payload,
-    parse_structure_payload,
     projection_digest,
     retrieval_projection_payload,
     structure_document_digest,
     structure_payload,
 )
+from src.services.lsrag_construct import LsragConstructService, bind_construct
 from src.services.lsrag_structurize import LsragStructurizeService, bind_structurize
 from src.services.prompt_profiles import COMPRESSION_CHANNELS, DEFAULT_COMPRESSION_CHANNEL
 
@@ -634,41 +633,17 @@ class IntakeGenerationConstructMixin:
                 )
             )
             clean = self._generation_clean_text(state, error_code="METADATA_REFRESH_SOURCE_INVALID")
-            compiler = LsragContractCompiler()
             structure_data = await self._read_metadata_refresh_member(
                 command, structure_receipt, error_code="METADATA_REFRESH_SOURCE_INVALID"
             )
             projection_data = await self._read_metadata_refresh_member(
                 command, projection_receipt, error_code="METADATA_REFRESH_SOURCE_INVALID"
             )
-            try:
-                structure_payload_value = json.loads(structure_data)
-                projection_payload_value = json.loads(projection_data)
-                if not isinstance(structure_payload_value, Mapping) or not isinstance(projection_payload_value, Mapping):
-                    raise ValueError("generation members must be objects")
-                structure = parse_structure_payload(structure_payload_value)
-                projection = parse_retrieval_projection_payload(projection_payload_value)
-                compiler.validate_structure(
-                    document=structure,
-                    projection=projection,
-                    clean_text=clean,
-                    required_granularities=frozenset(block.granularity for block in projection.blocks),
-                )
-            except (TypeError, ValueError, KeyError, json.JSONDecodeError, MkbError) as exc:
-                raise MkbError(
-                    "METADATA_REFRESH_SOURCE_INVALID",
-                    "Frozen source structure members cannot be re-proven",
-                    409,
-                ) from exc
-            if (
-                structure_data != canonical_json(structure_payload(structure))
-                or projection_data != canonical_json(retrieval_projection_payload(projection))
-            ):
-                raise MkbError(
-                    "METADATA_REFRESH_SOURCE_INVALID",
-                    "Frozen source structure bytes do not bind the inherited clean artifact",
-                    409,
-                )
+            compiler, structure, projection = LsragConstructService().reprove_structure_from_stored_payloads(
+                clean_text=clean,
+                structure_data=structure_data,
+                projection_data=projection_data,
+            )
             structure_validation_data = await self._read_metadata_refresh_member(
                 command, structure_validation_receipt, error_code="METADATA_REFRESH_SOURCE_INVALID"
             )
@@ -845,15 +820,19 @@ class IntakeGenerationConstructMixin:
                 state, "construction_artifact_uuid", "CONSTRUCT_TO_VECTORIZE_GATE"
             )
             dual_uuid = self._generation_state_text(state, "dual_channel_artifact_uuid", "CONSTRUCT_TO_VECTORIZE_GATE")
-            construction, dual = compiler.construct(
-                structure=structure,
-                projection=projection,
-                clean_text=self._generation_clean_text(state, error_code="CONSTRUCT_TO_VECTORIZE_GATE"),
-                construction_generation_artifact_uuid=construction_uuid,
-                dual_channel_generation_artifact_uuid=dual_uuid,
-                summaries_by_block_id=summaries,
-                metadata_headers=metadata_headers,
-                required_granularities=required_granularities,
+            construct_service = LsragConstructService(compiler)
+            construction, dual = construct_service.admit(
+                bind_construct(
+                    mode=self._construct_mode(state),
+                    clean_text=self._generation_clean_text(state, error_code="CONSTRUCT_TO_VECTORIZE_GATE"),
+                    structure=structure,
+                    projection=projection,
+                    summaries_by_block_id=summaries,
+                    construction_artifact_uuid=construction_uuid,
+                    dual_channel_artifact_uuid=dual_uuid,
+                    metadata_headers=metadata_headers,
+                    required_granularities=required_granularities,
+                )
             )
             construction_data = await self._read_frozen_generation_asset(
                 command,
@@ -873,10 +852,15 @@ class IntakeGenerationConstructMixin:
                 size_bytes_key="dual_channel_artifact_size_bytes",
                 error_code="CONSTRUCT_TO_VECTORIZE_GATE",
             )
-            if construction_data != canonical_json(construction_payload(construction)) or dual_data != canonical_json(dual_channel_payload(dual)):
-                raise MkbError("CONSTRUCT_TO_VECTORIZE_GATE", "Construct bytes do not match the exact full-valid generation", 409)
-            if state.get("construction_document_digest") != construction_document_digest(construction):
-                raise MkbError("CONSTRUCT_TO_VECTORIZE_GATE", "Construction semantic digest does not match the frozen handoff", 409)
+            construct_service.assert_construction_bytes(
+                construction=construction,
+                dual=dual,
+                construction_data=construction_data,
+                dual_data=dual_data,
+                construction_digest=state.get("construction_document_digest")
+                if isinstance(state.get("construction_document_digest"), str)
+                else None,
+            )
             return compiler, construction, dual
 
 
@@ -1146,15 +1130,18 @@ class IntakeGenerationConstructMixin:
             construction_artifact_uuid = uuid7()
             dual_channel_artifact_uuid = uuid7()
             validation_artifact_uuid = uuid7()
-            construction, dual = compiler.construct(
-                structure=structure,
-                projection=projection,
-                clean_text=self._generation_clean_text(state, error_code="CONSTRUCT_BINDING_CLEAN_DIGEST"),
-                construction_generation_artifact_uuid=construction_artifact_uuid,
-                dual_channel_generation_artifact_uuid=dual_channel_artifact_uuid,
-                summaries_by_block_id=summaries,
-                metadata_headers=metadata_headers,
-                required_granularities=required_granularities,
+            construction, dual = LsragConstructService(compiler).admit(
+                bind_construct(
+                    mode=construct_mode,
+                    clean_text=self._generation_clean_text(state, error_code="CONSTRUCT_BINDING_CLEAN_DIGEST"),
+                    structure=structure,
+                    projection=projection,
+                    summaries_by_block_id=summaries,
+                    construction_artifact_uuid=construction_artifact_uuid,
+                    dual_channel_artifact_uuid=dual_channel_artifact_uuid,
+                    metadata_headers=metadata_headers,
+                    required_granularities=required_granularities,
+                )
             )
             construction_semantic_digest = construction_document_digest(construction)
             construction_asset = await self._promote_generation_member(

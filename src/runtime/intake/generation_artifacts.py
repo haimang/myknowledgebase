@@ -30,8 +30,8 @@ from src.services.lsrag_compiler import (
     projection_digest,
     retrieval_projection_payload,
     structure_document_digest,
-    structure_payload,
 )
+from src.services.lsrag_construct import LsragConstructService
 
 
 class IntakeGenerationArtifactsMixin:
@@ -410,18 +410,16 @@ class IntakeGenerationArtifactsMixin:
             )
             layered_candidate = self._layered_state_candidate(state, error_code="CONSTRUCT_BINDING_CANDIDATE_MISSING")
             profile = self._layered_profile(state, error_code="CONSTRUCT_BINDING_PROFILE_INVALID")
-            compiler = LsragContractCompiler()
-            structure, projection = compiler.adopt_layered_json(
+            construct_service = LsragConstructService()
+            compiler, structure, projection = construct_service.reprove_structure_from_candidate(
                 clean_text=clean,
-                layered_json=layered_candidate,
-                generation_artifact_uuid=structure_uuid,
-                projection_generation_artifact_uuid=projection_uuid,
+                layered_candidate=layered_candidate,
+                granularity_set=profile,
+                structure_artifact_uuid=structure_uuid,
+                projection_artifact_uuid=projection_uuid,
                 clean_artifact_uuid=clean_artifact_uuid,
                 clean_digest=state["clean_digest"],
-                granularity_set=profile,
             )
-            expected_structure = canonical_json(structure_payload(structure))
-            expected_projection = canonical_json(retrieval_projection_payload(projection))
             structure_data = await self._read_frozen_generation_asset(
                 command,
                 state,
@@ -440,13 +438,18 @@ class IntakeGenerationArtifactsMixin:
                 size_bytes_key="retrieval_block_projection_size_bytes",
                 error_code="CONSTRUCT_BINDING_PROJECTION_DIGEST",
             )
-            if structure_data != expected_structure or projection_data != expected_projection:
-                raise MkbError("CONSTRUCT_BINDING_DIGEST", "Structure/projection bytes do not match their generation-local contract", 409)
-            if (
-                state.get("structure_document_digest") != structure_document_digest(structure)
-                or state.get("retrieval_block_projection_digest") != projection_digest(projection)
-            ):
-                raise MkbError("CONSTRUCT_BINDING_DIGEST", "Structure/projection semantic digests do not match the frozen handoff", 409)
+            construct_service.assert_structure_bytes(
+                structure=structure,
+                projection=projection,
+                structure_data=structure_data,
+                projection_data=projection_data,
+                structure_digest=state.get("structure_document_digest")
+                if isinstance(state.get("structure_document_digest"), str)
+                else None,
+                projection_digest_value=state.get("retrieval_block_projection_digest")
+                if isinstance(state.get("retrieval_block_projection_digest"), str)
+                else None,
+            )
             await self._assert_generation_members(
                 command,
                 state,
