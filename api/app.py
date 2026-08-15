@@ -235,6 +235,11 @@ def create_container(settings: Settings | None = None) -> Container:
         adapter,
         max_in_flight=settings.inference_max_in_flight,
         max_attempts=settings.inference_max_attempts,
+        capability_limits={
+            "embed": settings.dispatch_embed_running,
+            "structured_generate": settings.dispatch_local_running,
+            "text_generate": settings.dispatch_local_running,
+        },
         supply_fence=supply_fence,
         metrics=metrics,
     )

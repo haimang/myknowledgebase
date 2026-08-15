@@ -101,16 +101,16 @@ class IntakeGenerationConstructMixin:
     def _summary_transport(self, state: Mapping[str, Any]) -> str:
         """Choose C transport from the frozen intake channel.
 
-        ``api-inference`` is Spark Lightning via the facade.  ``non-interactive``
+        ``local-inference`` is Local vLLM generate via the facade.  ``non-interactive``
         keeps Claude ``-p`` when a CLI is wired; otherwise it stays deterministic.
         """
 
         channel = self._compression_channel(state)
-        if channel == "api-inference":
+        if channel == "local-inference":
             if not getattr(self, "_live_inference", False) or getattr(self, "_inference", None) is None:
                 raise MkbError(
                     "COMPRESSION_CHANNEL_UNAVAILABLE",
-                    "api-inference compression requires live inference",
+                    "local-inference compression requires live inference",
                     503,
                 )
             return "api_inference"
@@ -118,8 +118,11 @@ class IntakeGenerationConstructMixin:
             return "claude_cli"
         return "deterministic"
 
-    def _can_salvage_api_inference(self, exc: MkbError) -> bool:
+    def _can_salvage_local_inference(self, exc: MkbError) -> bool:
         return exc.code in _API_INFERENCE_SALVAGE_CODES and getattr(self, "_claude_cli", None) is not None
+
+    def _can_salvage_api_inference(self, exc: MkbError) -> bool:
+        return self._can_salvage_local_inference(exc)
 
     async def _salvage_summary_via_cli(
         self,
@@ -136,7 +139,7 @@ class IntakeGenerationConstructMixin:
         )
         receipt["transport"] = "claude_cli"
         receipt["compression_channel"] = "non-interactive"
-        receipt["salvage_from"] = "api-inference"
+        receipt["salvage_from"] = "local-inference"
         receipt["salvage_error_code"] = salvage_error.code
         return completed, receipt
 
@@ -150,7 +153,7 @@ class IntakeGenerationConstructMixin:
         accepted_layered_candidate: Mapping[str, object],
         profile: tuple[int, ...],
     ) -> tuple[dict[str, object], dict[str, str], list[dict[str, Any]], dict[str, object] | None]:
-        """Fill C summaries. api-inference may salvage once via Claude ``-p``."""
+        """Fill C summaries. local-inference may salvage once via Claude ``-p``."""
 
         transport = self._summary_transport(state)
         if transport == "claude_cli":
@@ -195,7 +198,7 @@ class IntakeGenerationConstructMixin:
                         "error_code": kernel_exc.code,
                         "error_digest": stable_digest({"error_code": kernel_exc.code}),
                         "transport": "api_inference",
-                        "compression_channel": "api-inference",
+                        "compression_channel": "local-inference",
                     }
                 )
                 persist = getattr(self, "_persist_failed_generation_invocation", None)
@@ -203,10 +206,10 @@ class IntakeGenerationConstructMixin:
                     await persist(command, receipt)
                 raise
             receipt["transport"] = "api_inference"
-            receipt["compression_channel"] = "api-inference"
+            receipt["compression_channel"] = "local-inference"
             return completed, summaries, [receipt], None
         except MkbError as exc:
-            if not self._can_salvage_api_inference(exc):
+            if not self._can_salvage_local_inference(exc):
                 raise
             completed, cli_receipt = await self._salvage_summary_via_cli(
                 layered_candidate=accepted_layered_candidate,
@@ -1094,9 +1097,9 @@ class IntakeGenerationConstructMixin:
                 )
             if cli_receipt is not None:
                 next_state["construct_cli_receipt"] = cli_receipt
-                if cli_receipt.get("salvage_from") == "api-inference":
+                if cli_receipt.get("salvage_from") == "local-inference":
                     next_state["compression_salvage"] = {
-                        "from": "api-inference",
+                        "from": "local-inference",
                         "to": "non-interactive",
                         "error_code": cli_receipt.get("salvage_error_code"),
                     }

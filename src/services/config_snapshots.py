@@ -172,7 +172,7 @@ class ConfigSnapshotService:
                 raise MkbError("CONFIG_CONFLICT", "Live embed binding has no valid registered dimension", 503)
             bindings["embed"] = {**embed, "dimension": model["default_dimension"]}
         flag_bundle, flag_bundle_digest = self._load_flag_bundle()
-        compression_channel = self._require_compression_channel(request)
+        compression_channel, channel_source = self._require_compression_channel(request)
         try:
             semantic_overrides, ops_overrides, override_digest, semantic_knobs = self._resolve_overrides(
                 request.overrides
@@ -181,6 +181,13 @@ class ConfigSnapshotService:
             if exc.code == "CONFIG_OVERRIDE_REJECTED":
                 await self._audit_override_rejected(request, exc)
             raise
+        l2: dict[str, Any] = {
+            "inference_vllm_base_url": self.settings.inference_vllm_base_url,
+            "inference_mode": "live" if self.settings.live_inference else "deterministic",
+        }
+        if isinstance(request.payload, IntakeIngestPayload):
+            l2["compression_channel"] = compression_channel
+            l2["channel_source"] = channel_source
         materials = {
             "schema_version": "mkb.config-snapshot.v1",
             "l0": l0,
@@ -192,11 +199,7 @@ class ConfigSnapshotService:
             },
             # L2 is deliberately topology-only. No token, secret, absolute
             # path, or prompt body can enter a frozen snapshot.
-            "l2": {
-                "inference_vllm_base_url": self.settings.inference_vllm_base_url,
-                "inference_mode": "live" if self.settings.live_inference else "deterministic",
-                "compression_channel": compression_channel,
-            },
+            "l2": l2,
             # L3 semantic overrides only.  Ops-only knobs (dry_run/debug_trace)
             # must not enter materials hashed into config_snapshot_digest /
             # domain_binding_digest (S14-A17); they are audit-only.
@@ -563,20 +566,25 @@ class ConfigSnapshotService:
         return {"prompts": prompts, "models": models, "bindings": bindings}
 
     @staticmethod
-    def _resolve_compression_channel(request: TaskCreateRequest) -> str:
+    def _resolve_compression_channel(request: TaskCreateRequest) -> tuple[str, str]:
         if not isinstance(request.payload, IntakeIngestPayload):
-            return DEFAULT_COMPRESSION_CHANNEL
-        return request.payload.compression_channel or DEFAULT_COMPRESSION_CHANNEL
+            return DEFAULT_COMPRESSION_CHANNEL, "default"
+        if request.payload.compression_channel is not None:
+            return request.payload.compression_channel, "explicit"
+        priority = request.priority or "normal"
+        if priority in {"urgent", "high"}:
+            return "non-interactive", "priority"
+        return "local-inference", "priority"
 
-    def _require_compression_channel(self, request: TaskCreateRequest) -> str:
-        channel = self._resolve_compression_channel(request)
-        if channel == "api-inference" and not self.settings.live_inference:
+    def _require_compression_channel(self, request: TaskCreateRequest) -> tuple[str, str]:
+        channel, channel_source = self._resolve_compression_channel(request)
+        if channel_source == "explicit" and channel == "local-inference" and not self.settings.live_inference:
             raise MkbError(
                 "COMPRESSION_CHANNEL_UNAVAILABLE",
-                "api-inference compression requires live inference",
+                "local-inference compression requires live inference",
                 503,
             )
-        return channel
+        return channel, channel_source
 
     def _resolve_prompt_selection(
         self,

@@ -125,11 +125,11 @@ DEFAULT_MODELS = (
 
 DEFAULT_BINDINGS = (
     ("embed", SPARK_VL_EMBED_MODEL_KEY, "v1", 10, True),
-    ("structured_generate", SPARK_LIGHTNING_GENERATE_MODEL_KEY, "v1", 5, True),
-    ("text_generate", SPARK_LIGHTNING_GENERATE_MODEL_KEY, "v1", 5, True),
-    # Spare generate path.  Higher priority number loses to Lightning.
-    ("structured_generate", SPARK_QWEN_GENERATE_MODEL_KEY, "v1", 10, True),
-    ("text_generate", SPARK_QWEN_GENERATE_MODEL_KEY, "v1", 10, True),
+    ("structured_generate", SPARK_QWEN_GENERATE_MODEL_KEY, "v1", 5, True),
+    ("text_generate", SPARK_QWEN_GENERATE_MODEL_KEY, "v1", 5, True),
+    # Spare generate path.  Higher priority number loses to Qwen.
+    ("structured_generate", SPARK_LIGHTNING_GENERATE_MODEL_KEY, "v1", 10, True),
+    ("text_generate", SPARK_LIGHTNING_GENERATE_MODEL_KEY, "v1", 10, True),
     # Rerank is intentionally disabled by default. Retrieval reports an honest
     # ANN fallback rather than inventing a score.
     ("rerank", "qwen-rerank-2b", "v1", 10, False),

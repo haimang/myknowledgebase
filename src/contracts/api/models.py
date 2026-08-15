@@ -182,7 +182,7 @@ class IntakeIngestPayload(StrictModel):
     granularity: Literal["g0", "g1", "g2"] | None = None
     # C/summarizer transport only.  A/B stay on the NS1 CLI unless that
     # worker is absent.  None means the closed default: Claude ``-p``.
-    compression_channel: Literal["non-interactive", "api-inference"] | None = None
+    compression_channel: Literal["non-interactive", "local-inference"] | None = None
     # Prompt selection is an identity-only public surface.  The catalog row
     # supplies version/hash/path at materialization; callers may not provide
     # prompt bodies, filesystem paths, or a free-form role guess.

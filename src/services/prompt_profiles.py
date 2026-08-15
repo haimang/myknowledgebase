@@ -19,7 +19,7 @@ prompt whose catalog ``granularity_set`` is inclusive of coarser layers:
 Compression channel is independent of prompt identity:
 
     non-interactive   Claude ``-p`` (default)
-    api-inference     Spark Lightning chat completions
+    local-inference   Local vLLM generate (Qwen / Lightning)
 """
 
 from __future__ import annotations
@@ -34,9 +34,10 @@ GRANULARITY_LEVELS: dict[str, tuple[int, ...]] = {
     "g2": (0, 1, 2),
 }
 
-COMPRESSION_CHANNELS = frozenset({"non-interactive", "api-inference"})
+COMPRESSION_CHANNELS = frozenset({"non-interactive", "local-inference"})
+INTERNAL_RESERVED_CHANNELS = frozenset({"non-interactive", "local-inference", "cloud-inference"})
 DEFAULT_COMPRESSION_CHANNEL = "non-interactive"
-CompressionChannel = Literal["non-interactive", "api-inference"]
+CompressionChannel = Literal["non-interactive", "local-inference"]
 
 IntakeDomain = Literal["documentation"]
 IntakeFlavor = Literal["qna", "eval", "closure", "plan", "code-review"]

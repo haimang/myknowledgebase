@@ -44,7 +44,14 @@ class Settings(BaseSettings):
     ns1_cli_mode: Literal["disabled", "stub", "subprocess"] = "stub"
     ns1_cli_executable: str = "claude"
     inference_generate_timeout_seconds: float = Field(default=180, ge=1, le=3600)
-    inference_max_in_flight: int = Field(default=8, ge=1, le=256)
+    dispatch_local_running: int = Field(default=2, ge=1, le=64)
+    dispatch_local_queued: int = Field(default=6, ge=1, le=256)
+    dispatch_ni_running: int = Field(default=2, ge=1, le=64)
+    dispatch_ni_queued: int = Field(default=4, ge=1, le=256)
+    dispatch_embed_running: int = Field(default=8, ge=1, le=128)
+    dispatch_embed_queued: int = Field(default=20, ge=1, le=512)
+    dispatch_local_char_budget: int = Field(default=16_000, ge=1, le=1_000_000)
+    inference_max_in_flight: int = Field(default=12, ge=1, le=256)
     inference_max_attempts: int = Field(default=3, ge=1, le=10)
     object_max_bytes: int = Field(default=256 * 1024 * 1024, ge=1, le=1024 * 1024 * 1024)
     rate_limit_ip_per_min: int = Field(default=120, ge=1, le=100_000)
