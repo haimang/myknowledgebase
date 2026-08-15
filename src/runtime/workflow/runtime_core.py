@@ -823,6 +823,7 @@ class WorkflowCoreMixin:
             config_snapshot_ref=process["config_snapshot_ref"],
             config_snapshot_digest=process["config_snapshot_digest"],
             binding_digest=process["domain_binding_digest"],
+            dispatch_pool=process.get("dispatch_pool"),
         )
 
 
