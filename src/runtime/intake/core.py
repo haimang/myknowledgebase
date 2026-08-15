@@ -47,6 +47,7 @@ class IntakeCoreMixin:
             inference: InferenceFacade | None = None,
             claude_cli: ClaudeCliPort | None = None,
             live_inference: bool = False,
+            billing: object | None = None,
             clean_llm: object | None = None,
             clean_prompt: CleanPrompt | None = None,
             lifecycle: IntakeLifecycleService | None = None,
@@ -68,6 +69,7 @@ class IntakeCoreMixin:
             self._inference = inference
             self._claude_cli = claude_cli
             self._live_inference = live_inference
+            self._billing = billing
             self._clean_llm = clean_llm
             self._clean_prompt = clean_prompt
             self._lifecycle = lifecycle

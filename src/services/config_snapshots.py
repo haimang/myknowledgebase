@@ -401,6 +401,10 @@ class ConfigSnapshotService:
         payload = request.payload.model_dump(mode="json")
         if prompt_selection:
             payload["prompt_selection"] = prompt_selection
+        if isinstance(request.payload, IntakeIngestPayload) and payload.get("compression_channel") is None:
+            channel, source = cls._resolve_compression_channel(request)
+            payload["compression_channel"] = channel
+            payload["channel_source"] = source
         if inline_ingress is None:
             return payload
         source = payload.get("source")
@@ -594,29 +598,23 @@ class ConfigSnapshotService:
         """Resolve the four role identities into one immutable input object."""
 
         if not isinstance(request.payload, IntakeIngestPayload):
-            requested: dict[str, str | None] = {
-                "clean": _DEFAULT_PROMPT_IDS["clean"],
-                "markdown": None,
-                "json": _DEFAULT_PROMPT_IDS["json"],
-                "summarizer": _DEFAULT_PROMPT_IDS["summarizer"],
-            }
-        else:
-            try:
-                domain_defaults = default_prompt_ids(
-                    domain=request.payload.domain,
-                    flavor=request.payload.flavor,
-                    granularity=request.payload.granularity,
-                )
-            except ValueError as exc:
-                raise MkbError("PROMPT_PROFILE_INVALID", str(exc), 422) from exc
-            requested = {
-                "clean": request.payload.clean_prompt_id or domain_defaults.get("clean") or _DEFAULT_PROMPT_IDS["clean"],
-                "markdown": request.payload.markdown_prompt_id or domain_defaults.get("markdown"),
-                "json": request.payload.json_prompt_id or domain_defaults.get("json"),
-                "summarizer": request.payload.summarizer_prompt_id
-                or domain_defaults.get("summarizer")
-                or _DEFAULT_PROMPT_IDS["summarizer"],
-            }
+            return {}
+        try:
+            domain_defaults = default_prompt_ids(
+                domain=request.payload.domain,
+                flavor=request.payload.flavor,
+                granularity=request.payload.granularity,
+            )
+        except ValueError as exc:
+            raise MkbError("PROMPT_PROFILE_INVALID", str(exc), 422) from exc
+        requested = {
+            "clean": request.payload.clean_prompt_id or domain_defaults.get("clean") or _DEFAULT_PROMPT_IDS["clean"],
+            "markdown": request.payload.markdown_prompt_id or domain_defaults.get("markdown"),
+            "json": request.payload.json_prompt_id or domain_defaults.get("json"),
+            "summarizer": request.payload.summarizer_prompt_id
+            or domain_defaults.get("summarizer")
+            or _DEFAULT_PROMPT_IDS["summarizer"],
+        }
         if not requested["json"]:
             raise MkbError("PROMPT_NOT_REGISTERED", "json prompt is required", 422)
         by_id: dict[str, list[dict[str, Any]]] = {}
@@ -816,6 +814,38 @@ class ConfigSnapshotService:
             "recall_k": 40,
             "pack_budget": 8_000,
         }
+
+    async def audit_explicit_channel(self, tx: UnitOfWork, request: TaskCreateRequest) -> None:
+        """Record a successful explicit compression_channel override (NS2-T38)."""
+
+        if not isinstance(request.payload, IntakeIngestPayload) or request.payload.compression_channel is None:
+            return
+        channel, source = self._resolve_compression_channel(request)
+        if source != "explicit":
+            return
+        try:
+            await self.security_audit.write_allowed(
+                tx,
+                action="config.compression_channel_override",
+                summary="Explicit compression channel override accepted",
+                http_status=200,
+                actor_kind="internal_token",
+                team_uuid=request.team_uuid,
+                trace_uuid=request.trace_uuid,
+                target_kind="task",
+                target_uuid=request.task_uuid,
+                payload={
+                    "channel": channel,
+                    "channel_source": source,
+                    "priority": request.priority or "normal",
+                    "actor_origin": "task.create",
+                    "result": "allowed",
+                },
+            )
+        except MkbError:
+            raise
+        except Exception as exc:
+            raise MkbError("SEC_AUDIT_WRITE_FAIL", "Security audit could not record channel override", 500) from exc
 
     async def _audit_override_rejected(self, request: TaskCreateRequest, exc: MkbError) -> None:
         """Write the sole security-audit sink for an L3 denial (S14-T017)."""

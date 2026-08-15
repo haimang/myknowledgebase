@@ -122,7 +122,7 @@ class InferenceFacade:
         self,
         adapter: InferenceAdapter,
         *,
-        max_in_flight: int = 8,
+        max_in_flight: int = 12,
         max_attempts: int = 3,
         capability_limits: Mapping[str, int] | None = None,
         initial_delay_seconds: float = 1.0,

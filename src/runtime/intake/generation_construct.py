@@ -11,6 +11,7 @@ from typing import Any
 from src.contracts.common.errors import MkbError
 from src.contracts.common.ids import canonical_json, stable_digest, uuid7
 from src.contracts.common.time import utc_now
+from src.contracts.inference.models import InferenceBinding, InvocationContext, TextGenerateRequest
 from src.contracts.runtime.models import ProcessCommand
 from src.persistence.ports import UnitOfWork
 from src.runtime.inference.claude_cli import BJSON_MATERIAL_SCHEMA, ClaudeCliRequest
@@ -89,7 +90,16 @@ class IntakeGenerationConstructMixin:
         return values
 
     @staticmethod
-    def _compression_channel(state: Mapping[str, Any]) -> str:
+    def _compression_channel(state: Mapping[str, Any], command: ProcessCommand | None = None) -> str:
+        """Resolve the generate transport channel.
+
+        ``ProcessCommand.dispatch_pool`` is the immutable SSOT after admit.
+        Payload / DEFAULT are only used when no generate pool was assigned.
+        """
+
+        assigned = getattr(command, "dispatch_pool", None) if command is not None else None
+        if assigned in COMPRESSION_CHANNELS:
+            return assigned
         payload = state.get("payload")
         raw = payload.get("compression_channel") if isinstance(payload, Mapping) else None
         if raw is None:
@@ -98,14 +108,14 @@ class IntakeGenerationConstructMixin:
             raise MkbError("COMPRESSION_CHANNEL_INVALID", "Compression channel is not registered", 422)
         return raw
 
-    def _summary_transport(self, state: Mapping[str, Any]) -> str:
-        """Choose C transport from the frozen intake channel.
+    def _summary_transport(self, state: Mapping[str, Any], command: ProcessCommand | None = None) -> str:
+        """Choose C transport from the admitted dispatch pool (or frozen payload).
 
         ``local-inference`` is Local vLLM generate via the facade.  ``non-interactive``
         keeps Claude ``-p`` when a CLI is wired; otherwise it stays deterministic.
         """
 
-        channel = self._compression_channel(state)
+        channel = self._compression_channel(state, command)
         if channel == "local-inference":
             if not getattr(self, "_live_inference", False) or getattr(self, "_inference", None) is None:
                 raise MkbError(
@@ -118,11 +128,22 @@ class IntakeGenerationConstructMixin:
             return "claude_cli"
         return "deterministic"
 
-    def _can_salvage_local_inference(self, exc: MkbError) -> bool:
-        return exc.code in _API_INFERENCE_SALVAGE_CODES and getattr(self, "_claude_cli", None) is not None
+    def _can_salvage_local_inference(self, exc: MkbError, command: ProcessCommand | None = None) -> bool:
+        if exc.code not in _API_INFERENCE_SALVAGE_CODES:
+            return False
+        if getattr(self, "_claude_cli", None) is None:
+            return False
+        if command is None or getattr(command, "dispatch_pool", None) != "local-inference":
+            return False
+        if getattr(command, "task_priority", None) != "normal":
+            return False
+        billing = getattr(self, "_billing", None)
+        if billing is not None and not billing.has_quota("non-interactive"):
+            return False
+        return True
 
-    def _can_salvage_api_inference(self, exc: MkbError) -> bool:
-        return self._can_salvage_local_inference(exc)
+    def _can_salvage_api_inference(self, exc: MkbError, command: ProcessCommand | None = None) -> bool:
+        return self._can_salvage_local_inference(exc, command)
 
     async def _salvage_summary_via_cli(
         self,
@@ -155,7 +176,7 @@ class IntakeGenerationConstructMixin:
     ) -> tuple[dict[str, object], dict[str, str], list[dict[str, Any]], dict[str, object] | None]:
         """Fill C summaries. local-inference may salvage once via Claude ``-p``."""
 
-        transport = self._summary_transport(state)
+        transport = self._summary_transport(state, command)
         if transport == "claude_cli":
             completed, receipt = await self._cli_layered_summary(
                 layered_candidate=accepted_layered_candidate,
@@ -209,7 +230,7 @@ class IntakeGenerationConstructMixin:
             receipt["compression_channel"] = "local-inference"
             return completed, summaries, [receipt], None
         except MkbError as exc:
-            if not self._can_salvage_local_inference(exc):
+            if not self._can_salvage_local_inference(exc, command):
                 raise
             completed, cli_receipt = await self._salvage_summary_via_cli(
                 layered_candidate=accepted_layered_candidate,
@@ -420,15 +441,86 @@ class IntakeGenerationConstructMixin:
         }
         return completed, receipt
 
+    async def _live_markdown_text(
+        self,
+        command: ProcessCommand,
+        *,
+        clean_text: str,
+        prompt_path: Path,
+        prompt_digest: str,
+        state: Mapping[str, Any],
+    ) -> tuple[str, dict[str, object]]:
+        if not getattr(self, "_live_inference", False) or getattr(self, "_inference", None) is None:
+            raise MkbError(
+                "COMPRESSION_CHANNEL_UNAVAILABLE",
+                "local-inference compression requires live inference",
+                503,
+            )
+        snapshot = await self._load_config_snapshot(command)
+        try:
+            raw_binding = snapshot["l1"]["bindings"]["text_generate"]
+        except (KeyError, TypeError) as exc:
+            raise MkbError("GENERATION_CONFIG_SNAPSHOT_INVALID", "Frozen text_generate binding is invalid", 503) from exc
+        if not isinstance(raw_binding, dict):
+            raise MkbError("GENERATION_CONFIG_SNAPSHOT_INVALID", "Frozen text_generate binding is invalid", 503)
+        try:
+            binding = InferenceBinding(
+                capability_key="text_generate",
+                adapter_kind=raw_binding["adapter_kind"],
+                model_key=raw_binding["model_key"],
+                model_version=raw_binding["model_version"],
+                binding_digest=str(raw_binding["binding_digest"]),
+            )
+        except (KeyError, TypeError, ValueError) as exc:
+            raise MkbError("GENERATION_CONFIG_SNAPSHOT_INVALID", "Frozen text_generate binding is invalid", 503) from exc
+        try:
+            system_text = prompt_path.read_text(encoding="utf-8")
+        except OSError as exc:
+            raise MkbError("PROMPT_HASH_MISMATCH", "Frozen markdown prompt bytes are unavailable", 503) from exc
+        _, pointer = self._frozen_prompt_file(state, role="markdown", error_code="PROMPT_HASH_MISMATCH")
+        generation_uuid = uuid7()
+        response = await self._inference.text_generate(
+            TextGenerateRequest(
+                team_uuid=command.team_uuid,
+                binding=binding,
+                prompt_ref=str(pointer.get("prompt_id") or "promptB.markdown"),
+                prompt_digest=prompt_digest,
+                input_text=clean_text,
+                system_text=system_text,
+                invocation=InvocationContext(
+                    trace_uuid=command.trace_uuid,
+                    task_uuid=command.task_uuid,
+                    execution_uuid=command.execution_uuid,
+                    process_uuid=command.process_uuid,
+                    generation_invocation_uuid=generation_uuid,
+                    prompt_content_hash=prompt_digest,
+                    config_snapshot_digest=command.config_snapshot_digest,
+                ),
+            )
+        )
+        markdown = (response.text or "").strip()
+        if not markdown:
+            raise MkbError("MARKDOWN_OUTPUT_INVALID", "Markdown worker returned empty output", 422)
+        return markdown, {
+            "transport": "api_inference",
+            "role": "markdown",
+            "prompt_relative_path": self._prompt_relative_path(prompt_path),
+            "prompt_version": pointer.get("version") or pointer.get("prompt_version"),
+            "prompt_sha256": prompt_digest,
+            "session_id": None,
+            "usage": None if response.usage is None else dict(response.usage),
+            "exit_code": 0,
+            "output_digest": stable_digest({"text": markdown}),
+            "compression_channel": "local-inference",
+        }
+
     async def _transcribe_markdown(
         self,
         command: ProcessCommand,
         state: dict[str, Any],
     ) -> tuple[_StageMaterial, dict[str, Any], Callable[[UnitOfWork, Mapping[str, str]], Awaitable[None]]]:
         clean = self._generation_clean_text(state, error_code="MARKDOWN_INPUT_INVALID")
-        cli = getattr(self, "_claude_cli", None)
-        if cli is None:
-            raise MkbError("MARKDOWN_WORKER_UNAVAILABLE", "Markdown worker is not configured", 503)
+        channel = self._compression_channel(state, command)
         if not self._has_frozen_prompt_selection(state, "markdown"):
             raise MkbError("PROMPT_NOT_REGISTERED", "Frozen markdown prompt pointer is unavailable", 503)
         prompt_path, prompt_digest = self._ns1_prompt_file(
@@ -437,28 +529,41 @@ class IntakeGenerationConstructMixin:
             state=state,
             role="markdown",
         )
-        result = await cli.run(
-            ClaudeCliRequest(
-                user_prompt=clean,
-                system_prompt_file=prompt_path,
-                role="markdown",
+        if channel == "local-inference":
+            markdown, receipt = await self._live_markdown_text(
+                command,
+                clean_text=clean,
+                prompt_path=prompt_path,
+                prompt_digest=prompt_digest,
+                state=state,
             )
-        )
-        markdown = result.text.strip()
-        if not markdown:
-            raise MkbError("MARKDOWN_OUTPUT_INVALID", "Markdown worker returned empty output", 422)
-        _, pointer = self._frozen_prompt_file(state, role="markdown", error_code="PROMPT_HASH_MISMATCH")
-        receipt: dict[str, object] = {
-            "transport": "claude_cli",
-            "role": "markdown",
-            "prompt_relative_path": self._prompt_relative_path(prompt_path),
-            "prompt_version": pointer.get("version") or pointer.get("prompt_version"),
-            "prompt_sha256": prompt_digest,
-            "session_id": result.session_id,
-            "usage": None if result.usage is None else dict(result.usage),
-            "exit_code": result.exit_code,
-            "output_digest": stable_digest({"text": markdown}),
-        }
+        else:
+            cli = getattr(self, "_claude_cli", None)
+            if cli is None:
+                raise MkbError("MARKDOWN_WORKER_UNAVAILABLE", "Markdown worker is not configured", 503)
+            result = await cli.run(
+                ClaudeCliRequest(
+                    user_prompt=clean,
+                    system_prompt_file=prompt_path,
+                    role="markdown",
+                )
+            )
+            markdown = result.text.strip()
+            if not markdown:
+                raise MkbError("MARKDOWN_OUTPUT_INVALID", "Markdown worker returned empty output", 422)
+            _, pointer = self._frozen_prompt_file(state, role="markdown", error_code="PROMPT_HASH_MISMATCH")
+            receipt = {
+                "transport": "claude_cli",
+                "role": "markdown",
+                "prompt_relative_path": self._prompt_relative_path(prompt_path),
+                "prompt_version": pointer.get("version") or pointer.get("prompt_version"),
+                "prompt_sha256": prompt_digest,
+                "session_id": result.session_id,
+                "usage": None if result.usage is None else dict(result.usage),
+                "exit_code": result.exit_code,
+                "output_digest": stable_digest({"text": markdown}),
+                "compression_channel": "non-interactive",
+            }
         next_state = dict(state)
         next_state.update(
             {
@@ -791,15 +896,8 @@ class IntakeGenerationConstructMixin:
             layered_candidate: Mapping[str, object] | None = None
             profile = self._layered_profile(state, error_code="STRUCTURE_PROFILE_INVALID")
             structurize_input = self._structurize_input_text(state, clean)
-            if getattr(self, "_claude_cli", None) is not None and state.get("layered_content_candidate") is None:
-                generated_candidate, cli_receipt = await self._cli_layered_candidate(
-                    clean_text=clean,
-                    input_text=structurize_input,
-                    profile=profile,
-                    state=state,
-                )
-                layered_candidate = generated_candidate
-            elif self._live_inference:
+            channel = self._compression_channel(state, command)
+            if state.get("layered_content_candidate") is None and channel == "local-inference":
                 generation_invocation = await self._live_structured_generate(
                     command,
                     stage_key="structurize",
@@ -814,6 +912,18 @@ class IntakeGenerationConstructMixin:
                 live_candidate = generation_invocation.pop("_structured_output", None)
                 if isinstance(live_candidate, Mapping):
                     layered_candidate = live_candidate
+            elif (
+                state.get("layered_content_candidate") is None
+                and channel == "non-interactive"
+                and getattr(self, "_claude_cli", None) is not None
+            ):
+                generated_candidate, cli_receipt = await self._cli_layered_candidate(
+                    clean_text=clean,
+                    input_text=structurize_input,
+                    profile=profile,
+                    state=state,
+                )
+                layered_candidate = generated_candidate
             if layered_candidate is None:
                 layered_candidate = self._layered_state_candidate(
                     state,
@@ -1071,7 +1181,7 @@ class IntakeGenerationConstructMixin:
             next_state = dict(state)
             next_state.update(
                 {
-                    "compression_channel": self._compression_channel(state),
+                    "compression_channel": self._compression_channel(state, command),
                     "construct_mode": construct_mode,
                     "construction_artifact_uuid": construction_artifact_uuid,
                     "construction_artifact_ref": construction_asset.stat.handle.value,

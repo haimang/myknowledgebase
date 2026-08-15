@@ -79,11 +79,32 @@ def test_payload_defaults_to_non_interactive_and_rejects_unknown_channel() -> No
         IntakeIngestPayload.model_validate(_payload(compression_channel="claude"))
 
 
-def test_summary_transport_keeps_claude_cli_as_the_default() -> None:
+def test_summary_transport_uses_dispatch_pool_as_ssot() -> None:
+    from src.contracts.common.ids import uuid7
+    from src.contracts.runtime.models import ProcessCommand
+
     pipeline = IntakePipeline(None, None, None, claude_cli=object())  # type: ignore[arg-type]
-    assert pipeline._summary_transport({"payload": {}}) == "claude_cli"
     assert pipeline._summary_transport({"payload": {"compression_channel": "non-interactive"}}) == "claude_cli"
-    assert pipeline._compression_channel({"payload": {}}) == "non-interactive"
+    local_command = ProcessCommand(
+        schema_version="mkb.process-command.v1",
+        team_uuid=uuid7(),
+        task_uuid=uuid7(),
+        trace_uuid=uuid7(),
+        execution_uuid=uuid7(),
+        process_uuid=uuid7(),
+        process_key="lsrag.construct",
+        process_contract_version="v1",
+        fencing_generation=1,
+        command_input_digest="0" * 64,
+        input_manifest_ref="ref",
+        input_manifest_digest="0" * 64,
+        config_snapshot_ref="cfg-ref",
+        config_snapshot_digest="0" * 64,
+        binding_digest="0" * 64,
+        dispatch_pool="non-interactive",
+        task_priority="normal",
+    )
+    assert pipeline._compression_channel({"payload": {}}, local_command) == "non-interactive"
 
 
 def test_summary_transport_uses_spark_only_when_local_inference_is_live() -> None:
@@ -103,7 +124,7 @@ def test_summary_transport_uses_spark_only_when_local_inference_is_live() -> Non
         claude_cli=object(),
         live_inference=True,
     )  # type: ignore[arg-type]
-    assert live_with_cli._summary_transport({"payload": {}}) == "claude_cli"
+    assert live_with_cli._summary_transport({"payload": {"compression_channel": "non-interactive"}}) == "claude_cli"
 
 
 def test_snapshot_rejects_explicit_local_inference_when_live_inference_is_off() -> None:
@@ -224,11 +245,35 @@ def test_local_inference_errors_are_salvageable_only_with_cli() -> None:
         claude_cli=object(),
         live_inference=True,
     )  # type: ignore[arg-type]
+    from src.contracts.common.ids import uuid7
+    from src.contracts.runtime.models import ProcessCommand
+
     empty = MkbError("INFERENCE_VALIDATION_RESPONSE", "empty content", 502)
-    assert bare._can_salvage_local_inference(empty) is False
-    assert with_cli._can_salvage_local_inference(empty) is True
-    assert with_cli._can_salvage_local_inference(MkbError("PROMPT_HASH_MISMATCH", "drift", 503)) is False
-    assert with_cli._can_salvage_local_inference(MkbError("CONSTRUCT_KERNEL_SUMMARY_INVALID", "bad json", 422)) is True
+    command = ProcessCommand(
+        schema_version="mkb.process-command.v1",
+        team_uuid=uuid7(),
+        task_uuid=uuid7(),
+        trace_uuid=uuid7(),
+        execution_uuid=uuid7(),
+        process_uuid=uuid7(),
+        process_key="lsrag.construct",
+        process_contract_version="v1",
+        fencing_generation=1,
+        command_input_digest="0" * 64,
+        input_manifest_ref="ref",
+        input_manifest_digest="0" * 64,
+        config_snapshot_ref="cfg-ref",
+        config_snapshot_digest="0" * 64,
+        binding_digest="0" * 64,
+        dispatch_pool="local-inference",
+        task_priority="normal",
+    )
+    assert bare._can_salvage_local_inference(empty, command) is False
+    assert with_cli._can_salvage_local_inference(empty, command) is True
+    assert with_cli._can_salvage_local_inference(MkbError("PROMPT_HASH_MISMATCH", "drift", 503), command) is False
+    assert with_cli._can_salvage_local_inference(MkbError("CONSTRUCT_KERNEL_SUMMARY_INVALID", "bad json", 422), command) is True
+    low_command = command.model_copy(update={"task_priority": "low"})
+    assert with_cli._can_salvage_local_inference(empty, low_command) is False
 
 
 @pytest.mark.asyncio
@@ -268,7 +313,7 @@ async def test_invalid_local_inference_result_salvages_once_via_claude_cli() -> 
         clean_artifact_uuid=uuid7(),
         granularity_set=(0,),
     )
-    command = SimpleNamespace()
+    command = SimpleNamespace(dispatch_pool="local-inference", task_priority="normal")
     prompt = Path("data/prompts/summarizer/promptC.summarizer.v1.md")
     state = {
         "payload": {
@@ -304,6 +349,56 @@ async def test_invalid_local_inference_result_salvages_once_via_claude_cli() -> 
     assert cli_receipt["salvage_error_code"] == "INFERENCE_VALIDATION_RESPONSE"
     assert completed["layered_content"][0]["llm_summary"]["body"]
     assert summaries
+
+
+@pytest.mark.asyncio
+async def test_explicit_channel_override_writes_security_audit(tmp_path: Path) -> None:
+    # NS2-T38: explicit compression_channel must write an allowed security audit
+    import json
+
+    from src.contracts.common.ids import uuid7
+    from src.contracts.common.time import utc_now
+    from src.persistence.sqlite_port import SqlitePersistence
+    from src.services.config_snapshots import ConfigSnapshotService
+    from src.services.events import SecurityAuditWriter
+
+    persistence = SqlitePersistence(tmp_path / "audit.sqlite3", Path("src/persistence/migrations"))
+    await persistence.migrate()
+    team_uuid = uuid7()
+    task_uuid = uuid7()
+    trace_uuid = uuid7()
+    now = utc_now()
+    service = object.__new__(ConfigSnapshotService)
+    service.security_audit = SecurityAuditWriter()
+    request = SimpleNamespace(
+        payload=IntakeIngestPayload.model_validate(_payload(compression_channel="non-interactive")),
+        priority="low",
+        team_uuid=team_uuid,
+        task_uuid=task_uuid,
+        trace_uuid=trace_uuid,
+    )
+    try:
+        async with persistence.transaction() as tx:
+            await tx.execute(
+                "INSERT INTO mkb_teams (team_uuid, name, creation_fingerprint, created_at, updated_at) "
+                "VALUES (?, 'audit', ?, ?, ?)",
+                (team_uuid, "d" * 64, now, now),
+            )
+            await service.audit_explicit_channel(tx, request)  # type: ignore[arg-type]
+            row = await tx.fetchone(
+                "SELECT action, outcome, payload_json FROM mkb_security_audit_events WHERE target_uuid=?",
+                (task_uuid,),
+            )
+        assert row is not None
+        assert row["action"] == "config.compression_channel_override"
+        assert row["outcome"] == "allowed"
+        payload = json.loads(row["payload_json"])
+        assert payload["channel"] == "non-interactive"
+        assert payload["channel_source"] == "explicit"
+        assert payload["priority"] == "low"
+        assert "content" not in payload
+    finally:
+        await persistence.close()
 
 
 @pytest.mark.asyncio
@@ -346,7 +441,7 @@ async def test_kernel_rejected_local_inference_package_salvages_once() -> None:
     pipeline._persist_failed_generation_invocation = _noop_persist  # type: ignore[method-assign]
     prompt = Path("data/prompts/summarizer/promptC.summarizer.v1.md")
     _completed, _summaries, invocations, cli_receipt = await pipeline._complete_construct_summaries(
-        SimpleNamespace(),  # type: ignore[arg-type]
+        SimpleNamespace(dispatch_pool="local-inference", task_priority="normal"),  # type: ignore[arg-type]
         {
             "payload": {
                 "compression_channel": "local-inference",

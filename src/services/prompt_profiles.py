@@ -18,8 +18,11 @@ prompt whose catalog ``granularity_set`` is inclusive of coarser layers:
 
 Compression channel is independent of prompt identity:
 
-    non-interactive   Claude ``-p`` (default)
+    non-interactive   Claude ``-p``
     local-inference   Local vLLM generate (Qwen / Lightning)
+
+Omit is not a Claude default. Snapshot/admit derive the channel from
+Task.priority (normal/low first local; urgent/high lock NI).
 """
 
 from __future__ import annotations

@@ -74,8 +74,18 @@ class IntakeCleanPreflightMixin:
             prompt = await self._clean_prompt_material(command, strategy, state=state)
             llm = self._clean_language_model()
             cli_clean_supported = command.process_key not in {"clean.ocr.local", "clean.extract.vision"}
+            channel = None
+            if command.dispatch_pool in {"local-inference", "non-interactive"}:
+                channel = command.dispatch_pool
+            if channel == "local-inference" and llm is None:
+                raise MkbError(
+                    "COMPRESSION_CHANNEL_UNAVAILABLE",
+                    "local-inference clean requires an injected language model",
+                    503,
+                )
             if (
                 llm is None
+                and channel != "local-inference"
                 and cli_clean_supported
                 and resolve_clean_strategy(strategy).llm_required
                 and getattr(self, "_claude_cli", None) is not None
