@@ -25,6 +25,7 @@ class DomainEventWriter:
         "execution.waiting_released",
         "execution.prerequisite_released",
         "process.materialized",
+        "process.dispatch_admitted",
         "process.claimed",
         "process.status_changed",
         "process.outcome_accepted",

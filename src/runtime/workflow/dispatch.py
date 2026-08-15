@@ -2,7 +2,11 @@
 
 from __future__ import annotations
 
-from typing import Any, Literal
+from dataclasses import dataclass
+from typing import TYPE_CHECKING, Any, Literal
+
+if TYPE_CHECKING:
+    from src.persistence.ports import UnitOfWork
 
 DISPATCH_LOCAL_RUNNING_CAP = 2
 DISPATCH_LOCAL_QUEUED_CAP = 6
@@ -14,6 +18,54 @@ DISPATCH_LOCAL_CHAR_BUDGET = 16_000
 
 DispatchPool = Literal["local-inference", "non-interactive", "embed"]
 PoolKind = Literal["generate", "embed", "unpooled"]
+
+
+@dataclass(frozen=True)
+class PoolOccupancy:
+    running: int
+    queued: int
+    waiting: int = 0
+
+
+async def get_pool_occupancies(tx: UnitOfWork) -> dict[str, PoolOccupancy]:
+    """Query current running and admitted queued counts for each dispatch pool."""
+
+    rows = await tx.fetchall(
+        """
+        SELECT dispatch_pool,
+               SUM(CASE WHEN status IN ('claimed', 'running') THEN 1 ELSE 0 END) AS running_count,
+               SUM(CASE WHEN status = 'ready' AND dispatch_admitted = 1 THEN 1 ELSE 0 END) AS queued_count
+        FROM mkb_processes
+        WHERE dispatch_pool IS NOT NULL
+        GROUP BY dispatch_pool
+        """
+    )
+    result = {
+        "local-inference": PoolOccupancy(running=0, queued=0),
+        "non-interactive": PoolOccupancy(running=0, queued=0),
+        "embed": PoolOccupancy(running=0, queued=0),
+    }
+    for row in rows:
+        pool = row["dispatch_pool"]
+        if pool in result:
+            result[pool] = PoolOccupancy(
+                running=int(row.get("running_count") or 0),
+                queued=int(row.get("queued_count") or 0),
+            )
+    return result
+
+
+async def get_waiting_count(tx: UnitOfWork) -> int:
+    """Query count of ready processes awaiting pool admission."""
+
+    row = await tx.fetchone(
+        """
+        SELECT COUNT(*) AS waiting_count
+        FROM mkb_processes
+        WHERE status = 'ready' AND dispatch_admitted = 0
+        """
+    )
+    return int(row.get("waiting_count") or 0) if row else 0
 
 
 def pool_kind(process_key: str, snapshot: dict[str, Any] | None = None) -> PoolKind:
