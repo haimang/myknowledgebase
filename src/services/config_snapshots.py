@@ -594,23 +594,29 @@ class ConfigSnapshotService:
         """Resolve the four role identities into one immutable input object."""
 
         if not isinstance(request.payload, IntakeIngestPayload):
-            return {}
-        try:
-            domain_defaults = default_prompt_ids(
-                domain=request.payload.domain,
-                flavor=request.payload.flavor,
-                granularity=request.payload.granularity,
-            )
-        except ValueError as exc:
-            raise MkbError("PROMPT_PROFILE_INVALID", str(exc), 422) from exc
-        requested: dict[str, str | None] = {
-            "clean": request.payload.clean_prompt_id or domain_defaults.get("clean") or _DEFAULT_PROMPT_IDS["clean"],
-            "markdown": request.payload.markdown_prompt_id or domain_defaults.get("markdown"),
-            "json": request.payload.json_prompt_id or domain_defaults.get("json"),
-            "summarizer": request.payload.summarizer_prompt_id
-            or domain_defaults.get("summarizer")
-            or _DEFAULT_PROMPT_IDS["summarizer"],
-        }
+            requested: dict[str, str | None] = {
+                "clean": _DEFAULT_PROMPT_IDS["clean"],
+                "markdown": None,
+                "json": _DEFAULT_PROMPT_IDS["json"],
+                "summarizer": _DEFAULT_PROMPT_IDS["summarizer"],
+            }
+        else:
+            try:
+                domain_defaults = default_prompt_ids(
+                    domain=request.payload.domain,
+                    flavor=request.payload.flavor,
+                    granularity=request.payload.granularity,
+                )
+            except ValueError as exc:
+                raise MkbError("PROMPT_PROFILE_INVALID", str(exc), 422) from exc
+            requested = {
+                "clean": request.payload.clean_prompt_id or domain_defaults.get("clean") or _DEFAULT_PROMPT_IDS["clean"],
+                "markdown": request.payload.markdown_prompt_id or domain_defaults.get("markdown"),
+                "json": request.payload.json_prompt_id or domain_defaults.get("json"),
+                "summarizer": request.payload.summarizer_prompt_id
+                or domain_defaults.get("summarizer")
+                or _DEFAULT_PROMPT_IDS["summarizer"],
+            }
         if not requested["json"]:
             raise MkbError("PROMPT_NOT_REGISTERED", "json prompt is required", 422)
         by_id: dict[str, list[dict[str, Any]]] = {}

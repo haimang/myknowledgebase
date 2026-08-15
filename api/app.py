@@ -281,6 +281,7 @@ def create_container(settings: Settings | None = None) -> Container:
         compatibility_definitions=BUILTIN_EXECUTION_COMPATIBILITY_WORKFLOWS,
         readiness=workflow_claim_readiness,
         outcome_committer=outcome_committer,
+        live_inference=settings.live_inference,
         cleanup_recovery_window_seconds=settings.workflow_cleanup_recovery_window_seconds,
     )
     # S09 retirement intent creation is part of a successful pointer cutover,
