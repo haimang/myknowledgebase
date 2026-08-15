@@ -143,8 +143,18 @@ class TaskCommandsMixin:
                 raise ConflictError(
                     "revision-conflict", "Task revision is stale", {"current_revision": row["row_revision"]}
                 )
-            if request.priority is not None and row["status"] != "queued":
-                raise ConflictError("task-priority-locked", "Task priority is mutable only while queued")
+            if request.priority is not None and request.priority != row["priority"]:
+                if row["status"] != "queued":
+                    raise ConflictError("task-priority-locked", "Task priority is mutable only while queued")
+                materialized = await tx.fetchone(
+                    "SELECT 1 AS present FROM mkb_processes WHERE team_uuid=? AND task_uuid=? LIMIT 1",
+                    (team_uuid, task_uuid),
+                )
+                if materialized is not None:
+                    raise ConflictError(
+                        "task-priority-locked",
+                        "Task priority is immutable after Process materialization",
+                    )
             title = request.title if request.title is not None else row["title"]
             description = request.description if request.description is not None else row["description"]
             priority = request.priority if request.priority is not None else row["priority"]

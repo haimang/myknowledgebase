@@ -138,7 +138,8 @@ class WorkflowOutcomeMixin:
                         "UPDATE mkb_processes SET status='retry_wait',accepted_outcome_digest=?,retry_count=retry_count+1,"
                         "next_retry_at=?,available_at=?,last_failure_retryability=1,error_code=?,error_message=?,"
                         "failure_disposition='retryable',claim_token_hash=NULL,lease_owner=NULL,lease_expires_at=NULL,"
-                        "heartbeat_at=NULL,row_revision=row_revision+1,updated_at=? "
+                        "heartbeat_at=NULL,dispatch_admitted=0,dispatch_pool=NULL,dispatch_enqueued_at=NULL,"
+                        "row_revision=row_revision+1,updated_at=? "
                         "WHERE process_uuid=? AND status='running' AND fencing_generation=?",
                         (
                             outcome.outcome_digest,
@@ -346,7 +347,8 @@ class WorkflowOutcomeMixin:
                 updated = await tx.execute(
                     "UPDATE mkb_processes SET status='ready',claim_token_hash=NULL,lease_owner=NULL,lease_expires_at=NULL,"
                     "heartbeat_at=NULL,fencing_generation=fencing_generation+1,recovery_count=recovery_count+1,"
-                    "available_at=?,row_revision=row_revision+1,updated_at=? "
+                    "available_at=?,dispatch_admitted=0,dispatch_pool=NULL,dispatch_enqueued_at=NULL,"
+                    "row_revision=row_revision+1,updated_at=? "
                     "WHERE process_uuid=? AND status IN ('claimed','running') AND fencing_generation=? "
                     "AND lease_expires_at<=?",
                     (now, now, process["process_uuid"], process["fencing_generation"], now),

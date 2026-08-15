@@ -38,6 +38,7 @@ def _sample_command(*, pool: str = "local-inference") -> ProcessCommand:
         config_snapshot_digest="0" * 64,
         binding_digest="0" * 64,
         dispatch_pool=pool,  # type: ignore[arg-type]
+        task_priority="normal",
     )
 
 
@@ -87,7 +88,7 @@ async def test_construct_dispatches_to_local_vllm_when_local_inference() -> None
 
     pipeline._live_layered_summary_generate = ok_generate  # type: ignore[method-assign]
     command = _sample_command(pool="local-inference")
-    state = {"payload": {"compression_channel": "local-inference"}}
+    state = {"payload": {}}
 
     completed, _summaries, invocations, cli_receipt = await pipeline._complete_construct_summaries(
         command,
@@ -200,6 +201,49 @@ async def test_local_inference_failure_salvages_once_with_claude_cli() -> None:
     assert cli_receipt["salvage_from"] == "local-inference"
     assert cli_receipt["salvage_error_code"] == "INFERENCE_VALIDATION_RESPONSE"
     assert completed["layered_content"][0]["llm_summary"]["body"]
+
+
+@pytest.mark.asyncio
+async def test_low_priority_local_failure_does_not_salvage_to_cli() -> None:
+    # NS2-T37: low + salvageable local error must fail-closed with zero CLI calls
+    cli = DeterministicNs1Stub()
+    pipeline = IntakePipeline(None, None, None, inference=object(), claude_cli=cli, live_inference=True)  # type: ignore[arg-type]
+    compiler, projection, accepted = _seed_construct_context()
+
+    async def fail_generate(_command, *, layered_candidate):
+        del layered_candidate
+        raise MkbError("INFERENCE_VALIDATION_RESPONSE", "vLLM output was empty", 502)
+
+    pipeline._live_layered_summary_generate = fail_generate  # type: ignore[method-assign]
+    command = _sample_command(pool="local-inference")
+    command = command.model_copy(update={"task_priority": "low"})
+    prompt = Path("data/prompts/summarizer/promptC.summarizer.v1.md")
+    state = {
+        "payload": {
+            "prompt_selection": {
+                "summarizer": {
+                    "prompt_id": "promptC.summarizer",
+                    "version": "v1",
+                    "content_sha256": hashlib.sha256(prompt.read_bytes()).hexdigest(),
+                    "git_relative_path": "summarizer/promptC.summarizer.v1.md",
+                    "role": "summarizer",
+                }
+            },
+        }
+    }
+
+    with pytest.raises(MkbError) as rejected:
+        await pipeline._complete_construct_summaries(
+            command,
+            state,
+            compiler=compiler,
+            projection=projection,
+            accepted_layered_candidate=accepted,
+            profile=(0,),
+        )
+
+    assert rejected.value.code == "INFERENCE_VALIDATION_RESPONSE"
+    assert cli.requests == []
 
 
 @pytest.mark.asyncio

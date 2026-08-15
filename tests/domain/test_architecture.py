@@ -456,3 +456,28 @@ def test_no_api_inference_in_production_or_test_sources() -> None:
             test_violations.append(str(py_path.relative_to(REPOSITORY_ROOT)))
 
     assert not test_violations, "api-inference string found in non-allowlisted test sources:\n" + "\n".join(test_violations)
+
+
+def test_ns2_dispatch_does_not_add_required_tables_or_payload_extra_keys() -> None:
+    """NS2-T71: dispatch state is columns on mkb_processes, never a new table or extra key."""
+
+    create_table = re.compile(r"CREATE\s+TABLE\s+(IF\s+NOT\s+EXISTS\s+)?([A-Za-z0-9_]+)", re.IGNORECASE)
+    extra_key = re.compile(r"payload_extra[^\n]{0,160}['\"]dispatch_")
+    post_011_tables: list[str] = []
+    for path in sorted((REPOSITORY_ROOT / "src/persistence/migrations").glob("[0-9][0-9][0-9]_*.sql")):
+        if path.name < "011_":
+            continue
+        text = path.read_text(encoding="utf-8")
+        for match in create_table.finditer(text):
+            table = match.group(2)
+            if table.startswith("mkb_") and table != "mkb_schema_migrations":
+                post_011_tables.append(f"{path.name}:{table}")
+    assert post_011_tables == [], "NS2 must not add required tables:\n" + "\n".join(post_011_tables)
+
+    extra_hits: list[str] = []
+    for root in ("src", "api"):
+        for py_path in (REPOSITORY_ROOT / root).rglob("*.py"):
+            text = py_path.read_text(encoding="utf-8")
+            if extra_key.search(text):
+                extra_hits.append(str(py_path.relative_to(REPOSITORY_ROOT)))
+    assert extra_hits == [], "dispatch_* must not be written into payload_extra:\n" + "\n".join(extra_hits)

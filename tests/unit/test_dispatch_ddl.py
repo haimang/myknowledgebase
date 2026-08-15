@@ -29,6 +29,7 @@ async def test_migration_011_applies_to_fresh_database(tmp_path: Path) -> None:
             indexes = await tx.fetchall("PRAGMA index_list(mkb_processes)")
             index_names = {row["name"] for row in indexes}
             assert "ix_mkb_proc_dispatch_ready" in index_names
+            assert "ix_mkb_proc_dispatch_embed_fifo" in index_names
     finally:
         await persistence.close()
 
@@ -114,3 +115,30 @@ async def test_migration_011_check_constraint_rejects_illegal_pool(tmp_path: Pat
                 )
     finally:
         await persistence.close()
+
+
+@pytest.mark.asyncio
+async def test_migration_011_upgrades_a_database_stopped_at_010(tmp_path: Path) -> None:
+    # NS2-T10: a fixture already at 010 must accept 011/012 without rebuilding
+    import sqlite3
+
+    from src.persistence.migration_runner import apply_migrations, discover_migrations
+
+    db_path = tmp_path / "upgrade_010.sqlite3"
+    migrations = discover_migrations(Path("src/persistence/migrations"))
+    through_010 = [item for item in migrations if item.migration_id <= "010_spark_vl_embed_model_key"]
+    remainder = [item for item in migrations if item.migration_id > "010_spark_vl_embed_model_key"]
+    connection = sqlite3.connect(db_path)
+    try:
+        apply_migrations(connection, through_010)
+        columns = {row[1] for row in connection.execute("PRAGMA table_info(mkb_processes)")}
+        assert "dispatch_pool" not in columns
+        apply_migrations(connection, migrations)
+        columns = {row[1] for row in connection.execute("PRAGMA table_info(mkb_processes)")}
+        indexes = {row[1] for row in connection.execute("PRAGMA index_list(mkb_processes)")}
+        assert {"dispatch_pool", "dispatch_admitted", "dispatch_enqueued_at"} <= columns
+        assert "ix_mkb_proc_dispatch_ready" in indexes
+        assert "ix_mkb_proc_dispatch_embed_fifo" in indexes
+        assert remainder
+    finally:
+        connection.close()

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import secrets
 from collections.abc import Awaitable, Callable
 from typing import Any
@@ -22,12 +23,8 @@ from src.runtime.workflow.constants import (
     _TERMINAL_EXECUTION_STATUSES,
 )
 from src.runtime.workflow.dispatch import (
-    DISPATCH_EMBED_QUEUED_CAP,
-    DISPATCH_EMBED_RUNNING_CAP,
-    DISPATCH_LOCAL_QUEUED_CAP,
-    DISPATCH_LOCAL_RUNNING_CAP,
-    DISPATCH_NI_QUEUED_CAP,
-    DISPATCH_NI_RUNNING_CAP,
+    OVER_BUDGET_PROCESS_KEYS,
+    DispatchCaps,
     choose_pool,
     get_pool_occupancies,
     pool_kind,
@@ -58,6 +55,7 @@ class WorkflowCoreMixin:
         readiness: ReadinessProbe | Callable[[], Awaitable[bool]] | None = None,
         outcome_committer: ProcessOutcomeCommitter | None = None,
         billing: BillingPort | None = None,
+        dispatch_caps: DispatchCaps | None = None,
         live_inference: bool = True,
         default_max_retries: int = 3,
         default_max_recoveries: int = 3,
@@ -75,6 +73,7 @@ class WorkflowCoreMixin:
         self.readiness = readiness
         self.outcome_committer = outcome_committer
         self.billing = billing or DefaultBillingService()
+        self.dispatch_caps = dispatch_caps or DispatchCaps()
         self.live_inference = live_inference
         self.default_max_retries = default_max_retries
         self.default_max_recoveries = default_max_recoveries
@@ -162,6 +161,75 @@ class WorkflowCoreMixin:
             return changed
 
 
+    def _dispatch_facts_from_audit(self, payload_json: str | None) -> dict[str, Any]:
+        """Recover frozen admit inputs from the task audit envelope."""
+
+        explicit_channel: str | None = None
+        channel_source = "priority"
+        source_chars = 0
+        if payload_json:
+            try:
+                envelope = json.loads(payload_json)
+            except (TypeError, json.JSONDecodeError):
+                envelope = {}
+            payload = envelope.get("payload") if isinstance(envelope, dict) else None
+            if isinstance(payload, dict):
+                raw = payload.get("compression_channel")
+                source = payload.get("channel_source")
+                if raw in {"local-inference", "non-interactive"} and source == "explicit":
+                    explicit_channel = raw
+                    channel_source = "explicit"
+                elif raw in {"local-inference", "non-interactive"} and source is None:
+                    # Audit dumps the original request. An explicit field is present
+                    # only when the caller set compression_channel.
+                    explicit_channel = raw
+                    channel_source = "explicit"
+                origin = payload.get("source")
+                if isinstance(origin, dict) and isinstance(origin.get("size_bytes"), int):
+                    source_chars = origin["size_bytes"]
+        inference_mode = "live" if self.live_inference else "deterministic"
+        return {
+            "snapshot": {
+                "l2": {
+                    "inference_mode": inference_mode,
+                    "compression_channel": explicit_channel,
+                    "channel_source": channel_source,
+                }
+            },
+            "explicit_channel": explicit_channel,
+            "channel_source": channel_source,
+            "source_chars": source_chars,
+        }
+
+    async def _admit_one_tx(
+        self,
+        tx: UnitOfWork,
+        row: dict[str, Any],
+        *,
+        pool: str | None,
+        now: str,
+        priority: str,
+        channel_source: str,
+    ) -> bool:
+        updated = await tx.execute(
+            "UPDATE mkb_processes SET dispatch_admitted=1, dispatch_pool=?, dispatch_enqueued_at=?, updated_at=? "
+            "WHERE process_uuid=? AND dispatch_admitted=0",
+            (pool, now, now, row["process_uuid"]),
+        )
+        if updated.rowcount != 1:
+            return False
+        label = "unpooled dispatch" if pool is None else f"{pool} dispatch pool"
+        await self._record_event_tx(
+            tx,
+            execution=row,
+            event_type="process.dispatch_admitted",
+            aggregate="process",
+            summary=f"Process admitted to {label}",
+            process_uuid=row["process_uuid"],
+            payload={"pool": pool, "priority": priority, "channel_source": channel_source},
+        )
+        return True
+
     async def _admit_waiting_processes_tx(self, tx: UnitOfWork, now: str) -> None:
         """Admit queued processes into pools within capacity limits (T-O-353 / T-O-355 / T-O-356)."""
 
@@ -169,108 +237,102 @@ class WorkflowCoreMixin:
         local_queued = occupancies["local-inference"].queued
         ni_queued = occupancies["non-interactive"].queued
         embed_queued = occupancies["embed"].queued
-
+        caps = self.dispatch_caps
         billing = getattr(self, "billing", None) or DefaultBillingService()
-        live_inference = getattr(self, "live_inference", True)
 
         waiting_rows = await tx.fetchall(
             "SELECT p.process_uuid, p.process_key, p.execution_uuid, p.task_uuid, p.team_uuid,"
-            "e.trace_uuid, t.priority "
+            "p.priority_rank, p.available_at, p.created_at, e.trace_uuid, t.priority, "
+            "a.strict_payload_json "
             "FROM mkb_processes AS p "
             "JOIN mkb_executions AS e ON e.execution_uuid=p.execution_uuid AND e.team_uuid=p.team_uuid "
             "JOIN mkb_tasks AS t ON t.team_uuid=p.team_uuid AND t.task_uuid=p.task_uuid "
+            "LEFT JOIN mkb_task_audits AS a ON a.team_uuid=p.team_uuid AND a.task_uuid=p.task_uuid "
             "WHERE p.status='ready' AND p.dispatch_admitted = 0 AND p.available_at <= ? "
-            "AND e.status IN ('ready','running') AND t.status IN ('queued','running') "
-            "ORDER BY p.priority_rank DESC, p.available_at ASC, p.created_at ASC, p.process_uuid ASC",
+            "AND e.status IN ('ready','running') AND t.status IN ('queued','running')",
             (now,),
         )
 
+        classified: list[tuple[dict[str, Any], str, dict[str, Any]]] = []
         for row in waiting_rows:
-            p_key = row["process_key"]
+            facts = self._dispatch_facts_from_audit(row.get("strict_payload_json"))
+            kind = pool_kind(row["process_key"], facts["snapshot"])
+            classified.append((row, kind, facts))
+
+        unpooled = [item for item in classified if item[1] == "unpooled"]
+        embeds = [item for item in classified if item[1] == "embed"]
+        generates = [item for item in classified if item[1] == "generate"]
+        embeds.sort(key=lambda item: (item[0]["available_at"] or "", item[0]["created_at"] or "", item[0]["process_uuid"]))
+        generates.sort(
+            key=lambda item: (
+                -(item[0]["priority_rank"] or 0),
+                item[0]["available_at"] or "",
+                item[0]["created_at"] or "",
+                item[0]["process_uuid"],
+            )
+        )
+
+        for row, _kind, facts in unpooled:
+            await self._admit_one_tx(
+                tx,
+                row,
+                pool=None,
+                now=now,
+                priority=row["priority"] or "normal",
+                channel_source=facts["channel_source"],
+            )
+
+        for row, _kind, facts in embeds:
+            if embed_queued >= caps.embed_queued:
+                break
+            if await self._admit_one_tx(
+                tx,
+                row,
+                pool="embed",
+                now=now,
+                priority=row["priority"] or "normal",
+                channel_source=facts["channel_source"],
+            ):
+                embed_queued += 1
+
+        for row, _kind, facts in generates:
             priority = row["priority"] or "normal"
-            kind = pool_kind(p_key)
-
-            if kind == "unpooled":
-                updated = await tx.execute(
-                    "UPDATE mkb_processes SET dispatch_admitted=1, dispatch_pool=NULL, dispatch_enqueued_at=?, updated_at=? "
-                    "WHERE process_uuid=? AND dispatch_admitted=0",
-                    (now, now, row["process_uuid"]),
-                )
-                if updated.rowcount == 1:
-                    await self._record_event_tx(
-                        tx,
-                        execution=row,
-                        event_type="process.dispatch_admitted",
-                        aggregate="process",
-                        summary="Process admitted to unpooled dispatch",
-                        process_uuid=row["process_uuid"],
-                        payload={"dispatch_pool": None, "priority": priority},
-                    )
-                continue
-
-            if kind == "embed":
-                if embed_queued < DISPATCH_EMBED_QUEUED_CAP:
-                    updated = await tx.execute(
-                        "UPDATE mkb_processes SET dispatch_admitted=1, dispatch_pool='embed', dispatch_enqueued_at=?, updated_at=? "
-                        "WHERE process_uuid=? AND dispatch_admitted=0",
-                        (now, now, row["process_uuid"]),
-                    )
-                    if updated.rowcount == 1:
-                        embed_queued += 1
-                        await self._record_event_tx(
-                            tx,
-                            execution=row,
-                            event_type="process.dispatch_admitted",
-                            aggregate="process",
-                            summary="Process admitted to embed dispatch pool",
-                            process_uuid=row["process_uuid"],
-                            payload={"dispatch_pool": "embed", "priority": priority},
-                        )
-                continue
-
-            if kind == "generate":
-                pool = choose_pool(
-                    priority,
-                    "generate",
-                    local_queued=local_queued,
-                    ni_queued=ni_queued,
-                    local_available=live_inference,
-                    ni_quota=billing.has_quota("non-interactive"),
-                )
-                if pool == "local-inference" and local_queued < DISPATCH_LOCAL_QUEUED_CAP:
-                    updated = await tx.execute(
-                        "UPDATE mkb_processes SET dispatch_admitted=1, dispatch_pool='local-inference', dispatch_enqueued_at=?, updated_at=? "
-                        "WHERE process_uuid=? AND dispatch_admitted=0",
-                        (now, now, row["process_uuid"]),
-                    )
-                    if updated.rowcount == 1:
-                        local_queued += 1
-                        await self._record_event_tx(
-                            tx,
-                            execution=row,
-                            event_type="process.dispatch_admitted",
-                            aggregate="process",
-                            summary="Process admitted to local-inference dispatch pool",
-                            process_uuid=row["process_uuid"],
-                            payload={"dispatch_pool": "local-inference", "priority": priority},
-                        )
-                elif pool == "non-interactive" and ni_queued < DISPATCH_NI_QUEUED_CAP:
-                    updated = await tx.execute(
-                        "UPDATE mkb_processes SET dispatch_admitted=1, dispatch_pool='non-interactive', dispatch_enqueued_at=?, updated_at=? "
-                        "WHERE process_uuid=? AND dispatch_admitted=0",
-                        (now, now, row["process_uuid"]),
-                    )
-                    if updated.rowcount == 1:
-                        ni_queued += 1
-                        await self._record_event_tx(
-                            tx,
-                            execution=row,
-                            event_type="process.dispatch_admitted",
-                            aggregate="process",
-                            summary="Process admitted to non-interactive dispatch pool",
-                            process_uuid=row["process_uuid"],
-                            payload={"dispatch_pool": "non-interactive", "priority": priority},
-                        )
+            over_budget = (
+                row["process_key"] in OVER_BUDGET_PROCESS_KEYS
+                and facts["source_chars"] > caps.local_char_budget
+            )
+            pool = choose_pool(
+                priority,
+                "generate",
+                local_queued=local_queued,
+                ni_queued=ni_queued,
+                local_available=self.live_inference,
+                ni_quota=billing.has_quota("non-interactive"),
+                over_budget=over_budget,
+                explicit_channel=facts["explicit_channel"],
+                local_queued_cap=caps.local_queued,
+                ni_queued_cap=caps.ni_queued,
+            )
+            if pool == "local-inference" and local_queued < caps.local_queued:
+                if await self._admit_one_tx(
+                    tx,
+                    row,
+                    pool="local-inference",
+                    now=now,
+                    priority=priority,
+                    channel_source=facts["channel_source"],
+                ):
+                    local_queued += 1
+            elif pool == "non-interactive" and ni_queued < caps.ni_queued:
+                if await self._admit_one_tx(
+                    tx,
+                    row,
+                    pool="non-interactive",
+                    now=now,
+                    priority=priority,
+                    channel_source=facts["channel_source"],
+                ):
+                    ni_queued += 1
 
     async def claim_next(self, lease_owner: str, *, lease_seconds: int = 30) -> ClaimedProcess | None:
         """Atomically claim the next due process, or return ``None`` when idle."""
@@ -321,13 +383,29 @@ class WorkflowCoreMixin:
 
             # Query pool occupancy to check running capacity
             occupancies = await get_pool_occupancies(tx)
-            local_can_run = 1 if occupancies["local-inference"].running < DISPATCH_LOCAL_RUNNING_CAP else 0
-            ni_can_run = 1 if occupancies["non-interactive"].running < DISPATCH_NI_RUNNING_CAP else 0
-            embed_can_run = 1 if occupancies["embed"].running < DISPATCH_EMBED_RUNNING_CAP else 0
+            caps = self.dispatch_caps
+            local_can_run = 1 if occupancies["local-inference"].running < caps.local_running else 0
+            ni_can_run = 1 if occupancies["non-interactive"].running < caps.ni_running else 0
+            embed_can_run = occupancies["embed"].running < caps.embed_running
 
-            candidate = await tx.fetchone(
+            embed_candidate = None
+            if embed_can_run:
+                embed_candidate = await tx.fetchone(
+                    "SELECT p.*, e.trace_uuid, e.status AS execution_status, e.domain_binding_digest,"
+                    "e.workflow_uuid,e.workflow_revision_uuid,e.compiled_digest, t.priority AS task_priority "
+                    "FROM mkb_processes AS p JOIN mkb_executions AS e "
+                    "ON e.execution_uuid=p.execution_uuid AND e.team_uuid=p.team_uuid "
+                    "JOIN mkb_tasks AS t ON t.team_uuid=p.team_uuid AND t.task_uuid=p.task_uuid "
+                    "WHERE p.status='ready' AND p.available_at<=? AND p.dispatch_admitted = 1 "
+                    "AND p.dispatch_pool = 'embed' "
+                    "AND e.status IN ('ready','running') AND t.status IN ('queued','running') "
+                    "ORDER BY p.available_at ASC, p.created_at ASC, p.process_uuid ASC "
+                    "LIMIT 1",
+                    (now,),
+                )
+            other_candidate = await tx.fetchone(
                 "SELECT p.*, e.trace_uuid, e.status AS execution_status, e.domain_binding_digest,"
-                "e.workflow_uuid,e.workflow_revision_uuid,e.compiled_digest "
+                "e.workflow_uuid,e.workflow_revision_uuid,e.compiled_digest, t.priority AS task_priority "
                 "FROM mkb_processes AS p JOIN mkb_executions AS e "
                 "ON e.execution_uuid=p.execution_uuid AND e.team_uuid=p.team_uuid "
                 "JOIN mkb_tasks AS t ON t.team_uuid=p.team_uuid AND t.task_uuid=p.task_uuid "
@@ -335,18 +413,31 @@ class WorkflowCoreMixin:
                 "AND ("
                 "  p.dispatch_pool IS NULL "
                 "  OR (p.dispatch_pool = 'local-inference' AND ? = 1) "
-                "  OR (p.dispatch_pool = 'non-interactive' AND ? = 1) "
-                "  OR (p.dispatch_pool = 'embed' AND ? = 1)"
+                "  OR (p.dispatch_pool = 'non-interactive' AND ? = 1)"
                 ") "
                 "AND e.status IN ('ready','running') AND t.status IN ('queued','running') "
                 "ORDER BY "
-                "  CASE WHEN p.dispatch_pool = 'embed' THEN 0 ELSE p.priority_rank END DESC,"
+                "  p.priority_rank DESC,"
                 "  p.available_at ASC,"
                 "  CASE WHEN p.deadline_at IS NULL THEN 1 ELSE 0 END, p.deadline_at ASC,"
                 "  p.created_at ASC, p.process_uuid ASC "
                 "LIMIT 1",
-                (now, local_can_run, ni_can_run, embed_can_run),
+                (now, local_can_run, ni_can_run),
             )
+            if embed_candidate is not None and other_candidate is not None:
+                embed_key = (
+                    embed_candidate["available_at"] or "",
+                    embed_candidate["created_at"] or "",
+                    embed_candidate["process_uuid"],
+                )
+                other_key = (
+                    other_candidate["available_at"] or "",
+                    other_candidate["created_at"] or "",
+                    other_candidate["process_uuid"],
+                )
+                candidate = embed_candidate if embed_key <= other_key else other_candidate
+            else:
+                candidate = embed_candidate if embed_candidate is not None else other_candidate
             if candidate is None:
                 return None
             # Do not lease a side-effecting Process unless its immutable
@@ -489,9 +580,12 @@ class WorkflowCoreMixin:
 
     async def _process_with_execution(self, tx: UnitOfWork, process_uuid: str) -> dict[str, Any]:
         row = await tx.fetchone(
-            "SELECT p.*,e.trace_uuid,e.status AS execution_status,e.domain_binding_digest "
+            "SELECT p.*,e.trace_uuid,e.status AS execution_status,e.domain_binding_digest,"
+            "t.priority AS task_priority "
             "FROM mkb_processes AS p JOIN mkb_executions AS e "
-            "ON e.execution_uuid=p.execution_uuid AND e.team_uuid=p.team_uuid WHERE p.process_uuid=?",
+            "ON e.execution_uuid=p.execution_uuid AND e.team_uuid=p.team_uuid "
+            "JOIN mkb_tasks AS t ON t.team_uuid=p.team_uuid AND t.task_uuid=p.task_uuid "
+            "WHERE p.process_uuid=?",
             (process_uuid,),
         )
         if row is None:
@@ -824,6 +918,7 @@ class WorkflowCoreMixin:
             config_snapshot_digest=process["config_snapshot_digest"],
             binding_digest=process["domain_binding_digest"],
             dispatch_pool=process.get("dispatch_pool"),
+            task_priority=process.get("task_priority"),
         )
 
 

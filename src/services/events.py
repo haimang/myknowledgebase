@@ -183,3 +183,59 @@ class SecurityAuditWriter:
             ),
         )
         return audit_uuid
+
+    async def write_allowed(
+        self,
+        tx: UnitOfWork,
+        *,
+        action: str,
+        summary: str,
+        http_status: int = 200,
+        actor_fingerprint: str | None = None,
+        actor_kind: str | None = None,
+        team_uuid: str | None = None,
+        trace_uuid: str | None = None,
+        request_id: str | None = None,
+        target_kind: str | None = None,
+        target_uuid: str | None = None,
+        remote_ip: str | None = None,
+        payload: dict[str, Any] | None = None,
+    ) -> str:
+        safe_payload = redact(payload or {})
+        safe_summary = redact(summary)
+        effective_actor_kind = actor_kind or ("anonymous" if actor_fingerprint is None else "internal_token")
+        if (
+            not isinstance(safe_payload, dict)
+            or not isinstance(safe_summary, str)
+            or effective_actor_kind not in self._ACTOR_KINDS
+            or len(safe_summary) > 512
+        ):
+            raise MkbError("SEC_AUDIT_WRITE_FAIL", "Security audit payload is invalid", 500)
+        encoded_payload = json.dumps(safe_payload, separators=(",", ":"))
+        if len(encoded_payload.encode("utf-8")) > 64 * 1024:
+            raise MkbError("SEC_AUDIT_WRITE_FAIL", "Security audit payload is invalid", 500)
+        audit_uuid = uuid7()
+        await tx.execute(
+            "INSERT INTO mkb_security_audit_events "
+            "(audit_uuid,team_uuid,trace_uuid,request_id,actor_kind,actor_fingerprint,action,outcome,denial_code,"
+            "http_status,target_kind,target_uuid,remote_addr_hash,summary,payload_json,payload_digest,occurred_at,"
+            "payload_extra) VALUES (?,?,?,?,?,?,?,'allowed',NULL,?,?,?,?,?,?,?,?,'{}')",
+            (
+                audit_uuid,
+                team_uuid,
+                trace_uuid,
+                safe_request_id(request_id),
+                effective_actor_kind,
+                actor_fingerprint,
+                action,
+                http_status,
+                target_kind[:128] if target_kind else None,
+                target_uuid[:128] if target_uuid else None,
+                hash_remote_address(remote_ip),
+                safe_summary[:512],
+                encoded_payload,
+                stable_digest(safe_payload),
+                utc_now(),
+            ),
+        )
+        return audit_uuid

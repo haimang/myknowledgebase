@@ -658,6 +658,9 @@ CREATE UNIQUE INDEX ux_restart_full_tgt_gen
 | Cleanup | `cleanup_eligible_at`; `cleanup_fence_digest` | |
 | Time | `created_at`… | |
 | | `payload_extra` | |
+| **NS2 dispatch** | `dispatch_pool`；`dispatch_admitted`；`dispatch_enqueued_at` | 011 列晋升，非新表；禁写入 `payload_extra` |
+
+**NS2 索引**：`ix_mkb_proc_dispatch_ready (dispatch_pool, dispatch_admitted, available_at) WHERE status='ready'`；`ix_mkb_proc_dispatch_embed_fifo (available_at, created_at, process_uuid) WHERE ready+admitted+embed`。
 
 **Process 八态**：与 S03 逐字对齐（含 `ready,claimed,running,retry_wait,succeeded,failed,cancelled,…`）。
 

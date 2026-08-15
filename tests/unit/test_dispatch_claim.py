@@ -509,3 +509,168 @@ async def test_unpooled_preserves_s03_priority_ordering(tmp_path: Path) -> None:
         assert claimed.command.process_uuid == proc_urgent
     finally:
         await persistence.close()
+
+
+class _DeniedBilling:
+    def has_quota(self, channel: str) -> bool:
+        del channel
+        return False
+
+
+@pytest.mark.asyncio
+async def test_billing_false_blocks_ni_admission_for_urgent(tmp_path: Path) -> None:
+    # NS2-T07: BillingPort False means urgent generate is not admitted to NI
+    persistence, runtime, team_uuid, compiled_digest, wf_uuid, wfr_uuid, step_map = await _setup_runtime(tmp_path)
+    runtime.billing = _DeniedBilling()
+    proc_uuid = uuid7()
+    try:
+        await _insert_task_and_process(
+            persistence,
+            team_uuid,
+            workflow_uuid=wf_uuid,
+            workflow_revision_uuid=wfr_uuid,
+            workflow_step_uuid=step_map["construct"],
+            compiled_digest=compiled_digest,
+            task_id=uuid7(),
+            exec_id=uuid7(),
+            proc_id=proc_uuid,
+            priority="urgent",
+            priority_rank=400,
+        )
+        claimed = await runtime.claim_next("worker-1")
+        assert claimed is None
+        async with persistence.transaction() as tx:
+            row = await tx.fetchone(
+                "SELECT dispatch_admitted, dispatch_pool FROM mkb_processes WHERE process_uuid=?",
+                (proc_uuid,),
+            )
+            assert row == {"dispatch_admitted": 0, "dispatch_pool": None}
+    finally:
+        await persistence.close()
+
+
+@pytest.mark.asyncio
+async def test_deterministic_vectorize_is_unpooled_when_live_inference_is_off(tmp_path: Path) -> None:
+    # NS2-T52: live_inference=false vectorize must not occupy the embed pool
+    persistence, _runtime, team_uuid, compiled_digest, wf_uuid, wfr_uuid, step_map = await _setup_runtime(tmp_path)
+    runtime = WorkflowRuntime(persistence, BUILTIN_SINGLE_INTAKE_LSRAG_WORKFLOW, live_inference=False)
+    proc_uuid = uuid7()
+    try:
+        await _insert_task_and_process(
+            persistence,
+            team_uuid,
+            workflow_uuid=wf_uuid,
+            workflow_revision_uuid=wfr_uuid,
+            workflow_step_uuid=step_map["vectorize"],
+            compiled_digest=compiled_digest,
+            task_id=uuid7(),
+            exec_id=uuid7(),
+            proc_id=proc_uuid,
+            step_key="vectorize",
+            process_key="lsrag.vectorize",
+            priority="low",
+            priority_rank=100,
+        )
+        claimed = await runtime.claim_next("worker-1")
+        assert claimed is not None
+        assert claimed.command.process_uuid == proc_uuid
+        assert claimed.command.dispatch_pool is None
+        async with persistence.transaction() as tx:
+            row = await tx.fetchone(
+                "SELECT dispatch_pool, dispatch_admitted FROM mkb_processes WHERE process_uuid=?",
+                (proc_uuid,),
+            )
+            assert row == {"dispatch_pool": None, "dispatch_admitted": 1}
+    finally:
+        await persistence.close()
+
+
+@pytest.mark.asyncio
+async def test_embed_still_claimed_when_local_running_is_full(tmp_path: Path) -> None:
+    # NS2-T54: local running=2 must not starve an already-admittable embed process
+    persistence, runtime, team_uuid, compiled_digest, wf_uuid, wfr_uuid, step_map = await _setup_runtime(tmp_path)
+    local_a, local_b, embed_id = uuid7(), uuid7(), uuid7()
+    try:
+        for proc_id in (local_a, local_b):
+            await _insert_task_and_process(
+                persistence,
+                team_uuid,
+                workflow_uuid=wf_uuid,
+                workflow_revision_uuid=wfr_uuid,
+                workflow_step_uuid=step_map["construct"],
+                compiled_digest=compiled_digest,
+                task_id=uuid7(),
+                exec_id=uuid7(),
+                proc_id=proc_id,
+                priority="normal",
+                priority_rank=200,
+                status="running",
+                dispatch_pool="local-inference",
+                dispatch_admitted=1,
+                claim_token_hash="c" * 64,
+                lease_owner="holder",
+                lease_expires_at="2026-08-16T00:00:00Z",
+            )
+        await _insert_task_and_process(
+            persistence,
+            team_uuid,
+            workflow_uuid=wf_uuid,
+            workflow_revision_uuid=wfr_uuid,
+            workflow_step_uuid=step_map["vectorize"],
+            compiled_digest=compiled_digest,
+            task_id=uuid7(),
+            exec_id=uuid7(),
+            proc_id=embed_id,
+            step_key="vectorize",
+            process_key="lsrag.vectorize",
+            priority="low",
+            priority_rank=100,
+            created_at="2026-08-15T00:00:00Z",
+            available_at="2026-08-15T00:00:00Z",
+        )
+        claimed = await runtime.claim_next("worker-embed")
+        assert claimed is not None
+        assert claimed.command.process_uuid == embed_id
+        assert claimed.command.dispatch_pool == "embed"
+    finally:
+        await persistence.close()
+
+
+@pytest.mark.asyncio
+async def test_explicit_non_interactive_overrides_low_lane_on_admit(tmp_path: Path) -> None:
+    persistence, runtime, team_uuid, compiled_digest, wf_uuid, wfr_uuid, step_map = await _setup_runtime(tmp_path)
+    proc_uuid = uuid7()
+    task_id = uuid7()
+    try:
+        await _insert_task_and_process(
+            persistence,
+            team_uuid,
+            workflow_uuid=wf_uuid,
+            workflow_revision_uuid=wfr_uuid,
+            workflow_step_uuid=step_map["construct"],
+            compiled_digest=compiled_digest,
+            task_id=task_id,
+            exec_id=uuid7(),
+            proc_id=proc_uuid,
+            priority="low",
+            priority_rank=100,
+        )
+        async with persistence.transaction() as tx:
+            await tx.execute(
+                "INSERT INTO mkb_task_audits "
+                "(team_uuid,task_uuid,request_envelope_digest,strict_payload_json,caller_token_fingerprint,received_at,payload_extra) "
+                "VALUES (?,?,?,?,?,?,'{}')",
+                (
+                    team_uuid,
+                    task_id,
+                    "d" * 64,
+                    '{"payload":{"compression_channel":"non-interactive"}}',
+                    "fp",
+                    "2026-08-15T00:00:00Z",
+                ),
+            )
+        claimed = await runtime.claim_next("worker-1")
+        assert claimed is not None
+        assert claimed.command.dispatch_pool == "non-interactive"
+    finally:
+        await persistence.close()

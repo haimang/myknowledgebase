@@ -130,6 +130,7 @@ class TaskCreateMixin:
                 ),
             )
             if prepared is not None:
+                await self.config_snapshots.audit_explicit_channel(tx, request)
                 await self.config_snapshots.catalog_for_execution(
                     tx,
                     team_uuid=request.team_uuid,

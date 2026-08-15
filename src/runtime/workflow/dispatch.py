@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING, Any, Literal
 
 if TYPE_CHECKING:
     from src.persistence.ports import UnitOfWork
+    from src.runtime.config import Settings
 
 DISPATCH_LOCAL_RUNNING_CAP = 2
 DISPATCH_LOCAL_QUEUED_CAP = 6
@@ -16,8 +17,53 @@ DISPATCH_EMBED_RUNNING_CAP = 8
 DISPATCH_EMBED_QUEUED_CAP = 20
 DISPATCH_LOCAL_CHAR_BUDGET = 16_000
 
+GENERATE_PROCESS_KEYS = frozenset(
+    {
+        "lsrag.transcribe_markdown",
+        "lsrag.structurize",
+        "lsrag.construct",
+        "clean.extract.web_llm",
+        "clean.extract.doc_llm",
+        "clean.extract.pdf_llm",
+    }
+)
+OVER_BUDGET_PROCESS_KEYS = frozenset(
+    {
+        "lsrag.structurize",
+        "clean.extract.web_llm",
+        "clean.extract.doc_llm",
+        "clean.extract.pdf_llm",
+    }
+)
+POOLED_PROCESS_KEYS = GENERATE_PROCESS_KEYS | {"lsrag.vectorize"}
+
 DispatchPool = Literal["local-inference", "non-interactive", "embed"]
 PoolKind = Literal["generate", "embed", "unpooled"]
+
+
+@dataclass(frozen=True)
+class DispatchCaps:
+    """Runtime-injected pool capacities. Defaults match the frozen NS2 constants."""
+
+    local_running: int = DISPATCH_LOCAL_RUNNING_CAP
+    local_queued: int = DISPATCH_LOCAL_QUEUED_CAP
+    ni_running: int = DISPATCH_NI_RUNNING_CAP
+    ni_queued: int = DISPATCH_NI_QUEUED_CAP
+    embed_running: int = DISPATCH_EMBED_RUNNING_CAP
+    embed_queued: int = DISPATCH_EMBED_QUEUED_CAP
+    local_char_budget: int = DISPATCH_LOCAL_CHAR_BUDGET
+
+    @classmethod
+    def from_settings(cls, settings: Settings) -> DispatchCaps:
+        return cls(
+            local_running=settings.dispatch_local_running,
+            local_queued=settings.dispatch_local_queued,
+            ni_running=settings.dispatch_ni_running,
+            ni_queued=settings.dispatch_ni_queued,
+            embed_running=settings.dispatch_embed_running,
+            embed_queued=settings.dispatch_embed_queued,
+            local_char_budget=settings.dispatch_local_char_budget,
+        )
 
 
 @dataclass(frozen=True)
@@ -56,14 +102,17 @@ async def get_pool_occupancies(tx: UnitOfWork) -> dict[str, PoolOccupancy]:
 
 
 async def get_waiting_count(tx: UnitOfWork) -> int:
-    """Query count of ready processes awaiting pool admission."""
+    """Count ready processes that still need a generate/embed pool slot."""
 
+    placeholders = ",".join("?" for _ in POOLED_PROCESS_KEYS)
     row = await tx.fetchone(
-        """
+        f"""
         SELECT COUNT(*) AS waiting_count
         FROM mkb_processes
         WHERE status = 'ready' AND dispatch_admitted = 0
-        """
+          AND process_key IN ({placeholders})
+        """,
+        tuple(sorted(POOLED_PROCESS_KEYS)),
     )
     return int(row.get("waiting_count") or 0) if row else 0
 
@@ -104,6 +153,8 @@ def choose_pool(
     ni_quota: bool = True,
     over_budget: bool = False,
     explicit_channel: str | None = None,
+    local_queued_cap: int = DISPATCH_LOCAL_QUEUED_CAP,
+    ni_queued_cap: int = DISPATCH_NI_QUEUED_CAP,
 ) -> str | None:
     """Determine the dispatch pool for a task based on lane, occupancy, and bounds.
 
@@ -123,12 +174,12 @@ def choose_pool(
 
     # Handle explicit channel override if present
     if explicit_channel == "local-inference":
-        if local_available and local_queued < DISPATCH_LOCAL_QUEUED_CAP:
+        if local_available and local_queued < local_queued_cap:
             return "local-inference"
         return None
 
     if explicit_channel == "non-interactive":
-        if ni_quota and ni_queued < DISPATCH_NI_QUEUED_CAP:
+        if ni_quota and ni_queued < ni_queued_cap:
             return "non-interactive"
         return None
 
@@ -137,25 +188,25 @@ def choose_pool(
 
     # Lane policy based on Task.priority
     if priority in {"urgent", "high"}:
-        if ni_quota and ni_queued < DISPATCH_NI_QUEUED_CAP:
+        if ni_quota and ni_queued < ni_queued_cap:
             return "non-interactive"
         return None
 
     if priority == "normal":
         if over_budget:
-            if ni_quota and ni_queued < DISPATCH_NI_QUEUED_CAP:
+            if ni_quota and ni_queued < ni_queued_cap:
                 return "non-interactive"
             return None
 
-        if local_available and local_queued < DISPATCH_LOCAL_QUEUED_CAP:
+        if local_available and local_queued < local_queued_cap:
             return "local-inference"
 
-        if ni_quota and ni_queued < DISPATCH_NI_QUEUED_CAP:
+        if ni_quota and ni_queued < ni_queued_cap:
             return "non-interactive"
         return None
 
     if priority == "low":
-        if local_available and local_queued < DISPATCH_LOCAL_QUEUED_CAP:
+        if local_available and local_queued < local_queued_cap:
             return "local-inference"
         return None
 

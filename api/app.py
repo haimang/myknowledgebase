@@ -32,9 +32,11 @@ from src.runtime.metrics import MetricRegistry, default_metrics
 from src.runtime.object_gc import ObjectGcScanner, ObjectGcSchedule
 from src.runtime.security import ActiveTokenSet, EgressPolicy, FixedWindowRateLimiter, SecretResolver, safe_request_id
 from src.runtime.task_service import TaskService
+from src.runtime.workflow.dispatch import DispatchCaps
 from src.runtime.workflow_engine import WorkflowRuntime, WorkflowWorker
 from src.runtime.workflow_supervisor import WorkflowSupervisor
 from src.services.artifacts import OutcomeArtifactCommitter
+from src.services.billing import DefaultBillingService
 from src.services.config_snapshots import ConfigSnapshotService
 from src.services.events import DomainEventWriter, SecurityAuditWriter
 from src.services.index_retirement import IndexGenerationRetirementService
@@ -243,7 +245,9 @@ def create_container(settings: Settings | None = None) -> Container:
         supply_fence=supply_fence,
         metrics=metrics,
     )
-    config_snapshots = ConfigSnapshotService(persistence, storage, workflows, settings)
+    config_snapshots = ConfigSnapshotService(
+        persistence, storage, workflows, settings, security_audit=security_audit
+    )
     tasks = TaskService(persistence, teams, events, config_snapshots)
     retrieval_access = ArtifactRetrievalAccess(persistence, storage)
     retrieval = RetrievalService(
@@ -281,6 +285,8 @@ def create_container(settings: Settings | None = None) -> Container:
         compatibility_definitions=BUILTIN_EXECUTION_COMPATIBILITY_WORKFLOWS,
         readiness=workflow_claim_readiness,
         outcome_committer=outcome_committer,
+        billing=DefaultBillingService(),
+        dispatch_caps=DispatchCaps.from_settings(settings),
         live_inference=settings.live_inference,
         cleanup_recovery_window_seconds=settings.workflow_cleanup_recovery_window_seconds,
     )
@@ -305,6 +311,7 @@ def create_container(settings: Settings | None = None) -> Container:
             inference=inference,
             claude_cli=ns1_cli,
             live_inference=settings.live_inference,
+            billing=DefaultBillingService(),
             lifecycle=lifecycle,
             index_retirement=index_retirement,
         ),

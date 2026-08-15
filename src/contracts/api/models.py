@@ -180,8 +180,9 @@ class IntakeIngestPayload(StrictModel):
     domain: Literal["documentation"] | None = None
     flavor: Literal["qna", "eval", "closure", "plan", "code-review"] | None = None
     granularity: Literal["g0", "g1", "g2"] | None = None
-    # C/summarizer transport only.  A/B stay on the NS1 CLI unless that
-    # worker is absent.  None means the closed default: Claude ``-p``.
+    # C/summarizer transport only.  Omit derives from Task.priority:
+    # normal/low → local-inference first; urgent/high → non-interactive.
+    # Explicit values force that pool and must be audited.
     compression_channel: Literal["non-interactive", "local-inference"] | None = None
     # Prompt selection is an identity-only public surface.  The catalog row
     # supplies version/hash/path at materialization; callers may not provide

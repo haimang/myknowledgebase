@@ -27,6 +27,7 @@ class ProcessCommand(PayloadExtraModel):
     config_snapshot_digest: Annotated[str, Field(pattern=r"^[0-9a-f]{64}$")]
     binding_digest: Annotated[str, Field(pattern=r"^[0-9a-f]{64}$")]
     dispatch_pool: Literal["local-inference", "non-interactive", "embed"] | None = None
+    task_priority: Literal["low", "normal", "high", "urgent"] | None = None
 
     @field_validator("team_uuid", "task_uuid", "trace_uuid", "execution_uuid", "process_uuid")
     @classmethod
