@@ -160,7 +160,12 @@ def test_generation_members_are_independent_and_vectorize_every_channel(tmp_path
     assert {block["granularity"] for block in projection["blocks"]} == {0, 1, 2}
     assert {unit["granularity"] for unit in dual["units"]} == {0, 1, 2}
 
-    expected_coordinates = {(unit["unit_id"], channel) for unit in dual["units"] for channel in ("original", "summary")}
+    expected_coordinates = {
+        (unit["unit_id"], channel)
+        for unit in dual["units"]
+        for channel in ("original", "summary")
+        if not (int(unit["granularity"]) == 0 and channel == "original")
+    }
     assert {(vector["block_or_unit_id"], vector["channel"]) for vector in vectors} == expected_coordinates
     assert len({vector["vector_record_uuid"] for vector in vectors}) == len(vectors)
     assert all(vector["generation_artifact_uuid"] == by_type["dual_channel_projection"]["generation_artifact_uuid"] for vector in vectors)

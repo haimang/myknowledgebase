@@ -34,6 +34,11 @@ from src.persistence.ports import PersistencePort, UnitOfWork
 from src.runtime.config import Settings
 from src.services.events import SecurityAuditWriter
 from src.services.intake_lifecycle import IntakeTargetResolver
+from src.services.prompt_profiles import (
+    DEFAULT_COMPRESSION_CHANNEL,
+    GRANULARITY_LEVELS,
+    default_prompt_ids,
+)
 from src.services.registry import select_latest_catalog_row
 from src.services.workflow_registry import WorkflowIdentity, WorkflowRegistryService
 from src.storage.ports import ObjectStorePort
@@ -167,6 +172,7 @@ class ConfigSnapshotService:
                 raise MkbError("CONFIG_CONFLICT", "Live embed binding has no valid registered dimension", 503)
             bindings["embed"] = {**embed, "dimension": model["default_dimension"]}
         flag_bundle, flag_bundle_digest = self._load_flag_bundle()
+        compression_channel = self._require_compression_channel(request)
         try:
             semantic_overrides, ops_overrides, override_digest, semantic_knobs = self._resolve_overrides(
                 request.overrides
@@ -189,6 +195,7 @@ class ConfigSnapshotService:
             "l2": {
                 "inference_vllm_base_url": self.settings.inference_vllm_base_url,
                 "inference_mode": "live" if self.settings.live_inference else "deterministic",
+                "compression_channel": compression_channel,
             },
             # L3 semantic overrides only.  Ops-only knobs (dry_run/debug_trace)
             # must not enter materials hashed into config_snapshot_digest /
@@ -555,6 +562,22 @@ class ConfigSnapshotService:
             raise MkbError("REGISTRY_NOT_FOUND", "Registry bootstrap rows are unavailable", 503)
         return {"prompts": prompts, "models": models, "bindings": bindings}
 
+    @staticmethod
+    def _resolve_compression_channel(request: TaskCreateRequest) -> str:
+        if not isinstance(request.payload, IntakeIngestPayload):
+            return DEFAULT_COMPRESSION_CHANNEL
+        return request.payload.compression_channel or DEFAULT_COMPRESSION_CHANNEL
+
+    def _require_compression_channel(self, request: TaskCreateRequest) -> str:
+        channel = self._resolve_compression_channel(request)
+        if channel == "api-inference" and not self.settings.live_inference:
+            raise MkbError(
+                "COMPRESSION_CHANNEL_UNAVAILABLE",
+                "api-inference compression requires live inference",
+                503,
+            )
+        return channel
+
     def _resolve_prompt_selection(
         self,
         prompt_rows: list[dict[str, Any]],
@@ -564,12 +587,24 @@ class ConfigSnapshotService:
 
         if not isinstance(request.payload, IntakeIngestPayload):
             return {}
+        try:
+            domain_defaults = default_prompt_ids(
+                domain=request.payload.domain,
+                flavor=request.payload.flavor,
+                granularity=request.payload.granularity,
+            )
+        except ValueError as exc:
+            raise MkbError("PROMPT_PROFILE_INVALID", str(exc), 422) from exc
         requested: dict[str, str | None] = {
-            "clean": request.payload.clean_prompt_id or _DEFAULT_PROMPT_IDS["clean"],
-            "markdown": request.payload.markdown_prompt_id,
-            "json": request.payload.json_prompt_id,
-            "summarizer": request.payload.summarizer_prompt_id or _DEFAULT_PROMPT_IDS["summarizer"],
+            "clean": request.payload.clean_prompt_id or domain_defaults.get("clean") or _DEFAULT_PROMPT_IDS["clean"],
+            "markdown": request.payload.markdown_prompt_id or domain_defaults.get("markdown"),
+            "json": request.payload.json_prompt_id or domain_defaults.get("json"),
+            "summarizer": request.payload.summarizer_prompt_id
+            or domain_defaults.get("summarizer")
+            or _DEFAULT_PROMPT_IDS["summarizer"],
         }
+        if not requested["json"]:
+            raise MkbError("PROMPT_NOT_REGISTERED", "json prompt is required", 422)
         by_id: dict[str, list[dict[str, Any]]] = {}
         for row in prompt_rows:
             prompt_id = row.get("prompt_id") or row.get("prompt_key")
@@ -632,6 +667,16 @@ class ConfigSnapshotService:
                 "role": role,
                 "granularity_set": normalized_profile,
             }
+        requested_level = request.payload.granularity
+        if requested_level is not None:
+            json_selection = selected.get("json")
+            actual = json_selection.get("granularity_set") if isinstance(json_selection, dict) else None
+            if actual != list(GRANULARITY_LEVELS[requested_level]):
+                raise MkbError(
+                    "PROMPT_GRANULARITY_MISMATCH",
+                    "json prompt granularity_set does not match the requested granularity level",
+                    422,
+                )
         return selected
 
     def _resolve_bindings(self, rows: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:

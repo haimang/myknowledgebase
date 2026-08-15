@@ -36,6 +36,28 @@ from src.services.lsrag_compiler import (
     structure_document_digest,
     structure_payload,
 )
+from src.services.prompt_profiles import COMPRESSION_CHANNELS, DEFAULT_COMPRESSION_CHANNEL
+
+# Lightning returned no usable C result.  One explicit non-interactive salvage
+# is allowed.  Config/fence gaps stay fail-closed and never switch channels.
+_API_INFERENCE_SALVAGE_CODES = frozenset(
+    {
+        "INFERENCE_VALIDATION_RESPONSE",
+        "INFERENCE_VALIDATION_STRUCTURED",
+        "INFERENCE_VALIDATION_REMOTE",
+        "INFERENCE_TRANSPORT_RETRYABLE",
+        "INFERENCE_TRANSPORT_EXHAUSTED",
+        "INFERENCE_BACKPRESSURE",
+        "INFERENCE_INTERNAL_UNEXPECTED",
+        "GENERATION_INFERENCE_FAILED",
+        "CONSTRUCT_KERNEL_SUMMARY_INVALID",
+        "CONSTRUCT_KERNEL_SUMMARY_INCOMPLETE",
+        "CONSTRUCT_KERNEL_ALIGNMENT_INVALID",
+        "CONSTRUCT_KERNEL_ORIGINAL_MUTATION",
+        "STRUCTURE_SUMMARY_INVALID",
+        "STRUCTURE_SCHEMA_INVALID",
+    }
+)
 
 
 class IntakeGenerationConstructMixin:
@@ -65,6 +87,139 @@ class IntakeGenerationConstructMixin:
         if any(isinstance(value, bool) or not isinstance(value, int) or value not in {0, 1, 2} for value in values) or 0 not in values:
             raise MkbError(error_code, "Layered granularity profile is invalid", 409)
         return values
+
+    @staticmethod
+    def _compression_channel(state: Mapping[str, Any]) -> str:
+        payload = state.get("payload")
+        raw = payload.get("compression_channel") if isinstance(payload, Mapping) else None
+        if raw is None:
+            return DEFAULT_COMPRESSION_CHANNEL
+        if not isinstance(raw, str) or raw not in COMPRESSION_CHANNELS:
+            raise MkbError("COMPRESSION_CHANNEL_INVALID", "Compression channel is not registered", 422)
+        return raw
+
+    def _summary_transport(self, state: Mapping[str, Any]) -> str:
+        """Choose C transport from the frozen intake channel.
+
+        ``api-inference`` is Spark Lightning via the facade.  ``non-interactive``
+        keeps Claude ``-p`` when a CLI is wired; otherwise it stays deterministic.
+        """
+
+        channel = self._compression_channel(state)
+        if channel == "api-inference":
+            if not getattr(self, "_live_inference", False) or getattr(self, "_inference", None) is None:
+                raise MkbError(
+                    "COMPRESSION_CHANNEL_UNAVAILABLE",
+                    "api-inference compression requires live inference",
+                    503,
+                )
+            return "api_inference"
+        if getattr(self, "_claude_cli", None) is not None:
+            return "claude_cli"
+        return "deterministic"
+
+    def _can_salvage_api_inference(self, exc: MkbError) -> bool:
+        return exc.code in _API_INFERENCE_SALVAGE_CODES and getattr(self, "_claude_cli", None) is not None
+
+    async def _salvage_summary_via_cli(
+        self,
+        *,
+        layered_candidate: Mapping[str, object],
+        profile: tuple[int, ...],
+        state: Mapping[str, Any] | None,
+        salvage_error: MkbError,
+    ) -> tuple[dict[str, object], dict[str, object]]:
+        completed, receipt = await self._cli_layered_summary(
+            layered_candidate=layered_candidate,
+            profile=profile,
+            state=state,
+        )
+        receipt["transport"] = "claude_cli"
+        receipt["compression_channel"] = "non-interactive"
+        receipt["salvage_from"] = "api-inference"
+        receipt["salvage_error_code"] = salvage_error.code
+        return completed, receipt
+
+    async def _complete_construct_summaries(
+        self,
+        command: ProcessCommand,
+        state: Mapping[str, Any],
+        *,
+        compiler: LsragContractCompiler,
+        projection: RetrievalBlockProjection,
+        accepted_layered_candidate: Mapping[str, object],
+        profile: tuple[int, ...],
+    ) -> tuple[dict[str, object], dict[str, str], list[dict[str, Any]], dict[str, object] | None]:
+        """Fill C summaries. api-inference may salvage once via Claude ``-p``."""
+
+        transport = self._summary_transport(state)
+        if transport == "claude_cli":
+            completed, receipt = await self._cli_layered_summary(
+                layered_candidate=accepted_layered_candidate,
+                profile=profile,
+                state=state,
+            )
+            summaries = compiler.layered_summary_map(
+                layered_json=completed,
+                projection=projection,
+                accepted_layered_json=accepted_layered_candidate,
+            )
+            return completed, summaries, [], receipt
+        if transport != "api_inference":
+            summaries = deterministic_summaries(projection)
+            completed = compiler.fill_layered_summaries(
+                accepted_layered_json=accepted_layered_candidate,
+                projection=projection,
+                summaries_by_block_id=summaries,
+            )
+            return completed, summaries, [], None
+
+        try:
+            completed_value, receipt = await self._live_layered_summary_generate(
+                command,
+                layered_candidate=accepted_layered_candidate,
+            )
+            if not isinstance(completed_value, Mapping):
+                raise MkbError("CONSTRUCT_KERNEL_SUMMARY_INVALID", "C did not return a layered JSON package", 422)
+            completed = dict(completed_value)
+            try:
+                summaries = compiler.layered_summary_map(
+                    layered_json=completed,
+                    projection=projection,
+                    accepted_layered_json=accepted_layered_candidate,
+                )
+            except MkbError as kernel_exc:
+                receipt.update(
+                    {
+                        "status": "failed",
+                        "error_code": kernel_exc.code,
+                        "error_digest": stable_digest({"error_code": kernel_exc.code}),
+                        "transport": "api_inference",
+                        "compression_channel": "api-inference",
+                    }
+                )
+                persist = getattr(self, "_persist_failed_generation_invocation", None)
+                if persist is not None:
+                    await persist(command, receipt)
+                raise
+            receipt["transport"] = "api_inference"
+            receipt["compression_channel"] = "api-inference"
+            return completed, summaries, [receipt], None
+        except MkbError as exc:
+            if not self._can_salvage_api_inference(exc):
+                raise
+            completed, cli_receipt = await self._salvage_summary_via_cli(
+                layered_candidate=accepted_layered_candidate,
+                profile=profile,
+                state=state,
+                salvage_error=exc,
+            )
+            summaries = compiler.layered_summary_map(
+                layered_json=completed,
+                projection=projection,
+                accepted_layered_json=accepted_layered_candidate,
+            )
+            return completed, summaries, [], cli_receipt
 
     @staticmethod
     def _bjson_user_material(*, clean_text: str, markdown_text: str | None) -> str:
@@ -249,6 +404,7 @@ class IntakeGenerationConstructMixin:
             _, pointer = self._frozen_prompt_file(state, role="summarizer", error_code="PROMPT_HASH_MISMATCH")
         receipt: dict[str, object] = {
             "transport": "claude_cli",
+            "compression_channel": "non-interactive",
             "role": "summarizer",
             "prompt_relative_path": self._prompt_relative_path(prompt_path),
             "prompt_version": None if pointer is None else pointer.get("version") or pointer.get("prompt_version"),
@@ -856,35 +1012,21 @@ class IntakeGenerationConstructMixin:
                     error_code="CONSTRUCT_BINDING_CANDIDATE_MISSING",
                 )
                 profile = self._layered_profile(state, error_code="CONSTRUCT_BINDING_PROFILE_INVALID")
-                if getattr(self, "_claude_cli", None) is not None:
-                    completed_layered_candidate, cli_receipt = await self._cli_layered_summary(
-                        layered_candidate=accepted_layered_candidate,
-                        profile=profile,
-                        state=state,
-                    )
-                elif self._live_inference:
-                    completed_value, receipt = await self._live_layered_summary_generate(
-                        command,
-                        layered_candidate=accepted_layered_candidate,
-                    )
-                    if not isinstance(completed_value, Mapping):
-                        raise MkbError("CONSTRUCT_KERNEL_SUMMARY_INVALID", "C did not return a layered JSON package", 422)
-                    completed_layered_candidate = dict(completed_value)
-                    generation_invocations = [receipt]
-                else:
-                    summaries = deterministic_summaries(projection)
-                    completed_layered_candidate = compiler.fill_layered_summaries(
-                        accepted_layered_json=accepted_layered_candidate,
-                        projection=projection,
-                        summaries_by_block_id=summaries,
-                    )
+                (
+                    completed_layered_candidate,
+                    summaries,
+                    generation_invocations,
+                    cli_receipt,
+                ) = await self._complete_construct_summaries(
+                    command,
+                    state,
+                    compiler=compiler,
+                    projection=projection,
+                    accepted_layered_candidate=accepted_layered_candidate,
+                    profile=profile,
+                )
                 if completed_layered_candidate is None:
                     raise MkbError("CONSTRUCT_KERNEL_SUMMARY_INVALID", "Completed layered JSON package is unavailable", 422)
-                summaries = compiler.layered_summary_map(
-                    layered_json=completed_layered_candidate,
-                    projection=projection,
-                    accepted_layered_json=accepted_layered_candidate,
-                )
                 required_granularities = frozenset(profile)
                 metadata_headers = None
             construction_artifact_uuid = uuid7()
@@ -926,6 +1068,7 @@ class IntakeGenerationConstructMixin:
             next_state = dict(state)
             next_state.update(
                 {
+                    "compression_channel": self._compression_channel(state),
                     "construct_mode": construct_mode,
                     "construction_artifact_uuid": construction_artifact_uuid,
                     "construction_artifact_ref": construction_asset.stat.handle.value,
@@ -951,6 +1094,12 @@ class IntakeGenerationConstructMixin:
                 )
             if cli_receipt is not None:
                 next_state["construct_cli_receipt"] = cli_receipt
+                if cli_receipt.get("salvage_from") == "api-inference":
+                    next_state["compression_salvage"] = {
+                        "from": "api-inference",
+                        "to": "non-interactive",
+                        "error_code": cli_receipt.get("salvage_error_code"),
+                    }
             if generation_invocations:
                 next_state["construction_generation_invocations"] = [
                     {
@@ -976,6 +1125,10 @@ class IntakeGenerationConstructMixin:
                             "schema_version",
                             "schema_digest",
                             "request_digest",
+                            "transport",
+                            "compression_channel",
+                            "salvage_from",
+                            "salvage_error_code",
                             "latency_ms",
                             "input_tokens",
                             "output_tokens",

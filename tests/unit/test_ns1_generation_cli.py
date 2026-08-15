@@ -7,7 +7,7 @@ import json
 import pytest
 
 from src.contracts.common.errors import MkbError
-from src.runtime.inference.claude_cli import DeterministicNs1Stub
+from src.runtime.inference.claude_cli import DeterministicNs1Stub, _stub_summary_body
 from src.runtime.intake.pipeline import IntakePipeline
 
 
@@ -33,7 +33,7 @@ async def test_b_json_uses_material_and_c_runs_once_for_the_whole_package() -> N
     assert stub.requests[0].json_schema is not None
     assert stub.requests[1].json_schema is not None
     whole_package = json.loads(stub.requests[1].user_prompt)
-    assert len(whole_package["layered_content"]) == 3
+    assert {block["granularity"] for block in whole_package["layered_content"]} == {0, 1, 2}
     assert [
         (block["block_id"], block["granularity"], block["original_content"])
         for block in completed["layered_content"]
@@ -42,6 +42,14 @@ async def test_b_json_uses_material_and_c_runs_once_for_the_whole_package() -> N
         for block in whole_package["layered_content"]
     ]
     assert all(block["llm_summary"]["body"] == block["original_content"]["body"] for block in completed["layered_content"])
+
+
+def test_stub_g0_summary_is_compact_when_original_exceeds_embed_budget() -> None:
+    long_original = "Title line\n" + ("body " * 4000)
+    assert _stub_summary_body(long_original, 0).startswith("Document summary: Title line")
+    assert len(_stub_summary_body(long_original, 0)) < len(long_original)
+    assert _stub_summary_body("short original", 0) == "short original"
+    assert _stub_summary_body(long_original, 1) == long_original
 
 
 @pytest.mark.asyncio
@@ -80,6 +88,8 @@ def test_live_app_composition_wires_ns1_cli(tmp_path) -> None:
         handler = app.state.container.workflow_worker.handler
         assert isinstance(handler._claude_cli, DeterministicNs1Stub)
         assert handler._live_inference is True
+        assert handler._summary_transport({"payload": {}}) == "claude_cli"
+        assert handler._summary_transport({"payload": {"compression_channel": "api-inference"}}) == "api_inference"
 
 
 def test_layered_profile_does_not_invent_generic_set() -> None:

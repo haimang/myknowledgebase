@@ -219,6 +219,7 @@ def create_container(settings: Settings | None = None) -> Container:
         settings.inference_vllm_base_url,
         secret_slot=secret_slot,
         secret_resolver=secret_resolver,
+        generate_timeout_seconds=settings.inference_generate_timeout_seconds,
     )
     supply_fence = SupplyFence(
         [
@@ -380,6 +381,9 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # all new business admission report not-ready until operators repair them.
     try:
         await container.registry.bootstrap()
+    except MkbError:
+        pass
+    try:
         await container.workflows.bootstrap()
     except MkbError:
         pass

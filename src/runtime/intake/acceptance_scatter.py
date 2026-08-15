@@ -125,7 +125,16 @@ class IntakeAcceptanceScatterMixin:
                     },
                     "prompt_selection": dict(prompt_selection),
                 }
-                for identity_key in ("json_prompt_id", "markdown_prompt_id", "clean_prompt_id", "summarizer_prompt_id"):
+                for identity_key in (
+                    "json_prompt_id",
+                    "markdown_prompt_id",
+                    "clean_prompt_id",
+                    "summarizer_prompt_id",
+                    "domain",
+                    "flavor",
+                    "granularity",
+                    "compression_channel",
+                ):
                     identity = parent_payload.get(identity_key)
                     if isinstance(identity, str) and identity:
                         child_payload[identity_key] = identity

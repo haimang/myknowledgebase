@@ -849,11 +849,16 @@ class LsragContractCompiler:
             _fail("VECTORIZE_BUDGET_INVALID", "Vectorization byte budget must be positive")
         required: list[VectorizationUnit] = []
         skipped: list[str] = []
+        g0_original_ready = False
         for unit in dual.units:
             for channel in (unit.original, unit.summary):
                 recomputed = content_full(body=channel.body, metadata_headers=metadata_headers, recipe_version=document.content_full_recipe_version)
                 if channel.content_full_digest != _text_digest(recomputed) or channel.content_full != recomputed:
                     _fail("VECTORIZE_CONTENT_MISMATCH", "Vectorization must recompute and verify content_full")
+                if unit.granularity == 0 and channel.channel == "original":
+                    if recomputed.strip() and unit.original.reattach_status in {"reattached", "native_full"}:
+                        g0_original_ready = True
+                    continue
                 if not recomputed.strip():
                     skipped.append(f"{unit.unit_id}:{channel.channel}")
                     continue
@@ -861,8 +866,10 @@ class LsragContractCompiler:
                     _fail("VECTORIZE_BUDGET_CONTENT_FULL", "A vectorization input exceeds the configured byte budget")
                 required.append(VectorizationUnit(unit.unit_id, unit.granularity, channel.channel, unit.coordinate, recomputed, _text_digest(recomputed)))
         required.sort(key=lambda item: (item.granularity, item.unit_id, item.channel))
-        if not any(item.granularity == 0 and item.channel == "original" and item.content_full.strip() for item in required):
-            _fail("ORIGINAL_NOT_REATTACHED", "Non-empty g0 original must remain a required vectorization unit")
+        if not g0_original_ready:
+            _fail("ORIGINAL_NOT_REATTACHED", "Vectorize requires a reattached non-empty g0 original in construct; that channel is not a vector unit")
+        if not any(item.granularity == 0 and item.channel == "summary" and item.content_full.strip() for item in required):
+            _fail("G0_SUMMARY_REQUIRED", "Non-empty g0 summary must remain a required vectorization unit")
         return VectorizationPlan(tuple(required), tuple(sorted(skipped)), stable_digest([item.content_full_digest for item in required]))
 
 

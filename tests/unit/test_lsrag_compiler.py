@@ -134,11 +134,16 @@ def test_constructs_full_valid_dual_channels_and_required_vector_units() -> None
     assert len(document.units) == len(projection.blocks)
     assert dual.generation_artifact_uuid == "dual-generation"
     assert dual.construction_generation_artifact_uuid == document.generation_artifact_uuid
-    assert len(plan.required) == len(document.units) * 2
+    assert len(plan.required) == len(document.units) * 2 - 1
     assert [(unit.granularity, unit.unit_id, unit.channel) for unit in plan.required] == sorted(
         (unit.granularity, unit.unit_id, unit.channel) for unit in plan.required
     )
-    assert any(unit.granularity == 0 and unit.channel == "original" for unit in plan.required)
+    assert not any(unit.granularity == 0 and unit.channel == "original" for unit in plan.required)
+    assert any(unit.granularity == 0 and unit.channel == "summary" for unit in plan.required)
+    assert all(
+        unit.channel == "summary" or unit.granularity != 0
+        for unit in plan.required
+    )
     assert all(unit.content_full_digest == stable_digest({"text": unit.content_full}) for unit in plan.required)
     payload = dual_channel_payload(dual)
     assert payload["generation_artifact_uuid"] == "dual-generation"

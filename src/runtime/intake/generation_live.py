@@ -202,6 +202,7 @@ class IntakeGenerationLiveMixin:
                 prompt_ref=config.prompt_ref,
                 prompt_digest=config.prompt_digest,
                 input_text=input_text,
+                system_text=config.prompt_text,
                 json_schema_ref=config.schema_ref,
                 json_schema_digest=config.schema_digest,
                 invocation=InvocationContext(

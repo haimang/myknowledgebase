@@ -55,6 +55,34 @@ def test_ingest_payload_requires_json_identity_and_rejects_transport_coordinates
             IntakeIngestPayload.model_validate(_payload(**{forbidden: "caller-controlled"}))
 
 
+def test_ingest_payload_accepts_documentation_domain_and_flavor_defaults() -> None:
+    selected = IntakeIngestPayload.model_validate(_payload(json_prompt_id=None, domain="documentation", flavor="qna"))
+    assert selected.domain == "documentation"
+    assert selected.flavor == "qna"
+    assert selected.json_prompt_id is None
+
+    level_only = IntakeIngestPayload.model_validate(_payload(json_prompt_id=None, granularity="g1"))
+    assert level_only.granularity == "g1"
+
+    domain_only = IntakeIngestPayload.model_validate(_payload(json_prompt_id=None, domain="documentation"))
+    assert domain_only.flavor is None
+    assert domain_only.compression_channel is None
+
+    spark = IntakeIngestPayload.model_validate(_payload(compression_channel="api-inference"))
+    assert spark.compression_channel == "api-inference"
+    claude = IntakeIngestPayload.model_validate(_payload(compression_channel="non-interactive"))
+    assert claude.compression_channel == "non-interactive"
+
+    with pytest.raises(ValidationError):
+        IntakeIngestPayload.model_validate(_payload(compression_channel="spark"))
+    with pytest.raises(ValidationError):
+        IntakeIngestPayload.model_validate(_payload(json_prompt_id=None, flavor="qna"))
+    with pytest.raises(ValidationError):
+        IntakeIngestPayload.model_validate(_payload(json_prompt_id=None, domain="legal"))
+    with pytest.raises(ValidationError):
+        IntakeIngestPayload.model_validate(_payload(domain="documentation", flavor="handbook"))
+
+
 def _catalog_rows() -> list[dict[str, object]]:
     rows: list[dict[str, object]] = []
     for prompt_id, version, relative_path, role, granularity_set in (
@@ -71,6 +99,14 @@ def _catalog_rows() -> list[dict[str, object]]:
         ("promptB.json.legal", "v1", "json/promptB.json.legal.v1.md", "json", [0, 1]),
         ("promptC.summarizer", "v1", "summarizer/promptC.summarizer.v1.md", "summarizer", None),
         ("promptC.default", "v1", "prompt-c-summary-v1.md", "summarizer", None),
+        ("promptA.documentation.default", "v1", "clean/promptA.documentation.default.v1.md", "clean", None),
+        ("promptB.documentation.qna", "v1", "markdown/promptB.documentation.qna.v1.md", "markdown", None),
+        ("promptB.documentation.default", "v1", "json/promptB.documentation.default.v1.md", "json", [0, 1, 2]),
+        ("promptB.documentation.g0", "v1", "json/promptB.documentation.g0.v1.md", "json", [0]),
+        ("promptB.documentation.g1", "v1", "json/promptB.documentation.g1.v1.md", "json", [0, 1]),
+        ("promptB.documentation.g2", "v1", "json/promptB.documentation.g2.v1.md", "json", [0, 1, 2]),
+        ("promptB.json.g1", "v1", "json/promptB.json.g1.v1.md", "json", [0, 1]),
+        ("promptC.documentation.default", "v1", "summarizer/promptC.documentation.default.v1.md", "summarizer", None),
     ):
         content = (Path("data/prompts") / relative_path).read_bytes()
         rows.append(
@@ -111,6 +147,58 @@ def test_materialize_resolves_role_rows_to_hash_path_and_profile() -> None:
     with pytest.raises(MkbError) as error:
         service._resolve_prompt_selection(mismatched, SimpleNamespace(payload=payload))
     assert error.value.code == "PROMPT_ROLE_MISMATCH"
+
+
+def test_documentation_domain_flavor_resolves_to_documentation_prompt_cluster() -> None:
+    service = object.__new__(ConfigSnapshotService)
+    service.settings = SimpleNamespace(prompt_root=Path("data/prompts").resolve())
+    payload = IntakeIngestPayload.model_validate(_payload(json_prompt_id=None, domain="documentation", flavor="qna"))
+
+    selection = service._resolve_prompt_selection(_catalog_rows(), SimpleNamespace(payload=payload))
+
+    assert selection["clean"]["prompt_id"] == "promptA.documentation.default"
+    assert selection["markdown"]["prompt_id"] == "promptB.documentation.qna"
+    assert selection["json"]["prompt_id"] == "promptB.documentation.g1"
+    assert selection["json"]["granularity_set"] == [0, 1]
+    assert selection["summarizer"]["prompt_id"] == "promptC.documentation.default"
+
+
+def test_intake_granularity_selects_json_template_and_rejects_mismatch() -> None:
+    service = object.__new__(ConfigSnapshotService)
+    service.settings = SimpleNamespace(prompt_root=Path("data/prompts").resolve())
+    selected = service._resolve_prompt_selection(
+        _catalog_rows(),
+        SimpleNamespace(payload=IntakeIngestPayload.model_validate(_payload(json_prompt_id=None, granularity="g1"))),
+    )
+    assert selected["json"]["prompt_id"] == "promptB.json.g1"
+    assert selected["json"]["granularity_set"] == [0, 1]
+
+    docs = service._resolve_prompt_selection(
+        _catalog_rows(),
+        SimpleNamespace(
+            payload=IntakeIngestPayload.model_validate(
+                _payload(json_prompt_id=None, domain="documentation", granularity="g0")
+            )
+        ),
+    )
+    assert docs["json"]["prompt_id"] == "promptB.documentation.g0"
+    assert docs["json"]["granularity_set"] == [0]
+
+    with pytest.raises(MkbError) as error:
+        service._resolve_prompt_selection(
+            _catalog_rows(),
+            SimpleNamespace(
+                payload=IntakeIngestPayload.model_validate(_payload(json_prompt_id="promptB.json.generic", granularity="g1"))
+            ),
+        )
+    assert error.value.code == "PROMPT_GRANULARITY_MISMATCH"
+
+    overridden = IntakeIngestPayload.model_validate(
+        _payload(domain="documentation", flavor="qna", json_prompt_id="promptB.json.generic")
+    )
+    overlay = service._resolve_prompt_selection(_catalog_rows(), SimpleNamespace(payload=overridden))
+    assert overlay["json"]["prompt_id"] == "promptB.json.generic"
+    assert overlay["markdown"]["prompt_id"] == "promptB.documentation.qna"
 
 
 def test_new_ingest_selects_latest_active_and_frozen_pointer_stays_put() -> None:

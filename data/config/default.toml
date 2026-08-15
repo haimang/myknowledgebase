@@ -11,7 +11,7 @@ native_vector_required = true
 vllm_base_url = "http://127.0.0.1:668"
 probe_enabled = false
 embed_model = "LifetimeMistake/Qwen3-VL-Embedding-2B-NVFP4"
-generate_model = "qwen35-a3b"
+generate_model = "nvidia/NVIDIA-Nemotron-3.5-Lightning-30B-A3B-NVFP4"
 
 [storage]
 max_object_bytes = 268435456

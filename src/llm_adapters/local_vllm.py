@@ -17,6 +17,7 @@ from src.contracts.inference.models import (
     GenerateResponse,
     InferenceBinding,
     InferenceUsage,
+    StructuredGenerateRequest,
 )
 
 
@@ -69,6 +70,7 @@ class LocalVllmAdapter:
         secret_slot: str | None = None,
         secret_resolver: SecretValueResolver | None = None,
         timeout_seconds: float = 30,
+        generate_timeout_seconds: float | None = None,
         transport: httpx.AsyncBaseTransport | None = None,
         bearer_token: str | None = None,
     ) -> None:
@@ -80,10 +82,19 @@ class LocalVllmAdapter:
             raise ValueError("secret_resolver is required when secret_slot is configured")
         if not isinstance(timeout_seconds, int | float) or isinstance(timeout_seconds, bool) or timeout_seconds <= 0:
             raise ValueError("timeout_seconds must be positive")
+        if generate_timeout_seconds is not None and (
+            not isinstance(generate_timeout_seconds, int | float)
+            or isinstance(generate_timeout_seconds, bool)
+            or generate_timeout_seconds <= 0
+        ):
+            raise ValueError("generate_timeout_seconds must be positive")
         self.base_url = _normalize_base_url(base_url)
         self.secret_slot = secret_slot
         self._secret_resolver = secret_resolver
         self.timeout_seconds = float(timeout_seconds)
+        self.generate_timeout_seconds = (
+            float(generate_timeout_seconds) if generate_timeout_seconds is not None else max(self.timeout_seconds, 180.0)
+        )
         self._transport = transport
 
     def _headers(self) -> dict[str, str]:
@@ -134,19 +145,24 @@ class LocalVllmAdapter:
 
     async def generate(self, request: GenerateRequest) -> GenerateResponse:
         self._assert_binding(request.binding)
-        payload = {
+        messages: list[dict[str, str]] = []
+        if isinstance(request.system_text, str) and request.system_text.strip():
+            messages.append({"role": "system", "content": request.system_text})
+        messages.append({"role": "user", "content": request.input_text})
+        payload: dict[str, Any] = {
             "model": request.binding.model_key,
-            "messages": [{"role": "user", "content": request.input_text}],
+            "messages": messages,
             "stream": False,
         }
-        response = await self._request("/v1/chat/completions", payload)
+        if isinstance(request, StructuredGenerateRequest):
+            payload["response_format"] = {"type": "json_object"}
+        response = await self._request(
+            "/v1/chat/completions",
+            payload,
+            timeout=self.generate_timeout_seconds,
+        )
         self._assert_provider_model(response, request.binding)
-        try:
-            text = response["choices"][0]["message"]["content"]
-        except (KeyError, IndexError, TypeError) as exc:
-            raise MkbError("INFERENCE_VALIDATION_RESPONSE", "Generation response is malformed", 502) from exc
-        if not isinstance(text, str):
-            raise MkbError("INFERENCE_VALIDATION_RESPONSE", "Generation response is malformed", 502)
+        text = self._completion_content(response)
         try:
             return GenerateResponse(
                 text=text,
@@ -176,10 +192,10 @@ class LocalVllmAdapter:
         except (MkbError, httpx.HTTPError):
             return False
 
-    async def _request(self, path: str, payload: dict[str, Any]) -> dict[str, Any]:
+    async def _request(self, path: str, payload: dict[str, Any], *, timeout: float | None = None) -> dict[str, Any]:
         try:
             async with httpx.AsyncClient(
-                timeout=self.timeout_seconds,
+                timeout=self.timeout_seconds if timeout is None else timeout,
                 transport=self._transport,
                 follow_redirects=False,
             ) as client:
@@ -205,6 +221,21 @@ class LocalVllmAdapter:
     def _assert_binding(cls, binding: InferenceBinding) -> None:
         if binding.adapter_kind != cls.adapter_kind:
             raise MkbError("SEC_SUPPLY_UNBOUND", "Inference binding is not registered for this adapter", 503)
+
+    @staticmethod
+    def _completion_content(response: dict[str, Any]) -> str:
+        """Keep the final assistant body. Reasoning stays on the wire and is discarded."""
+
+        try:
+            message = response["choices"][0]["message"]
+        except (KeyError, IndexError, TypeError) as exc:
+            raise MkbError("INFERENCE_VALIDATION_RESPONSE", "Generation response is malformed", 502) from exc
+        if not isinstance(message, dict):
+            raise MkbError("INFERENCE_VALIDATION_RESPONSE", "Generation response is malformed", 502)
+        text = message.get("content")
+        if not isinstance(text, str) or not text.strip():
+            raise MkbError("INFERENCE_VALIDATION_RESPONSE", "Generation response is malformed", 502)
+        return text
 
     @staticmethod
     def _assert_provider_model(response: dict[str, Any], binding: InferenceBinding) -> None:

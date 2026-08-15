@@ -76,6 +76,61 @@ def clean_text_from_bjson_material(user_prompt: str) -> str:
     return user_prompt.strip()
 
 
+def _exact_splits(text: str, delimiter: str) -> list[str]:
+    if not text:
+        return []
+    if not delimiter or delimiter not in text:
+        return [text]
+    parts = text.split(delimiter)
+    chunks: list[str] = []
+    for index, part in enumerate(parts):
+        chunk = part if index == 0 else f"{delimiter}{part}"
+        if chunk:
+            chunks.append(chunk)
+    return chunks
+
+
+def _stub_parts_for_granularity(material: str, granularity: int) -> list[str]:
+    if granularity == 0:
+        return [material]
+    delimiters = ("\n## ", "## ") if granularity == 1 else ("\n\n", "\n")
+    for delimiter in delimiters:
+        parts = [part for part in _exact_splits(material, delimiter) if part]
+        if len(parts) >= 2:
+            return parts
+    midpoint = max(1, len(material) // 2)
+    return [part for part in (material[:midpoint], material[midpoint:]) if part] or [material]
+
+
+# Live Spark VL stays under 8192 tokens at ~16k chars. Long g0 originals are
+# kept in construct; the stub summary must still be embeddable.
+_STUB_G0_SUMMARY_CHAR_BUDGET = 16_000
+
+
+def _stub_summary_body(original: str, granularity: int) -> str:
+    if granularity != 0 or len(original) <= _STUB_G0_SUMMARY_CHAR_BUDGET:
+        return original
+    first_line = next((line.strip() for line in original.splitlines() if line.strip()), "document")
+    return f"Document summary: {first_line[:400]}"
+
+
+def _stub_layered_blocks(material: str, profile: tuple[int, ...]) -> list[dict[str, object]]:
+    blocks: list[dict[str, object]] = []
+    block_id = 0
+    for granularity in profile:
+        for body in _stub_parts_for_granularity(material, granularity):
+            blocks.append(
+                {
+                    "block_id": block_id,
+                    "granularity": granularity,
+                    "original_content": {"title": None, "body": body},
+                    "llm_summary": {"title": None, "body": None},
+                }
+            )
+            block_id += 1
+    return blocks
+
+
 def build_claude_argv(
     request: ClaudeCliRequest,
     *,
@@ -289,25 +344,15 @@ class DeterministicNs1Stub:
                 if isinstance(block, dict) and isinstance(block.get("original_content"), dict):
                     original = block["original_content"].get("body")
                     if isinstance(block.get("llm_summary"), dict) and isinstance(original, str):
-                        block["llm_summary"]["body"] = original
+                        granularity = block.get("granularity")
+                        gran = granularity if isinstance(granularity, int) else 0
+                        block["llm_summary"]["body"] = _stub_summary_body(original, gran)
             value = package
         elif request.role == "json":
             material = clean_text_from_bjson_material(request.user_prompt)
-            midpoint = max(1, len(material) // 2)
-            prefix = material[:midpoint].rstrip() or material
-            suffix = material[midpoint:].lstrip() or material
-            bodies = {0: material, 1: prefix, 2: suffix}
             value = {
                 "context_meta": {},
-                "layered_content": [
-                    {
-                        "block_id": block_id,
-                        "granularity": granularity,
-                        "original_content": {"title": None, "body": bodies.get(granularity, material)},
-                        "llm_summary": {"title": None, "body": None},
-                    }
-                    for block_id, granularity in enumerate(request.granularity_set)
-                ],
+                "layered_content": _stub_layered_blocks(material, request.granularity_set),
             }
         else:
             return ClaudeCliResult(request.user_prompt.strip(), None, 0, session_id=f"stub-{len(self.requests)}")

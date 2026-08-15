@@ -104,6 +104,8 @@ class GenerateRequest(InferenceRequest):
     prompt_ref: BoundedIdentifier
     prompt_digest: Digest
     input_text: Annotated[str, Field(max_length=1_000_000)]
+    # Transient system material.  Ledgers keep prompt_digest only.
+    system_text: Annotated[str | None, Field(default=None, max_length=1_000_000)] = None
 
 
 class TextGenerateRequest(GenerateRequest):

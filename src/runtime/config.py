@@ -40,8 +40,10 @@ class Settings(BaseSettings):
     # NS1 A/B.md/B.json/C transport. Independent of live_inference, which only
     # selects the embed/vectorize facade. ``disabled`` keeps the legacy S11
     # structured_generate fallback for tests that inject a local fixture.
+    # Compression (C) can independently choose Claude ``-p`` or Spark generate.
     ns1_cli_mode: Literal["disabled", "stub", "subprocess"] = "stub"
     ns1_cli_executable: str = "claude"
+    inference_generate_timeout_seconds: float = Field(default=180, ge=1, le=3600)
     inference_max_in_flight: int = Field(default=8, ge=1, le=256)
     inference_max_attempts: int = Field(default=3, ge=1, le=10)
     object_max_bytes: int = Field(default=256 * 1024 * 1024, ge=1, le=1024 * 1024 * 1024)

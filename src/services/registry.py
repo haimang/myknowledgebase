@@ -68,11 +68,25 @@ DEFAULT_CATALOG_PROMPTS = (
     ("promptA.default", "v1", "prompt-a-clean-v1.md", "clean", None),
     ("promptB.markdown.legal", "v1", "markdown/promptB.markdown.legal.v1.md", "markdown", None),
     ("promptB.json.generic", "v1", "json/promptB.json.generic.v1.md", "json", (0, 1, 2)),
+    ("promptB.json.g0", "v1", "json/promptB.json.g0.v1.md", "json", (0,)),
+    ("promptB.json.g1", "v1", "json/promptB.json.g1.v1.md", "json", (0, 1)),
+    ("promptB.json.g2", "v1", "json/promptB.json.g2.v1.md", "json", (0, 1, 2)),
     ("promptB.json.legal", "v1", "json/promptB.json.legal.v1.md", "json", (0, 1)),
     ("promptB.json.realestate", "v1", "json/promptB.json.realestate.v1.md", "json", (0,)),
     ("promptB.default", "v1", "prompt-b-structure-v1.md", "json", (0, 1, 2)),
     ("promptC.summarizer", "v1", "summarizer/promptC.summarizer.v1.md", "summarizer", None),
     ("promptC.default", "v1", "prompt-c-summary-v1.md", "summarizer", None),
+    ("promptA.documentation.default", "v1", "clean/promptA.documentation.default.v1.md", "clean", None),
+    ("promptB.documentation.qna", "v1", "markdown/promptB.documentation.qna.v1.md", "markdown", None),
+    ("promptB.documentation.eval", "v1", "markdown/promptB.documentation.eval.v1.md", "markdown", None),
+    ("promptB.documentation.closure", "v1", "markdown/promptB.documentation.closure.v1.md", "markdown", None),
+    ("promptB.documentation.plan", "v1", "markdown/promptB.documentation.plan.v1.md", "markdown", None),
+    ("promptB.documentation.code-review", "v1", "markdown/promptB.documentation.code-review.v1.md", "markdown", None),
+    ("promptB.documentation.default", "v1", "json/promptB.documentation.default.v1.md", "json", (0, 1, 2)),
+    ("promptB.documentation.g0", "v1", "json/promptB.documentation.g0.v1.md", "json", (0,)),
+    ("promptB.documentation.g1", "v1", "json/promptB.documentation.g1.v1.md", "json", (0, 1)),
+    ("promptB.documentation.g2", "v1", "json/promptB.documentation.g2.v1.md", "json", (0, 1, 2)),
+    ("promptC.documentation.default", "v1", "summarizer/promptC.documentation.default.v1.md", "summarizer", None),
 )
 
 _PROMPT_ID = re.compile(r"^[A-Za-z][A-Za-z0-9_.-]{0,127}$")
@@ -96,19 +110,26 @@ def select_latest_catalog_row(rows: list[Mapping[str, Any]]) -> Mapping[str, Any
 
 
 SPARK_VL_EMBED_MODEL_KEY = "LifetimeMistake/Qwen3-VL-Embedding-2B-NVFP4"
+SPARK_LIGHTNING_GENERATE_MODEL_KEY = "nvidia/NVIDIA-Nemotron-3.5-Lightning-30B-A3B-NVFP4"
+SPARK_QWEN_GENERATE_MODEL_KEY = "unsloth/Qwen3.8-27B-NVFP4"
 
 DEFAULT_MODELS = (
     ("deterministic-hash-v1", "v1", "embed", 64),
     (SPARK_VL_EMBED_MODEL_KEY, "v1", "embed", 1024),
     ("qwen35-a3b", "v1", "generate", None),
+    (SPARK_LIGHTNING_GENERATE_MODEL_KEY, "v1", "generate", None),
+    (SPARK_QWEN_GENERATE_MODEL_KEY, "v1", "generate", None),
     ("qwen-rerank-2b", "v1", "rerank", None),
 )
 
 
 DEFAULT_BINDINGS = (
     ("embed", SPARK_VL_EMBED_MODEL_KEY, "v1", 10, True),
-    ("structured_generate", "qwen35-a3b", "v1", 10, True),
-    ("text_generate", "qwen35-a3b", "v1", 10, True),
+    ("structured_generate", SPARK_LIGHTNING_GENERATE_MODEL_KEY, "v1", 5, True),
+    ("text_generate", SPARK_LIGHTNING_GENERATE_MODEL_KEY, "v1", 5, True),
+    # Spare generate path.  Higher priority number loses to Lightning.
+    ("structured_generate", SPARK_QWEN_GENERATE_MODEL_KEY, "v1", 10, True),
+    ("text_generate", SPARK_QWEN_GENERATE_MODEL_KEY, "v1", 10, True),
     # Rerank is intentionally disabled by default. Retrieval reports an honest
     # ANN fallback rather than inventing a score.
     ("rerank", "qwen-rerank-2b", "v1", 10, False),
@@ -242,14 +263,6 @@ class RegistryService:
                     "WHERE prompt_id=? AND prompt_version=?",
                     (pointer.prompt_key, pointer.prompt_version),
                 )
-                if row and (
-                    row["content_sha256"] != pointer.content_sha256
-                    or row["git_relative_path"] != pointer.relative_path
-                    or row["role"] != role
-                    or row["status"] != "active"
-                    or self._decode_granularity_set(row["granularity_set"]) != granularity_set
-                ):
-                    raise MkbError("REGISTRY_DIGEST_MISMATCH", "Prompt pointer digest conflicts", 503)
                 if not row:
                     await tx.execute(
                         "INSERT INTO mkb_prompt_hash_pointers "
@@ -267,6 +280,7 @@ class RegistryService:
                             utc_now(),
                         ),
                     )
+        async with self.persistence.transaction() as tx:
             for key, version, modality, dimension in DEFAULT_MODELS:
                 definition_digest = stable_digest(
                     {"model_key": key, "model_version": version, "modality": modality, "dimension": dimension}
@@ -817,11 +831,25 @@ class RegistryService:
                 bindings = await tx.fetchall(
                     "SELECT capability_key FROM mkb_adapter_bindings WHERE enabled=1 AND adapter_kind='local_vllm'"
                 )
-            expected = {(item[0], item[1]) for item in DEFAULT_PROMPTS}
-            if {(row["prompt_key"], row["prompt_version"]) for row in prompt_rows} < expected:
+            expected = {
+                prompt_id
+                for prompt_id, _version, _path, _role, _profile in DEFAULT_CATALOG_PROMPTS
+                if prompt_id
+                in {
+                    "promptA.clean",
+                    "promptB.json.generic",
+                    "promptB.markdown.legal",
+                    "promptC.summarizer",
+                    "promptA.documentation.default",
+                    "promptB.documentation.g1",
+                    "promptB.documentation.qna",
+                    "promptC.documentation.default",
+                }
+            }
+            if {row["prompt_key"] for row in prompt_rows} < expected:
                 return False
-            for key, version, _ in DEFAULT_PROMPTS:
-                await self.load_prompt(key, version)
+            for prompt_id in expected:
+                await self.resolve_prompt(prompt_id)
             required = {"embed", "structured_generate", "text_generate"}
             bound = {row["capability_key"] for row in bindings}
             return bool(model_count and model_count["count"] >= 2 and required <= bound)

@@ -21,7 +21,7 @@ from src.contracts.inference.models import (
     TextGenerateResponse,
 )
 from src.runtime.config import Settings
-from src.services.registry import SPARK_VL_EMBED_MODEL_KEY
+from src.services.registry import SPARK_LIGHTNING_GENERATE_MODEL_KEY, SPARK_VL_EMBED_MODEL_KEY
 from tests.local_runtime import local_mock_settings
 
 
@@ -205,9 +205,10 @@ class _LiveEmbeddingFixture:
     ) -> tuple[StructuredGenerateResponse, object | None]:
         del validator
         assert request.binding.capability_key == "structured_generate"
-        assert request.binding.model_key == "qwen35-a3b"
+        assert request.binding.model_key == SPARK_LIGHTNING_GENERATE_MODEL_KEY
         assert request.prompt_digest
         assert request.json_schema_digest
+        assert request.system_text
         assert request.invocation is not None
         assert request.invocation.generation_invocation_uuid
         self.structured_calls += 1
@@ -271,7 +272,7 @@ class _LiveEmbeddingFixture:
 
     async def text_generate(self, request: TextGenerateRequest) -> TextGenerateResponse:
         assert request.binding.capability_key == "text_generate"
-        assert request.binding.model_key == "qwen35-a3b"
+        assert request.binding.model_key == SPARK_LIGHTNING_GENERATE_MODEL_KEY
         assert request.prompt_digest
         assert request.invocation is not None
         assert request.invocation.generation_invocation_uuid
@@ -340,6 +341,7 @@ def test_live_profile_uses_frozen_binding_for_vector_write_and_query(tmp_path: P
                 "request_intent": "intake.ingest",
                 "payload": {
                     "json_prompt_id": "promptB.json.generic",
+                    "compression_channel": "api-inference",
                     "source": {
                         "source_kind": "inline_payload",
                         "external_key": "live-vector-document",

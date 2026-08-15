@@ -46,6 +46,26 @@ _T = TypeVar("_T", bound=InferenceResult)
 _V = TypeVar("_V")
 
 
+def coerce_json_object_text(text: str) -> str:
+    """Accept a raw model string, optional fences, and return a JSON object text."""
+
+    stripped = text.strip()
+    if stripped.startswith("```"):
+        lines = stripped.splitlines()
+        if lines and lines[0].startswith("```"):
+            lines = lines[1:]
+        if lines and lines[-1].strip() == "```":
+            lines = lines[:-1]
+        stripped = "\n".join(lines).strip()
+    if stripped.startswith("{") and stripped.endswith("}"):
+        return stripped
+    start = stripped.find("{")
+    end = stripped.rfind("}")
+    if start >= 0 and end > start:
+        return stripped[start : end + 1]
+    return stripped
+
+
 @dataclass(frozen=True, slots=True)
 class _GateLease:
     capability: str
@@ -179,7 +199,7 @@ class InferenceFacade:
             nonlocal typed_value
             response = self._validate_generation(raw)
             try:
-                value = json.loads(response.text)
+                value = json.loads(coerce_json_object_text(response.text))
             except (TypeError, ValueError) as exc:
                 raise MkbError("INFERENCE_VALIDATION_STRUCTURED", "Structured model response is invalid", 502) from exc
             if not isinstance(value, dict):
@@ -527,4 +547,4 @@ class InferenceFacade:
             return
 
 
-__all__ = ["ConcurrencyGate", "InferenceFacade"]
+__all__ = ["ConcurrencyGate", "InferenceFacade", "coerce_json_object_text"]

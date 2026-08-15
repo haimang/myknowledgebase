@@ -175,13 +175,29 @@ SourceDescriptor = Annotated[
 class IntakeIngestPayload(StrictModel):
     source: SourceDescriptor
     preflight_profile_key: Annotated[str, Field(min_length=1, max_length=128)] = "default"
+    # Optional closed selectors that resolve to catalog identities.  They are
+    # not prompt bodies, paths, or a free-form role guess.
+    domain: Literal["documentation"] | None = None
+    flavor: Literal["qna", "eval", "closure", "plan", "code-review"] | None = None
+    granularity: Literal["g0", "g1", "g2"] | None = None
+    # C/summarizer transport only.  A/B stay on the NS1 CLI unless that
+    # worker is absent.  None means the closed default: Claude ``-p``.
+    compression_channel: Literal["non-interactive", "api-inference"] | None = None
     # Prompt selection is an identity-only public surface.  The catalog row
     # supplies version/hash/path at materialization; callers may not provide
     # prompt bodies, filesystem paths, or a free-form role guess.
-    json_prompt_id: Annotated[str, Field(pattern=r"^[A-Za-z][A-Za-z0-9_.-]{0,127}$")]
+    json_prompt_id: Annotated[str | None, Field(pattern=r"^[A-Za-z][A-Za-z0-9_.-]{0,127}$")] = None
     markdown_prompt_id: Annotated[str | None, Field(pattern=r"^[A-Za-z][A-Za-z0-9_.-]{0,127}$")] = None
     clean_prompt_id: Annotated[str | None, Field(pattern=r"^[A-Za-z][A-Za-z0-9_.-]{0,127}$")] = None
     summarizer_prompt_id: Annotated[str | None, Field(pattern=r"^[A-Za-z][A-Za-z0-9_.-]{0,127}$")] = None
+
+    @model_validator(mode="after")
+    def require_json_identity_or_domain_default(self) -> IntakeIngestPayload:
+        if self.flavor is not None and self.domain is None:
+            raise ValueError("flavor requires domain")
+        if self.json_prompt_id is None and self.domain is None and self.granularity is None:
+            raise ValueError("json_prompt_id is required unless domain or granularity selects a json template")
+        return self
 
 
 class IntakeRebuildPayload(StrictModel):
