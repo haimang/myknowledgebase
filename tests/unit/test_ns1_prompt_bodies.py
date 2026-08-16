@@ -17,6 +17,9 @@ def test_four_role_prompt_bodies_are_nonempty_and_b_json_has_no_legacy_contract_
         "json_documentation_g0": Path("data/prompts/json/promptB.documentation.g0.v1.md"),
         "json_documentation_g1": Path("data/prompts/json/promptB.documentation.g1.v1.md"),
         "json_documentation_g2": Path("data/prompts/json/promptB.documentation.g2.v1.md"),
+        "json_documentation_v2": Path("data/prompts/json/promptB.documentation.default.v2.md"),
+        "json_documentation_g1_v2": Path("data/prompts/json/promptB.documentation.g1.v2.md"),
+        "json_documentation_g2_v2": Path("data/prompts/json/promptB.documentation.g2.v2.md"),
         "json_g0": Path("data/prompts/json/promptB.json.g0.v1.md"),
         "json_g1": Path("data/prompts/json/promptB.json.g1.v1.md"),
         "json_g2": Path("data/prompts/json/promptB.json.g2.v1.md"),
@@ -28,6 +31,7 @@ def test_four_role_prompt_bodies_are_nonempty_and_b_json_has_no_legacy_contract_
         "markdown_review": Path("data/prompts/markdown/promptB.documentation.code-review.v1.md"),
         "summarizer": Path("data/prompts/summarizer/promptC.summarizer.v1.md"),
         "summarizer_documentation": Path("data/prompts/summarizer/promptC.documentation.default.v1.md"),
+        "summarizer_documentation_v2": Path("data/prompts/summarizer/promptC.documentation.default.v2.md"),
     }
     for role, path in paths.items():
         body = path.read_bytes()
@@ -41,6 +45,9 @@ def test_four_role_prompt_bodies_are_nonempty_and_b_json_has_no_legacy_contract_
         "json_documentation_g0",
         "json_documentation_g1",
         "json_documentation_g2",
+        "json_documentation_v2",
+        "json_documentation_g1_v2",
+        "json_documentation_g2_v2",
         "json_g0",
         "json_g1",
         "json_g2",
@@ -49,6 +56,15 @@ def test_four_role_prompt_bodies_are_nonempty_and_b_json_has_no_legacy_contract_
         assert "semantic_understanding" not in json_prompt
         assert "semantic_block" not in json_prompt
         assert "mkb.b-json-material.v1" in json_prompt
+    for key in (
+        "json_documentation_v2",
+        "json_documentation_g1_v2",
+        "json_documentation_g2_v2",
+        "summarizer_documentation_v2",
+    ):
+        body = paths[key].read_text(encoding="utf-8")
+        assert "步骤 1" in body, key
+        assert "正例" in body and "反例" in body, key
     for key, path in paths.items():
         if "documentation" in key or key.startswith("markdown_"):
             body = path.read_text(encoding="utf-8")

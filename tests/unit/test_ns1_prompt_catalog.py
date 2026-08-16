@@ -27,7 +27,10 @@ async def test_bootstrap_registers_four_roles_and_json_closed_sets(tmp_path: Pat
         assert json_by_id["promptB.documentation.default"].granularity_set == (0, 1, 2)
         assert json_by_id["promptB.documentation.g0"].granularity_set == (0,)
         assert json_by_id["promptB.documentation.g1"].granularity_set == (0, 1)
+        assert json_by_id["promptB.documentation.g1"].prompt_version == "v2"
+        assert json_by_id["promptB.documentation.g1"].relative_path.endswith("g1.v2.md")
         assert json_by_id["promptB.documentation.g2"].granularity_set == (0, 1, 2)
+        assert json_by_id["promptB.documentation.g2"].prompt_version == "v2"
         assert json_by_id["promptB.json.g0"].granularity_set == (0,)
         assert json_by_id["promptB.json.g1"].granularity_set == (0, 1)
         assert json_by_id["promptB.json.g2"].granularity_set == (0, 1, 2)
@@ -45,6 +48,8 @@ async def test_bootstrap_registers_four_roles_and_json_closed_sets(tmp_path: Pat
             "promptB.documentation.plan",
             "promptB.documentation.code-review",
         }
+        summarizer = {entry.prompt_id: entry for entry in entries if entry.role == "summarizer" and entry.status == "active"}
+        assert summarizer["promptC.documentation.default"].prompt_version == "v2"
         assert all(entry.content_sha256 and len(entry.content_sha256) == 64 for entry in entries)
     finally:
         await persistence.close()
