@@ -102,7 +102,7 @@ class MismatchedEmbedder:
 
 class FixedLayerAEmbedder:
     async def embed(self, request: object) -> EmbeddingResponse:
-        del request
+        assert getattr(request, "expected_dimension", None) == 2
         return EmbeddingResponse(vectors=[[1.0, 0.0]], model_key="model", model_version="v1", dimension=2)
 
 

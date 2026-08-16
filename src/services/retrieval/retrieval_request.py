@@ -405,7 +405,12 @@ class RetrievalRequestMixin:
             raise MkbError("RETRIEVE_INFERENCE_EMBED_UNAVAILABLE", "embed facade is unavailable", 503)
         try:
             response = await self._inference.embed(
-                EmbeddingRequest(team_uuid=query.team_uuid, binding=binding, texts=[query.query])
+                EmbeddingRequest(
+                    team_uuid=query.team_uuid,
+                    binding=binding,
+                    texts=[query.query],
+                    expected_dimension=int(namespace["dimension"]),
+                )
             )
         except MkbError as exc:
             raise MkbError("RETRIEVE_INFERENCE_EMBED_FAILED", "query embedding failed", 503) from exc
