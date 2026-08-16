@@ -153,7 +153,7 @@ async def _insert(
             "available_at, priority_rank, deadline_at, fencing_generation, max_retries, max_recoveries,"
             "backoff_policy_json, created_at, updated_at, payload_extra, dispatch_admitted) "
             "VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'v1', ?, ?, 'required', ?, 'in-ref', ?, 'ctl-ref', 'cfg-ref', ?,"
-            "'proof', 'ready', 0, ?, ?, '2026-08-16T00:00:00Z', 0, 3, 3, '{}', ?, ?, '{}', 0)",
+            "'proof', 'ready', 0, ?, ?, '2099-01-01T00:00:00Z', 0, 3, 3, '{}', ?, ?, '{}', 0)",
             (
                 proc_id,
                 team_uuid,

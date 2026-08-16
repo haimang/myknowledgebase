@@ -61,9 +61,9 @@ async def test_occupancy_three_counters_definition(tmp_path: Path) -> None:
                                               dispatch_pool, dispatch_admitted, claim_token_hash, lease_owner, lease_expires_at)
                     VALUES (?, 'team-1', 'exec-1', 'task-1', 'exec-1', ?, 'sk-1', 'lsrag.construct', 'v1', ?, 'rd'*32,
                             'required', 'ps'*32, 'in-ref', 'in-dig'*16, 'ctl-ref', 'cfg-ref', 'cfg-dig'*16, 'proof',
-                            'claimed', 0, '2026-08-15T00:00:00Z', 200, '2026-08-16T00:00:00Z', 0, 3, 3, '{}',
+                            'claimed', 0, '2026-08-15T00:00:00Z', 200, '2099-01-01T00:00:00Z', 0, 3, 3, '{}',
                             '2026-08-15T00:00:00Z', '2026-08-15T00:00:00Z', '{}', 'local-inference', 1,
-                            'cth'*16, 'worker-1', '2026-08-16T00:00:00Z')
+                            'cth'*16, 'worker-1', '2099-01-01T00:00:00Z')
                     """,
                     (f"proc-claimed-{i}", f"ws-claimed-{i}", f"mk-claimed-{i}"),
                 )
@@ -82,7 +82,7 @@ async def test_occupancy_three_counters_definition(tmp_path: Path) -> None:
                                               dispatch_pool, dispatch_admitted)
                     VALUES (?, 'team-1', 'exec-1', 'task-1', 'exec-1', ?, 'sk-1', 'lsrag.construct', 'v1', ?, 'rd'*32,
                             'required', 'ps'*32, 'in-ref', 'in-dig'*16, 'ctl-ref', 'cfg-ref', 'cfg-dig'*16, 'proof',
-                            'ready', 0, '2026-08-15T00:00:00Z', 200, '2026-08-16T00:00:00Z', 0, 3, 3, '{}',
+                            'ready', 0, '2026-08-15T00:00:00Z', 200, '2099-01-01T00:00:00Z', 0, 3, 3, '{}',
                             '2026-08-15T00:00:00Z', '2026-08-15T00:00:00Z', '{}', 'local-inference', 1)
                     """,
                     (f"proc-queued-{i}", f"ws-queued-{i}", f"mk-queued-{i}"),
@@ -102,7 +102,7 @@ async def test_occupancy_three_counters_definition(tmp_path: Path) -> None:
                                               dispatch_pool, dispatch_admitted)
                     VALUES (?, 'team-1', 'exec-1', 'task-1', 'exec-1', ?, 'sk-1', 'lsrag.construct', 'v1', ?, 'rd'*32,
                             'required', 'ps'*32, 'in-ref', 'in-dig'*16, 'ctl-ref', 'cfg-ref', 'cfg-dig'*16, 'proof',
-                            'ready', 0, '2026-08-15T00:00:00Z', 200, '2026-08-16T00:00:00Z', 0, 3, 3, '{}',
+                            'ready', 0, '2026-08-15T00:00:00Z', 200, '2099-01-01T00:00:00Z', 0, 3, 3, '{}',
                             '2026-08-15T00:00:00Z', '2026-08-15T00:00:00Z', '{}', NULL, 0)
                     """,
                     (f"proc-waiting-{i}", f"ws-waiting-{i}", f"mk-waiting-{i}"),

@@ -123,7 +123,7 @@ async def _insert_process(
     priority_rank: int = 200,
     created_at: str = "2026-08-15T00:00:00Z",
     available_at: str = "2026-08-15T00:00:00Z",
-    deadline_at: str = "2026-08-16T00:00:00Z",
+    deadline_at: str = "2099-01-01T00:00:00Z",
     status: str = "ready",
     dispatch_pool: str | None = None,
     dispatch_admitted: int = 0,

@@ -89,7 +89,7 @@ async def test_migration_011_check_constraint_rejects_illegal_pool(tmp_path: Pat
                                               dispatch_pool, dispatch_admitted)
                     VALUES (?, 'team-1', 'exec-1', 'task-1', 'exec-1', ?, 'sk-1', 'pk-1', 'v1', ?, 'rd'*32,
                             'required', 'ps'*32, 'in-ref', 'in-dig'*16, 'ctl-ref', 'cfg-ref', 'cfg-dig'*16, 'proof',
-                            'ready', 0, '2026-08-15T00:00:00Z', 200, '2026-08-16T00:00:00Z', 0, 3, 3, '{}',
+                            'ready', 0, '2026-08-15T00:00:00Z', 200, '2099-01-01T00:00:00Z', 0, 3, 3, '{}',
                             '2026-08-15T00:00:00Z', '2026-08-15T00:00:00Z', '{}', ?, 0)
                     """,
                     (proc_uuid, step_uuid, mat_key, pool),
@@ -109,7 +109,7 @@ async def test_migration_011_check_constraint_rejects_illegal_pool(tmp_path: Pat
                                               dispatch_pool, dispatch_admitted)
                     VALUES ('proc-illegal', 'team-1', 'exec-1', 'task-1', 'exec-1', 'ws-illegal', 'sk-1', 'pk-1', 'v1', 'mk-illegal', 'rd'*32,
                             'required', 'ps'*32, 'in-ref', 'in-dig'*16, 'ctl-ref', 'cfg-ref', 'cfg-dig'*16, 'proof',
-                            'ready', 0, '2026-08-15T00:00:00Z', 200, '2026-08-16T00:00:00Z', 0, 3, 3, '{}',
+                            'ready', 0, '2026-08-15T00:00:00Z', 200, '2099-01-01T00:00:00Z', 0, 3, 3, '{}',
                             '2026-08-15T00:00:00Z', '2026-08-15T00:00:00Z', '{}', 'cloud-inference', 0)
                     """
                 )

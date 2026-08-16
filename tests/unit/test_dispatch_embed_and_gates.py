@@ -169,7 +169,7 @@ async def _insert_embed_process(
                                       dispatch_pool, dispatch_admitted, claim_token_hash, lease_owner, lease_expires_at)
             VALUES (?, ?, ?, ?, ?, ?, 'vectorize', 'lsrag.vectorize', 'v1', ?, ?,
                     'required', ?, 'in-ref', ?, 'ctl-ref', 'cfg-ref', ?, 'proof',
-                    ?, 0, ?, ?, '2026-08-16T00:00:00Z', 0, 3, 3, '{}',
+                    ?, 0, ?, ?, '2099-01-01T00:00:00Z', 0, 3, 3, '{}',
                     ?, ?, '{}', ?, ?, ?, ?, ?)
             """,
             (

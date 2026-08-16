@@ -104,7 +104,7 @@ async def _insert_task_and_process(
     priority_rank: int = 200,
     created_at: str = "2026-08-15T00:00:00Z",
     available_at: str = "2026-08-15T00:00:00Z",
-    deadline_at: str = "2026-08-16T00:00:00Z",
+    deadline_at: str | None = "2099-01-01T00:00:00Z",
     status: str = "ready",
     dispatch_pool: str | None = None,
     dispatch_admitted: int = 0,
@@ -413,7 +413,7 @@ async def test_unadmitted_process_never_claimed(tmp_path: Path) -> None:
                 dispatch_admitted=1,
                 claim_token_hash="0" * 64,
                 lease_owner="worker-other",
-                lease_expires_at="2026-08-16T00:00:00Z",
+                lease_expires_at="2099-01-01T00:00:00Z",
                 created_at=f"2026-08-15T00:00:{i:02d}Z",
             )
         for i in range(2, 8):
@@ -609,7 +609,7 @@ async def test_embed_still_claimed_when_local_running_is_full(tmp_path: Path) ->
                 dispatch_admitted=1,
                 claim_token_hash="c" * 64,
                 lease_owner="holder",
-                lease_expires_at="2026-08-16T00:00:00Z",
+                lease_expires_at="2099-01-01T00:00:00Z",
             )
         await _insert_task_and_process(
             persistence,
