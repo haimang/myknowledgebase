@@ -86,7 +86,7 @@ Q-A3 serving intact
 ## 4. 预检闸
 
 权威机器记录：`.experiment/0815/runs/MKB-0815-R3/results/preflight.json`  
-`checked_at`：`2026-08-16T06:25:36Z` · `passed`：`true` · `git_head`：`d3a41955cbdd6a9fea70b24a2c816561f08cb793`
+`checked_at`：`2026-08-16T06:28:00Z` 左右（复跑于 `38d2c6e`）· `passed`：`true` · 以 `results/preflight.json.git_head` 为准
 
 19/19 闸全过：R1 封条与对象、R2/R3 对象、NS4 closure、g1 v3 合同、catalog g1=v3/C=v2、`transcribe_markdown→markdown`、CLI schema、markdown flavor、冻结命令、Turso 013 + 17/17 向量、零 `-r3` ingest、问句 `expected_dimension`、仓内测试结构、vLLM 模型、Layer A 1024 embed、Qwen `PING_OK`、Claude NI `PING_OK`。
 
@@ -109,5 +109,5 @@ Q-A3 serving intact
 - [x] Turso + CW；Q-A3 17 向量 intact
 - [x] 013 + stage_reports 表已在 live 拷贝
 - [x] 零 `-r3` ingest
-- [x] `preflight.py` 全绿（`2026-08-16T06:25:36Z` · 19/19）
+- [x] `preflight.py` 全绿（复跑于 `38d2c6e` · 19/19）
 - [ ] **业主点头** 后才跑冻结 collect
