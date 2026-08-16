@@ -24,6 +24,22 @@ from src.runtime.workflow.constants import (
 from src.runtime.workflow.helpers import (
     _json,
 )
+from src.services.prompt_profiles import default_prompt_ids
+
+
+def _markdown_id_from_domain_flavor(payload: dict[str, Any]) -> str | None:
+    """Resolve optional markdown hop from domain/flavor defaults."""
+
+    try:
+        defaults = default_prompt_ids(
+            domain=payload.get("domain") if isinstance(payload.get("domain"), str) else None,
+            flavor=payload.get("flavor") if isinstance(payload.get("flavor"), str) else None,
+            granularity=payload.get("granularity") if isinstance(payload.get("granularity"), str) else None,
+        )
+    except ValueError:
+        return None
+    markdown_id = defaults.get("markdown")
+    return markdown_id if isinstance(markdown_id, str) and markdown_id else None
 
 
 class WorkflowMaterializeMixin:
@@ -137,6 +153,8 @@ class WorkflowMaterializeMixin:
                 markdown_id = markdown.get("prompt_id") if isinstance(markdown, dict) else None
                 if not markdown_id and isinstance(payload, dict):
                     markdown_id = payload.get("markdown_prompt_id")
+                if not markdown_id and isinstance(payload, dict):
+                    markdown_id = _markdown_id_from_domain_flavor(payload)
                 if isinstance(markdown_id, str) and markdown_id:
                     context["markdown_selection"] = "present"
                     if context.get("admission_result") == "auto_admitted":

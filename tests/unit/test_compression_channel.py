@@ -190,10 +190,10 @@ async def test_local_adapter_sends_system_prompt_and_json_object_for_qwen() -> N
         ],
         "stream": False,
         "response_format": {"type": "json_object"},
+        "chat_template_kwargs": {"enable_thinking": False},
     }
     assert "max_tokens" not in captured["body"]
-    assert "chat_template_kwargs" not in captured["body"]
-    assert "enable_thinking" not in captured["body"]
+    assert captured["body"]["chat_template_kwargs"] == {"enable_thinking": False}
     assert response.model_key == SPARK_QWEN_GENERATE_MODEL_KEY
     assert response.text == '{"ok":true}'
 

@@ -28,7 +28,7 @@ class ClaudeCliRequest:
     system_prompt_file: str | Path
     json_schema: Mapping[str, object] | None = None
     model: str | None = None
-    timeout_seconds: float = 120.0
+    timeout_seconds: float = 900.0
     role: Literal["clean", "markdown", "json", "summarizer"] | None = None
     granularity_set: tuple[int, ...] = (0, 1, 2)
 
@@ -162,11 +162,26 @@ def build_claude_argv(
         argv.extend(("--model", request.model))
     if request.json_schema is not None:
         try:
-            schema = json.dumps(request.json_schema, ensure_ascii=False, sort_keys=True, separators=(",", ":"), allow_nan=False)
+            schema = json.dumps(
+                _cli_json_schema(request.json_schema),
+                ensure_ascii=False,
+                sort_keys=True,
+                separators=(",", ":"),
+                allow_nan=False,
+            )
         except (TypeError, ValueError) as exc:
             raise MkbError("CLAUDE_CLI_SCHEMA_INVALID", "Claude CLI JSON schema is not deterministic JSON", 422) from exc
         argv.extend(("--output-format", "json", "--json-schema", schema))
     return tuple(argv)
+
+
+def _cli_json_schema(schema: Mapping[str, object]) -> dict[str, object]:
+    """Drop JSON Schema meta-document keys the CLI treats as remote $ref."""
+
+    sanitized = dict(schema)
+    sanitized.pop("$schema", None)
+    sanitized.pop("$id", None)
+    return sanitized
 
 
 def _decode_structured_stdout(stdout: str) -> tuple[str, dict[str, Any] | None, str | None, Mapping[str, object] | None, bool]:

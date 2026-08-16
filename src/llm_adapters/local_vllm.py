@@ -153,6 +153,10 @@ class LocalVllmAdapter:
             "model": request.binding.model_key,
             "messages": messages,
             "stream": False,
+            # This Qwen3.8 checkpoint writes the answer into reasoning and
+            # leaves content empty unless thinking is off. NS2-T34 forbade the
+            # flag assuming omit == no thinking tokens; that is false here.
+            "chat_template_kwargs": {"enable_thinking": False},
         }
         if isinstance(request, StructuredGenerateRequest):
             payload["response_format"] = {"type": "json_object"}

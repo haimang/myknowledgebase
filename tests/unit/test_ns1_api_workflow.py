@@ -14,7 +14,10 @@ from src.contracts.api.models import IntakeIngestPayload
 from src.contracts.common.errors import MkbError
 from src.contracts.common.ids import stable_digest, uuid7
 from src.contracts.workflow.models import WorkflowOutcomeSelector
-from src.runtime.workflow.runtime_materialize import WorkflowMaterializeMixin
+from src.runtime.workflow.runtime_materialize import (
+    WorkflowMaterializeMixin,
+    _markdown_id_from_domain_flavor,
+)
 from src.services.config_snapshots import ConfigSnapshotService
 from src.workflows.builtin_lsrag import BUILTIN_EXECUTION_COMPATIBILITY_WORKFLOWS
 from src.workflows.builtin_scatter import (
@@ -165,6 +168,15 @@ def test_documentation_domain_flavor_resolves_to_documentation_prompt_cluster() 
     assert selection["json"]["prompt_id"] == "promptB.documentation.g1"
     assert selection["json"]["granularity_set"] == [0, 1]
     assert selection["summarizer"]["prompt_id"] == "promptC.documentation.default"
+
+
+def test_route_context_derives_markdown_from_documentation_flavor() -> None:
+    assert (
+        _markdown_id_from_domain_flavor({"domain": "documentation", "flavor": "closure"})
+        == "promptB.documentation.closure"
+    )
+    assert _markdown_id_from_domain_flavor({"domain": "documentation"}) is None
+    assert _markdown_id_from_domain_flavor({"flavor": "qna"}) is None
 
 
 def test_intake_granularity_selects_json_template_and_rejects_mismatch() -> None:

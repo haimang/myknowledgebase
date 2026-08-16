@@ -248,7 +248,8 @@ async def test_low_priority_local_failure_does_not_salvage_to_cli() -> None:
 
 @pytest.mark.asyncio
 async def test_local_vllm_adapter_sends_exact_qwen_json_object_payload() -> None:
-    # NS2-T34: Qwen adapter sends system + user prompt + json_object, omits max_tokens / enable_thinking, strips reasoning
+    # NS2-T34: Qwen adapter sends system + user + json_object, omits max_tokens, strips reasoning.
+    # enable_thinking=false is required so this checkpoint fills content instead of reasoning.
     captured: dict[str, Any] = {}
 
     def handler(request: httpx.Request) -> httpx.Response:
@@ -298,6 +299,5 @@ async def test_local_vllm_adapter_sends_exact_qwen_json_object_payload() -> None
     ]
     assert body["response_format"] == {"type": "json_object"}
     assert "max_tokens" not in body
-    assert "enable_thinking" not in body
-    assert "chat_template_kwargs" not in body
+    assert body["chat_template_kwargs"] == {"enable_thinking": False}
     assert response.text == '{"summary": "clean content"}'

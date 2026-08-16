@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import pytest
@@ -55,6 +56,27 @@ def test_build_argv_uses_bare_system_file_tools_and_schema_only_for_structured()
     assert stdin_argv[:2] == ("claude", "-p")
     assert "x" * 10 not in stdin_argv
     assert prompt_transport_for("x" * (CLAUDE_CLI_ARGV_PROMPT_LIMIT_BYTES + 1)) == "stdin"
+
+
+def test_build_argv_strips_json_schema_meta_document_keys() -> None:
+    structured = build_claude_argv(
+        ClaudeCliRequest(
+            user_prompt="material",
+            system_prompt_file="data/prompts/json/prompt.md",
+            json_schema={
+                "$schema": "https://json-schema.org/draft/2020-12/schema",
+                "$id": "mkb://schemas/lsrag.layered_content.v1",
+                "type": "object",
+                "required": ["layered_content"],
+            },
+        )
+    )
+    schema_arg = structured[structured.index("--json-schema") + 1]
+    parsed = json.loads(schema_arg)
+    assert "$schema" not in parsed
+    assert "$id" not in parsed
+    assert parsed["type"] == "object"
+    assert parsed["required"] == ["layered_content"]
 
 
 def test_structured_output_has_priority_over_result_string() -> None:
