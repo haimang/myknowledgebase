@@ -53,7 +53,9 @@ async def write_pending_generation_evidence_tx(tx: Any, process: dict[str, Any])
         if isinstance(invocation, dict):
             status = invocation.get("status") or "failed"
             stage_key = invocation.get("stage_key") or "structurize"
-            adapter_kind = invocation.get("adapter_kind") or "claude_cli"
+            adapter_kind = invocation.get("adapter_kind") or "local_inference"
+            if adapter_kind not in {"claude_cli", "local_inference", "local_vllm"}:
+                adapter_kind = "local_inference"
             await tx.execute(
                 "INSERT OR IGNORE INTO mkb_generation_invocations "
                 "(invocation_uuid,team_uuid,execution_uuid,process_uuid,process_attempt,invocation_ordinal,"

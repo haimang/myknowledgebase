@@ -12,7 +12,7 @@ ALTER TABLE mkb_generation_invocations ADD COLUMN stage_key TEXT
 ALTER TABLE mkb_generation_invocations ADD COLUMN error_code TEXT;
 
 ALTER TABLE mkb_generation_invocations ADD COLUMN adapter_kind TEXT
-  CHECK (adapter_kind IS NULL OR adapter_kind IN ('claude_cli', 'local_inference'));
+  CHECK (adapter_kind IS NULL OR adapter_kind IN ('claude_cli', 'local_inference', 'local_vllm'));
 
 ALTER TABLE mkb_generation_invocations ADD COLUMN cli_structured_kind TEXT
   CHECK (

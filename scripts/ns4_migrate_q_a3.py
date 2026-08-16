@@ -1,4 +1,6 @@
-"""One-shot NS4 migrate: copy Q-A3 serving onto a Turso file and stop using sqlite.
+"""RETIRED after NS4-P3. One-shot Q-A3 copy. Do not call from runtime or 0815 collect.
+
+One-shot NS4 migrate: copy Q-A3 serving onto a Turso file and stop using sqlite.
 
 Does not invent structure-reject histograms for old failed rows.
 """

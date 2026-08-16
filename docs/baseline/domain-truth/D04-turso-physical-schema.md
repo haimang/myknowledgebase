@@ -37,6 +37,8 @@
 > **Legacy 边界（T-O-42 / T-O-101）**：禁止 `smind_*`；禁止 clean/rag 双 process；禁止 `smind_vec_process` 克隆；禁止 log 作状态 SSOT；禁止外置 Vectorize 作 v1 最终向量 SSOT。
 
 > **冻结声明**：Owner 2026-08-11 批准本文件为 **数据库表结构与细节的真相层**。§2 全域 Truth **append-only**（`T-O-160..179` + S11 reopen `T-O-193`/`T-O-194`）。v1 required **55 表**（52 + model/inference 3）以 §2.2 为准；变更须显式 reopen。
+>
+> **NS4 窄 reopen（2026-08-16 · `T-O-366`/`T-O-369`）**：generation 模块 +1 required 表 `mkb_generation_stage_reports`；`mkb_generation_invocations` 列晋升 `status`/`stage_key`/`error_code`/`adapter_kind`/`cli_structured_kind`。全域 required **56**。禁止 extra 承载这些证据。
 
 > **S11 校准 / reopen（2026-08-12）**：Owner 接受 catalog 独立三表（`T-O-193`）。新增 `mkb_model_catalog`、`mkb_adapter_bindings`、`mkb_inference_invocations`。embedding 空间严禁跨 model 混用；写/读须带 model/namespace/adapter 围栏（`T-O-192`）。
 
@@ -243,7 +245,7 @@ D04 回答：在 **单主库 `mkb_primary`**（T-O-102）上，如何用 **一�
 | 42 | `mkb_intake_cleanup_intents` | Cleanup intent | S04 | required |
 | 43 | `mkb_intake_cleanup_proofs` | Cleanup proof | S04 | required |
 
-#### 2.2.5 `generation` 模块（4）
+#### 2.2.5 `generation` 模块（5 · NS4）
 
 | # | 物理表名 | 逻辑职责 | Product owner | Status |
 |---|---|---|---|---|
@@ -251,6 +253,7 @@ D04 回答：在 **单主库 `mkb_primary`**（T-O-102）上，如何用 **一�
 | 45 | `mkb_generation_invocations` | LLM/工具调用账 | S06/S07 | required |
 | 46 | `mkb_generation_pointers` | per-type current CAS | S06/S07 | required |
 | 47 | `mkb_generation_pointer_transitions` | pointer 变更账 | S06/S07 | required |
+| 47b | `mkb_generation_stage_reports` | 每 generate 阶段一等 admit/transport 报告 | S06/S15 | required · NS4 `T-O-369` |
 
 #### 2.2.6 `object` 模块（3）
 
@@ -1187,9 +1190,17 @@ UNIQUE(`change_set_uuid`,`fact_ordinal`)；索引 (`change_set_uuid`,`fact_kind`
 | input/output/error digests | |
 | token usage integers | |
 | `occurred_at`; `payload_extra` | |
+| **NS4** `status` CHECK ∈ `succeeded,failed` | 一等成败 |
+| **NS4** `stage_key` CHECK ∈ `markdown,structurize,construct` | |
+| **NS4** `error_code`；`adapter_kind` CHECK ∈ `claude_cli,local_inference` | |
+| **NS4** `cli_structured_kind` | CLI 信封分型；禁进 extra |
 
 UNIQUE(`process_uuid`,`invocation_ordinal`)。  
 索引：(`execution_uuid`,`occurred_at`)。
+
+#### 3.5.5 `mkb_generation_stage_reports`（append-only · NS4 `T-O-369`）
+
+每 generate 阶段一行。直方图与 CLI kind 的 SSOT。`payload_extra` 必须保持 `{}` 证据空袋。列闭集见 `docs/plan/new-start/NS4-d04-s15-reopen.md`。
 
 ---
 

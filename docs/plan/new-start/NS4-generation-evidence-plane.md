@@ -28,7 +28,7 @@
 > - 本 AP §7 内置锚区（对照当前 NS3 后 `src/` / `tests/` / `.experiment/0815/`）
 > 关联 reference-anchor:
 > - 见 §7 内置锚区
-> 文档状态: `executing`
+> 文档状态: `executed`
 
 ---
 
@@ -635,13 +635,16 @@ NS4 generation-evidence plane
 
 ## 11. 执行日志回填（仅 `executed` 状态使用）
 
-> 文档状态非 `executed`，本节省略。
+> 执行者：`Grok`  
+> 执行时间：`2026-08-16`  
+> 文档状态：`draft → executing → executed`  
+> 代码改动统计：六相分批 commit（`9d3f3cc` … closure）
 
-- **实际执行摘要**：—
-- **Phase 偏差**：—
-- **阻塞与处理**：—
-- **测试发现**：—
-- **后续 handoff**：NS4 closure 之后 → 0815 R3（`T-O-375` 命令与双轴）
+- **实际执行摘要**：P0 合同/守卫 → P3 Turso+Q-A3 一次迁移 → P1 013+同 TX → P2 sink/sidecar → P4 Port/去 dump → closure。R3 未发。
+- **Phase 偏差**：① extra 守卫 P0 用 allowlist、P1 清空；② ContextVar 代替改 ProcessOutcome；③ 多线程 CONCURRENT soak 改串行；④ `adapter_kind` CHECK 增加 `local_vllm`。
+- **阻塞与处理**：`_structurize` 内联 `import uuid7` UnboundLocalError 已删；live e2e 因 CHECK 拒 `local_vllm` 已扩列。
+- **测试发现**：NS4 专项 + `tests/unit|domain|integration` + 关键 e2e 在 adapter 扩 CHECK 后 PASS。
+- **后续 handoff**：`docs/closure/new-start/NS4-generation-evidence-plane-closure.md` → R3 `T-O-375`。
 
 ---
 
@@ -723,3 +726,9 @@ NS4 generation-evidence plane
 - **实际执行摘要**：ReadPort 在 timeline 上附 invocation+report。collect 不再 spawn dump。jsonl `_journal_row` 剥 reject 键。
 - **Phase 偏差**：`inspect_dump.py` 文件仍在 gitignore 实验树，但 collect 已切断调用。分类：`substrate-fit`。
 - **测试发现**：T24/T25/T26 绿。
+
+### 12.6 Phase 6 / Closure
+
+- **实际执行摘要**：迁移脚本标 RETIRED；D04/S15 窄回填；closure 落盘。本地回归在扩 `local_vllm` CHECK 后绿。
+- **Phase 偏差**：T30 多线程 soak `partial`。`adapter_kind` 比 QNA 两值多一个 `local_vllm`（S11 现网）。
+- **后续 handoff**：owner 可按 `T-O-375` 发 R3。

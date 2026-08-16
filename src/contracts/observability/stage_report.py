@@ -17,7 +17,7 @@ LAYER_COUNTS_SCHEMA = "mkb.layer-counts.v1"
 
 STAGE_KEYS = frozenset({"markdown", "structurize", "construct"})
 DISPOSITIONS = frozenset({"accepted", "rejected", "transport_failed"})
-ADAPTER_KINDS = frozenset({"claude_cli", "local_inference"})
+ADAPTER_KINDS = frozenset({"claude_cli", "local_inference", "local_vllm"})
 CLI_STRUCTURED_KINDS = frozenset(
     {"object", "list", "string", "empty_result", "missing", "null", "number", "bool", "other"}
 )
