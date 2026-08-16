@@ -626,7 +626,7 @@ class IntakeGenerationConstructMixin:
             invocation = self._cli_invocation_from_receipt(
                 command,
                 receipt,
-                stage_key="transcribe_markdown",
+                stage_key="markdown",
                 capability_key="text_generate",
                 input_digest=state["clean_digest"],
             )

@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+import json
+import sqlite3
 from pathlib import Path
 
 import pytest
 
 from src.persistence.factory import build_persistence
-from src.persistence.migration_runner import discover_migrations
+from src.persistence.migration_runner import apply_migrations, discover_migrations
 
 
 @pytest.mark.asyncio
@@ -41,6 +43,46 @@ async def test_migration_013_adds_columns_and_stage_report_table(tmp_path: Path)
         assert "mkb_generation_stage_reports" in tables
     finally:
         await persistence.close()
+
+
+def test_migration_013_maps_historic_transcribe_markdown(tmp_path: Path) -> None:
+    db = tmp_path / "hist.db"
+    migrations = discover_migrations(Path("src/persistence/migrations"))
+    assert migrations[-1].migration_id == "013_generation_evidence_plane"
+    connection = sqlite3.connect(db)
+    try:
+        apply_migrations(connection, migrations[:-1])
+        connection.execute("PRAGMA foreign_keys=OFF")
+        connection.execute(
+            "INSERT INTO mkb_generation_invocations ("
+            "invocation_uuid,team_uuid,execution_uuid,process_uuid,process_attempt,"
+            "invocation_ordinal,invocation_kind,input_digest,occurred_at,payload_extra"
+            ") VALUES ('i','t','e','p',0,0,'generation',?,?,?)",
+            (
+                "a" * 64,
+                "now",
+                json.dumps(
+                    {
+                        "stage_key": "transcribe_markdown",
+                        "status": "succeeded",
+                        "adapter_kind": "claude_cli",
+                    }
+                ),
+            ),
+        )
+        connection.commit()
+        apply_migrations(connection, migrations)
+        row = connection.execute(
+            "SELECT stage_key, status, adapter_kind FROM mkb_generation_invocations"
+        ).fetchone()
+        assert row == ("markdown", "succeeded", "claude_cli")
+        tables = {
+            name
+            for (name,) in connection.execute("SELECT name FROM sqlite_master WHERE type='table'")
+        }
+        assert "mkb_generation_stage_reports" in tables
+    finally:
+        connection.close()
 
 
 @pytest.mark.asyncio

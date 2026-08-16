@@ -7,6 +7,7 @@ import pytest
 from src.contracts.observability.stage_report import (
     STAGE_REPORT_SCHEMA,
     StageReportValidationError,
+    evidence_stage_key,
     validate_layer_counts,
     validate_stage_report,
 )
@@ -65,3 +66,14 @@ def test_rejected_disposition_requires_error_code() -> None:
 def test_unknown_stage_key_is_rejected() -> None:
     with pytest.raises(StageReportValidationError):
         validate_stage_report(_valid_report(stage_key="vectorize"))
+
+
+def test_evidence_stage_key_maps_transcribe_markdown() -> None:
+    assert evidence_stage_key("transcribe_markdown") == "markdown"
+    assert evidence_stage_key("markdown") == "markdown"
+    assert evidence_stage_key("structurize") == "structurize"
+    assert evidence_stage_key("construct") == "construct"
+    projected = validate_stage_report(_valid_report(stage_key="transcribe_markdown"))
+    assert projected["stage_key"] == "markdown"
+    with pytest.raises(StageReportValidationError):
+        evidence_stage_key("lsrag.transcribe_markdown")

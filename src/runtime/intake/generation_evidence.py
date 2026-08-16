@@ -51,8 +51,10 @@ async def write_pending_generation_evidence_tx(tx: Any, process: dict[str, Any])
     for item in take_pending_generation_evidence():
         invocation = item.get("invocation")
         if isinstance(invocation, dict):
+            from src.contracts.observability.stage_report import evidence_stage_key
+
             status = invocation.get("status") or "failed"
-            stage_key = invocation.get("stage_key") or "structurize"
+            stage_key = evidence_stage_key(invocation.get("stage_key") or "structurize")
             adapter_kind = invocation.get("adapter_kind") or "local_inference"
             if adapter_kind not in {"claude_cli", "local_inference", "local_vllm"}:
                 adapter_kind = "local_inference"

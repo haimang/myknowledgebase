@@ -23,11 +23,37 @@ ALTER TABLE mkb_generation_invocations ADD COLUMN cli_structured_kind TEXT
 
 UPDATE mkb_generation_invocations
 SET
-  status = COALESCE(status, json_extract(payload_extra, '$.status'), 'succeeded'),
-  stage_key = COALESCE(stage_key, json_extract(payload_extra, '$.stage_key'), 'structurize'),
+  status = CASE json_extract(payload_extra, '$.status')
+    WHEN 'succeeded' THEN 'succeeded'
+    WHEN 'failed' THEN 'failed'
+    ELSE COALESCE(status, 'succeeded')
+  END,
+  stage_key = CASE json_extract(payload_extra, '$.stage_key')
+    WHEN 'markdown' THEN 'markdown'
+    WHEN 'structurize' THEN 'structurize'
+    WHEN 'construct' THEN 'construct'
+    WHEN 'transcribe_markdown' THEN 'markdown'
+    ELSE COALESCE(stage_key, 'structurize')
+  END,
   error_code = COALESCE(error_code, json_extract(payload_extra, '$.error_code')),
-  adapter_kind = COALESCE(adapter_kind, json_extract(payload_extra, '$.adapter_kind'), 'claude_cli'),
-  cli_structured_kind = COALESCE(cli_structured_kind, json_extract(payload_extra, '$.cli_structured_kind'));
+  adapter_kind = CASE json_extract(payload_extra, '$.adapter_kind')
+    WHEN 'claude_cli' THEN 'claude_cli'
+    WHEN 'local_inference' THEN 'local_inference'
+    WHEN 'local_vllm' THEN 'local_vllm'
+    ELSE COALESCE(adapter_kind, 'claude_cli')
+  END,
+  cli_structured_kind = CASE json_extract(payload_extra, '$.cli_structured_kind')
+    WHEN 'object' THEN 'object'
+    WHEN 'list' THEN 'list'
+    WHEN 'string' THEN 'string'
+    WHEN 'empty_result' THEN 'empty_result'
+    WHEN 'missing' THEN 'missing'
+    WHEN 'null' THEN 'null'
+    WHEN 'number' THEN 'number'
+    WHEN 'bool' THEN 'bool'
+    WHEN 'other' THEN 'other'
+    ELSE cli_structured_kind
+  END;
 
 CREATE TABLE mkb_generation_stage_reports (
   report_uuid TEXT PRIMARY KEY,

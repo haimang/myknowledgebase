@@ -347,8 +347,10 @@ class IntakeGenerationLiveMixin:
             """Persist linked S06/S07 generation + S11 inference ledgers (no bodies)."""
 
             now = utc_now()
+            from src.contracts.observability.stage_report import evidence_stage_key
+
             status = invocation.get("status") or "succeeded"
-            stage_key = invocation.get("stage_key") or "structurize"
+            stage_key = evidence_stage_key(invocation.get("stage_key") or "structurize")
             adapter_kind = invocation.get("adapter_kind") or "local_inference"
             await tx.execute(
                 "INSERT OR IGNORE INTO mkb_generation_invocations "

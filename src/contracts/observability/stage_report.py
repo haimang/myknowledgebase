@@ -16,6 +16,7 @@ STAGE_REPORT_SCHEMA = "mkb.generation-stage-report.v1"
 LAYER_COUNTS_SCHEMA = "mkb.layer-counts.v1"
 
 STAGE_KEYS = frozenset({"markdown", "structurize", "construct"})
+STAGE_KEY_ALIASES = {"transcribe_markdown": "markdown"}
 DISPOSITIONS = frozenset({"accepted", "rejected", "transport_failed"})
 ADAPTER_KINDS = frozenset({"claude_cli", "local_inference", "local_vllm"})
 CLI_STRUCTURED_KINDS = frozenset(
@@ -57,6 +58,16 @@ class StageReportValidationError(MkbError):
 
     def __init__(self, message: str) -> None:
         super().__init__("OBS_STAGE_REPORT_INVALID", message, 422)
+
+
+def evidence_stage_key(value: object) -> str:
+    """Project a process or receipt label onto the closed evidence stage set."""
+
+    if isinstance(value, str) and value in STAGE_KEY_ALIASES:
+        return STAGE_KEY_ALIASES[value]
+    if isinstance(value, str) and value in STAGE_KEYS:
+        return value
+    raise StageReportValidationError("stage_key is not in the closed set")
 
 
 def _reject_forbidden_keys(value: object, *, path: str = "$") -> None:
@@ -114,9 +125,7 @@ def validate_stage_report(value: object) -> dict[str, Any]:
     if schema != STAGE_REPORT_SCHEMA:
         raise StageReportValidationError("stage report schema is not registered")
 
-    stage_key = value.get("stage_key")
-    if stage_key not in STAGE_KEYS:
-        raise StageReportValidationError("stage_key is not in the closed set")
+    stage_key = evidence_stage_key(value.get("stage_key"))
 
     disposition = value.get("disposition")
     if disposition not in DISPOSITIONS:
