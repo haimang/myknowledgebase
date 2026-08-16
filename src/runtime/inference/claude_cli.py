@@ -184,6 +184,26 @@ def _cli_json_schema(schema: Mapping[str, object]) -> dict[str, object]:
     return sanitized
 
 
+def cli_structured_kind(value: object, *, present: bool) -> str:
+    """Closed diagnosis for a non-object structured payload. Never returns the payload."""
+
+    if not present:
+        return "missing"
+    if value is None:
+        return "null"
+    if isinstance(value, bool):
+        return "bool"
+    if isinstance(value, int | float):
+        return "number"
+    if isinstance(value, str):
+        return "empty_result" if not value.strip() else "string"
+    if isinstance(value, list):
+        return "list"
+    if isinstance(value, Mapping):
+        return "object"
+    return "other"
+
+
 def _decode_structured_stdout(stdout: str) -> tuple[str, dict[str, Any] | None, str | None, Mapping[str, object] | None, bool]:
     try:
         envelope = json.loads(stdout)
@@ -198,15 +218,40 @@ def _decode_structured_stdout(stdout: str) -> tuple[str, dict[str, Any] | None, 
     if isinstance(structured, Mapping):
         return json.dumps(structured, ensure_ascii=False, sort_keys=True, separators=(",", ":")), dict(structured), session_id, usage, is_error
     result = envelope.get("result")
-    if not isinstance(result, str) or not result.strip():
-        raise MkbError("CLAUDE_CLI_OUTPUT_INVALID", "Claude CLI returned no result", 502)
-    try:
-        parsed_result = json.loads(result)
-    except json.JSONDecodeError:
-        return result.strip(), None, session_id, usage, is_error
-    if isinstance(parsed_result, Mapping):
-        return result.strip(), dict(parsed_result), session_id, usage, is_error
-    return result.strip(), None, session_id, usage, is_error
+    if isinstance(result, str) and result.strip():
+        try:
+            parsed_result = json.loads(result)
+        except json.JSONDecodeError:
+            kind = cli_structured_kind(result, present=True)
+            raise MkbError(
+                "CLAUDE_CLI_OUTPUT_INVALID",
+                f"Claude CLI structured result is {kind}",
+                502,
+                {"cli_structured_kind": kind},
+            )
+        if isinstance(parsed_result, Mapping):
+            return result.strip(), dict(parsed_result), session_id, usage, is_error
+        kind = cli_structured_kind(parsed_result, present=True)
+        raise MkbError(
+            "CLAUDE_CLI_OUTPUT_INVALID",
+            f"Claude CLI structured result is {kind}",
+            502,
+            {"cli_structured_kind": kind},
+        )
+    if "structured_output" in envelope:
+        kind = cli_structured_kind(structured, present=True)
+        raise MkbError(
+            "CLAUDE_CLI_OUTPUT_INVALID",
+            f"Claude CLI structured result is {kind}",
+            502,
+            {"cli_structured_kind": kind},
+        )
+    raise MkbError(
+        "CLAUDE_CLI_OUTPUT_INVALID",
+        "Claude CLI returned no result",
+        502,
+        {"cli_structured_kind": "empty_result"},
+    )
 
 
 def _decode_plain_stdout(stdout: str) -> tuple[str, str | None, Mapping[str, object] | None, bool]:
@@ -272,7 +317,12 @@ class SubprocessClaudeCli:
             if is_error:
                 raise MkbError("CLAUDE_CLI_TRANSPORT_FAILED", "Claude CLI reported an error", 503)
             if structured is None:
-                raise MkbError("CLAUDE_CLI_OUTPUT_INVALID", "Claude CLI structured result is not an object", 502)
+                raise MkbError(
+                    "CLAUDE_CLI_OUTPUT_INVALID",
+                    "Claude CLI structured result is not an object",
+                    502,
+                    {"cli_structured_kind": "missing"},
+                )
             return ClaudeCliResult(text, structured, exit_code, session_id, usage, is_error)
         text, session_id, usage, is_error = _decode_plain_stdout(stdout)
         if is_error:

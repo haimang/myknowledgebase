@@ -17,6 +17,7 @@ from src.runtime.inference.claude_cli import (
     _decode_plain_stdout,
     _decode_structured_stdout,
     build_claude_argv,
+    cli_structured_kind,
     prompt_transport_for,
 )
 
@@ -100,6 +101,15 @@ def test_structured_result_string_is_fallback_and_transport_errors_are_typed() -
         _decode_structured_stdout('{"is_error":false}')
     with pytest.raises(MkbError, match="CLAUDE_CLI_OUTPUT_INVALID"):
         _decode_structured_stdout("not json")
+    listed = pytest.raises(MkbError, match="CLAUDE_CLI_OUTPUT_INVALID")
+    with listed as rejected:
+        _decode_structured_stdout('{"is_error":false,"result":"[1,2]"}')
+    assert rejected.value.details == {"cli_structured_kind": "list"}
+    with pytest.raises(MkbError) as missing:
+        _decode_structured_stdout('{"is_error":false}')
+    assert missing.value.details == {"cli_structured_kind": "empty_result"}
+    assert cli_structured_kind([1], present=True) == "list"
+    assert cli_structured_kind(None, present=False) == "missing"
 
 
 def test_plain_output_accepts_envelope_metadata_and_rejects_error_envelope() -> None:
