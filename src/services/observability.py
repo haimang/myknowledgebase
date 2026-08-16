@@ -8,6 +8,7 @@ It has no repair or arbitrary SQL surface.
 
 from __future__ import annotations
 
+import asyncio
 import base64
 import binascii
 import json
@@ -84,10 +85,12 @@ class DiagnosticSink:
         metrics: MetricRegistry,
         *,
         stderr: Callable[[str], None] | None = None,
+        sidecar: Any | None = None,
     ) -> None:
         self._persistence = persistence
         self._metrics = metrics
         self._stderr = stderr or self._write_stderr
+        self._sidecar = sidecar
         self._attempted = 0
         self._missing_trace = 0
 
@@ -136,30 +139,34 @@ class DiagnosticSink:
             "mkb_diagnostic_missing_trace_ratio",
             self._missing_trace / self._attempted,
         )
+        params = (
+            uuid7(),
+            safe["team_uuid"],
+            safe["trace_uuid"],
+            safe["task_uuid"],
+            safe["execution_uuid"],
+            safe["process_uuid"],
+            safe["log_level"],
+            safe["log_code"],
+            safe["message"],
+            safe["calling_module"],
+            safe["calling_worker"],
+            safe["payload_json"],
+            stable_digest(safe["payload"]),
+            utc_now(),
+        )
         try:
-            async with self._persistence.transaction() as tx:
-                await tx.execute(
-                    "INSERT INTO mkb_ops_diagnostic_logs "
-                    "(log_uuid,team_uuid,trace_uuid,task_uuid,execution_uuid,process_uuid,log_level,log_code,"
-                    "log_message,calling_module,calling_worker,payload_json,payload_digest,occurred_at,payload_extra) "
-                    "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,'{}')",
-                    (
-                        uuid7(),
-                        safe["team_uuid"],
-                        safe["trace_uuid"],
-                        safe["task_uuid"],
-                        safe["execution_uuid"],
-                        safe["process_uuid"],
-                        safe["log_level"],
-                        safe["log_code"],
-                        safe["message"],
-                        safe["calling_module"],
-                        safe["calling_worker"],
-                        safe["payload_json"],
-                        stable_digest(safe["payload"]),
-                        utc_now(),
-                    ),
-                )
+            if self._sidecar is not None:
+                await asyncio.to_thread(self._sidecar.insert, params)
+            else:
+                async with self._persistence.transaction() as tx:
+                    await tx.execute(
+                        "INSERT INTO mkb_ops_diagnostic_logs "
+                        "(log_uuid,team_uuid,trace_uuid,task_uuid,execution_uuid,process_uuid,log_level,log_code,"
+                        "log_message,calling_module,calling_worker,payload_json,payload_digest,occurred_at,payload_extra) "
+                        "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,'{}')",
+                        params,
+                    )
         except Exception:
             self._drop("append_fail", safe["log_code"])
             return False

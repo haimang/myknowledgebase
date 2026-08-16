@@ -55,6 +55,7 @@ class IntakeCoreMixin:
             index_retirement: IndexGenerationRetirementService | None = None,
             embedding_dimension: int = 64,
             prompt_root: Path | None = None,
+            diagnostics: object | None = None,
         ) -> None:
             if embedding_dimension < 1:
                 raise ValueError("embedding_dimension must be positive")
@@ -79,6 +80,7 @@ class IntakeCoreMixin:
             # supplies it, so a real S09 promotion records its grace intent in the
             # same transaction as the pointer CAS.
             self._index_retirement = index_retirement
+            self._diagnostics = diagnostics
             self._embedding_dimension = embedding_dimension
             # Prompt bytes are code-owned source assets.  A deployment can mount a
             # reviewed alternate git checkout through composition, but they never

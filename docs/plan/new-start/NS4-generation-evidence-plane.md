@@ -709,3 +709,11 @@ NS4 generation-evidence plane
 | P1-02 | `✅ done` | `generation_live.py` / `generation_evidence.py` / `runtime_outcome.py` | 同 TX |
 | P1-03 | `✅ done` | `core.py` extra={}；删 getattr/吞异常 | |
 | P1-04 | `✅ done` | admit except → stage report | |
+
+### 12.4 Phase 4 / P2 — DiagnosticSink 旁路
+
+- **实际执行摘要**：create_app 注入 DiagnosticSink；Turso 走 sidecar BEGIN CONCURRENT。generate 无 sink 即 503。失败阶段写一行 diagnostic。
+- **Phase 偏差**：大量单测仍可构造无 sink 的 Pipeline（只测 helper）。真正 `_structurize/_construct` 强制 sink。分类：`substrate-fit`。
+- **阻塞与处理**：无。
+- **测试发现**：sink required / sidecar / e2e / observability contracts 绿。
+- **后续 handoff**：Phase 5 ReadPort。

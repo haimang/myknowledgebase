@@ -42,7 +42,12 @@ from src.services.events import DomainEventWriter, SecurityAuditWriter
 from src.services.index_retirement import IndexGenerationRetirementService
 from src.services.intake_lifecycle import IntakeLifecycleService
 from src.services.object_gc import ObjectGcService
-from src.services.observability import ObservabilityReadService, ObservabilityRetentionService, RetentionPolicy
+from src.services.observability import (
+    DiagnosticSink,
+    ObservabilityReadService,
+    ObservabilityRetentionService,
+    RetentionPolicy,
+)
 from src.services.registry import RegistryService, default_enabled_inference_bindings
 from src.services.retrieval import RetrievalService
 from src.services.teams import TeamService
@@ -301,6 +306,12 @@ def create_container(settings: Settings | None = None) -> Container:
         ns1_cli = DeterministicNs1Stub()
     elif settings.ns1_cli_mode == "subprocess":
         ns1_cli = SubprocessClaudeCli(executable=settings.ns1_cli_executable)
+    diagnostic_sidecar = None
+    if settings.persistence_backend == "turso":
+        from src.persistence.turso.sidecar import TursoDiagnosticSidecar
+
+        diagnostic_sidecar = TursoDiagnosticSidecar(settings.resolved_database_path)
+    diagnostics = DiagnosticSink(persistence, metrics, sidecar=diagnostic_sidecar)
     workflow_worker = WorkflowWorker(
         workflow_runtime,
         IntakePipeline(
@@ -314,6 +325,7 @@ def create_container(settings: Settings | None = None) -> Container:
             billing=DefaultBillingService(),
             lifecycle=lifecycle,
             index_retirement=index_retirement,
+            diagnostics=diagnostics,
         ),
     )
     workflow_supervisor = WorkflowSupervisor(workflow_runtime, workflow_worker)

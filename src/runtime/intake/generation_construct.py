@@ -901,9 +901,33 @@ class IntakeGenerationConstructMixin:
             return compiler, construction, dual
 
 
+    def _require_diagnostics(self) -> None:
+            if getattr(self, "_diagnostics", None) is None:
+                raise MkbError("OBS_DIAGNOSTIC_SINK_MISSING", "Generate stages require a DiagnosticSink", 503)
+
+    async def _emit_generation_diagnostic(self, command: ProcessCommand, *, log_code: str, message: str, payload: dict[str, Any] | None = None) -> None:
+            sink = getattr(self, "_diagnostics", None)
+            if sink is None:
+                return
+            try:
+                await sink.write(
+                    log_code=log_code,
+                    message=message,
+                    calling_module="runtime.intake.generation",
+                    team_uuid=command.team_uuid,
+                    trace_uuid=command.trace_uuid,
+                    task_uuid=command.task_uuid,
+                    execution_uuid=command.execution_uuid,
+                    process_uuid=command.process_uuid,
+                    payload=payload or {},
+                )
+            except Exception:
+                return
+
     async def _structurize(
             self, command: ProcessCommand, state: dict[str, Any]
         ) -> tuple[_StageMaterial, dict[str, Any], Callable[[UnitOfWork, Mapping[str, str]], Awaitable[None]]]:
+            self._require_diagnostics()
             clean = self._generation_clean_text(state, error_code="STRUCTURE_BINDING_CLEAN_DIGEST")
             clean_artifact_uuid = self._generation_state_text(state, "clean_artifact_uuid", "STRUCTURE_BINDING_CLEAN_ARTIFACT")
             structure_artifact_uuid = uuid7()
@@ -980,6 +1004,12 @@ class IntakeGenerationConstructMixin:
                             }
                         ),
                     )
+                    await self._emit_generation_diagnostic(
+                        command,
+                        log_code="GEN_CLI_ENVELOPE",
+                        message=exc.code,
+                        payload={"cli_structured_kind": kind},
+                    )
                     raise
                 layered_candidate = generated_candidate
             if layered_candidate is None:
@@ -1020,6 +1050,12 @@ class IntakeGenerationConstructMixin:
                                 "latency_ms": 0,
                             }
                         )
+                    )
+                    await self._emit_generation_diagnostic(
+                        command,
+                        log_code="GEN_STRUCTURIZE_REJECT",
+                        message=exc.code,
+                        payload={"granularity_set": gran_set, "schema_digest": histogram.get("schema")},
                     )
                     raise MkbError(exc.code, exc.message, exc.status_code) from exc
                 raise
@@ -1190,6 +1226,7 @@ class IntakeGenerationConstructMixin:
     async def _construct(
             self, command: ProcessCommand, state: dict[str, Any]
         ) -> tuple[_StageMaterial, dict[str, Any], Callable[[UnitOfWork, Mapping[str, str]], Awaitable[None]]]:
+            self._require_diagnostics()
             construct_mode = self._construct_mode(state)
             generation_invocations: list[dict[str, Any]] = []
             cli_receipt: dict[str, object] | None = None
