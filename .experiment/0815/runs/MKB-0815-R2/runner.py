@@ -5,7 +5,6 @@ from __future__ import annotations
 import argparse
 import json
 import os
-import sqlite3
 import time
 from pathlib import Path
 
@@ -146,6 +145,32 @@ def _append_jsonl(row: dict[str, object]) -> None:
         handle.write(json.dumps(row, ensure_ascii=False) + "\n")
 
 
+def _process_steps(database_path: Path, team_uuid: str, task_uuid: str) -> list[dict[str, object]]:
+    """Read process rows through the Turso driver. Stock sqlite3 cannot open this file after pyturso writes."""
+
+    import turso
+
+    columns = (
+        "step_key",
+        "process_key",
+        "status",
+        "dispatch_pool",
+        "error_code",
+        "error_message",
+        "payload_extra",
+    )
+    connection = turso.connect(str(database_path))
+    try:
+        rows = connection.execute(
+            "SELECT step_key, process_key, status, dispatch_pool, error_code, error_message, payload_extra "
+            "FROM mkb_processes WHERE team_uuid=? AND task_uuid=? ORDER BY created_at",
+            (team_uuid, task_uuid),
+        ).fetchall()
+    finally:
+        connection.close()
+    return [dict(zip(columns, row, strict=True)) for row in rows]
+
+
 def ingest_cell(cell_id: str, *, team_uuid: str | None = None, key_suffix: str = "") -> dict[str, object]:
     lane, sample_id = parse_cell(cell_id)
     sample = SAMPLES[sample_id]
@@ -211,18 +236,7 @@ def ingest_cell(cell_id: str, *, team_uuid: str | None = None, key_suffix: str =
         created.raise_for_status()
         terminal = _wait(client, team_uuid, task_uuid, headers, float(sample["timeout"]))
     wall_ms = int((time.monotonic() - started) * 1000)
-    steps: list[dict[str, object]] = []
-    db = settings.resolved_database_path
-    with sqlite3.connect(db) as connection:
-        connection.row_factory = sqlite3.Row
-        steps = [
-            dict(row)
-            for row in connection.execute(
-                "SELECT step_key, process_key, status, dispatch_pool, error_code, error_message, payload_extra "
-                "FROM mkb_processes WHERE team_uuid=? AND task_uuid=? ORDER BY created_at",
-                (team_uuid, task_uuid),
-            )
-        ]
+    steps = _process_steps(settings.resolved_database_path, team_uuid, task_uuid)
     generate_steps = [step for step in steps if step.get("step_key") in {"transcribe_markdown", "structurize", "construct"}]
     generate_pools = sorted(
         {str(step.get("dispatch_pool") or "") for step in generate_steps if step.get("dispatch_pool")}
