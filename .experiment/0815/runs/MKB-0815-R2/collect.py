@@ -22,6 +22,13 @@ def _now() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
+_JOURNAL_FORBIDDEN = frozenset({"structure_reject", "cli_structured_kind", "prompt", "content", "stdout"})
+
+
+def _journal_row(row: dict[str, object]) -> dict[str, object]:
+    return {key: value for key, value in row.items() if key not in _JOURNAL_FORBIDDEN}
+
+
 def _write_meta(team_uuid: str) -> None:
     RESULTS.mkdir(parents=True, exist_ok=True)
     path = RESULTS / "_meta.json"
@@ -127,7 +134,7 @@ def run_cell(cell_id: str, team_uuid: str, *, key_suffix: str = "") -> dict[str,
         }
         RESULTS.mkdir(parents=True, exist_ok=True)
         with (RESULTS / "runs.jsonl").open("a", encoding="utf-8") as handle:
-            handle.write(json.dumps(row, ensure_ascii=False) + "\n")
+            handle.write(json.dumps(_journal_row(row), ensure_ascii=False) + "\n")
         print("collect-exception", cell_id, type(exc).__name__, exc, flush=True)
         return row
 
@@ -179,8 +186,6 @@ def main() -> int:
     (RESULTS / "_meta.json").write_text(json.dumps(meta, ensure_ascii=False, indent=2) + "\n")
     _write_status(planned, done, None)
     print("INGEST COMPLETE", json.dumps(meta["wave"], ensure_ascii=False), flush=True)
-    inspect = subprocess.run([sys.executable, str(RUN_ROOT / "inspect_dump.py")], cwd=ROOT)
-    print("inspect", inspect.returncode, flush=True)
     if any(row.get("task_status") == "succeeded" for row in done.values()):
         retrieve = subprocess.run([sys.executable, str(RUN_ROOT / "retrieve.py")], cwd=ROOT)
         print("retrieve", retrieve.returncode, flush=True)

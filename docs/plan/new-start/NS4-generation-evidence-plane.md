@@ -717,3 +717,9 @@ NS4 generation-evidence plane
 - **阻塞与处理**：无。
 - **测试发现**：sink required / sidecar / e2e / observability contracts 绿。
 - **后续 handoff**：Phase 5 ReadPort。
+
+### 12.5 Phase 5 / P4 — 唯一读面
+
+- **实际执行摘要**：ReadPort 在 timeline 上附 invocation+report。collect 不再 spawn dump。jsonl `_journal_row` 剥 reject 键。
+- **Phase 偏差**：`inspect_dump.py` 文件仍在 gitignore 实验树，但 collect 已切断调用。分类：`substrate-fit`。
+- **测试发现**：T24/T25/T26 绿。

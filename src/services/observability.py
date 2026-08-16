@@ -322,7 +322,69 @@ class ObservabilityReadService:
                 occurred_at=tail["occurred_at"],
                 row_uuid=tail["event_uuid"],
             )
-        return [self._event_view(row) for row in page], next_cursor
+        events = [self._event_view(row) for row in page]
+        process_ids = sorted({row["process_uuid"] for row in page if row.get("process_uuid")})
+        evidence = await self._generation_evidence(team_uuid, process_ids)
+        for event in events:
+            extra = evidence.get(str(event.get("process_uuid") or ""), {})
+            if extra:
+                event["generation_invocations"] = extra.get("invocations", [])
+                event["generation_stage_reports"] = extra.get("reports", [])
+        return events, next_cursor
+
+    async def _generation_evidence(
+        self, team_uuid: str, process_ids: list[str]
+    ) -> dict[str, dict[str, list[dict[str, Any]]]]:
+        if not process_ids:
+            return {}
+        placeholders = ",".join("?" for _ in process_ids)
+        try:
+            async with self._persistence.transaction() as tx:
+                invocations = await tx.fetchall(
+                    "SELECT process_uuid,status,stage_key,error_code,adapter_kind,cli_structured_kind,occurred_at "
+                    "FROM mkb_generation_invocations WHERE team_uuid=? AND process_uuid IN ("
+                    + placeholders
+                    + ") ORDER BY occurred_at",
+                    (team_uuid, *process_ids),
+                )
+                reports = await tx.fetchall(
+                    "SELECT process_uuid,stage_key,disposition,error_code,cli_structured_kind,has_g0,block_count,"
+                    "granularity_set,layer_counts,latency_ms,schema_digest,occurred_at "
+                    "FROM mkb_generation_stage_reports WHERE team_uuid=? AND process_uuid IN ("
+                    + placeholders
+                    + ") ORDER BY occurred_at",
+                    (team_uuid, *process_ids),
+                )
+        except Exception:
+            return {}
+        bundled: dict[str, dict[str, list[dict[str, Any]]]] = {}
+        for row in invocations:
+            bundled.setdefault(row["process_uuid"], {"invocations": [], "reports": []})["invocations"].append(
+                {
+                    "status": row["status"],
+                    "stage_key": row["stage_key"],
+                    "error_code": row["error_code"],
+                    "adapter_kind": row["adapter_kind"],
+                    "cli_structured_kind": row["cli_structured_kind"],
+                    "occurred_at": row["occurred_at"],
+                }
+            )
+        for row in reports:
+            bundled.setdefault(row["process_uuid"], {"invocations": [], "reports": []})["reports"].append(
+                {
+                    "stage_key": row["stage_key"],
+                    "disposition": row["disposition"],
+                    "error_code": row["error_code"],
+                    "cli_structured_kind": row["cli_structured_kind"],
+                    "has_g0": None if row["has_g0"] is None else bool(row["has_g0"]),
+                    "block_count": row["block_count"],
+                    "granularity_set": row["granularity_set"],
+                    "latency_ms": row["latency_ms"],
+                    "schema_digest": row["schema_digest"],
+                    "occurred_at": row["occurred_at"],
+                }
+            )
+        return bundled
 
     @staticmethod
     def _event_view(row: dict[str, Any]) -> dict[str, Any]:
