@@ -189,12 +189,23 @@ class IntakeCoreMixin:
 
     @classmethod
     def _outcome_from_error(cls, command: ProcessCommand, exc: MkbError) -> ProcessOutcome:
+        extra = cls._safe_outcome_extra(exc)
         if cls._is_recoverable_error(exc):
-            return cls._retryable_failure(command, exc.code, exc.message)
-        return cls._failed(command, exc.code, exc.message)
+            return cls._retryable_failure(command, exc.code, exc.message, extra)
+        return cls._failed(command, exc.code, exc.message, extra)
 
     @staticmethod
-    def _retryable_failure(command: ProcessCommand, code: str, message: str) -> ProcessOutcome:
+    def _safe_outcome_extra(exc: MkbError) -> dict[str, object]:
+        # NS4: reject/kind are first-class report/invocation columns, not extra.
+        return {}
+
+    @staticmethod
+    def _retryable_failure(
+        command: ProcessCommand,
+        code: str,
+        message: str,
+        extra: dict[str, object] | None = None,
+    ) -> ProcessOutcome:
         provisional = ProcessOutcome(
             schema_version="mkb.process-outcome.v1",
             team_uuid=command.team_uuid,
@@ -206,11 +217,17 @@ class IntakeCoreMixin:
             outcome_digest="0" * 64,
             error_code=code[:128],
             error_message=message[:512],
+            payload_extra=dict(extra or {}),
         )
         return provisional.model_copy(update={"outcome_digest": canonical_outcome_digest(provisional)})
 
     @staticmethod
-    def _failed(command: ProcessCommand, code: str, message: str) -> ProcessOutcome:
+    def _failed(
+        command: ProcessCommand,
+        code: str,
+        message: str,
+        extra: dict[str, object] | None = None,
+    ) -> ProcessOutcome:
             provisional = ProcessOutcome(
                 schema_version="mkb.process-outcome.v1",
                 team_uuid=command.team_uuid,
@@ -222,6 +239,7 @@ class IntakeCoreMixin:
                 outcome_digest="0" * 64,
                 error_code=code[:128],
                 error_message=message[:512],
+                payload_extra=dict(extra or {}),
             )
             return provisional.model_copy(update={"outcome_digest": canonical_outcome_digest(provisional)})
 

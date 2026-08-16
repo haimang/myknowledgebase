@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from typing import Any
 
 from src.contracts.common.errors import ConflictError, MkbError
@@ -202,6 +203,7 @@ class WorkflowOutcomeMixin:
                     error_message=outcome.error_message,
                     failure_disposition="non-retryable",
                     accepted_outcome_digest=outcome.outcome_digest,
+                    payload_extra=outcome.payload_extra,
                 )
                 await self._route_after_terminal_process_tx(
                     tx, execution, process, WorkflowOutcomeSelector.FAILED, outcome.payload_extra, outcome.error_code
@@ -432,12 +434,16 @@ class WorkflowOutcomeMixin:
         error_message: str,
         failure_disposition: str,
         accepted_outcome_digest: str | None = None,
+        payload_extra: dict[str, Any] | None = None,
     ) -> None:
         now = utc_now()
+        extras = payload_extra if isinstance(payload_extra, dict) else {}
+        extra_json = json.dumps(extras, ensure_ascii=False, separators=(",", ":")) if extras else None
         updated = await tx.execute(
             "UPDATE mkb_processes SET status='failed',accepted_outcome_digest=COALESCE(?,accepted_outcome_digest),"
             "error_class='workflow-stage',error_code=?,error_message=?,failure_disposition=?,claim_token_hash=NULL,"
-            "lease_owner=NULL,lease_expires_at=NULL,heartbeat_at=NULL,completed_at=?,row_revision=row_revision+1,updated_at=? "
+            "lease_owner=NULL,lease_expires_at=NULL,heartbeat_at=NULL,completed_at=?,row_revision=row_revision+1,updated_at=?,"
+            "payload_extra=COALESCE(?,payload_extra) "
             "WHERE process_uuid=? AND status NOT IN ('succeeded','failed','cancelled')",
             (
                 accepted_outcome_digest,
@@ -446,10 +452,17 @@ class WorkflowOutcomeMixin:
                 failure_disposition,
                 now,
                 now,
+                extra_json,
                 process["process_uuid"],
             ),
         )
         if updated.rowcount:
+            from src.runtime.intake.generation_evidence import write_pending_generation_evidence_tx
+
+            await write_pending_generation_evidence_tx(tx, process)
+            event_payload = {"error_code": error_code, "failure_disposition": failure_disposition}
+            if extras:
+                event_payload.update(extras)
             await self._record_event_tx(
                 tx,
                 execution=process,
@@ -460,7 +473,7 @@ class WorkflowOutcomeMixin:
                 status_before=process["status"],
                 status_after=ProcessStatus.FAILED.value,
                 severity="error",
-                payload={"error_code": error_code, "failure_disposition": failure_disposition},
+                payload=event_payload,
             )
 
 

@@ -329,15 +329,13 @@ class IntakeGenerationLiveMixin:
     async def _persist_failed_generation_invocation(
             self, command: ProcessCommand, invocation: Mapping[str, Any]
         ) -> None:
-            """Best-effort failure audit outside the business success callback."""
+            """Stash a failed invocation for the Process Outcome transaction."""
 
-            try:
-                async with self._persistence.transaction() as tx:
-                    await self._record_generation_and_inference_invocations(tx, command, invocation)
-            except Exception:
-                # Audit must not replace the original inference failure as the
-                # Process error surface; the domain failure remains authoritative.
-                return
+            from src.runtime.intake.generation_evidence import record_pending_generation_evidence
+
+            payload = dict(invocation)
+            payload.setdefault("status", "failed")
+            record_pending_generation_evidence(invocation=payload)
 
 
     async def _record_generation_and_inference_invocations(
@@ -349,13 +347,17 @@ class IntakeGenerationLiveMixin:
             """Persist linked S06/S07 generation + S11 inference ledgers (no bodies)."""
 
             now = utc_now()
+            status = invocation.get("status") or "succeeded"
+            stage_key = invocation.get("stage_key") or "structurize"
+            adapter_kind = invocation.get("adapter_kind") or "local_inference"
             await tx.execute(
                 "INSERT OR IGNORE INTO mkb_generation_invocations "
                 "(invocation_uuid,team_uuid,execution_uuid,process_uuid,process_attempt,invocation_ordinal,"
                 "invocation_kind,model_key,model_version,prompt_key,prompt_version,prompt_digest,"
                 "schema_key,schema_version,schema_digest,input_digest,output_digest,error_digest,"
-                "input_tokens,output_tokens,total_tokens,occurred_at,payload_extra) "
-                "VALUES (?,?,?,?,?,?,'generation',?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                "input_tokens,output_tokens,total_tokens,occurred_at,payload_extra,"
+                "status,stage_key,error_code,adapter_kind,cli_structured_kind) "
+                "VALUES (?,?,?,?,?,?,'generation',?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                 (
                     invocation["invocation_uuid"],
                     command.team_uuid,
@@ -381,15 +383,16 @@ class IntakeGenerationLiveMixin:
                     _json(
                         {
                             "capability_key": invocation.get("capability_key"),
-                            "stage_key": invocation.get("stage_key"),
-                            "status": invocation.get("status"),
-                            "error_code": invocation.get("error_code"),
                             "binding_digest": invocation.get("binding_digest"),
                             "request_digest": invocation.get("request_digest"),
-                            "adapter_kind": invocation.get("adapter_kind"),
                             "latency_ms": invocation.get("latency_ms"),
                         }
                     ),
+                    status,
+                    stage_key,
+                    invocation.get("error_code"),
+                    adapter_kind,
+                    invocation.get("cli_structured_kind"),
                 ),
             )
             await tx.execute(
@@ -442,3 +445,55 @@ class IntakeGenerationLiveMixin:
                 process_uuid=command.process_uuid,
                 payload={"invocation_uuid": invocation["invocation_uuid"]},
             )
+
+    async def _record_stage_report(
+            self,
+            tx: UnitOfWork,
+            command: ProcessCommand,
+            report: Mapping[str, Any],
+        ) -> None:
+            from src.contracts.common.ids import uuid7
+            from src.contracts.common.time import utc_now
+            from src.contracts.observability.stage_report import validate_stage_report
+
+            projected = validate_stage_report(report)
+            has_g0 = projected.get("has_g0")
+            counts = projected.get("layer_counts") or {}
+            await tx.execute(
+                "INSERT INTO mkb_generation_stage_reports "
+                "(report_uuid,team_uuid,trace_uuid,task_uuid,execution_uuid,process_uuid,stage_key,"
+                "disposition,error_code,cli_structured_kind,has_g0,block_count,granularity_set,"
+                "layer_counts,latency_ms,schema_digest,occurred_at,payload_extra) "
+                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                (
+                    uuid7(),
+                    command.team_uuid,
+                    command.trace_uuid,
+                    command.task_uuid,
+                    command.execution_uuid,
+                    command.process_uuid,
+                    projected["stage_key"],
+                    projected["disposition"],
+                    projected.get("error_code"),
+                    projected.get("cli_structured_kind"),
+                    None if has_g0 is None else int(has_g0),
+                    projected.get("block_count"),
+                    projected.get("granularity_set"),
+                    _json(counts) if counts else None,
+                    int(projected["latency_ms"]),
+                    projected["schema_digest"],
+                    utc_now(),
+                    "{}",
+                ),
+            )
+
+    async def _flush_pending_generation_evidence(self, tx: UnitOfWork, command: ProcessCommand) -> None:
+            from src.runtime.intake.generation_evidence import take_pending_generation_evidence
+
+            for item in take_pending_generation_evidence():
+                invocation = item.get("invocation")
+                if isinstance(invocation, Mapping):
+                    await self._record_generation_and_inference_invocations(tx, command, invocation)
+                report = item.get("report")
+                if isinstance(report, Mapping):
+                    await self._record_stage_report(tx, command, report)

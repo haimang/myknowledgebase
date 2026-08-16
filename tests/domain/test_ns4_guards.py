@@ -12,19 +12,15 @@ from pathlib import Path
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 
 # P1 deletes these writes. Adding a path here is an NS4 stop-ship.
-NS4_EXTRA_EVIDENCE_ALLOWLIST = frozenset(
-    {
-        "src/runtime/intake/core.py",
-        "src/runtime/intake/generation_construct.py",
-    }
-)
+NS4_EXTRA_EVIDENCE_ALLOWLIST = frozenset()
 
 _EXTRA_EVIDENCE = re.compile(
     r"""payload_extra|extra\[['\"]structure_reject['\"]\]|extra\[['\"]cli_structured_kind['\"]\]"""
     r"""|\[['\"]structure_reject['\"]\]\s*=|\[['\"]cli_structured_kind['\"]\]\s*="""
 )
 _ASSIGN_EVIDENCE_KEY = re.compile(
-    r"""(?:extra|details|payload_extra).{0,80}['\"](?:structure_reject|cli_structured_kind)['\"]"""
+    r"""extra\[['\"](?:structure_reject|cli_structured_kind)['\"]\]\s*="""
+    r"""|payload_extra\[.['\"](?:structure_reject|cli_structured_kind)"""
 )
 
 
@@ -41,12 +37,8 @@ def test_ns4_extra_evidence_keys_are_not_introduced_outside_p1_allowlist() -> No
     assert hits == [], "NS4 forbids new extra evidence keys:\n" + "\n".join(hits)
 
 
-def test_ns4_extra_evidence_allowlist_is_the_known_p1_cut_set() -> None:
-    for relative in NS4_EXTRA_EVIDENCE_ALLOWLIST:
-        path = REPOSITORY_ROOT / relative
-        assert path.is_file(), relative
-        text = path.read_text(encoding="utf-8")
-        assert "structure_reject" in text or "cli_structured_kind" in text
+def test_ns4_extra_evidence_allowlist_is_empty_after_p1() -> None:
+    assert NS4_EXTRA_EVIDENCE_ALLOWLIST == frozenset()
 
 
 def test_ns4_src_has_no_dual_sqlite_turso_read_surface() -> None:

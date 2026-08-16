@@ -692,3 +692,20 @@ NS4 generation-evidence plane
 | P3-02 | `✅ done` | `engine.py:80-99` 沿用 | 测试锁 required 跟探针 |
 | P3-03 | `✅ done` | `src/persistence/factory.py` | `sqlite_backend_permitted` |
 | P3-04 | `✅ done` | `scripts/ns4_migrate_q_a3.py` | 17/17/0 reports |
+
+### 12.3 Phase 3 / P1 — 一等 schema 与同 TX 写入
+
+- **实际执行摘要**：013 加列+`mkb_generation_stage_reports`。失败证据进 ContextVar，在 `_fail_process_tx` 同 TX 落行。删除 extra allowlist、`getattr` persist、吞异常。histogram 只进 report。
+- **Phase 偏差**：用 in-request ContextVar 而不是改 ProcessOutcome 字段（避免 digest 形状变化）。分类：`substrate-fit`。
+- **阻塞与处理**：`_structurize` 内二次 `import uuid7` 导致 UnboundLocalError → 已删内联 import。
+- **测试发现**：migration/guards/e2e single-intake 绿。
+- **后续 handoff**：Phase 4 DiagnosticSink。
+
+#### 逐工作项
+
+| 工作项 | 状态 | 实际落点 | 备注 |
+|--------|------|----------|------|
+| P1-01 | `✅ done` | `013_generation_evidence_plane.sql` | CHECK + 新表 |
+| P1-02 | `✅ done` | `generation_live.py` / `generation_evidence.py` / `runtime_outcome.py` | 同 TX |
+| P1-03 | `✅ done` | `core.py` extra={}；删 getattr/吞异常 | |
+| P1-04 | `✅ done` | admit except → stage report | |

@@ -39,6 +39,42 @@ from src.services.lsrag_construct import LsragConstructService, bind_construct
 from src.services.lsrag_structurize import LsragStructurizeService, bind_structurize
 from src.services.prompt_profiles import COMPRESSION_CHANNELS, DEFAULT_COMPRESSION_CHANNEL
 
+STRUCTURE_REJECT_SCHEMA = "mkb.structure-reject.v1"
+
+
+def layered_reject_histogram(
+    candidate: object, profile: tuple[int, ...] | list[int] | None
+) -> dict[str, Any]:
+    """Redacted layer histogram for a rejected B candidate. Never copies text."""
+
+    counts: dict[str, int] = {}
+    invalid = 0
+    blocks: list[object] = []
+    if isinstance(candidate, Mapping):
+        raw = candidate.get("layered_content")
+        if isinstance(raw, list):
+            blocks = list(raw)
+    for item in blocks:
+        if not isinstance(item, Mapping):
+            invalid += 1
+            continue
+        gran = item.get("granularity")
+        if isinstance(gran, bool) or not isinstance(gran, int) or gran < 0:
+            invalid += 1
+            continue
+        key = str(gran)
+        counts[key] = counts.get(key, 0) + 1
+    gran_set = sorted(int(key) for key in counts)
+    return {
+        "schema": STRUCTURE_REJECT_SCHEMA,
+        "counts": counts,
+        "set": gran_set,
+        "has_g0": 0 in gran_set,
+        "block_count": len(blocks),
+        "invalid_granularity_count": invalid,
+        "profile": [int(item) for item in profile] if profile else [],
+    }
+
 # Lightning returned no usable C result.  One explicit non-interactive salvage
 # is allowed.  Config/fence gaps stay fail-closed and never switch channels.
 _API_INFERENCE_SALVAGE_CODES = frozenset(
@@ -222,9 +258,10 @@ class IntakeGenerationConstructMixin:
                         "compression_channel": "local-inference",
                     }
                 )
-                persist = getattr(self, "_persist_failed_generation_invocation", None)
-                if persist is not None:
-                    await persist(command, receipt)
+                receipt["status"] = "failed"
+                from src.runtime.intake.generation_evidence import record_pending_generation_evidence
+
+                record_pending_generation_evidence(invocation=dict(receipt))
                 raise
             receipt["transport"] = "api_inference"
             receipt["compression_channel"] = "local-inference"
@@ -902,12 +939,48 @@ class IntakeGenerationConstructMixin:
                 and channel == "non-interactive"
                 and getattr(self, "_claude_cli", None) is not None
             ):
-                generated_candidate, cli_receipt = await self._cli_layered_candidate(
-                    clean_text=clean,
-                    input_text=structurize_input,
-                    profile=profile,
-                    state=state,
-                )
+                try:
+                    generated_candidate, cli_receipt = await self._cli_layered_candidate(
+                        clean_text=clean,
+                        input_text=structurize_input,
+                        profile=profile,
+                        state=state,
+                    )
+                except MkbError as exc:
+                    from src.contracts.observability.stage_report import validate_stage_report
+                    from src.runtime.intake.generation_evidence import record_pending_generation_evidence
+
+                    kind = None
+                    if isinstance(exc.details, dict):
+                        raw_kind = exc.details.get("cli_structured_kind")
+                        if isinstance(raw_kind, str):
+                            kind = raw_kind
+                    record_pending_generation_evidence(
+                        invocation={
+                            "invocation_uuid": uuid7(),
+                            "invocation_ordinal": 0,
+                            "process_attempt": command.fencing_generation,
+                            "capability_key": "structured_generate",
+                            "stage_key": "structurize",
+                            "input_digest": stable_digest(
+                                {"clean_digest": state.get("clean_digest"), "stage": "structurize"}
+                            ),
+                            "status": "failed",
+                            "error_code": exc.code,
+                            "adapter_kind": "claude_cli",
+                            "cli_structured_kind": kind,
+                        },
+                        report=validate_stage_report(
+                            {
+                                "stage_key": "structurize",
+                                "disposition": "transport_failed",
+                                "error_code": exc.code,
+                                "cli_structured_kind": kind,
+                                "latency_ms": 0,
+                            }
+                        ),
+                    )
+                    raise
                 layered_candidate = generated_candidate
             if layered_candidate is None:
                 layered_candidate = self._layered_state_candidate(
@@ -915,17 +988,41 @@ class IntakeGenerationConstructMixin:
                     error_code="STRUCTURE_CANDIDATE_MISSING",
                 )
             profile = self._layered_profile(state, error_code="STRUCTURE_PROFILE_INVALID")
-            admitted = LsragStructurizeService().admit(
-                bind_structurize(
-                    clean_text=clean,
-                    clean_artifact_uuid=clean_artifact_uuid,
-                    clean_digest=state["clean_digest"],
-                    layered_candidate=layered_candidate,
-                    granularity_set=profile,
-                    structure_artifact_uuid=structure_artifact_uuid,
-                    projection_artifact_uuid=projection_artifact_uuid,
+            try:
+                admitted = LsragStructurizeService().admit(
+                    bind_structurize(
+                        clean_text=clean,
+                        clean_artifact_uuid=clean_artifact_uuid,
+                        clean_digest=state["clean_digest"],
+                        layered_candidate=layered_candidate,
+                        granularity_set=profile,
+                        structure_artifact_uuid=structure_artifact_uuid,
+                        projection_artifact_uuid=projection_artifact_uuid,
+                    )
                 )
-            )
+            except MkbError as exc:
+                if exc.code.startswith("STRUCTURE_"):
+                    from src.contracts.observability.stage_report import validate_stage_report
+                    from src.runtime.intake.generation_evidence import record_pending_generation_evidence
+
+                    histogram = layered_reject_histogram(layered_candidate, profile)
+                    gran_set = ",".join(str(item) for item in histogram.get("set") or [])
+                    record_pending_generation_evidence(
+                        report=validate_stage_report(
+                            {
+                                "stage_key": "structurize",
+                                "disposition": "rejected",
+                                "error_code": exc.code,
+                                "has_g0": bool(histogram.get("has_g0")),
+                                "block_count": histogram.get("block_count"),
+                                "granularity_set": gran_set,
+                                "layer_counts": histogram.get("counts") or {},
+                                "latency_ms": 0,
+                            }
+                        )
+                    )
+                    raise MkbError(exc.code, exc.message, exc.status_code) from exc
+                raise
             accepted_candidate = admitted.accepted_candidate
             structure = admitted.structure
             projection = admitted.projection
