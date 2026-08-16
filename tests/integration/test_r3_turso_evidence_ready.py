@@ -28,6 +28,10 @@ def test_live_turso_is_r3_ready() -> None:
             "SELECT prompt_version FROM mkb_prompt_hash_pointers "
             "WHERE prompt_id='promptB.documentation.g1' AND status='active'"
         ).fetchone()
+        n_a5 = connection.execute(
+            "SELECT COUNT(*) FROM mkb_vector_records WHERE task_uuid=?",
+            ("01a00b3a-3e20-71a3-81b4-0724743f8196",),
+        ).fetchone()[0]
         q_a3_vectors = connection.execute(
             "SELECT COUNT(*) FROM mkb_vector_records WHERE task_uuid=?",
             (Q_A3_TASK,),
@@ -46,6 +50,7 @@ def test_live_turso_is_r3_ready() -> None:
     assert int(facets) >= 17
     assert int(q_a3_vectors) == 17
     assert task is not None and task[0] == "succeeded"
-    assert g1 is not None and g1[0] == "v3"
+    assert g1 is not None and g1[0] == "v4"
+    assert int(n_a5) == 21
     assert int(mapped) == 0
     assert int(markdown) >= 1
