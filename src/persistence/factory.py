@@ -2,10 +2,17 @@
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from typing import Literal, Protocol
 
 from src.persistence.sqlite_port import SqlitePersistence
+
+
+def sqlite_backend_permitted() -> bool:
+    """Stock sqlite is a pytest fixture only (NS4 T-O-364 / T-O-371)."""
+
+    return bool(os.environ.get("PYTEST_CURRENT_TEST"))
 
 
 class PersistenceEngine(Protocol):
@@ -30,6 +37,8 @@ def build_persistence(
     native_vector_required: bool = True,
 ) -> PersistenceEngine:
     if backend == "sqlite":
+        if not sqlite_backend_permitted():
+            raise ValueError("sqlite persistence is test-only; production and 0815 must use turso")
         return SqlitePersistence(
             database_path,
             migration_directory,

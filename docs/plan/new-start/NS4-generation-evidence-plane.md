@@ -675,3 +675,20 @@ NS4 generation-evidence plane
 |------|------|-------------|
 | T0 | 拉 D04 §3.5.4 / architecture / contracts | 确认 invocation 无 status 列 |
 | T1 | 写 reopen + contract + 守卫测试 | P0 短途 17 绿 |
+
+### 12.2 Phase 2 / P3 — Turso 硬切与一次迁移
+
+- **实际执行摘要**：P3-01 删除 0815 sqlite/CW=False；入口改 `mkb.turso.db`。P3-02 沿用 `apply_capability_gates`（required=True 跟探针）。P3-03 factory 非 pytest 拒 sqlite。P3-04 一次复制 Q-A3 到 Turso 文件（17 向量，0 report）。
+- **Phase 偏差**：preflight 目录探测闸改为看 `mkb.turso.db`；旧 `mkb.db` 仅作 archive。`r3_prepare` 改为 `build_persistence(turso)`。分类：`substrate-fit`。
+- **阻塞与处理**：无。pyturso 可打开 sqlite 复制件；CW 探针在复制件上为 True。
+- **测试发现**：`19 passed`（factory / ready-cw / 0815 guard / migrate / turso driver / P0 guards）。
+- **后续 handoff**：Phase 3 / P1 DDL 只许打在 Turso 路径上。
+
+#### 逐工作项
+
+| 工作项 | 状态 | 实际落点 | 备注 |
+|--------|------|----------|------|
+| P3-01 | `✅ done` | `runner.py` / `collect.py` / `retrieve.py` / `r3_prepare.py` | turso+CW=True |
+| P3-02 | `✅ done` | `engine.py:80-99` 沿用 | 测试锁 required 跟探针 |
+| P3-03 | `✅ done` | `src/persistence/factory.py` | `sqlite_backend_permitted` |
+| P3-04 | `✅ done` | `scripts/ns4_migrate_q_a3.py` | 17/17/0 reports |
