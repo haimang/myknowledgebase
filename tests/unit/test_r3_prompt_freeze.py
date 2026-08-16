@@ -28,7 +28,7 @@ def test_c_default_stays_v2_and_mentions_original() -> None:
     assert "MKB" not in text
     catalog = {row[0]: row for row in DEFAULT_CATALOG_PROMPTS}
     assert catalog["promptC.documentation.default"][1] == "v2"
-    assert catalog["promptB.documentation.g1"][1] == "v3"
+    assert catalog["promptB.documentation.g1"][1] == "v4"
 
 
 def test_markdown_hop_writes_evidence_stage_markdown() -> None:

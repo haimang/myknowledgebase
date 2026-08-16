@@ -27,8 +27,8 @@ async def test_bootstrap_registers_four_roles_and_json_closed_sets(tmp_path: Pat
         assert json_by_id["promptB.documentation.default"].granularity_set == (0, 1, 2)
         assert json_by_id["promptB.documentation.g0"].granularity_set == (0,)
         assert json_by_id["promptB.documentation.g1"].granularity_set == (0, 1)
-        assert json_by_id["promptB.documentation.g1"].prompt_version == "v3"
-        assert json_by_id["promptB.documentation.g1"].relative_path.endswith("g1.v3.md")
+        assert json_by_id["promptB.documentation.g1"].prompt_version == "v4"
+        assert json_by_id["promptB.documentation.g1"].relative_path.endswith("g1.v4.md")
         assert json_by_id["promptB.documentation.g2"].granularity_set == (0, 1, 2)
         assert json_by_id["promptB.documentation.g2"].prompt_version == "v2"
         assert json_by_id["promptB.json.g0"].granularity_set == (0,)
@@ -204,8 +204,8 @@ async def test_bootstrap_retires_previous_active_g1_when_default_moves_to_v3(tmp
         assert (await registry.resolve_prompt("promptB.documentation.g1")).prompt_version == "v2"
         await registry.bootstrap()
         latest = await registry.resolve_prompt("promptB.documentation.g1")
-        assert latest.prompt_version == "v3"
-        assert latest.relative_path.endswith("g1.v3.md")
+        assert latest.prompt_version == "v4"
+        assert latest.relative_path.endswith("g1.v4.md")
         retired = await registry.list_prompt_catalog(prompt_id="promptB.documentation.g1", status="retired")
         assert any(entry.prompt_version == "v2" for entry in retired)
     finally:

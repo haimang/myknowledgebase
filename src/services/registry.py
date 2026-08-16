@@ -84,7 +84,7 @@ DEFAULT_CATALOG_PROMPTS = (
     ("promptB.documentation.code-review", "v1", "markdown/promptB.documentation.code-review.v1.md", "markdown", None),
     ("promptB.documentation.default", "v2", "json/promptB.documentation.default.v2.md", "json", (0, 1, 2)),
     ("promptB.documentation.g0", "v1", "json/promptB.documentation.g0.v1.md", "json", (0,)),
-    ("promptB.documentation.g1", "v3", "json/promptB.documentation.g1.v3.md", "json", (0, 1)),
+    ("promptB.documentation.g1", "v4", "json/promptB.documentation.g1.v4.md", "json", (0, 1)),
     ("promptB.documentation.g2", "v2", "json/promptB.documentation.g2.v2.md", "json", (0, 1, 2)),
     ("promptC.documentation.default", "v2", "summarizer/promptC.documentation.default.v2.md", "summarizer", None),
 )

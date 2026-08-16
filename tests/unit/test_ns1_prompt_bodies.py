@@ -20,6 +20,7 @@ def test_four_role_prompt_bodies_are_nonempty_and_b_json_has_no_legacy_contract_
         "json_documentation_v2": Path("data/prompts/json/promptB.documentation.default.v2.md"),
         "json_documentation_g1_v2": Path("data/prompts/json/promptB.documentation.g1.v2.md"),
         "json_documentation_g1_v3": Path("data/prompts/json/promptB.documentation.g1.v3.md"),
+        "json_documentation_g1_v4": Path("data/prompts/json/promptB.documentation.g1.v4.md"),
         "json_documentation_g2_v2": Path("data/prompts/json/promptB.documentation.g2.v2.md"),
         "json_g0": Path("data/prompts/json/promptB.json.g0.v1.md"),
         "json_g1": Path("data/prompts/json/promptB.json.g1.v1.md"),
@@ -49,6 +50,7 @@ def test_four_role_prompt_bodies_are_nonempty_and_b_json_has_no_legacy_contract_
         "json_documentation_v2",
         "json_documentation_g1_v2",
         "json_documentation_g1_v3",
+        "json_documentation_g1_v4",
         "json_documentation_g2_v2",
         "json_g0",
         "json_g1",
@@ -62,6 +64,7 @@ def test_four_role_prompt_bodies_are_nonempty_and_b_json_has_no_legacy_contract_
         "json_documentation_v2",
         "json_documentation_g1_v2",
         "json_documentation_g1_v3",
+        "json_documentation_g1_v4",
         "json_documentation_g2_v2",
         "summarizer_documentation_v2",
     ):
@@ -71,6 +74,11 @@ def test_four_role_prompt_bodies_are_nonempty_and_b_json_has_no_legacy_contract_
     g1_v3 = paths["json_documentation_g1_v3"].read_text(encoding="utf-8")
     assert "出现 granularity=2 则整包失败" in g1_v3
     assert '"granularity":2' not in g1_v3
+    g1_v4 = paths["json_documentation_g1_v4"].read_text(encoding="utf-8")
+    assert "只交一块 granularity=0" in g1_v4
+    assert "只交 g=1，没有 g=0" in g1_v4
+    assert "必须至少一块 g=1" in g1_v4
+    assert '"granularity":2' not in g1_v4
     for key, path in paths.items():
         if "documentation" in key or key.startswith("markdown_"):
             body = path.read_text(encoding="utf-8")
