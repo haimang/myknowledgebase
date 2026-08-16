@@ -4,7 +4,8 @@
 > **日期**：`2026-08-16`
 > **作者**：`Grok`
 > **文档性质**：`eval / run-score`（不是 closure，不改写 R1）
-> **文档状态**：`scored / conclusions-unsealed`
+> **文档状态**：`scored / superseded-as-tldr`
+> **完整 RCA**：`docs/eval/new-start/after-MKB-0815-R3-analysis.md`（FF10 家族密度；R4 台账在 §9–§22）
 > **方法**：`.experiment/0815/runs/MKB-0815-R3/RUN.md`
 > **库证**：R2 `runtime/mkb.turso.db` 一等行；重建期刊 `MKB-0815-R3/results/runs.jsonl`
 
