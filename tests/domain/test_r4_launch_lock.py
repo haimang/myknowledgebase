@@ -21,9 +21,15 @@ def test_run_md_locks_r4_command() -> None:
     assert "mkb.turso.db" in text
 
 
-def test_r2_jsonl_has_no_r4_suffix_yet() -> None:
+def test_r2_jsonl_r4_rows_stay_on_frozen_cells() -> None:
     path = R2 / "results/runs.jsonl"
     if not path.is_file():
         return
+    import json
+
+    allowed = {"N-A3", "N-A6", "N-A2", "Q-A5"}
     for line in path.read_text(encoding="utf-8").splitlines():
-        assert "-r4" not in line
+        if "-r4" not in line:
+            continue
+        row = json.loads(line)
+        assert row.get("cell_id") in allowed
