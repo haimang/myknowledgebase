@@ -35,10 +35,8 @@ def test_r2_collect_and_runner_stay_on_turso() -> None:
     assert 'persistence_backend="sqlite"' not in runner
 
 
-def test_r2_jsonl_has_no_r3_suffix_yet() -> None:
-    path = R2 / "results/runs.jsonl"
-    if not path.is_file():
-        return
-    for line in path.read_text(encoding="utf-8").splitlines():
-        assert "-r3" not in line
-        assert "suffix=-r3" not in line
+def test_r2_runner_reads_process_steps_via_turso() -> None:
+    text = (R2 / "runner.py").read_text(encoding="utf-8")
+    assert "def _process_steps" in text
+    assert "turso.connect" in text
+    assert "sqlite3.connect" not in text

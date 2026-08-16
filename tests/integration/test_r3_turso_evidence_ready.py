@@ -28,9 +28,10 @@ def test_live_turso_is_r3_ready() -> None:
             "SELECT prompt_version FROM mkb_prompt_hash_pointers "
             "WHERE prompt_id='promptB.documentation.g1' AND status='active'"
         ).fetchone()
-        r3_keys = connection.execute(
-            "SELECT normalized_external_key FROM mkb_intake_items WHERE normalized_external_key LIKE '%-r3%'"
-        ).fetchall()
+        q_a3_vectors = connection.execute(
+            "SELECT COUNT(*) FROM mkb_vector_records WHERE task_uuid=?",
+            (Q_A3_TASK,),
+        ).fetchone()[0]
         mapped = connection.execute(
             "SELECT COUNT(*) FROM mkb_generation_invocations WHERE stage_key='transcribe_markdown'"
         ).fetchone()[0]
@@ -41,10 +42,10 @@ def test_live_turso_is_r3_ready() -> None:
         connection.close()
     assert "013_generation_evidence_plane" in migs
     assert "mkb_generation_stage_reports" in tables
-    assert int(vectors) == 17
-    assert int(facets) == 17
+    assert int(vectors) >= 17
+    assert int(facets) >= 17
+    assert int(q_a3_vectors) == 17
     assert task is not None and task[0] == "succeeded"
     assert g1 is not None and g1[0] == "v3"
-    assert r3_keys == []
     assert int(mapped) == 0
     assert int(markdown) >= 1
