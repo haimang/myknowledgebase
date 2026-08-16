@@ -60,3 +60,36 @@ def test_pending_admit_mismatch_stashes_histogram_fields() -> None:
     items = take_pending_generation_evidence()
     assert items[0]["report"]["has_g0"] is True
     assert items[0]["report"]["layer_counts"]["2"] == 1
+
+
+def test_pending_admit_reject_can_carry_failed_invocation() -> None:
+    take_pending_generation_evidence()
+    record_pending_generation_evidence(
+        invocation={
+            "invocation_uuid": "00000000-0000-4000-8000-0000000000ad",
+            "status": "failed",
+            "stage_key": "structurize",
+            "error_code": "STRUCTURE_ANCHOR_MISSING",
+            "adapter_kind": "claude_cli",
+            "input_digest": "c" * 64,
+            "process_attempt": 1,
+            "invocation_ordinal": 0,
+        },
+        report=validate_stage_report(
+            {
+                "stage_key": "structurize",
+                "disposition": "rejected",
+                "error_code": "STRUCTURE_ANCHOR_MISSING",
+                "has_g0": True,
+                "block_count": 9,
+                "granularity_set": "0,1",
+                "layer_counts": {"0": 1, "1": 8},
+                "latency_ms": 12,
+            }
+        ),
+    )
+    items = take_pending_generation_evidence()
+    assert items[0]["invocation"]["status"] == "failed"
+    assert items[0]["invocation"]["error_code"] == "STRUCTURE_ANCHOR_MISSING"
+    assert items[0]["report"]["disposition"] == "rejected"
+    assert items[0]["report"]["latency_ms"] == 12

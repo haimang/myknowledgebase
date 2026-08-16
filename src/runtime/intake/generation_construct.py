@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import time
 from collections.abc import Awaitable, Callable, Mapping
 from pathlib import Path
 from typing import Any
@@ -314,6 +315,8 @@ class IntakeGenerationConstructMixin:
         input_digest: str,
     ) -> dict[str, Any]:
         usage = receipt.get("usage") if isinstance(receipt.get("usage"), Mapping) else {}
+        transport = receipt.get("transport")
+        adapter_kind = "local_vllm" if transport == "api_inference" else "claude_cli"
         return {
             "invocation_uuid": uuid7(),
             "inference_invocation_uuid": uuid7(),
@@ -324,7 +327,7 @@ class IntakeGenerationConstructMixin:
             "input_digest": input_digest,
             "output_digest": receipt.get("output_digest"),
             "status": "succeeded",
-            "adapter_kind": "claude_cli",
+            "adapter_kind": adapter_kind,
             "prompt_key": receipt.get("prompt_relative_path"),
             "prompt_version": receipt.get("prompt_version"),
             "prompt_digest": receipt.get("prompt_sha256"),
@@ -928,6 +931,7 @@ class IntakeGenerationConstructMixin:
             self, command: ProcessCommand, state: dict[str, Any]
         ) -> tuple[_StageMaterial, dict[str, Any], Callable[[UnitOfWork, Mapping[str, str]], Awaitable[None]]]:
             self._require_diagnostics()
+            started = time.monotonic()
             clean = self._generation_clean_text(state, error_code="STRUCTURE_BINDING_CLEAN_DIGEST")
             clean_artifact_uuid = self._generation_state_text(state, "clean_artifact_uuid", "STRUCTURE_BINDING_CLEAN_ARTIFACT")
             structure_artifact_uuid = uuid7()
@@ -1000,7 +1004,7 @@ class IntakeGenerationConstructMixin:
                                 "disposition": "transport_failed",
                                 "error_code": exc.code,
                                 "cli_structured_kind": kind,
-                                "latency_ms": 0,
+                                "latency_ms": max(0, int((time.monotonic() - started) * 1000)),
                             }
                         ),
                     )
@@ -1037,7 +1041,39 @@ class IntakeGenerationConstructMixin:
 
                     histogram = layered_reject_histogram(layered_candidate, profile)
                     gran_set = ",".join(str(item) for item in histogram.get("set") or [])
+                    failed_invocation: dict[str, Any]
+                    if generation_invocation is not None:
+                        generation_invocation["status"] = "failed"
+                        generation_invocation["error_code"] = exc.code
+                        failed_invocation = generation_invocation
+                    elif cli_receipt is not None:
+                        failed_invocation = self._cli_invocation_from_receipt(
+                            command,
+                            cli_receipt,
+                            stage_key="structurize",
+                            capability_key="structured_generate",
+                            input_digest=stable_digest(
+                                {"clean_digest": state.get("clean_digest"), "stage": "structurize"}
+                            ),
+                        )
+                        failed_invocation["status"] = "failed"
+                        failed_invocation["error_code"] = exc.code
+                    else:
+                        failed_invocation = {
+                            "invocation_uuid": uuid7(),
+                            "invocation_ordinal": 0,
+                            "process_attempt": command.fencing_generation,
+                            "capability_key": "structured_generate",
+                            "stage_key": "structurize",
+                            "input_digest": stable_digest(
+                                {"clean_digest": state.get("clean_digest"), "stage": "structurize"}
+                            ),
+                            "status": "failed",
+                            "error_code": exc.code,
+                            "adapter_kind": "local_vllm" if channel == "local-inference" else "claude_cli",
+                        }
                     record_pending_generation_evidence(
+                        invocation=failed_invocation,
                         report=validate_stage_report(
                             {
                                 "stage_key": "structurize",
@@ -1047,9 +1083,9 @@ class IntakeGenerationConstructMixin:
                                 "block_count": histogram.get("block_count"),
                                 "granularity_set": gran_set,
                                 "layer_counts": histogram.get("counts") or {},
-                                "latency_ms": 0,
+                                "latency_ms": max(0, int((time.monotonic() - started) * 1000)),
                             }
-                        )
+                        ),
                     )
                     await self._emit_generation_diagnostic(
                         command,

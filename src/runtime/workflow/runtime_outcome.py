@@ -89,7 +89,8 @@ class WorkflowOutcomeMixin:
                     )
                 updated = await tx.execute(
                     "UPDATE mkb_processes SET status='succeeded',accepted_outcome_digest=?,output_manifest_ref=?,"
-                    "output_manifest_digest=?,proof_ref=?,proof_digest=?,claim_token_hash=NULL,lease_owner=NULL,"
+                    "output_manifest_digest=?,proof_ref=?,proof_digest=?,error_code=NULL,error_message=NULL,"
+                    "claim_token_hash=NULL,lease_owner=NULL,"
                     "lease_expires_at=NULL,heartbeat_at=NULL,completed_at=?,row_revision=row_revision+1,updated_at=? "
                     "WHERE process_uuid=? AND status='running' AND fencing_generation=?",
                     (
