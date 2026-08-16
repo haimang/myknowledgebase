@@ -84,7 +84,7 @@ DEFAULT_CATALOG_PROMPTS = (
     ("promptB.documentation.code-review", "v1", "markdown/promptB.documentation.code-review.v1.md", "markdown", None),
     ("promptB.documentation.default", "v2", "json/promptB.documentation.default.v2.md", "json", (0, 1, 2)),
     ("promptB.documentation.g0", "v1", "json/promptB.documentation.g0.v1.md", "json", (0,)),
-    ("promptB.documentation.g1", "v2", "json/promptB.documentation.g1.v2.md", "json", (0, 1)),
+    ("promptB.documentation.g1", "v3", "json/promptB.documentation.g1.v3.md", "json", (0, 1)),
     ("promptB.documentation.g2", "v2", "json/promptB.documentation.g2.v2.md", "json", (0, 1, 2)),
     ("promptC.documentation.default", "v2", "summarizer/promptC.documentation.default.v2.md", "summarizer", None),
 )
@@ -264,6 +264,11 @@ class RegistryService:
                     (pointer.prompt_key, pointer.prompt_version),
                 )
                 if not row:
+                    await tx.execute(
+                        "UPDATE mkb_prompt_hash_pointers SET status='retired' "
+                        "WHERE prompt_id=? AND status='active'",
+                        (pointer.prompt_key,),
+                    )
                     await tx.execute(
                         "INSERT INTO mkb_prompt_hash_pointers "
                         "(prompt_id,prompt_key,prompt_version,git_relative_path,content_sha256,role,status,"
