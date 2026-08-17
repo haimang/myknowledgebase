@@ -26,3 +26,5 @@ N-A3/N-A2 structurize invocation 钉的是 `g1.v4.md`。v4 恰好集字面在，
 ## 不做
 
 不改 kernel，不重跑 N-A5/Q-A3，不开 A1/A4/A5g2，不改写 R1。
+
+下一解法台账（未执行）：`docs/eval/new-start/R5-system-g0-and-quoted-cuts.md`。
