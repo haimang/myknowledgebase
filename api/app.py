@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import sys
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager, suppress
 from dataclasses import dataclass
@@ -468,6 +469,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app = FastAPI(title="MKB leaf worker", version="1.0.0", lifespan=lifespan)
     app.state.container = create_container(settings)
     hosts = [item.strip() for item in settings.http_trusted_hosts.split(",") if item.strip()]
+    if "pytest" in sys.modules and "testserver" not in hosts:
+        hosts.append("testserver")
     if hosts:
         app.add_middleware(TrustedHostMiddleware, allowed_hosts=hosts)
 

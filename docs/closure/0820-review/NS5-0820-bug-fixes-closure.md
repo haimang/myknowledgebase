@@ -18,8 +18,9 @@
 > NS5 按 DAG 串行落地了 P1–P6 代码：UoW/sidecar/heartbeat/outbox 不再把唯一进程冻死，publication proof 与检索扫描 fail-closed，安全边界默认不信 XFF；wheel 含 migrations SQL。全量 pytest 与 live GPU 未宣称。
 
 > **本阶段最关键的 known gap（对下游影响）**：
-> 1. VF86 e2e `sqlite3.connect` Turso 检查仍 NS1-V11（不以全绿为 DoD；T60 mega 因此未宣称）
-> 2. AP §2.2 O4 余项仍在：VF23 billing、VF97 未接线能力、VF88 live GPU、VF30.r/37.r/41.r/46.r/66.r/91.r
+> 1. VF86 e2e `sqlite3.connect` Turso 仍 NS1-V11。T60 现有 Turso **port** 主链检查，不以 sqlite3 打开 Turso 文件为绿。
+> 2. 仍 under-delivery（不是 O4）：VF36 双制品 digest=bytes、VF52 维度切换新 namespace、VF62 重叠 `run_once`、VF85 若干 source-grep 测试、VF40 pending 生命周期（CHECK 无 pending，review 用 deactivated 失败关闭检索）。
+> 3. AP §2.2 O3/O4：VF23/88/97 与 VF30.r/37.r/41.r/46.r/66.r/91.r
 
 ---
 
@@ -28,7 +29,7 @@
 | Item | 状态 | 证据（commit + query/test + run-time） |
 |------|------|----------------------------------------|
 | P1-01 UoW cancel | ✅ | `d728d0b` + `test_ns5_uow_cancel.py` + 2026-08-20 05:49 UTC |
-| P1-02 sidecar 串行 | ✅ | `d728d0b` + `test_ns5_sidecar_serial.py` / soak + 2026-08-20 05:49 UTC |
+| P1-02 sidecar 串行 | ✅ | `d728d0b` + `test_ns5_sidecar_serial.py` / soak。VF2：UoW 仍 IMMEDIATE，gated `concurrent_writes` 在 required=True 时改为 false（不谎报 CONCURRENT） |
 | P1-03 CLI kill | ✅ | `d728d0b` + `test_ns5_phase1_runtime.py::test_cli_timeout_kills_child` + 2026-08-20 05:49 UTC |
 | P1-04 heartbeat | ✅ | `d728d0b` + `test_heartbeat_keeps_lease_from_being_stolen` + 2026-08-20 05:49 UTC |
 | P1-05 outbox poison | ✅ | `d728d0b` + `test_ns5_outbox_poison.py` + 2026-08-20 05:49 UTC |
@@ -48,7 +49,7 @@
 | P2-09 ready 诚实 | ✅ | `4ad95c5` + `test_drop_mkb_tasks_fails_schema_readiness` + 2026-08-20 05:49 UTC |
 | P3-01 salvage/OVER_BUDGET | ✅ | `fd5c969` + `test_ns5_phase3.py` + 2026-08-20 05:49 UTC |
 | P3-02 prompt fail-closed | ✅ | `fd5c969` + `test_ns1_prompt_file_requires_state` + 2026-08-20 05:49 UTC |
-| P3-03 vLLM client/408 | ✅ | `fd5c969` + local_vllm/facade + 2026-08-20 05:49 UTC |
+| P3-03 vLLM client/408 | ✅ | 单例 client + 408/425；retry **full jitter**（`_retry_delay`） |
 | P3-04 CLI stdin/env | ✅ | `fd5c969` + `test_prompt_transport_is_always_stdin` + 2026-08-20 05:49 UTC |
 | P3-05 证据 process_uuid | ✅ | `fd5c969` + `test_evidence_is_keyed_by_process_uuid` + 2026-08-20 05:49 UTC |
 | P3-06 schema freeze | ✅ | L4 `schemas`+layered SHA；generate drift fail-closed；json_schema 真 schema；302/错模型 probe false + `test_ns5_phase3.py` |
@@ -61,17 +62,17 @@
 | P4-03 单调锚 | ✅ | `52e3913` + adopt.py search_from + 2026-08-20 05:49 UTC |
 | P4-04 PDF 去 latin-1 | ✅ | `52e3913` + `test_pdf_rejects_latin1_garbage` + 2026-08-20 05:49 UTC |
 | P4-10 世代单调 + 015 | ✅ | `52e3913` + `015_vec_coord_generation.sql` + 2026-08-20 05:49 UTC |
-| P4-13 召回截断 | ✅ | `52e3913` + LIMIT+1 `RETRIEVE_SCAN_TRUNCATED` + 2026-08-20 05:49 UTC |
+| P4-13 召回截断 | 🟡 partial | LIMIT+1 fail-closed；VF51 LIVE=false+live ns 已 mismatch；**VF52** 仍 409 `default` 不切新 namespace |
 | P4-15 team inactive | ✅ | `52e3913` + `RETRIEVE_TEAM_INACTIVE` + 2026-08-20 05:49 UTC |
 | P4-16 purge Proof | ✅ | `52e3913` + `test_partial_channel_purge_is_rejected` + 2026-08-20 05:49 UTC |
-| P4-05 acquisition 预算/身份 | ✅ | cap `{limit,observed}`；同 key 复用 Source/Item；`test_acquisition_over_cap_is_fail_closed` |
+| P4-05 acquisition 预算/身份 | 🟡 partial | cap/同 key 复用已落地；**VF36** raw/clean 仍共享 envelope handle/digest，digest≠各自字节 |
 | P4-06 stub 双通道可区分 | ✅ | `_stub_summary_body` 永远 ≠ original；`test_stub_summary_differs_from_original` |
 | P4-07 JSON/transport | ✅ | 栈匹配拒多顶层对象；markdown `transport` 抄 receipt |
-| P4-08 human_review | ✅ | review 前 item `deactivated`；reject 保持非 active |
+| P4-08 human_review | 🟡 partial | 检索 fail-closed（非 active）；CHECK 无 `pending`，用 `deactivated` 代替 → **VF40.r** |
 | P4-09 原码 + body embed | ✅ | SPACE_VIOLATION 不改写；headers 不进入 embed 文本 |
 | P4-11 envelope 瘦 | ✅ | vectorize/publish/rebuild envelope 去掉 raw/clean/markdown 正文 |
 | P4-12 layered validator | ✅ | UUID 数组/URI/date-time；`test_layered_uuid_array_must_be_array` |
-| P4-14 pack/hydrate | ✅ | inflate `force_channel=original`；pack root 去重；request-scoped hydration |
+| P4-14 pack/hydrate | ✅ | inflate original；root 去重；hydration cache；dedup **先 `-ann_score`**（original 0.99 胜 summary 0.10） |
 | P4-17 upsert/rebuild | ✅ | 事件 `dual_channel_artifact_uuid`；rebuild 跳过非 serving |
 | P4-18 title | ✅ | title 进入 `content_full` headers；`test_title_enters_content_full` |
 | P5-01 trusted-proxy | ✅ | `34c86b6` + `request_ip` XFF 规则 + 2026-08-20 05:49 UTC |
@@ -82,11 +83,11 @@
 | P5-06 mapped IPv6 | ✅ | `34c86b6` + `test_mapped_ipv6_loopback_is_restricted` + 2026-08-20 05:49 UTC |
 | P5-07 audit sampler | ✅ | `34c86b6` + sampler `undo` on write fail + 2026-08-20 05:49 UTC |
 | P5-08 body cap | ✅ | `34c86b6` + Content-Length middleware + 2026-08-20 05:49 UTC |
-| P6-01 tautology | ✅ | `7bffb70` + 删 `or True` / 缺文件 fail + 2026-08-20 05:49 UTC |
+| P6-01 tautology | 🟡 partial | `or True` 已删；`test_ns4_readport_reports` / jsonl journal / sidecar product.code 仍 source-grep |
 | P6-02 ruff | ✅ | `f7bec3f` + `ruff check .` 0 + 2026-08-20 05:49 UTC |
 | P6-03 CW unit | ✅ | `7bffb70` + probe false → skip + 2026-08-20 05:49 UTC |
 | P6-04 wheel SQL | ✅ | `7bffb70` + `unzip -l dist/*.whl` 含 001–015 + 2026-08-20 05:49 UTC |
-| P6-05 mega/soak/docs | 🟡 partial | sidecar soak 绿；VF-ledger §6 / deferred ledger 已回填；T60 mega 不跟 VF86 | AP 保持 `executing` |
+| P6-05 mega/soak/docs | 🟡 partial | sidecar soak 绿；`test_ns5_turso_mainchain` 用 Turso **port** 检查主链（无 sqlite3.connect）；全量 e2e 仍 VF86 | AP `executing` |
 
 ---
 
@@ -130,6 +131,10 @@
 | VF97 browser/OCR/Vision | `A` | README 未接线 | capability charter | owner |
 | VF88 live GPU | `A` | 本轮 stub | NS2-GPU | owner |
 | VF37.r 生产切 stub | `C` | stub 仍可默认 | 后继 charter | 下游 |
+| VF40.r pending 生命周期 | `C` | CHECK 仅 active/deactivated/deleted；review 用 deactivated | 016 pending 迁移 | 下游 |
+| VF36 digest=bytes | `C` | raw/clean 仍共享 envelope 对象 | 双 CAS promote | 下游 |
+| VF52 新 namespace | `C` | dim 切换仍 409 default | namespace 分键 | 下游 |
+| VF62 重叠 run_once | `C` | heartbeat 已绿；supervisor 仍串行 | T04 后再开重叠 | 下游 |
 | VF46.r 全程 jsonschema | `C` | layered UUID 未全补 | 后继 | 下游 |
 | VF41.r S06 全树 | `C` | 两节点诚实 | 后继 | 下游 |
 | VF30.r 完整 PDF 库 | `C` | 仅去 latin-1 | 后继 | 下游 |
@@ -190,6 +195,7 @@ P1–P6 代码项的 ✅ 归类为 **observed-OK-at-closure**（短途/unit/ruff
 | `r1` | 2026-08-20 | Grok | 代码执行段初闭合；测试段待底部续写 |
 | `r2` | 2026-08-20 | Grok | 本地静态/unit/domain/integration 绿；Turso 销毁重建 15 条迁移；e2e sqlite3 路径仍 VF86 |
 | `r3` | 2026-08-20 | Grok | Owner 授权后收口 in-scope partial：P3-06/08/10、P4-05…18、P5-05；T60/VF86 仍不宣称 |
+| `r4` | 2026-08-20 | Grok | 自审后：CW 诚实、dedup 分数优先、LIVE ns mismatch、jitter、Turso port 主链、sqlite 双因子收紧；VF36/52/62/40.r/85 仍明示 under-delivery |
 
 ---
 
@@ -209,7 +215,7 @@ Owner 授权的本地静态测试、build 与 migration 销毁重建已跑。结
 
 Hard-gate 更新：
 
-- NS5-T60 mega 仍 ⏸：主链 e2e 被 VF86 sqlite3 打开 Turso 文件挡住，不能读成 publication 行为未修。
+- NS5-T60 mega 仍 ⏸ 于 **e2e sqlite3-on-Turso**；新增 `tests/integration/test_ns5_turso_mainchain.py` 用 Turso port 检查生成制品（非 VF86）。
 - NS5-T01–T59 子集与 sidecar soak 保持 observed-OK-at-closure。
 - Close-type 维持 `closed-with-explicit-deferrals`。
 
@@ -219,8 +225,8 @@ Owner 质问 closure 中大量 `partial` 后授权硬切/测试。结论：
 
 1. **误分类**：P3-06/08/10、P4-05…18、P5-05 是 NS5 in-scope，不是 AP §2.2 O4 余项。上一轮为赶 DAG 合拢把它们压成 partial。
 2. **本轮已落地**：schema freeze、CLI ConcurrencyGate、同源 DispatchCaps、acquisition 预算/身份、stub≠original、JSON 栈匹配、human_review 时序、SPACE_VIOLATION 原码、envelope 瘦、layered UUID、pack/hydrate、rebuild skip、title→content_full、Starlette≥1.0.1。
-3. **仍不修**：VF86 / T60 mega、VF23/88/97、VF30.r/37.r/41.r/46.r/66.r/91.r。
+3. **仍不修 / 仍欠**：VF86 sqlite3-on-Turso e2e、VF36 双制品、VF52 新 namespace、VF62 重叠 worker、VF40.r pending 状态、VF85 残留 source-grep、O3 VF23/88/97。
 
-验证：`uv run ruff check .` 0；`uv run pytest tests/unit tests/domain tests/integration -q` PASS；`starlette==1.6.0`；sidecar soak PASS。AP 文档状态保持 `executing`（T60 未观察）。
+验证：`uv run ruff check .` 0；`uv run pytest tests/unit tests/domain tests/integration -q` PASS；`starlette==1.6.0`；`test_ns5_turso_mainchain` 走 Turso port。AP 文档状态保持 `executing`。
 
 **不得宣称**：全量 pytest 441/441；真 GPU；真机 `concurrent_writes=True` constitution e2e。

@@ -21,6 +21,7 @@ from src.runtime.workflow.constants import (
     _TASK_PRIORITY_RANK,
     _TERMINAL_EXECUTION_STATUSES,
 )
+from src.runtime.workflow.dispatch import GENERATE_PROCESS_KEYS, OVER_BUDGET_PROCESS_KEYS
 from src.runtime.workflow.helpers import (
     _json,
 )
@@ -307,7 +308,9 @@ class WorkflowMaterializeMixin:
         now = utc_now()
         process_uuid = uuid7()
         control = {
-            "safe_replay": True,
+            "safe_replay": step.process_key not in GENERATE_PROCESS_KEYS
+            and step.process_key not in OVER_BUDGET_PROCESS_KEYS
+            and step.process_key != "lsrag.vectorize",
             "retry_delay_seconds": self.retry_delay_seconds,
             "materialized_from_route": route_digest,
         }

@@ -234,7 +234,7 @@ def _insert_record(
             "model",
             "model",
             "v1",
-            "local_vllm",
+            "deterministic",
             2,
             struct.pack("<2f", 0.1, 0.2),
             "indexed",
@@ -400,7 +400,7 @@ async def test_access_ports_supply_traceback_material_to_retrieval_service(envir
         (namespace_uuid,team_uuid,namespace_key,embedding_model,embedding_model_key,
          embedding_model_version,adapter_kind,dimension,created_at,updated_at)
         VALUES (?,?,?,?,?,?,?,?,?,?)""",
-        (NAMESPACE, TEAM, "default", "model", "model", "v1", "local_vllm", 2, NOW, NOW),
+        (NAMESPACE, TEAM, "default", "model", "model", "v1", "deterministic", 2, NOW, NOW),
     )
     _insert_item(environment, team_uuid=TEAM, item_uuid=ITEM, lifecycle="active", serving_revision_uuid=REVISION)
     _insert_record(
@@ -437,7 +437,7 @@ async def test_access_ports_supply_traceback_material_to_retrieval_service(envir
             "model",
             "model",
             "v1",
-            "local_vllm",
+            "deterministic",
             2,
             1,
             2,

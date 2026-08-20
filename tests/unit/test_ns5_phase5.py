@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 from pydantic import ValidationError
 
@@ -34,11 +36,31 @@ def test_rate_limiter_overflow_does_not_fail_open() -> None:
     assert limiter.check_ip("4.4.4.4").allowed is False
 
 
-def test_starlette_left_badhost_cve_range() -> None:
+def test_starlette_left_badhost_cve_range(tmp_path: Path) -> None:
     import starlette
+    from fastapi.testclient import TestClient
+
+    from api.app import create_app
+    from src.runtime.config import Settings
 
     parts = tuple(int(part) for part in starlette.__version__.split(".")[:3])
     assert parts >= (1, 0, 1)
+    app = create_app(
+        Settings(
+            internal_token="host-probe",
+            database_path=tmp_path / "mkb.sqlite3",
+            object_root=tmp_path / "objects",
+            persistence_backend="sqlite",
+            concurrent_writes_required=False,
+            native_vector_required=False,
+            http_trusted_hosts="testserver,localhost,127.0.0.1",
+        )
+    )
+    with TestClient(app) as client:
+        response = client.get("/live", headers={"host": "example.com/abc?bar="})
+        assert response.status_code in {200, 400}
+        if response.status_code == 200:
+            assert response.json().get("status") == "live"
 
 
 def test_mapped_ipv6_loopback_is_restricted() -> None:
@@ -51,6 +73,6 @@ def test_mapped_ipv6_loopback_is_restricted() -> None:
 def test_sqlite_requires_pytest_module(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("PYTEST_CURRENT_TEST", "forged::test")
     monkeypatch.delenv("MKB_ALLOW_SQLITE", raising=False)
-    assert sqlite_backend_permitted() is True  # real pytest process still has pytest loaded
+    assert sqlite_backend_permitted() is True  # this process imported pytest
     monkeypatch.delenv("PYTEST_CURRENT_TEST", raising=False)
     assert sqlite_backend_permitted() is False

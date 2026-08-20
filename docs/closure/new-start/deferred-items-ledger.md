@@ -49,3 +49,7 @@
 | `NS5-VF46.r` | VF46 余项 | `[partial-delivery] 剩余切片` | 全程 jsonschema | layered validator 已补 UUID/array/URI/date-time | 契约升级 | 下游 |
 | `NS5-VF66.r` | VF66 余项 | `[true-deferred]` | 目录 CAS SSOT | T-O-120 | owner 授权 | owner |
 | `NS5-VF91.r` | VF91 余项 | `[partial-delivery] 剩余切片` | 真机 CW e2e | unit 已 skipIf；constitution e2e 依赖真机 | NS4 constitution e2e | 下游 |
+| `NS5-VF40.r` | VF40 | `[partial-delivery] 剩余切片` | Item pending/reviewing | CHECK 无 pending；review 用 deactivated 失败关闭检索 | 016 扩 lifecycle | 下游 |
+| `NS5-VF36` | VF36 | `[true-bug]` 未关 | raw/clean 共享 envelope digest | 双 CAS 对象 | 后继 serving AP | 下游 |
+| `NS5-VF52` | VF52 | `[true-bug]` 未关 | dim 切换 409 default | namespace 按 (model,ver,adapter,dim) 分键 | 后继 serving AP | 下游 |
+| `NS5-VF62` | VF62 | `[partial-delivery]` 未关 | 重叠 run_once | heartbeat 已绿；supervisor 仍串行 | T04 后再开 | 下游 |

@@ -11,11 +11,14 @@ from src.persistence.sqlite_port import SqlitePersistence
 
 
 def sqlite_backend_permitted() -> bool:
-    """Stock sqlite is a pytest fixture only (NS4 T-O-364 / T-O-371)."""
+    """Stock sqlite is a pytest fixture only (NS4 T-O-364 / T-O-371).
 
-    return bool(os.environ.get("PYTEST_CURRENT_TEST")) and (
-        "pytest" in sys.modules or os.environ.get("MKB_ALLOW_SQLITE") == "1"
-    )
+    Both factors are required: the pytest env marker *and* a real pytest
+    import.  Forging ``PYTEST_CURRENT_TEST`` plus ``MKB_ALLOW_SQLITE`` in a
+    production process is not enough.
+    """
+
+    return bool(os.environ.get("PYTEST_CURRENT_TEST")) and "pytest" in sys.modules
 
 
 class PersistenceEngine(Protocol):
@@ -51,6 +54,8 @@ def build_persistence(
         )
     if backend != "turso":
         raise ValueError("persistence backend is unsupported")
+    if vector_backend == "native_ann":
+        raise ValueError("native_ann is not bound; VectorSearchPort is not implemented")
     from src.persistence.turso.port import TursoPersistence
 
     return TursoPersistence(

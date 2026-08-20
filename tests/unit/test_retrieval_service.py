@@ -131,7 +131,7 @@ async def retrieval_db(tmp_path: Path) -> SqlitePersistence:
         (namespace_uuid,team_uuid,namespace_key,embedding_model,embedding_model_key,
          embedding_model_version,adapter_kind,dimension,created_at,updated_at)
         VALUES (?,?,?,?,?,?,?,?,?,?)""",
-        (NAMESPACE, TEAM, "default", "model", "model", "v1", "local_vllm", 2, NOW, NOW),
+        (NAMESPACE, TEAM, "default", "model", "model", "v1", "deterministic", 2, NOW, NOW),
     )
     connection.execute(
         """INSERT INTO mkb_intake_items
@@ -187,7 +187,7 @@ async def retrieval_db(tmp_path: Path) -> SqlitePersistence:
                 "model",
                 "model",
                 "v1",
-                "local_vllm",
+                "deterministic",
                 2,
                 struct.pack("<2f", 0.1, 0.2),
                 "indexed",
@@ -215,7 +215,7 @@ async def retrieval_db(tmp_path: Path) -> SqlitePersistence:
             "model",
             "model",
             "v1",
-            "local_vllm",
+            "deterministic",
             2,
             1,
             5,
@@ -377,7 +377,7 @@ async def test_dual_fence_rejects_an_incomplete_or_injected_proof_record_set(
             "model",
             "model",
             "v1",
-            "local_vllm",
+            "deterministic",
             2,
             struct.pack("<2f", 0.1, 0.2),
             "indexed",
@@ -495,7 +495,7 @@ async def test_live_embed_layer_a_mismatch_fails_closed(retrieval_db: SqlitePers
         (
             "123e4567-e89b-42d3-a456-426614174020",
             "embed",
-            "local_vllm",
+            "deterministic",
             "model",
             "v1",
             10,
@@ -523,7 +523,7 @@ async def test_live_embed_adapter_layer_a_mismatch_fails_closed(retrieval_db: Sq
         (
             "123e4567-e89b-42d3-a456-426614174022",
             "embed",
-            "local_vllm",
+            "deterministic",
             "model",
             "v1",
             10,
@@ -562,7 +562,7 @@ async def test_local_exact_search_respects_the_controlled_namespace_metric(retri
         (
             "123e4567-e89b-42d3-a456-426614174021",
             "embed",
-            "local_vllm",
+            "deterministic",
             "model",
             "v1",
             10,

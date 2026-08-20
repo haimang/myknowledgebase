@@ -1,0 +1,80 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "mkb://schemas/lsrag.layered_content.v1",
+  "title": "MKB layered content v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["context_meta", "layered_content"],
+  "properties": {
+    "context_meta": {
+      "$ref": "#/$defs/context_meta"
+    },
+    "date": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "processed_at": { "type": ["string", "null"], "format": "date-time" },
+        "published_at": { "type": ["string", "null"], "format": "date-time" }
+      }
+    },
+    "knowledge_tree": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "original_file_uuid": { "type": ["string", "null"], "format": "uuid" },
+        "upstream_file_uuids": { "type": ["array", "null"], "items": { "type": "string", "format": "uuid" } },
+        "downstream_file_uuids": { "type": ["array", "null"], "items": { "type": "string", "format": "uuid" } }
+      }
+    },
+    "layered_content": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/layered_content_block" },
+      "contains": {
+        "type": "object",
+        "required": ["granularity"],
+        "properties": {
+          "granularity": { "const": 0 }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "context_meta": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "title": { "type": ["string", "null"] },
+        "author": { "type": ["string", "null"] },
+        "publisher": { "type": ["string", "null"] },
+        "realm": { "type": ["string", "null"] },
+        "type": { "type": ["string", "null"] },
+        "tags": { "type": ["array", "null"], "items": { "type": "string" } },
+        "channel": { "type": ["string", "null"] },
+        "default_locale": { "type": ["string", "null"] },
+        "source_name": { "type": ["string", "null"] },
+        "source_url": { "type": ["string", "null"], "format": "uri" }
+      }
+    },
+    "layered_content_block": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["block_id", "granularity", "original_content", "llm_summary"],
+      "properties": {
+        "block_id": { "type": "integer", "minimum": 0 },
+        "granularity": { "type": "integer", "minimum": 0 },
+        "original_content": { "$ref": "#/$defs/content_channel" },
+        "llm_summary": { "$ref": "#/$defs/content_channel" }
+      }
+    },
+    "content_channel": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["title", "body"],
+      "properties": {
+        "title": { "type": ["string", "null"] },
+        "body": { "type": ["string", "null"] }
+      }
+    }
+  }
+}

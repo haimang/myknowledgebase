@@ -544,7 +544,10 @@ class InferenceFacade:
         )
 
     def _retry_delay(self, attempt: int) -> float:
-        return min(self._initial_delay_seconds * (2**attempt), self._max_delay_seconds)
+        import random
+
+        ceiling = min(self._initial_delay_seconds * (2**attempt), self._max_delay_seconds)
+        return random.random() * ceiling
 
     async def _record_success(
         self,

@@ -150,6 +150,14 @@ class RetrievalRankMixin:
         # inference service; this remains a vector comparison, not a body-text
         # shortcut around S09/S10's fences.
         if query_embedding is None and self._candidate_scorer is None:
+            adapter = str(namespace.get("adapter_kind") or "")
+            live = bool(getattr(self, "_live_inference", False))
+            if not live and adapter in {"local_vllm", "remote_gemini"}:
+                raise MkbError(
+                    "RETRIEVE_SPACE_LAYER_A_MISMATCH",
+                    "Live namespace ranking requires a live query embedding",
+                    409,
+                )
             try:
                 query_embedding = deterministic_embedding(query.query, dimension=int(namespace["dimension"]))
             except (TypeError, ValueError) as exc:

@@ -29,6 +29,7 @@ from src.contracts.api.models import (
 )
 from src.contracts.common.errors import MkbError
 from src.contracts.common.ids import canonical_json, sha256_bytes, stable_digest, uuid7
+from src.contracts.lsrag.layered_content import layered_schema_sha256
 from src.contracts.storage.models import ObjectStat, PromoteRequest
 from src.persistence.ports import PersistencePort, UnitOfWork
 from src.runtime.config import Settings
@@ -590,9 +591,7 @@ class ConfigSnapshotService:
             }
             for row in (*structure_rows, *construction_rows)
         }
-        layered_path = Path("data/schemas/lsrag.layered_content.v1.json")
-        layered_sha = hashlib.sha256(layered_path.read_bytes()).hexdigest() if layered_path.is_file() else None
-        return {"schemas": schemas, "layered_schema_sha256": layered_sha}
+        return {"schemas": schemas, "layered_schema_sha256": layered_schema_sha256()}
 
     @staticmethod
     def _resolve_compression_channel(request: TaskCreateRequest) -> tuple[str, str]:

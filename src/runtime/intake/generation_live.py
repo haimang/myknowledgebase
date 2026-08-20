@@ -17,6 +17,7 @@ from src.contracts.inference.models import (
     InvocationContext,
     StructuredGenerateRequest,
 )
+from src.contracts.lsrag.layered_content import layered_schema_sha256
 from src.contracts.runtime.models import ProcessCommand
 from src.contracts.storage.models import ObjectHandle
 from src.persistence.ports import UnitOfWork
@@ -25,6 +26,29 @@ from src.runtime.intake.types import (
     _FrozenGenerationConfig,
     _json,
 )
+
+
+def assert_frozen_schema_matches(
+    snapshot: Mapping[str, Any],
+    *,
+    schema_key: str,
+    schema_version: str,
+    registry_digest: str,
+) -> None:
+    """Fail closed when L4 schema freeze is missing or drifted."""
+
+    frozen_l4 = snapshot.get("l4") if isinstance(snapshot.get("l4"), dict) else {}
+    frozen_schemas = frozen_l4.get("schemas") if isinstance(frozen_l4.get("schemas"), dict) else {}
+    frozen = frozen_schemas.get(f"{schema_key}@{schema_version}")
+    if not isinstance(frozen, dict) or not frozen.get("schema_digest"):
+        raise MkbError("GENERATION_SCHEMA_DRIFT", "Frozen schema digest is missing from the L4 snapshot", 409)
+    if frozen["schema_digest"] != registry_digest:
+        raise MkbError("GENERATION_SCHEMA_DRIFT", "Frozen schema digest no longer matches the registry", 409)
+    frozen_layered = frozen_l4.get("layered_schema_sha256")
+    if not isinstance(frozen_layered, str) or not frozen_layered:
+        raise MkbError("GENERATION_SCHEMA_DRIFT", "Frozen layered schema SHA is missing from the L4 snapshot", 409)
+    if layered_schema_sha256() != frozen_layered:
+        raise MkbError("GENERATION_SCHEMA_DRIFT", "Layered JSON schema bytes drifted from the freeze", 409)
 
 
 class IntakeGenerationLiveMixin:
@@ -145,17 +169,12 @@ class IntakeGenerationLiveMixin:
                     )
             if schema_row is None or not schema_row["schema_digest"]:
                 raise MkbError("REGISTRY_NOT_FOUND", "Generation schema definition is unavailable", 503)
-            frozen_l4 = snapshot.get("l4") if isinstance(snapshot.get("l4"), dict) else {}
-            frozen_schemas = frozen_l4.get("schemas") if isinstance(frozen_l4.get("schemas"), dict) else {}
-            frozen = frozen_schemas.get(f"{schema_key}@{schema_version}")
-            if isinstance(frozen, dict) and frozen.get("schema_digest") and frozen["schema_digest"] != schema_row["schema_digest"]:
-                raise MkbError("GENERATION_SCHEMA_DRIFT", "Frozen schema digest no longer matches the registry", 409)
-            layered_path = Path("data/schemas/lsrag.layered_content.v1.json")
-            frozen_layered = frozen_l4.get("layered_schema_sha256")
-            if isinstance(frozen_layered, str) and layered_path.is_file():
-                current_layered = hashlib.sha256(layered_path.read_bytes()).hexdigest()
-                if current_layered != frozen_layered:
-                    raise MkbError("GENERATION_SCHEMA_DRIFT", "Layered JSON schema bytes drifted from the freeze", 409)
+            assert_frozen_schema_matches(
+                snapshot,
+                schema_key=schema_key,
+                schema_version=schema_version,
+                registry_digest=str(schema_row["schema_digest"]),
+            )
             try:
                 binding = InferenceBinding(
                     capability_key=capability_key,

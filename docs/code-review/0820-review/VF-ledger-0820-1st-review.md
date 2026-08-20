@@ -815,9 +815,9 @@
 
 ### 6.2 Blocker / Follow-up 状态汇总
 
-- 14 remaining-critical in-scope VF 均已进入 NS5 代码路径；不以 live GPU / 全量 e2e 441 为关闭闸。
-- Owner 二次授权后，先前被误标为 O4 remainder 的 P3-06/08/10 与 P4-05…18、P5-05 已收口。
-- 仍 open：VF86 harness、T60 mega（被 VF86 挡住）、§5.4 `.r` 余项。
+- 14 remaining-critical 多数已进入代码路径；**未关**：VF2 写路径仍 IMMEDIATE（现改为 gated `concurrent_writes=false` 以免假绿）、VF85 部分 source-grep 测试。
+- 自审 r4 另钉：VF36 digest=bytes、VF48 已改为 `-ann_score` 优先、VF51 LIVE=false+live ns mismatch、VF52 仍 409、VF62 重叠未开。
+- 仍 owner-gated：VF86 harness、VF23/88/97、§5.4 `.r`。
 
 ### 6.3 变更文件清单
 

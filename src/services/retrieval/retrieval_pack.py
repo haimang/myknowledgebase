@@ -269,9 +269,9 @@ class RetrievalPackMixin:
         return sorted(selected.values(), key=lambda item: (-item.result.ann_score, item.candidate.vector_record_uuid))
 
     @staticmethod
-    def _dedup_key(item: _ResultWork) -> tuple[int, float, str]:
+    def _dedup_key(item: _ResultWork) -> tuple[float, int, str]:
         resolved_priority = 0 if item.result.traceback_status == "resolved" else 1
-        return (resolved_priority, -item.result.ann_score, item.candidate.vector_record_uuid)
+        return (-item.result.ann_score, resolved_priority, item.candidate.vector_record_uuid)
 
     async def _rerank(self, query: str, work: list[_ResultWork]) -> str:
         if not self._rerank_enabled:

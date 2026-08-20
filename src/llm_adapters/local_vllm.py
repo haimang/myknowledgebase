@@ -2,9 +2,7 @@
 
 from __future__ import annotations
 
-import json
 import math
-from pathlib import Path
 from typing import Any, Protocol, runtime_checkable
 from urllib.parse import urlsplit
 
@@ -21,6 +19,7 @@ from src.contracts.inference.models import (
     InferenceUsage,
     StructuredGenerateRequest,
 )
+from src.contracts.lsrag.layered_content import load_layered_json_schema
 
 
 @runtime_checkable
@@ -31,20 +30,12 @@ class SecretValueResolver(Protocol):
 
 
 def _structured_json_schema(request: StructuredGenerateRequest) -> dict[str, Any]:
-    """Send the checked-in layered schema, never a dummy `{type: object}`."""
+    """Send the checked-in layered schema. Dummy `{type: object}` is forbidden."""
 
     supplied = getattr(request, "json_schema", None)
     if isinstance(supplied, dict) and supplied:
         return supplied
-    path = Path("data/schemas/lsrag.layered_content.v1.json")
-    if path.is_file():
-        try:
-            loaded = json.loads(path.read_text(encoding="utf-8"))
-        except (OSError, UnicodeDecodeError, json.JSONDecodeError):
-            loaded = None
-        if isinstance(loaded, dict) and loaded:
-            return loaded
-    return {"type": "object"}
+    return load_layered_json_schema()
 
 
 def _normalize_base_url(value: str) -> str:

@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
 import re
 import unicodedata
 from collections.abc import Mapping
+from pathlib import Path
 from typing import Any
 
 from src.contracts.common.errors import MkbError
@@ -30,6 +33,37 @@ _CHANNEL_KEYS = {"title", "body"}
 _UUID = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$")
 _URI = re.compile(r"^[a-zA-Z][a-zA-Z0-9+.-]*:")
 _DATETIME = re.compile(r"^\d{4}-\d{2}-\d{2}T")
+
+
+def layered_schema_path() -> Path:
+    """Layered JSON Schema shipped next to this module (wheel-safe)."""
+
+    packaged = Path(__file__).resolve().parent / "layered_content.v1.json"
+    if packaged.is_file():
+        return packaged
+    repo = Path(__file__).resolve().parents[3] / "data" / "schemas" / "lsrag.layered_content.v1.json"
+    if repo.is_file():
+        return repo
+    raise MkbError("STRUCTURE_SCHEMA_UNAVAILABLE", "Layered JSON schema bytes are unavailable", 503)
+
+
+def layered_schema_sha256() -> str:
+    path = layered_schema_path()
+    try:
+        return hashlib.sha256(path.read_bytes()).hexdigest()
+    except OSError as exc:
+        raise MkbError("STRUCTURE_SCHEMA_UNAVAILABLE", "Layered JSON schema bytes are unavailable", 503) from exc
+
+
+def load_layered_json_schema() -> dict[str, Any]:
+    path = layered_schema_path()
+    try:
+        loaded = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise MkbError("STRUCTURE_SCHEMA_UNAVAILABLE", "Layered JSON schema is invalid", 503) from exc
+    if not isinstance(loaded, dict) or not loaded:
+        raise MkbError("STRUCTURE_SCHEMA_UNAVAILABLE", "Layered JSON schema is invalid", 503)
+    return loaded
 
 
 def normalize_layered_text(value: str) -> str:
@@ -142,4 +176,11 @@ def validate_layered_content(
     return result
 
 
-__all__ = ["LAYERED_CONTENT_SCHEMA_VERSION", "normalize_layered_text", "validate_layered_content"]
+__all__ = [
+    "LAYERED_CONTENT_SCHEMA_VERSION",
+    "layered_schema_path",
+    "layered_schema_sha256",
+    "load_layered_json_schema",
+    "normalize_layered_text",
+    "validate_layered_content",
+]

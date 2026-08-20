@@ -65,7 +65,7 @@ class Settings(BaseSettings):
     egress_allow_private_default: bool = False
     egress_allow_http: bool = False
     acquisition_max_response_bytes: int = Field(default=8 * 1024 * 1024, ge=1, le=64 * 1024 * 1024)
-    http_trusted_hosts: str = "localhost,127.0.0.1,testserver"
+    http_trusted_hosts: str = "localhost,127.0.0.1"
     object_gc_enabled: bool = True
     object_gc_grace_seconds: int = Field(default=24 * 60 * 60, ge=1, le=365 * 24 * 60 * 60)
     object_gc_interval_seconds: int = Field(default=10 * 60, ge=1, le=24 * 60 * 60)

@@ -168,6 +168,13 @@ class TursoPersistence:
                 concurrent_writes_required=self.concurrent_writes_required,
                 native_vector_required=self.native_vector_required,
             )
+            # Business UoW is BEGIN IMMEDIATE (sidecar abort on a second
+            # CONCURRENT writer).  Never report concurrent_writes=true for a
+            # serialized write path.
+            if not self.concurrent_writes_required:
+                pass
+            else:
+                gates = {**gates, "concurrent_writes": False}
             return {
                 "db_primary": True,
                 "schema_migration": schema_ok,

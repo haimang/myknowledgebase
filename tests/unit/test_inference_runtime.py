@@ -181,7 +181,9 @@ async def test_transport_retries_the_same_frozen_binding_only() -> None:
 
     assert response.has_complete_provenance()
     assert attempts == 3
-    assert delays == [1.0, 2.0]
+    assert len(delays) == 2
+    assert 0 <= delays[0] <= 1.0
+    assert 0 <= delays[1] <= 2.0
     assert all(item.binding is request.binding for item in adapter.embed_requests)
     assert {item.binding.binding_digest for item in adapter.embed_requests} == {_DIGEST}
 

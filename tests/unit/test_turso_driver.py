@@ -125,7 +125,10 @@ async def test_turso_readiness_reports_honest_cw_and_vector(tmp_path: Path) -> N
         assert readiness["native_vector"] is True
         if not readiness["concurrent_writes_probe"]:
             pytest.skip("Turso BEGIN CONCURRENT is not available on this engine")
-        assert readiness["concurrent_writes"] is True
+        # Probe can be true while UoW remains BEGIN IMMEDIATE.  The gated
+        # flag must not advertise CONCURRENT writers that the write path
+        # does not use.
+        assert readiness["concurrent_writes"] is False
     finally:
         await persistence.close()
 
