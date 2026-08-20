@@ -93,6 +93,14 @@ async def _audit_denial(
             )
     except Exception as exc:
         container.metrics.increment("mkb_sec_audit_write_fail_total")
+        try:
+            _sampler_for(request).undo(
+                category=category,
+                source_identity=hash_remote_address(remote_ip),
+                disposition=disposition,
+            )
+        except Exception:
+            pass
         if fail_closed:
             raise MkbError("SEC_AUDIT_WRITE_FAIL", "Security audit persistence failed", 503) from exc
 

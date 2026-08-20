@@ -197,22 +197,20 @@ class FixedWindowRateLimiter:
             cutoff = bucket - 1
             self._buckets = {item: count for item, count in self._buckets.items() if item[2] >= cutoff}
             if key not in self._buckets and len(self._buckets) >= self.max_buckets:
-                # This is an accounting failure, not an authentication
-                # decision.  `_check` records degraded and follows S16's
-                # explicit fail-open policy for rate accounting only.
-                raise RuntimeError("rate-limit bucket capacity exhausted")
+                overflow_key = (dimension, "__overflow__", bucket)
+                self._buckets[overflow_key] = self._buckets.get(overflow_key, 0) + 1
+                return False
             self._buckets[key] = self._buckets.get(key, 0) + 1
             return self._buckets[key] <= limit
 
     def _check(self, dimension: str, identity: str, limit: int) -> RateLimitDecision:
         try:
             allowed = self._allow(dimension, identity, limit, self._clock())
+            self.degraded = False
             return RateLimitDecision(allowed, None if allowed else dimension)
         except Exception:
-            # Rate accounting is intentionally fail-open, but only after the
-            # token verifier has independently established authentication.
             self.degraded = True
-            return RateLimitDecision(True)
+            return RateLimitDecision(False, dimension)
 
     def check_ip(self, remote_ip: str | None) -> RateLimitDecision:
         return self._check("ip", hash_remote_address(remote_ip) or "unknown", self.ip_limit)
@@ -278,6 +276,18 @@ class DenialAuditSampler:
                 result = AuditSampleDisposition.DROP
             return result
 
+    def undo(self, *, category: str, source_identity: str | None, disposition: AuditSampleDisposition) -> None:
+        if disposition is AuditSampleDisposition.DROP:
+            return
+        bucket = int(self._clock() // self.window_seconds)
+        key = (category, source_identity or "unknown", bucket)
+        with self._lock:
+            detail_count, summary_written = self._buckets.get(key, (0, False))
+            if disposition is AuditSampleDisposition.DETAIL and detail_count > 0:
+                self._buckets[key] = (detail_count - 1, summary_written)
+            elif disposition is AuditSampleDisposition.SUMMARY:
+                self._buckets[key] = (detail_count, False)
+
 
 @dataclass(frozen=True, slots=True)
 class EgressTarget:
@@ -335,6 +345,9 @@ class EgressPolicy:
     def _restricted(address: ipaddress.IPv4Address | ipaddress.IPv6Address, *, allow_private: bool) -> bool:
         # These categories never become valid HTTP-source destinations, even
         # for the tightly scoped internal_only profile.
+        mapped = getattr(address, "ipv4_mapped", None)
+        if mapped is not None:
+            return EgressPolicy._restricted(mapped, allow_private=allow_private)
         if address.is_loopback or address.is_link_local or address.is_multicast or address.is_unspecified:
             return True
         if address.is_reserved:
@@ -461,12 +474,51 @@ def redact(value: object) -> object:
 
 
 def request_ip(request: Request) -> str | None:
-    """Use the ASGI peer address; forwarded headers require a trusted proxy layer."""
+    """Use the ASGI peer; X-Forwarded-For is trusted only for configured proxies."""
 
     client = request.client
-    if client is None or not client.host or len(client.host) > 255:
-        return None
-    return client.host
+    peer = None if client is None or not client.host or len(client.host) > 255 else client.host
+    forwarded = request.headers.get("x-forwarded-for")
+    cidrs: list[str] = []
+    try:
+        settings = request.app.state.container.settings
+        raw = getattr(settings, "trusted_proxy_cidrs", "") or ""
+        cidrs = [item.strip() for item in str(raw).split(",") if item.strip()]
+    except Exception:
+        cidrs = []
+    if forwarded:
+        presented = forwarded.split(",")[0].strip()
+        if presented and len(presented) <= 255:
+            if cidrs:
+                if peer and _ip_in_cidrs(peer, cidrs):
+                    return presented
+            elif peer and _is_private_peer(peer):
+                # Empty CIDR: a private ASGI peer is treated as an untrusted
+                # reverse proxy, so the forwarded client is the identity.
+                return presented
+    return peer
+
+
+def _is_private_peer(value: str) -> bool:
+    try:
+        address = ipaddress.ip_address(value)
+    except ValueError:
+        return False
+    return address.is_private or address.is_loopback or address.is_link_local
+
+
+def _ip_in_cidrs(value: str, cidrs: list[str]) -> bool:
+    try:
+        address = ipaddress.ip_address(value)
+    except ValueError:
+        return False
+    for cidr in cidrs:
+        try:
+            if address in ipaddress.ip_network(cidr, strict=False):
+                return True
+        except ValueError:
+            continue
+    return False
 
 
 def is_internal_ip(remote_ip: str | None) -> bool:
@@ -478,6 +530,9 @@ def is_internal_ip(remote_ip: str | None) -> bool:
         address = ipaddress.ip_address(remote_ip)
     except ValueError:
         return False
+    mapped = getattr(address, "ipv4_mapped", None)
+    if mapped is not None:
+        return is_internal_ip(str(mapped))
     return address.is_private or address.is_loopback or address.is_link_local
 
 

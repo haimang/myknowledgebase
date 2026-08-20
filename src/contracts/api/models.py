@@ -41,6 +41,11 @@ class TeamCreateRequest(PayloadExtraModel):
     def validate_team_uuid(cls, value: str) -> str:
         return _uuid(value, "team_uuid")
 
+    @model_validator(mode="after")
+    def reject_secret_extras(self) -> TeamCreateRequest:
+        assert_safe_public_data(self.payload_extra)
+        return self
+
 
 class TeamPatchRequest(PayloadExtraModel):
     expected_revision: Annotated[int, Field(ge=0)]

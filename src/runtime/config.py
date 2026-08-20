@@ -22,6 +22,8 @@ class Settings(BaseSettings):
     # Stock sqlite is an explicit local/CI waiver.
     persistence_backend: Literal["sqlite", "turso"] = "turso"
     concurrent_writes_required: bool = True
+    trusted_proxy_cidrs: str = ""
+    max_request_bytes: int = Field(default=1_048_576, ge=1024, le=64 * 1024 * 1024)
     native_vector_required: bool = True
     # Retrieval scan profile.  It is never evidence that the engine has ANN.
     vector_backend: Literal["deterministic_exact", "native_ann"] = "deterministic_exact"

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import sys
 from pathlib import Path
 from typing import Literal, Protocol
 
@@ -12,7 +13,9 @@ from src.persistence.sqlite_port import SqlitePersistence
 def sqlite_backend_permitted() -> bool:
     """Stock sqlite is a pytest fixture only (NS4 T-O-364 / T-O-371)."""
 
-    return bool(os.environ.get("PYTEST_CURRENT_TEST"))
+    return bool(os.environ.get("PYTEST_CURRENT_TEST")) and (
+        "pytest" in sys.modules or os.environ.get("MKB_ALLOW_SQLITE") == "1"
+    )
 
 
 class PersistenceEngine(Protocol):

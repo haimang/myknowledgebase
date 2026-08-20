@@ -140,15 +140,13 @@ def test_fixed_window_limiter_is_dual_dimension_bounded_and_degrades_open_only_f
         raise RuntimeError("clock unavailable")
 
     degraded = FixedWindowRateLimiter(clock=broken_clock)
-    assert degraded.check_ip("198.51.100.2").allowed
+    assert not degraded.check_ip("198.51.100.2").allowed
     assert degraded.degraded
 
     bounded = FixedWindowRateLimiter(ip_limit=1, token_limit=1, max_buckets=1, clock=fixed_clock)
     assert bounded.check_ip("198.51.100.2").allowed
-    # A distinct identity cannot make the control-plane map grow forever.  It
-    # follows the documented accounting-only fail-open/degraded behaviour.
-    assert bounded.check_ip("198.51.100.3").allowed
-    assert bounded.degraded
+    assert not bounded.check_ip("198.51.100.3").allowed
+    assert not bounded.check_ip("198.51.100.2").allowed
 
 
 def test_denial_sampler_caps_detail_rows_and_keeps_one_summary_per_window() -> None:

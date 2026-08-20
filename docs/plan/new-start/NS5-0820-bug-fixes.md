@@ -877,3 +877,9 @@ residual：VF67 部分 unique → P2-02。
 - **实际执行摘要**：vectorize 超预算 fail-closed；HTML 换行；单调锚；PDF 去 latin-1；检索 LIMIT+1 fail-closed；禁单通道 purge；指针 `active < excluded`；015 unique 含 generation；停用 Team 不可检索。
 - **Phase 偏差**：title→dual、acquisition budget、stub summary≠original、envelope 瘦、layered UUID validator 等未全部展开（P4-05/06/07/11/12/14/17/18 部分仍交后续切片）。
 - **测试发现**：`test_ns5_phase4.py` + adopt/retrieval/d04 绿。
+
+### 11.7 Phase 5 回填
+
+- **实际执行摘要**：XFF 默认不信；限流 overflow 拒绝新身份而非全局 fail-open；extras 拒 camelCase secret 与 signed URL；sqlite 双因子；mapped IPv6 unwrap；audit write 失败回滚 sampler；body Content-Length cap。
+- **Phase 偏差**：Starlette 主版本未强升（P5-05 若 0.115.12 仍可运行则 TrustedHost 未加，避免打本地 TestClient Host）。
+- **测试发现**：`test_ns5_phase5.py` + security_boundary 绿。

@@ -114,9 +114,15 @@ _SECRET_KEYS: ClassVar[set[str]] = {
     "password",
     "secret",
     "api_key",
+    "apikey",
+    "secretkey",
     "access_key",
+    "accesskey",
     "private_key",
+    "privatekey",
 }
+_SECRET_KEY_PATTERN = re.compile(r"(api[_-]?key|secret|token|password|authorization)", re.IGNORECASE)
+_SIGNED_URL = re.compile(r"(X-Amz-Signature|X-Amz-Credential|Signature=|sig=)", re.IGNORECASE)
 
 
 def assert_safe_public_data(value: Any) -> None:
@@ -124,11 +130,15 @@ def assert_safe_public_data(value: Any) -> None:
 
     if isinstance(value, dict):
         for key, item in value.items():
-            if key.lower() in _SECRET_KEYS:
+            folded = str(key).lower().replace("-", "")
+            if folded in _SECRET_KEYS or _SECRET_KEY_PATTERN.search(str(key)):
                 raise ValueError(f"unsafe key {key!r} in public payload")
             assert_safe_public_data(item)
     elif isinstance(value, list):
         for item in value:
             assert_safe_public_data(item)
-    elif isinstance(value, str) and _ABSOLUTE_PATH.search(value):
-        raise ValueError("absolute paths are not permitted in public payloads")
+    elif isinstance(value, str):
+        if _ABSOLUTE_PATH.search(value):
+            raise ValueError("absolute paths are not permitted in public payloads")
+        if _SIGNED_URL.search(value):
+            raise ValueError("signed URLs are not permitted in public payloads")

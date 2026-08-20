@@ -503,6 +503,19 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             registry.cardinality_drops = 0
         return PlainTextResponse(registry.render(), media_type="text/plain; version=0.0.4")
 
+    @app.middleware("http")
+    async def reject_oversize_body(request: Request, call_next):  # type: ignore[no-untyped-def]
+        cap = int(getattr(request.app.state.container.settings, "max_request_bytes", 1_048_576))
+        length = request.headers.get("content-length")
+        if length:
+            try:
+                if int(length) > cap:
+                    error = MkbError("REQUEST_BODY_TOO_LARGE", "Request body exceeds the configured cap", 413)
+                    return JSONResponse(status_code=413, content=error.as_dict(_public_request_id(request)))
+            except ValueError:
+                pass
+        return await call_next(request)
+
     app.include_router(public_router)
     app.include_router(internal_router)
     return app
