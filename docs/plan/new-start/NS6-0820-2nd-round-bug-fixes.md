@@ -761,3 +761,20 @@ NS6-0820-2nd-round-bug-fixes
 | `T0` | 重读 NS6 AP + VF-ledger 批次 1 + A-1…A-8 | 串行 P1→P2；禁止 waiver / CONCURRENT / 打开 VF62 |
 | `T1` | P1 代码 | UoW BEGIN fence + write_path_ready + scratch CW + vLLM timeout + handler/heartbeat + GC quarantine + TTL |
 | `T2` | P1 测试 | `uv run pytest` NS6-T01–T08 + 相关回归 PASS |
+
+### 11.3 Phase 2 回填
+
+- **实际执行摘要**：P2-01…P2-08（VF4/5/23/24/26/27/28/37）。schema 核心表闭集；live lookup 滤 tombstone；outbox.dead 看 rowcount + metrics + owning trace；retirement 对 pointer=None 一律 abandon；fail CAS 带 fencing_generation；cancel 同 TX 栅栏 Execution 并去掉 success-wins；Team UNIQUE → 409。
+- **Phase 偏差**：无 in-scope 代码偏差。supervisor 异常路径不再 `progressed+=1`。
+- **测试发现**：`tests/unit/test_ns6_phase2.py` 8 passed；`test_ns5_outbox_poison` / `test_ns5_retirement_stuck` / `test_ns5_phase2` 回归绿。
+
+| 工作项 | 状态 | 实际落点 | 备注 |
+|--------|------|----------|------|
+| P2-01 | `✅ done` | `migration_runner.py` `_CORE_SCHEMA_TABLES` | DROP outbox → schema false |
+| P2-02 | `✅ done` | `artifacts.live_stored_object_uuid`；generation/config/rebuild/scatter/task_create | 墓碑 uuid 不再复用 |
+| P2-03 | `✅ done` | `runtime_core.py` metrics；`runtime_outbox.py` owning trace | `/metrics` 同源 `metrics.render()` |
+| P2-04 | `✅ done` | `_mark_outbox_dead`/`_release_outbox` `rowcount==1`；repair 滤 pending/in_flight | stale owner 0 事件 |
+| P2-05 | `✅ done` | `_close_unavailable_intent_tx` 不再要求 item gone | namespace disabled 可让队 |
+| P2-06 | `✅ done` | `_fail_process_tx` `AND fencing_generation=?` | 旧 fail 不打死新世代 |
+| P2-07 | `✅ done` | `task_commands.cancel` CAS execution/process；projection 去掉 success-wins | Task 不得 succeeded |
+| P2-08 | `✅ done` | `teams.create` IntegrityError → 409/replay | stub UNIQUE |

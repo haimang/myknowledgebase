@@ -558,11 +558,9 @@ class IntakeGenerationArtifactsMixin:
             digest: str,
             size: int,
         ) -> str | None:
-            row = await tx.fetchone(
-                "SELECT stored_object_uuid FROM mkb_stored_objects WHERE team_uuid=? AND content_digest=? AND size_bytes=?",
-                (team_uuid, digest, size),
-            )
-            return None if row is None else str(row["stored_object_uuid"])
+            from src.services.artifacts import live_stored_object_uuid
+
+            return await live_stored_object_uuid(tx, team_uuid, digest, size)
 
 
     async def _catalog_generation_object(self, tx: UnitOfWork, team_uuid: str, stat: ObjectStat) -> str:

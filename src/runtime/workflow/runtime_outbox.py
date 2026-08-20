@@ -343,16 +343,38 @@ class WorkflowOutboxMixin:
     async def _mark_outbox_dead(self, outbox_id: str, lease_owner: str, error: str) -> None:
         now = utc_now()
         async with self.persistence.transaction() as tx:
-            row = await tx.fetchone(
-                "SELECT team_uuid,kind FROM mkb_outbox WHERE outbox_id=?", (outbox_id,)
-            )
-            await tx.execute(
+            updated = await tx.execute(
                 "UPDATE mkb_outbox SET status='dead',lease_owner=NULL,lease_expires_at=NULL,last_error=?,updated_at=? "
                 "WHERE outbox_id=? AND status='in_flight' AND lease_owner=?",
                 (_safe_outbox_error(error), now, outbox_id, lease_owner),
             )
+            if updated.rowcount != 1:
+                return
+            row = await tx.fetchone(
+                "SELECT team_uuid,kind,payload_json FROM mkb_outbox WHERE outbox_id=?", (outbox_id,)
+            )
             if row is not None:
                 await self._record_outbox_dead_tx(tx, row, error=_safe_outbox_error(error))
+
+    async def _owning_trace_uuid_tx(self, tx: UnitOfWork, row: dict[str, Any]) -> str:
+        try:
+            payload = json.loads(row.get("payload_json") or "")
+        except (json.JSONDecodeError, TypeError):
+            payload = None
+        if isinstance(payload, dict):
+            execution_uuid = payload.get("execution_uuid")
+            task_uuid = payload.get("task_uuid")
+            if isinstance(execution_uuid, str) and execution_uuid:
+                execution = await tx.fetchone(
+                    "SELECT trace_uuid FROM mkb_executions WHERE execution_uuid=?", (execution_uuid,)
+                )
+                if execution is not None and execution["trace_uuid"]:
+                    return str(execution["trace_uuid"])
+            if isinstance(task_uuid, str) and task_uuid:
+                task = await tx.fetchone("SELECT trace_uuid FROM mkb_tasks WHERE task_uuid=?", (task_uuid,))
+                if task is not None and task["trace_uuid"]:
+                    return str(task["trace_uuid"])
+        return uuid7()
 
     async def _record_outbox_dead_tx(self, tx: UnitOfWork, row: dict[str, Any], *, error: str) -> None:
         from src.services.events import DomainEventWriter
@@ -360,7 +382,7 @@ class WorkflowOutboxMixin:
         await DomainEventWriter().write(
             tx,
             team_uuid=str(row["team_uuid"]),
-            trace_uuid=uuid7(),
+            trace_uuid=await self._owning_trace_uuid_tx(tx, row),
             event_type="outbox.dead",
             aggregate="outbox",
             summary="Outbox delivery marked dead",
@@ -372,7 +394,7 @@ class WorkflowOutboxMixin:
         if metrics is not None:
             kind = str(row.get("kind") or "wake_process")
             try:
-                metrics.increment("mkb_outbox_dead_total", 1, kind=kind)
+                metrics.increment("mkb_outbox_dead_total", kind=kind)
             except Exception:
                 pass
 
@@ -395,12 +417,12 @@ class WorkflowOutboxMixin:
             status = "dead" if row["attempts"] >= 8 else "pending"
             safe_error = _safe_outbox_error(error)
             meta = await tx.fetchone(
-                "SELECT team_uuid,kind FROM mkb_outbox WHERE outbox_id=?", (outbox_id,)
+                "SELECT team_uuid,kind,payload_json FROM mkb_outbox WHERE outbox_id=?", (outbox_id,)
             )
-            await tx.execute(
+            released = await tx.execute(
                 "UPDATE mkb_outbox SET status=?,lease_owner=NULL,lease_expires_at=NULL,last_error=?,available_at=?,updated_at=? "
                 "WHERE outbox_id=? AND status='in_flight' AND lease_owner=?",
                 (status, safe_error, _add_seconds(now, 1), now, outbox_id, lease_owner),
             )
-            if status == "dead" and meta is not None:
+            if status == "dead" and meta is not None and released.rowcount == 1:
                 await self._record_outbox_dead_tx(tx, meta, error=safe_error)

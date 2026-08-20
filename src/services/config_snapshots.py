@@ -329,10 +329,10 @@ class ConfigSnapshotService:
         owner_kind: str,
         owner_uuid: str,
     ) -> str:
-        row = await tx.fetchone(
-            "SELECT stored_object_uuid FROM mkb_stored_objects WHERE team_uuid=? AND content_digest=? AND size_bytes=?",
-            (team_uuid, stat.sha256, stat.size_bytes),
-        )
+        from src.services.artifacts import live_stored_object_uuid
+
+        live_uuid = await live_stored_object_uuid(tx, team_uuid, stat.sha256, stat.size_bytes)
+        row = None if live_uuid is None else {"stored_object_uuid": live_uuid}
         if row is None:
             stored_object_uuid = uuid7()
             await tx.execute(

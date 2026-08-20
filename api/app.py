@@ -308,6 +308,7 @@ def create_container(settings: Settings | None = None) -> Container:
         dispatch_caps=dispatch_caps,
         live_inference=settings.live_inference,
         cleanup_recovery_window_seconds=settings.workflow_cleanup_recovery_window_seconds,
+        metrics=metrics,
     )
     # S09 retirement intent creation is part of a successful pointer cutover,
     # so construct it before the pipeline rather than only for the scanner.

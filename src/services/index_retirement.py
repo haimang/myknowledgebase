@@ -515,18 +515,6 @@ class IndexGenerationRetirementService:
     ) -> IndexGenerationRetirementResult | None:
         """Finish intents whose serving item is gone so they cannot occupy the due queue."""
 
-        item = await tx.fetchone(
-            "SELECT lifecycle_state, deleted_at FROM mkb_intake_items "
-            "WHERE team_uuid=? AND intake_item_uuid=?",
-            (candidate.team_uuid, intake_item_uuid),
-        )
-        gone = (
-            item is None
-            or item["deleted_at"] is not None
-            or str(item["lifecycle_state"]) in {"deactivated", "deleted"}
-        )
-        if not gone:
-            return None
         now = self._timestamp(self._now())
         await tx.execute(
             "UPDATE mkb_vector_records SET deleted_at=?,updated_at=? "

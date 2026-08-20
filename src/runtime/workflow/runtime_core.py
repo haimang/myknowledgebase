@@ -61,6 +61,7 @@ class WorkflowCoreMixin:
         default_max_recoveries: int = 3,
         retry_delay_seconds: int = 1,
         cleanup_recovery_window_seconds: int = 60,
+        metrics: Any | None = None,
     ) -> None:
         if default_max_retries < 0 or default_max_recoveries < 0:
             raise ValueError("retry and recovery limits must be non-negative")
@@ -83,6 +84,7 @@ class WorkflowCoreMixin:
         # evaluator below only appends eligibility evidence; physical archive
         # or deletion stays in the S12/S15 retention owner.
         self.cleanup_recovery_window_seconds = cleanup_recovery_window_seconds
+        self.metrics = metrics
         active_definitions = (definition, *additional_definitions)
         self._active_workflow_keys = {candidate.workflow_key for candidate in active_definitions}
         if len(self._active_workflow_keys) != len(active_definitions):

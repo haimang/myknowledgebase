@@ -1,9 +1,8 @@
 """Single owned Task status projection helper used by command and runtime paths.
 
-Success-while-cancelling is allowed (success-wins): a root Execution that
-reaches validated terminal success may project Task to succeeded even when
-cancel was already accepted, matching the live CAS filter that only excludes
-already-terminal Task rows.
+A Task that has already accepted cancel (`cancelling`) must not be projected
+to succeeded. In-flight handlers are fenced by the cancel UoW bumping the
+root Execution and running Process fencing_generation.
 """
 
 from __future__ import annotations
@@ -56,8 +55,7 @@ async def project_task_status_tx(
         if status != "queued":
             return False
     elif target == TaskStatus.SUCCEEDED:
-        # Success-wins: running or cancelling may become succeeded.
-        if status not in {"running", "cancelling"}:
+        if status != "running":
             return False
     elif target == TaskStatus.FAILED:
         if status not in {"running", "cancelling", "queued"}:

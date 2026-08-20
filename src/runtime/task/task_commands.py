@@ -197,6 +197,23 @@ class TaskCommandsMixin:
             )
             if updated.rowcount != 1:
                 raise ConflictError("revision-conflict", "Task revision is stale")
+            root_uuid = row["current_root_execution_uuid"]
+            if root_uuid:
+                await tx.execute(
+                    "UPDATE mkb_executions SET status='cancelling',"
+                    "cancel_requested_at=COALESCE(cancel_requested_at,?),"
+                    "row_revision=row_revision+1,updated_at=? "
+                    "WHERE root_execution_uuid=? AND status NOT IN ('succeeded','failed','cancelled')",
+                    (now, now, root_uuid),
+                )
+                await tx.execute(
+                    "UPDATE mkb_processes SET status='cancelling',fencing_generation=fencing_generation+1,"
+                    "row_revision=row_revision+1,updated_at=? "
+                    "WHERE execution_uuid IN ("
+                    "SELECT execution_uuid FROM mkb_executions WHERE root_execution_uuid=?"
+                    ") AND status IN ('claimed','running')",
+                    (now, root_uuid),
+                )
             await self._enqueue(
                 tx,
                 team_uuid,

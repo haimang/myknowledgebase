@@ -160,4 +160,19 @@ def verify_migrations(connection: MigrationConnection, migrations: list[Migratio
         tables = {str(row[0]) for row in _fetchall(connection, "SELECT name FROM sqlite_master WHERE type='table'")}
     except Exception:
         return False
-    return "mkb_tasks" in tables
+    return _CORE_SCHEMA_TABLES.issubset(tables)
+
+
+_CORE_SCHEMA_TABLES = frozenset(
+    {
+        "mkb_tasks",
+        "mkb_processes",
+        "mkb_executions",
+        "mkb_outbox",
+        "mkb_stored_objects",
+        "mkb_object_references",
+        "mkb_vector_records",
+        "mkb_publication_proofs",
+        "mkb_intake_items",
+    }
+)

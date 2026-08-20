@@ -678,12 +678,11 @@ class ScatterAcceptanceWriter:
 
     @staticmethod
     async def _catalog_stat(tx: UnitOfWork, team_uuid: str, stat: ObjectStat) -> str:
-        existing = await tx.fetchone(
-            "SELECT stored_object_uuid FROM mkb_stored_objects WHERE team_uuid=? AND content_digest=? AND size_bytes=?",
-            (team_uuid, stat.sha256, stat.size_bytes),
-        )
-        if existing is not None:
-            return str(existing["stored_object_uuid"])
+        from src.services.artifacts import live_stored_object_uuid
+
+        existing_uuid = await live_stored_object_uuid(tx, team_uuid, stat.sha256, stat.size_bytes)
+        if existing_uuid is not None:
+            return existing_uuid
         stored_object_uuid = uuid7()
         await tx.execute(
             "INSERT INTO mkb_stored_objects "

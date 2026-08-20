@@ -456,7 +456,7 @@ class WorkflowOutcomeMixin:
             "error_class='workflow-stage',error_code=?,error_message=?,failure_disposition=?,claim_token_hash=NULL,"
             "lease_owner=NULL,lease_expires_at=NULL,heartbeat_at=NULL,completed_at=?,row_revision=row_revision+1,updated_at=?,"
             "payload_extra=COALESCE(?,payload_extra) "
-            "WHERE process_uuid=? AND status NOT IN ('succeeded','failed','cancelled')",
+            "WHERE process_uuid=? AND status NOT IN ('succeeded','failed','cancelled') AND fencing_generation=?",
             (
                 accepted_outcome_digest,
                 error_code,
@@ -466,9 +466,10 @@ class WorkflowOutcomeMixin:
                 now,
                 extra_json,
                 process["process_uuid"],
+                process["fencing_generation"],
             ),
         )
-        if updated.rowcount:
+        if updated.rowcount == 1:
             from src.runtime.intake.generation_evidence import write_pending_generation_evidence_tx
 
             await write_pending_generation_evidence_tx(tx, process)

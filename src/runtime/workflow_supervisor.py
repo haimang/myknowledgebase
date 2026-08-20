@@ -51,7 +51,6 @@ class WorkflowSupervisor:
             except Exception as exc:
                 self.last_error = exc
                 self.consecutive_failures += 1
-                progressed += 1
         for _ in range(self.max_processes_per_tick):
             try:
                 if not await self.worker.run_once(self.lease_owner):
@@ -60,7 +59,6 @@ class WorkflowSupervisor:
             except Exception as exc:
                 self.last_error = exc
                 self.consecutive_failures += 1
-                progressed += 1
         return progressed + await self.runtime.repair_once()
 
     async def run(self, stop: asyncio.Event) -> None:

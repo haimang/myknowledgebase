@@ -44,7 +44,8 @@ class WorkflowRepairMixin:
             )
             for decision in decisions:
                 before = await tx.fetchone(
-                    "SELECT outbox_id FROM mkb_outbox WHERE team_uuid=? AND dedupe_key IN (?,?)",
+                    "SELECT outbox_id FROM mkb_outbox WHERE team_uuid=? AND dedupe_key IN (?,?) "
+                    "AND status IN ('pending','in_flight')",
                     (
                         decision["team_uuid"],
                         f"gate-decision:{decision['decision_uuid']}",

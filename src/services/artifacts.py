@@ -24,6 +24,17 @@ from src.storage.ports import ObjectStorePort
 StageCommitCallback = Callable[[UnitOfWork], Awaitable[None]]
 
 
+async def live_stored_object_uuid(tx: UnitOfWork, team_uuid: str, digest: str, size_bytes: int) -> str | None:
+    """Return the live catalog uuid for a digest, ignoring tombstoned rows."""
+
+    row = await tx.fetchone(
+        "SELECT stored_object_uuid FROM mkb_stored_objects "
+        "WHERE team_uuid=? AND content_digest=? AND size_bytes=? AND tombstoned_at IS NULL",
+        (team_uuid, digest, size_bytes),
+    )
+    return None if row is None else str(row["stored_object_uuid"])
+
+
 @dataclass(frozen=True, slots=True)
 class StagedArtifacts:
     """Opaque references a handler can safely put in a ProcessOutcome."""
@@ -138,11 +149,8 @@ class OutcomeArtifactCommitter:
         owner_kind: str,
         owner_uuid: str,
     ) -> None:
-        existing = await tx.fetchone(
-            "SELECT stored_object_uuid FROM mkb_stored_objects "
-            "WHERE team_uuid=? AND content_digest=? AND size_bytes=? AND tombstoned_at IS NULL",
-            (team_uuid, stat.sha256, stat.size_bytes),
-        )
+        existing_uuid = await live_stored_object_uuid(tx, team_uuid, stat.sha256, stat.size_bytes)
+        existing = None if existing_uuid is None else {"stored_object_uuid": existing_uuid}
         if existing is None:
             stored_object_uuid = uuid7()
             await tx.execute(

@@ -398,7 +398,8 @@ class TaskCreateMixin:
         for owner_kind, digest in entries:
             object_row = await tx.fetchone(
                 "SELECT stored_object_uuid,size_bytes FROM mkb_stored_objects "
-                "WHERE team_uuid=? AND content_digest=? ORDER BY created_at ASC LIMIT 1",
+                "WHERE team_uuid=? AND content_digest=? AND tombstoned_at IS NULL "
+                "ORDER BY created_at ASC LIMIT 1",
                 (team_uuid, digest),
             )
             if object_row is None:

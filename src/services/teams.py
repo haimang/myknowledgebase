@@ -12,6 +12,11 @@ from src.contracts.common.time import utc_now
 from src.persistence.ports import PersistencePort
 
 
+def _is_unique_conflict(exc: BaseException) -> bool:
+    text = str(exc).lower()
+    return "unique" in text or "constraint" in text or type(exc).__name__ == "IntegrityError"
+
+
 class TeamService:
     def __init__(self, persistence: PersistencePort) -> None:
         self.persistence = persistence
@@ -42,20 +47,30 @@ class TeamService:
                 if existing["creation_fingerprint"] != fingerprint:
                     raise ConflictError("team-identity-conflict", "Team identity is already registered")
                 return self._view(existing), True
-            await tx.execute(
-                "INSERT INTO mkb_teams "
-                "(team_uuid,name,description,status,row_revision,creation_fingerprint,created_at,updated_at,payload_extra) "
-                "VALUES (?,?,?,'active',0,?,?,?,?)",
-                (
-                    request.team_uuid,
-                    request.name,
-                    request.description,
-                    fingerprint,
-                    now,
-                    now,
-                    json.dumps(request.payload_extra, separators=(",", ":")),
-                ),
-            )
+            try:
+                await tx.execute(
+                    "INSERT INTO mkb_teams "
+                    "(team_uuid,name,description,status,row_revision,creation_fingerprint,created_at,updated_at,payload_extra) "
+                    "VALUES (?,?,?,'active',0,?,?,?,?)",
+                    (
+                        request.team_uuid,
+                        request.name,
+                        request.description,
+                        fingerprint,
+                        now,
+                        now,
+                        json.dumps(request.payload_extra, separators=(",", ":")),
+                    ),
+                )
+            except Exception as exc:
+                if not _is_unique_conflict(exc):
+                    raise
+                raced = await tx.fetchone("SELECT * FROM mkb_teams WHERE team_uuid=?", (request.team_uuid,))
+                if raced is None:
+                    raise ConflictError("team-identity-conflict", "Team identity collided") from exc
+                if raced["creation_fingerprint"] != fingerprint:
+                    raise ConflictError("team-identity-conflict", "Team identity is already registered") from exc
+                return self._view(raced), True
             created = await tx.fetchone("SELECT * FROM mkb_teams WHERE team_uuid=?", (request.team_uuid,))
         assert created is not None
         return self._view(created), False
