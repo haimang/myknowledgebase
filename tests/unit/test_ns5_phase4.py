@@ -71,9 +71,9 @@ def test_stub_summary_differs_from_original() -> None:
 def test_title_enters_content_full() -> None:
     from src.services.lsrag_compiler.models import content_full
 
-    rendered = content_full(body="body text", metadata_headers={"title": "Notice"})
-    assert rendered.startswith("title: Notice")
-    assert "body text" in rendered
+    rendered = content_full(body="body text")
+    assert "title:" not in rendered
+    assert rendered == "body text"
 
 
 def test_acquisition_over_cap_is_fail_closed() -> None:

@@ -499,9 +499,16 @@ def parse_retrieval_request(payload: object) -> RetrievalRequest:
         raise MkbError("RETRIEVE_SCHEMA_UNKNOWN_FIELD", "Unknown retrieval request field", 422)
 
     try:
-        return RetrievalRequest.model_validate(payload)
+        request = RetrievalRequest.model_validate(payload)
     except ValidationError as exc:
         raise _retrieval_validation_error(exc) from exc
+    if request.namespace_key is None and request.namespace_uuid is None:
+        raise MkbError(
+            "RETRIEVE_SCHEMA_NAMESPACE_REQUIRED",
+            "retrieval requires namespace_key or namespace_uuid; default is not a Layer-A space",
+            422,
+        )
+    return request
 
 
 def _retrieval_validation_error(exc: ValidationError) -> MkbError:

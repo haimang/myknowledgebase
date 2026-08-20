@@ -641,3 +641,4 @@ S10-v1.0 将 progressive `T-O-247..262` 升格为 **唯一可编码执行真相*
 | 版本 | 日期 | 作者 | 状态 | 变更 |
 |---|---|---|---|---|
 | `S10-v1.0` | `2026-08-12` | `MKB owner + Codex` | `accepted` | 自 `qna-truth/S10.md v1.0`（`T-O-247..262`）升格唯一执行 SSOT；九段式 + E01–E10；dual-fence/Traceback/rank/pack/context-only/契约闭包；Round 3 waived；G-07 closed |
+| `S10-v1.0-ns6-note` | `2026-08-20` | `Grok` | `change-request` | 检索必须显式 `namespace_key` 或 `namespace_uuid`；禁止缺省落到 `"default"`。query embed 与 write 同一 body-only 配方。 |

@@ -43,6 +43,7 @@ def _request_payload(team_uuid: str, **extra: Any) -> dict[str, Any]:
     return {
         "schema_version": "mkb.retrieval.v1",
         "team_uuid": team_uuid,
+        "namespace_key": "default",
         "query": "a safe query",
         **extra,
     }
@@ -71,6 +72,17 @@ def test_forbidden_retrieval_controls_use_stable_non_echoing_taxonomy(
     assert response.json()["error"]["code"] == "RETRIEVE_SCHEMA_FORBIDDEN_FIELD"
     assert "must-not-echo" not in response.text
     assert "details" not in response.json()["error"]
+
+
+def test_omitted_namespace_is_rejected(client: TestClient) -> None:
+    team_uuid = uuid7()
+    response = client.post(
+        f"/v1/teams/{team_uuid}/retrieval:search",
+        headers={"Authorization": "Bearer retrieval-validation-token"},
+        json={"schema_version": "mkb.retrieval.v1", "team_uuid": team_uuid, "query": "a safe query"},
+    )
+    assert response.status_code == 422
+    assert response.json()["error"]["code"] == "RETRIEVE_SCHEMA_NAMESPACE_REQUIRED"
 
 
 def test_unknown_retrieval_field_uses_stable_non_echoing_taxonomy(client: TestClient) -> None:

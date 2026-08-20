@@ -462,7 +462,7 @@ async def test_access_ports_supply_traceback_material_to_retrieval_service(envir
         environment.persistence,
         body_port=environment.access,
         eligibility_port=environment.access,
-    ).search({"team_uuid": TEAM, "query": "revenue", "include_pack": False})
+    ).search({"team_uuid": TEAM, "namespace_key": "default", "query": "revenue", "include_pack": False})
 
     assert result["disposition"] == "ok"
     hit = result["results"][0]

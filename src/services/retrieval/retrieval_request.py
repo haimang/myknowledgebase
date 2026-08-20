@@ -263,7 +263,11 @@ class RetrievalRequestMixin:
         namespace_key = self._request_value(request, "namespace_key")
         namespace_uuid = self._request_value(request, "namespace_uuid")
         if namespace_key is None and namespace_uuid is None:
-            namespace_key = "default"
+            raise MkbError(
+                "RETRIEVE_SCHEMA_NAMESPACE_REQUIRED",
+                "retrieval requires namespace_key or namespace_uuid; default is not a Layer-A space",
+                422,
+            )
         if namespace_key is not None and (not isinstance(namespace_key, str) or not namespace_key.strip()):
             raise MkbError("RETRIEVE_SCHEMA_NAMESPACE_INVALID", "namespace_key must be a non-empty string", 422)
         if isinstance(namespace_key, str) and len(namespace_key) > 256:

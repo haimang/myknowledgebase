@@ -240,7 +240,7 @@ async def retrieval_db(tmp_path: Path) -> SqlitePersistence:
 
 
 async def test_blank_query_is_empty_without_database_read(retrieval_db: SqlitePersistence) -> None:
-    result = await RetrievalService(retrieval_db).search({"team_uuid": TEAM, "query": " \t "})
+    result = await RetrievalService(retrieval_db).search({"team_uuid": TEAM, "namespace_key": "default", "query": " \t "})
 
     assert result["disposition"] == "empty"
     assert result["results"] == []
@@ -256,7 +256,7 @@ async def test_search_applies_fences_traceback_redaction_and_honest_rerank_fallb
         for table in ("mkb_tasks", "mkb_task_audits", "mkb_executions", "mkb_processes")
     }
     result = await RetrievalService(retrieval_db, BrokenReranker(), body_port=FixtureBodies()).search(
-        {"team_uuid": TEAM, "query": "revenue", "return_k": 10}
+        {"team_uuid": TEAM, "namespace_key": "default", "query": "revenue", "return_k": 10}
     )
     counts_after = {
         table: connection.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
@@ -291,7 +291,7 @@ async def test_g0_summary_tracebacks_to_construct_original_without_original_vect
     connection.commit()
 
     result = await RetrievalService(retrieval_db, body_port=FixtureBodies()).search(
-        {"team_uuid": TEAM, "query": "root", "return_k": 10}
+        {"team_uuid": TEAM, "namespace_key": "default", "query": "root", "return_k": 10}
     )
 
     g0 = next(item for item in result["results"] if item["coordinate"]["unit_id"] == "g0:root")
@@ -303,7 +303,7 @@ async def test_g0_summary_tracebacks_to_construct_original_without_original_vect
 
 async def test_summary_without_original_is_not_claimed_as_original(retrieval_db: SqlitePersistence) -> None:
     result = await RetrievalService(retrieval_db, body_port=FixtureBodies()).search(
-        {"team_uuid": TEAM, "query": "missing", "return_k": 10}
+        {"team_uuid": TEAM, "namespace_key": "default", "query": "missing", "return_k": 10}
     )
 
     missing = next(item for item in result["results"] if item["coordinate"]["unit_id"] == "g1:missing")
@@ -316,21 +316,21 @@ async def test_dual_fence_rejects_withdrawn_pointer_and_non_serving_revision(ret
     connection = retrieval_db._connect()
     connection.execute("UPDATE mkb_vector_records SET publication_state='withdrawn'")
     connection.commit()
-    withdrawn = await RetrievalService(retrieval_db).search({"team_uuid": TEAM, "query": "revenue"})
+    withdrawn = await RetrievalService(retrieval_db).search({"team_uuid": TEAM, "namespace_key": "default", "query": "revenue"})
     assert withdrawn["disposition"] == "empty"
     assert withdrawn["diagnostics"]["empty_reason"] == "no_hit"
 
     connection.execute("UPDATE mkb_vector_records SET publication_state='indexed'")
     connection.execute("UPDATE mkb_intake_items SET lifecycle_state='deactivated', serving_revision_uuid=NULL")
     connection.commit()
-    inactive = await RetrievalService(retrieval_db).search({"team_uuid": TEAM, "query": "revenue"})
+    inactive = await RetrievalService(retrieval_db).search({"team_uuid": TEAM, "namespace_key": "default", "query": "revenue"})
     assert inactive["disposition"] == "empty"
     assert inactive["diagnostics"]["empty_reason"] == "no_hit"
 
     connection.execute("UPDATE mkb_intake_items SET lifecycle_state='active', serving_revision_uuid=?", (REVISION,))
     connection.execute("UPDATE mkb_vector_records SET deleted_at=?", (NOW,))
     connection.commit()
-    soft_deleted = await RetrievalService(retrieval_db).search({"team_uuid": TEAM, "query": "revenue"})
+    soft_deleted = await RetrievalService(retrieval_db).search({"team_uuid": TEAM, "namespace_key": "default", "query": "revenue"})
     assert soft_deleted["disposition"] == "empty"
 
 
@@ -338,13 +338,13 @@ async def test_dual_fence_requires_named_proof_and_active_pointer(retrieval_db: 
     connection = retrieval_db._connect()
     connection.execute("UPDATE mkb_index_active_pointers SET last_proof_uuid=NULL")
     connection.commit()
-    missing_pointer_proof = await RetrievalService(retrieval_db).search({"team_uuid": TEAM, "query": "revenue"})
+    missing_pointer_proof = await RetrievalService(retrieval_db).search({"team_uuid": TEAM, "namespace_key": "default", "query": "revenue"})
     assert missing_pointer_proof["disposition"] == "empty"
 
     connection.execute("UPDATE mkb_index_active_pointers SET last_proof_uuid=?", (PROOF,))
     connection.execute("UPDATE mkb_publication_proofs SET matched_count=4 WHERE proof_uuid=?", (PROOF,))
     connection.commit()
-    incomplete_proof = await RetrievalService(retrieval_db).search({"team_uuid": TEAM, "query": "revenue"})
+    incomplete_proof = await RetrievalService(retrieval_db).search({"team_uuid": TEAM, "namespace_key": "default", "query": "revenue"})
     assert incomplete_proof["disposition"] == "empty"
 
 
@@ -389,7 +389,7 @@ async def test_dual_fence_rejects_an_incomplete_or_injected_proof_record_set(
     )
     connection.commit()
 
-    result = await RetrievalService(retrieval_db).search({"team_uuid": TEAM, "query": "revenue"})
+    result = await RetrievalService(retrieval_db).search({"team_uuid": TEAM, "namespace_key": "default", "query": "revenue"})
 
     assert result["disposition"] == "empty"
     assert result["diagnostics"]["empty_reason"] == "no_hit"
@@ -398,7 +398,7 @@ async def test_dual_fence_rejects_an_incomplete_or_injected_proof_record_set(
 async def test_injected_eligibility_port_is_batched_and_fail_closed(retrieval_db: SqlitePersistence) -> None:
     eligibility = RejectingEligibility()
     result = await RetrievalService(retrieval_db, eligibility_port=eligibility).search(
-        {"team_uuid": TEAM, "query": "revenue"}
+        {"team_uuid": TEAM, "namespace_key": "default", "query": "revenue"}
     )
 
     assert result["disposition"] == "empty"
@@ -414,7 +414,7 @@ async def test_post_ranking_publication_revalidation_rejects_a_withdrawal(
     eligibility = WithdrawingPublicationEligibility(retrieval_db)
 
     result = await RetrievalService(retrieval_db, eligibility_port=eligibility).search(
-        {"team_uuid": TEAM, "query": "revenue"}
+        {"team_uuid": TEAM, "namespace_key": "default", "query": "revenue"}
     )
 
     assert eligibility.calls == 1
@@ -425,7 +425,7 @@ async def test_post_ranking_publication_revalidation_rejects_a_withdrawal(
 async def test_body_integrity_failure_fails_closed(retrieval_db: SqlitePersistence) -> None:
     with pytest.raises(MkbError) as error:
         await RetrievalService(retrieval_db, body_port=IntegrityFailureBodies()).search(
-            {"team_uuid": TEAM, "query": "revenue"}
+            {"team_uuid": TEAM, "namespace_key": "default", "query": "revenue"}
         )
 
     assert error.value.code == "RETRIEVE_BODY_INTEGRITY"
@@ -435,7 +435,7 @@ async def test_missing_original_body_degrades_traceback_without_claiming_resolut
     retrieval_db: SqlitePersistence,
 ) -> None:
     result = await RetrievalService(retrieval_db, body_port=MissingOriginalBodies()).search(
-        {"team_uuid": TEAM, "query": "revenue"}
+        {"team_uuid": TEAM, "namespace_key": "default", "query": "revenue"}
     )
 
     summary = next(item for item in result["results"] if item["hit_channel"] == "summary")
@@ -446,7 +446,7 @@ async def test_missing_original_body_degrades_traceback_without_claiming_resolut
 
 async def test_missing_configured_reranker_is_failed_not_skipped(retrieval_db: SqlitePersistence) -> None:
     result = await RetrievalService(retrieval_db, body_port=FixtureBodies()).search(
-        {"team_uuid": TEAM, "query": "revenue"}
+        {"team_uuid": TEAM, "namespace_key": "default", "query": "revenue"}
     )
 
     assert len(result["results"]) > 1
@@ -456,29 +456,29 @@ async def test_missing_configured_reranker_is_failed_not_skipped(retrieval_db: S
 async def test_unknown_filter_and_invalid_rank_policy_fail_loudly(retrieval_db: SqlitePersistence) -> None:
     service = RetrievalService(retrieval_db)
     with pytest.raises(MkbError, match="unknown retrieval filter key") as unknown:
-        await service.search({"team_uuid": TEAM, "query": "x", "filters": {"forbidden": "x"}})
+        await service.search({"team_uuid": TEAM, "namespace_key": "default", "query": "x", "filters": {"forbidden": "x"}})
     assert unknown.value.code == "RETRIEVE_FILTER_INVALID"
 
     with pytest.raises(MkbError) as invalid:
-        await service.search({"team_uuid": TEAM, "query": "x", "return_k": 20, "recall_k": 10})
+        await service.search({"team_uuid": TEAM, "namespace_key": "default", "query": "x", "return_k": 20, "recall_k": 10})
     assert invalid.value.code == "RETRIEVE_TOPK_INVALID"
 
     with pytest.raises(MkbError) as forbidden:
-        await service.search({"team_uuid": TEAM, "query": "x", "index_generation": 999})
+        await service.search({"team_uuid": TEAM, "namespace_key": "default", "query": "x", "index_generation": 999})
     assert forbidden.value.code == "RETRIEVE_SCHEMA_FORBIDDEN_FIELD"
 
     with pytest.raises(MkbError) as malformed_schema:
-        await service.search({"schema_version": "mkb.retrieval.v0", "team_uuid": TEAM, "query": "x"})
+        await service.search({"schema_version": "mkb.retrieval.v0", "team_uuid": TEAM, "namespace_key": "default", "query": "x"})
     assert malformed_schema.value.code == "RETRIEVE_SCHEMA_INVALID"
 
     with pytest.raises(MkbError) as invalid_source_kind:
-        await service.search({"team_uuid": TEAM, "query": "x", "filters": {"source_kind": "unregistered"}})
+        await service.search({"team_uuid": TEAM, "namespace_key": "default", "query": "x", "filters": {"source_kind": "unregistered"}})
     assert invalid_source_kind.value.code == "RETRIEVE_FILTER_INVALID"
 
 
 async def test_successful_rerank_retains_ann_score(retrieval_db: SqlitePersistence) -> None:
     result = await RetrievalService(retrieval_db, FixedReranker(), body_port=FixtureBodies()).search(
-        {"team_uuid": TEAM, "query": "revenue", "return_k": 10}
+        {"team_uuid": TEAM, "namespace_key": "default", "query": "revenue", "return_k": 10}
     )
 
     assert result["diagnostics"]["rerank_status"] == "applied"
@@ -509,7 +509,7 @@ async def test_live_embed_layer_a_mismatch_fails_closed(retrieval_db: SqlitePers
 
     with pytest.raises(MkbError) as mismatch:
         await RetrievalService(retrieval_db, MismatchedEmbedder(), live_inference=True).search(
-            {"team_uuid": TEAM, "query": "revenue"}
+            {"team_uuid": TEAM, "namespace_key": "default", "query": "revenue"}
         )
     assert mismatch.value.code == "RETRIEVE_SPACE_LAYER_A_MISMATCH"
 
@@ -537,7 +537,7 @@ async def test_live_embed_adapter_layer_a_mismatch_fails_closed(retrieval_db: Sq
 
     with pytest.raises(MkbError) as mismatch:
         await RetrievalService(retrieval_db, AdapterMismatchedEmbedder(), live_inference=True).search(
-            {"team_uuid": TEAM, "query": "revenue"}
+            {"team_uuid": TEAM, "namespace_key": "default", "query": "revenue"}
         )
     assert mismatch.value.code == "RETRIEVE_SPACE_LAYER_A_MISMATCH"
 
@@ -580,7 +580,7 @@ async def test_local_exact_search_respects_the_controlled_namespace_metric(retri
         live_inference=True,
         rerank_enabled=False,
     ).search(
-        {"team_uuid": TEAM, "query": "revenue", "filters": {"channel": "original"}, "return_k": 1, "recall_k": 3}
+        {"team_uuid": TEAM, "namespace_key": "default", "query": "revenue", "filters": {"channel": "original"}, "return_k": 1, "recall_k": 3}
     )
 
     assert result["disposition"] == "ok"
@@ -591,7 +591,7 @@ async def test_local_exact_search_respects_the_controlled_namespace_metric(retri
 
 async def test_pack_is_bounded_and_marks_truncation(retrieval_db: SqlitePersistence) -> None:
     result = await RetrievalService(retrieval_db, body_port=FixtureBodies(), pack_max_hits=1).search(
-        {"team_uuid": TEAM, "query": "revenue", "include_pack": True}
+        {"team_uuid": TEAM, "namespace_key": "default", "query": "revenue", "include_pack": True}
     )
 
     assert result["pack"]["pack_hit_count"] == 1
@@ -618,7 +618,7 @@ async def test_g0_result_packs_as_a_document_root(retrieval_db: SqlitePersistenc
         candidate_scorer=root_only_scorer,
         body_port=FixtureBodies(),
         rerank_enabled=False,
-    ).search({"team_uuid": TEAM, "query": "revenue", "return_k": 1, "recall_k": 1})
+    ).search({"team_uuid": TEAM, "namespace_key": "default", "query": "revenue", "return_k": 1, "recall_k": 1})
 
     assert result["results"][0]["granularity"] == 0
     assert result["pack"]["segments"][0]["tier"] == "document_root"
