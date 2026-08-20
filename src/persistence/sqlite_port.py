@@ -13,7 +13,11 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any, Literal
 
-from src.persistence.engine import apply_capability_gates, probe_concurrent_writes, probe_native_vector
+from src.persistence.engine import (
+    apply_capability_gates,
+    probe_concurrent_writes_scratch,
+    probe_native_vector,
+)
 from src.persistence.migration_runner import (
     apply_migrations,
     discover_migrations,
@@ -61,6 +65,7 @@ class SqlitePersistence:
         self.native_vector_required = native_vector_required
         self._write_lock = asyncio.Lock()
         self._connection: sqlite3.Connection | None = None
+        self._cw_probe_cache: bool | None = None
 
     def _connect(self) -> sqlite3.Connection:
         if self._connection is None:
@@ -102,26 +107,35 @@ class SqlitePersistence:
         connection.row_factory = sqlite3.Row
         return connection
 
+    def _probe_cw_scratch(self) -> bool:
+        if self._cw_probe_cache is not None:
+            return self._cw_probe_cache
+
+        def connect(path: str) -> sqlite3.Connection:
+            return sqlite3.connect(path, check_same_thread=False, isolation_level=None)
+
+        scratch = self.database_path.parent / f".{self.database_path.name}.cw-probe"
+        self._cw_probe_cache = probe_concurrent_writes_scratch(connect, scratch)
+        return self._cw_probe_cache
+
     async def readiness(self) -> dict[str, bool]:
         try:
             # SQLite exposes one connection to this single-writer profile.
             # Readiness verification touches that connection too, so it must
             # share the transaction lock; otherwise concurrent claims can race
             # a PRAGMA/schema query against BEGIN IMMEDIATE and falsely fence
-            # healthy work as not-ready. Capability probes use a bypass
-            # connection so they never flip the live journal_mode.
+            # healthy work as not-ready. CW probes a scratch file so they
+            # never flip the live journal_mode.
             async with self._write_lock:
                 connection = self._connect()
                 migrations = discover_migrations(self.migration_directory)
                 schema_ok = await asyncio.to_thread(verify_migrations, connection, migrations)
-                probe = self._open_probe_connection()
-                try:
-                    cw = await asyncio.to_thread(
-                        probe_concurrent_writes, probe, restore_journal_mode=False
-                    )
-                    vector = await asyncio.to_thread(self._probe_native_vector, probe)
-                finally:
-                    probe.close()
+            probe = self._open_probe_connection()
+            try:
+                vector = await asyncio.to_thread(self._probe_native_vector, probe)
+            finally:
+                probe.close()
+            cw = await asyncio.to_thread(self._probe_cw_scratch)
             gates = apply_capability_gates(
                 concurrent_writes=cw,
                 native_vector=vector,
@@ -131,6 +145,7 @@ class SqlitePersistence:
             return {
                 "db_primary": True,
                 "schema_migration": schema_ok,
+                "write_path_ready": True,
                 "concurrent_writes": gates["concurrent_writes"],
                 "native_vector": gates["native_vector"],
                 "concurrent_writes_probe": gates["concurrent_writes_probe"],
@@ -140,6 +155,7 @@ class SqlitePersistence:
             return {
                 "db_primary": False,
                 "schema_migration": False,
+                "write_path_ready": False,
                 "concurrent_writes": False,
                 "native_vector": False,
                 "concurrent_writes_probe": False,

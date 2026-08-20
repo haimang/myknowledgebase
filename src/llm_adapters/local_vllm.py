@@ -203,13 +203,16 @@ class LocalVllmAdapter:
         del query, documents
         raise MkbError("INFERENCE_CONFIG_RERANK_UNAVAILABLE", "Reranking is not bound", 503)
 
-    def _shared_client(self, *, timeout: float) -> httpx.AsyncClient:
+    def _shared_client(self) -> httpx.AsyncClient:
         client = self._client
         if client is None:
+            # Per-request timeout is the contract. Baking the first caller's
+            # timeout into the shared client froze generate at the 5s probe.
             client = httpx.AsyncClient(
-                timeout=timeout,
+                timeout=None,
                 transport=self._transport,
                 follow_redirects=False,
+                trust_env=False,
             )
             self._client = client
         return client
@@ -222,8 +225,12 @@ class LocalVllmAdapter:
 
     async def probe(self, model_key: str | None = None) -> bool:
         try:
-            client = self._shared_client(timeout=min(self.timeout_seconds, 5))
-            response = await client.get(f"{self.base_url}/v1/models", headers=self._headers())
+            client = self._shared_client()
+            response = await client.get(
+                f"{self.base_url}/v1/models",
+                headers=self._headers(),
+                timeout=min(self.timeout_seconds, 5),
+            )
             if not 200 <= response.status_code < 300:
                 return False
             if not model_key:
@@ -241,8 +248,13 @@ class LocalVllmAdapter:
 
     async def _request(self, path: str, payload: dict[str, Any], *, timeout: float | None = None) -> dict[str, Any]:
         try:
-            client = self._shared_client(timeout=self.timeout_seconds if timeout is None else timeout)
-            response = await client.post(f"{self.base_url}{path}", json=payload, headers=self._headers())
+            client = self._shared_client()
+            response = await client.post(
+                f"{self.base_url}{path}",
+                json=payload,
+                headers=self._headers(),
+                timeout=self.timeout_seconds if timeout is None else timeout,
+            )
         except MkbError:
             raise
         except httpx.RequestError as exc:

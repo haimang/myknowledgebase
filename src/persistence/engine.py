@@ -7,6 +7,8 @@ presence and libsql_vector_idx are never evidence.
 
 from __future__ import annotations
 
+from collections.abc import Callable
+from pathlib import Path
 from typing import Any
 
 
@@ -40,6 +42,33 @@ def probe_concurrent_writes(connection: Any, *, restore_journal_mode: bool = Tru
             try:
                 _set_journal_mode(connection, previous_mode)
             except Exception:
+                pass
+
+
+def probe_concurrent_writes_scratch(connect: Callable[[str], Any], scratch_path: Path) -> bool:
+    """Measure BEGIN CONCURRENT on a throwaway file, never the live database.
+
+    ``PRAGMA journal_mode`` is database-wide. Probing the production file —
+    even through a bypass connection — can flip a live ``wal`` database to
+    ``mvcc``. Scratch isolation keeps the constitution probe honest without
+    mutating the leaf worker's primary file.
+    """
+
+    scratch_path.parent.mkdir(parents=True, exist_ok=True)
+    connection = connect(str(scratch_path))
+    try:
+        return probe_concurrent_writes(connection, restore_journal_mode=False)
+    finally:
+        closer = getattr(connection, "close", None)
+        if closer is not None:
+            try:
+                closer()
+            except Exception:
+                pass
+        for leftover in scratch_path.parent.glob(scratch_path.name + "*"):
+            try:
+                leftover.unlink()
+            except OSError:
                 pass
 
 

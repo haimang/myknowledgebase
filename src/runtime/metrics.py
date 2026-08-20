@@ -22,6 +22,7 @@ _READINESS_COMPONENTS = frozenset(
         "registry_bootstrap",
         "db_primary",
         "concurrent_writes",
+        "write_path_ready",
         "native_vector",
         "object_root",
         "inference_binding",

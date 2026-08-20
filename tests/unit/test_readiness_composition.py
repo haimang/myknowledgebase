@@ -149,7 +149,7 @@ async def test_constitution_defaults_make_stock_sqlite_app_not_ready(tmp_path: P
         ready = await container.health.ready()
         assert ready["status"] == "not_ready"
         names = {item["name"]: item["ok"] for item in ready["components"]}
-        assert names["concurrent_writes"] is False
+        assert names["write_path_ready"] is True
         assert names["native_vector"] is False
     finally:
         await container.persistence.close()

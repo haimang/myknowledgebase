@@ -135,6 +135,11 @@ class WorkflowWorker:
             heartbeat_task.cancel()
             with suppress(asyncio.CancelledError, Exception):
                 await heartbeat_task
+            if not handler_task.done():
+                handler_task.cancel()
+                with suppress(asyncio.CancelledError):
+                    await handler_task
+                self._discard_pending(claim.command)
 
     async def _heartbeat_loop(
         self,
@@ -159,4 +164,8 @@ class WorkflowWorker:
                     handler_task.cancel()
                     return
         except asyncio.CancelledError:
+            return
+        except Exception:
+            fenced.set()
+            handler_task.cancel()
             return

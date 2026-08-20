@@ -409,7 +409,11 @@ def create_container(settings: Settings | None = None) -> Container:
     async def probe() -> dict[str, bool]:
         return await _probe(container)
 
-    container.health = HealthAggregator(probe, metrics)
+    container.health = HealthAggregator(
+        probe,
+        metrics,
+        cache_fingerprint=lambda: container.tokens.active_fingerprints,
+    )
     return container
 
 
@@ -461,6 +465,10 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             if background_task is not None:
                 with suppress(asyncio.CancelledError):
                     await background_task
+        closer = getattr(container.inference, "aclose", None)
+        if closer is not None:
+            with suppress(Exception):
+                await closer()
         await container.persistence.close()
 
 

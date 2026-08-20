@@ -6,9 +6,10 @@ after the grace window, recording immutable physical-delete evidence in the
 same database transaction that tombstones the catalogue row.
 
 Physical unlink runs *outside* the persistence write lock. TX1 rechecks
-blockers; unlink happens after that transaction commits; TX2 rechecks again
-then writes proof + tombstone. If TX2 fails after unlink, the catalogue stays
-live so readers observe a missing-object condition rather than a false delete.
+blockers; bytes are renamed to a quarantine path after that transaction
+commits; TX2 rechecks again then writes proof + tombstone and destroys the
+quarantine. If TX2 sees a new live reference, the quarantine is restored so
+the catalogue never points at missing bytes.
 """
 
 from __future__ import annotations
@@ -212,64 +213,89 @@ class ObjectGcService:
             if blocker is not None:
                 return ObjectGcCandidateResult(candidate, blocker)
 
-        unlinked = await self._storage.delete_if_unreferenced(candidate.team_uuid, candidate.handle)
-        if not unlinked:
+        quarantined = await self._quarantine_candidate(candidate)
+        if not quarantined:
             return ObjectGcCandidateResult(candidate, ObjectGcDisposition.MISSING_BYTES)
 
-        async with self._persistence.transaction() as tx:
-            current = await tx.fetchone(
-                "SELECT team_uuid,stored_object_uuid,content_digest,size_bytes,created_at,media_type,"
-                "digest_algorithm,storage_backend,tombstoned_at "
-                "FROM mkb_stored_objects WHERE team_uuid=? AND stored_object_uuid=?",
-                (candidate.team_uuid, candidate.stored_object_uuid),
-            )
-            if not self._same_catalogue_row(candidate, current):
-                raise MkbError(
-                    "OBJECT_CONFLICT_DELETE_FENCE",
-                    "Object catalogue changed during physical unlink",
-                    409,
+        blocked: ObjectGcDisposition | None = None
+        conflict_code = ""
+        deleted = False
+        try:
+            async with self._persistence.transaction() as tx:
+                current = await tx.fetchone(
+                    "SELECT team_uuid,stored_object_uuid,content_digest,size_bytes,created_at,media_type,"
+                    "digest_algorithm,storage_backend,tombstoned_at "
+                    "FROM mkb_stored_objects WHERE team_uuid=? AND stored_object_uuid=?",
+                    (candidate.team_uuid, candidate.stored_object_uuid),
                 )
-            blocker = await self._delete_blocker_tx(tx, candidate)
-            if blocker is not None:
-                raise MkbError(
-                    "OBJECT_CONFLICT_DELETE_FENCE",
-                    "Object delete fence changed during physical unlink",
-                    409,
-                )
+                if not self._same_catalogue_row(candidate, current):
+                    conflict_code = "OBJECT_CONFLICT_DELETE_FENCE"
+                    raise MkbError(
+                        conflict_code,
+                        "Object catalogue changed during physical unlink",
+                        409,
+                    )
+                blocker = await self._delete_blocker_tx(tx, candidate)
+                if blocker is not None:
+                    blocked = blocker
+                else:
+                    unlinked_at = self._timestamp(self._now())
+                    fence_digest = self._delete_fence_digest(candidate)
+                    await tx.execute(
+                        "INSERT INTO mkb_object_delete_proofs "
+                        "(delete_proof_uuid,team_uuid,stored_object_uuid,content_digest,size_bytes,delete_fence_digest,"
+                        "unlinked_at,scanner_id,payload_extra) VALUES (?,?,?,?,?,?,?,?, '{}')",
+                        (
+                            uuid7(),
+                            candidate.team_uuid,
+                            candidate.stored_object_uuid,
+                            candidate.content_digest,
+                            candidate.size_bytes,
+                            fence_digest,
+                            unlinked_at,
+                            self._scanner_id,
+                        ),
+                    )
+                    updated = await tx.execute(
+                        "UPDATE mkb_stored_objects SET tombstoned_at=? "
+                        "WHERE team_uuid=? AND stored_object_uuid=? AND tombstoned_at IS NULL",
+                        (unlinked_at, candidate.team_uuid, candidate.stored_object_uuid),
+                    )
+                    if updated.rowcount != 1:
+                        conflict_code = "OBJECT_CONFLICT_DELETE_TOMBSTONE"
+                        raise MkbError(
+                            conflict_code,
+                            "Object catalogue changed during physical unlink",
+                            409,
+                        )
+                    deleted = True
+        except MkbError:
+            await self._restore_candidate(candidate)
+            raise
+        if blocked is not None:
+            await self._restore_candidate(candidate)
+            return ObjectGcCandidateResult(candidate, blocked)
+        if deleted:
+            await self._destroy_candidate(candidate)
+            return ObjectGcCandidateResult(candidate, ObjectGcDisposition.DELETED)
+        await self._restore_candidate(candidate)
+        raise MkbError("OBJECT_CONFLICT_DELETE_FENCE", "Object catalogue changed during physical unlink", 409)
 
-            unlinked_at = self._timestamp(self._now())
-            fence_digest = self._delete_fence_digest(candidate)
-            await tx.execute(
-                "INSERT INTO mkb_object_delete_proofs "
-                "(delete_proof_uuid,team_uuid,stored_object_uuid,content_digest,size_bytes,delete_fence_digest,"
-                "unlinked_at,scanner_id,payload_extra) VALUES (?,?,?,?,?,?,?,?, '{}')",
-                (
-                    uuid7(),
-                    candidate.team_uuid,
-                    candidate.stored_object_uuid,
-                    candidate.content_digest,
-                    candidate.size_bytes,
-                    fence_digest,
-                    unlinked_at,
-                    self._scanner_id,
-                ),
-            )
-            updated = await tx.execute(
-                "UPDATE mkb_stored_objects SET tombstoned_at=? "
-                "WHERE team_uuid=? AND stored_object_uuid=? AND tombstoned_at IS NULL",
-                (unlinked_at, candidate.team_uuid, candidate.stored_object_uuid),
-            )
-            if updated.rowcount != 1:
-                # The physical unlink has happened, but an unknown concurrent
-                # catalogue mutation means no durable success may be claimed.
-                # Raising rolls back proof/tombstone and leaves a fail-closed
-                # missing-object condition for repair rather than hiding it.
-                raise MkbError(
-                    "OBJECT_CONFLICT_DELETE_TOMBSTONE",
-                    "Object catalogue changed during physical unlink",
-                    409,
-                )
-        return ObjectGcCandidateResult(candidate, ObjectGcDisposition.DELETED)
+    async def _quarantine_candidate(self, candidate: ObjectGcCandidate) -> bool:
+        quarantine = getattr(self._storage, "quarantine_object", None)
+        if callable(quarantine):
+            return bool(await quarantine(candidate.team_uuid, candidate.handle))
+        return bool(await self._storage.delete_if_unreferenced(candidate.team_uuid, candidate.handle))
+
+    async def _restore_candidate(self, candidate: ObjectGcCandidate) -> None:
+        restore = getattr(self._storage, "restore_quarantined", None)
+        if callable(restore):
+            await restore(candidate.team_uuid, candidate.handle)
+
+    async def _destroy_candidate(self, candidate: ObjectGcCandidate) -> None:
+        destroy = getattr(self._storage, "destroy_quarantined", None)
+        if callable(destroy):
+            await destroy(candidate.team_uuid, candidate.handle)
 
     async def _delete_blocker_tx(self, tx: UnitOfWork, candidate: ObjectGcCandidate) -> ObjectGcDisposition | None:
         """Return a conservative fence result using durable tables only."""

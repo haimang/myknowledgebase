@@ -13,7 +13,11 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
 
-from src.persistence.engine import apply_capability_gates, probe_concurrent_writes, probe_native_vector
+from src.persistence.engine import (
+    apply_capability_gates,
+    probe_concurrent_writes_scratch,
+    probe_native_vector,
+)
 from src.persistence.migration_runner import apply_migrations, discover_migrations, verify_migrations
 from src.persistence.uow import immediate_transaction
 
@@ -79,6 +83,7 @@ class TursoPersistence:
         self.native_vector_required = native_vector_required
         self._write_lock = asyncio.Lock()
         self._connection: Any | None = None
+        self._cw_probe_cache: bool | None = None
 
     def _discard_connection(self) -> None:
         connection = self._connection
@@ -143,25 +148,42 @@ class TursoPersistence:
             async with immediate_transaction(connection, discard=self._discard_connection):
                 yield TursoUnitOfWork(connection)
 
+    def _probe_cw_scratch(self) -> bool:
+        if self._cw_probe_cache is not None:
+            return self._cw_probe_cache
+
+        def connect(path: str) -> Any:
+            import turso
+
+            return turso.connect(path)
+
+        scratch = self.database_path.parent / f".{self.database_path.name}.cw-probe"
+        self._cw_probe_cache = probe_concurrent_writes_scratch(connect, scratch)
+        return self._cw_probe_cache
+
+    def _probe_native_bypass(self) -> bool:
+        probe = self._open_probe_connection()
+        try:
+            return probe_native_vector(probe)
+        finally:
+            close = getattr(probe, "close", None)
+            if close is not None:
+                try:
+                    close()
+                except Exception:
+                    pass
+
     async def readiness(self) -> dict[str, bool]:
         try:
             async with self._write_lock:
                 connection = self._connect()
                 migrations = discover_migrations(self.migration_directory)
                 schema_ok = await asyncio.to_thread(verify_migrations, connection, migrations)
-                probe = self._open_probe_connection()
-                try:
-                    cw = await asyncio.to_thread(
-                        probe_concurrent_writes, probe, restore_journal_mode=False
-                    )
-                    vector = await asyncio.to_thread(probe_native_vector, probe)
-                finally:
-                    close = getattr(probe, "close", None)
-                    if close is not None:
-                        try:
-                            close()
-                        except Exception:
-                            pass
+            # Capability probes must not hold the write lock or mutate the
+            # live journal_mode. CW runs on a scratch file; vector is a
+            # read-only SELECT on a bypass connection.
+            cw = await asyncio.to_thread(self._probe_cw_scratch)
+            vector = await asyncio.to_thread(self._probe_native_bypass)
             gates = apply_capability_gates(
                 concurrent_writes=cw,
                 native_vector=vector,
@@ -170,14 +192,13 @@ class TursoPersistence:
             )
             # Business UoW is BEGIN IMMEDIATE (sidecar abort on a second
             # CONCURRENT writer).  Never report concurrent_writes=true for a
-            # serialized write path.
-            if not self.concurrent_writes_required:
-                pass
-            else:
+            # serialized write path. Admission uses write_path_ready instead.
+            if self.concurrent_writes_required:
                 gates = {**gates, "concurrent_writes": False}
             return {
                 "db_primary": True,
                 "schema_migration": schema_ok,
+                "write_path_ready": True,
                 "concurrent_writes": gates["concurrent_writes"],
                 "native_vector": gates["native_vector"],
                 "concurrent_writes_probe": gates["concurrent_writes_probe"],
@@ -187,6 +208,7 @@ class TursoPersistence:
             return {
                 "db_primary": False,
                 "schema_migration": False,
+                "write_path_ready": False,
                 "concurrent_writes": False,
                 "native_vector": False,
                 "concurrent_writes_probe": False,

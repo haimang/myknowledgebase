@@ -182,6 +182,11 @@ class InferenceFacade:
         self._invocation_recorder = invocation_recorder
         self._metrics = metrics
 
+    async def aclose(self) -> None:
+        closer = getattr(self._adapter, "aclose", None)
+        if closer is not None:
+            await closer()
+
     async def embed(self, request: EmbeddingRequest) -> EmbeddingResponse:
         response = await self._invoke(
             capability="embed",

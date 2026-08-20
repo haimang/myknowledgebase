@@ -23,24 +23,28 @@ async def immediate_transaction(
     rollback itself is uncertain).
     """
 
-    await asyncio.to_thread(connection.execute, begin_sql)
     body_ok = False
+    begun = False
     try:
+        # BEGIN lives in the same BaseException fence as commit. Cancel during
+        # to_thread(BEGIN) leaves the handle's transaction state unknown, so
+        # the caller must discard rather than return a poisoned singleton.
+        await asyncio.to_thread(connection.execute, begin_sql)
+        begun = True
         yield
         body_ok = True
         await asyncio.to_thread(connection.commit)
     except BaseException:
-        rolled_back = False
+        if not begun:
+            discard()
+            raise
         try:
             await asyncio.shield(asyncio.to_thread(connection.rollback))
-            rolled_back = True
         except Exception:
             discard()
         else:
             if body_ok:
                 # Commit raised after the body succeeded. Rollback may not
                 # undo a driver-partial commit; drop the handle.
-                discard()
-            elif not rolled_back:
                 discard()
         raise

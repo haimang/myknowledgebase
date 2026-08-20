@@ -558,7 +558,7 @@ class WorkflowCoreMixin:
             readiness = await self.persistence.readiness()
             ready = all(
                 readiness.get(name)
-                for name in ("db_primary", "schema_migration", "concurrent_writes", "native_vector")
+                for name in ("db_primary", "schema_migration", "write_path_ready", "native_vector")
             )
         if not ready:
             raise NotReadyError("workflow-not-ready", "Readiness is false; new Process claims are fenced")

@@ -38,6 +38,9 @@ class LocalObjectStore:
     def _object_path(self, team_uuid: str, digest: str) -> Path:
         return self.root / "objects" / team_uuid / "sha256" / digest[:2] / digest[2:4] / digest
 
+    def _quarantine_path(self, team_uuid: str, digest: str) -> Path:
+        return self.root / "staging" / "gc-quarantine" / team_uuid / digest
+
     def _ensure_root(self) -> None:
         self.root.mkdir(mode=0o700, parents=True, exist_ok=True)
         (self.root / "objects").mkdir(mode=0o700, exist_ok=True)
@@ -131,6 +134,62 @@ class LocalObjectStore:
                 return False
             await asyncio.to_thread(path.unlink)
             return True
+
+    async def quarantine_object(self, team_uuid: str, handle: ObjectHandle) -> bool:
+        """Rename live bytes off the CAS path so TX2 can restore them."""
+
+        match = _HANDLE_ID.match(handle.value)
+        if not match:
+            raise MkbError("SEC_PATH_REJECTED", "Object handle is invalid", 422)
+        if match.group(1) != team_uuid:
+            raise MkbError("OBJECT_AUTH_TEAM_MISMATCH", "Object handle belongs to a different Team", 403)
+        digest = match.group(2)
+        source = self._object_path(team_uuid, digest)
+        target = self._quarantine_path(team_uuid, digest)
+        async with self._write_lock:
+            return await asyncio.to_thread(self._quarantine_sync, source, target)
+
+    @staticmethod
+    def _quarantine_sync(source: Path, target: Path) -> bool:
+        if not source.exists():
+            return False
+        target.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+        os.replace(source, target)
+        return True
+
+    async def restore_quarantined(self, team_uuid: str, handle: ObjectHandle) -> bool:
+        match = _HANDLE_ID.match(handle.value)
+        if not match:
+            raise MkbError("SEC_PATH_REJECTED", "Object handle is invalid", 422)
+        if match.group(1) != team_uuid:
+            raise MkbError("OBJECT_AUTH_TEAM_MISMATCH", "Object handle belongs to a different Team", 403)
+        digest = match.group(2)
+        quarantined = self._quarantine_path(team_uuid, digest)
+        live = self._object_path(team_uuid, digest)
+        async with self._write_lock:
+            return await asyncio.to_thread(self._restore_quarantine_sync, quarantined, live)
+
+    @staticmethod
+    def _restore_quarantine_sync(quarantined: Path, live: Path) -> bool:
+        if live.exists():
+            if quarantined.exists():
+                quarantined.unlink()
+            return True
+        if not quarantined.exists():
+            return False
+        live.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+        os.replace(quarantined, live)
+        return True
+
+    async def destroy_quarantined(self, team_uuid: str, handle: ObjectHandle) -> None:
+        match = _HANDLE_ID.match(handle.value)
+        if not match:
+            raise MkbError("SEC_PATH_REJECTED", "Object handle is invalid", 422)
+        if match.group(1) != team_uuid:
+            raise MkbError("OBJECT_AUTH_TEAM_MISMATCH", "Object handle belongs to a different Team", 403)
+        quarantined = self._quarantine_path(team_uuid, match.group(2))
+        async with self._write_lock:
+            await asyncio.to_thread(lambda: quarantined.unlink(missing_ok=True))
 
     async def readiness(self) -> bool:
         try:
