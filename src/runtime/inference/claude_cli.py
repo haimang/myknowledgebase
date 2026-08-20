@@ -325,19 +325,22 @@ class SubprocessClaudeCli:
                 env=self._env,
             )
             payload = request.user_prompt.encode("utf-8") if transport == "stdin" else None
-            stdout_bytes, stderr_bytes = await asyncio.wait_for(process.communicate(payload), request.timeout_seconds)
+            stdout_bytes, stderr_bytes = await asyncio.wait_for(
+                _bounded_communicate(process, payload, CLAUDE_CLI_STDOUT_LIMIT_BYTES),
+                request.timeout_seconds,
+            )
+        except MkbError:
+            await asyncio.shield(_terminate_process(process))
+            raise
         except TimeoutError as exc:
-            await _terminate_process(process)
+            await asyncio.shield(_terminate_process(process))
             raise MkbError("CLAUDE_CLI_TIMEOUT", "Claude CLI invocation timed out", 503) from exc
         except asyncio.CancelledError:
-            await _terminate_process(process)
+            await asyncio.shield(_terminate_process(process))
             raise
         except OSError as exc:
-            await _terminate_process(process)
+            await asyncio.shield(_terminate_process(process))
             raise MkbError("CLAUDE_CLI_TRANSPORT_FAILED", "Claude CLI could not be started", 503) from exc
-        if len(stdout_bytes) > CLAUDE_CLI_STDOUT_LIMIT_BYTES or len(stderr_bytes) > CLAUDE_CLI_STDOUT_LIMIT_BYTES:
-            await _terminate_process(process)
-            raise MkbError("CLAUDE_CLI_OUTPUT_INVALID", "Claude CLI output exceeded the bounded stdout cap", 502)
         stdout = stdout_bytes.decode("utf-8", errors="replace")
         stderr = stderr_bytes.decode("utf-8", errors="replace")
         exit_code = process.returncode if process.returncode is not None else -1
@@ -374,9 +377,47 @@ def _digest_text(value: str) -> str:
     return hashlib.sha256(value.encode("utf-8")).hexdigest()
 
 
+_CLI_ENV_KEYS = frozenset({"PATH", "LANG", "HOME", "LC_ALL", "LC_CTYPE", "TERM"})
+_CLI_ENV_PREFIXES = ("ANTHROPIC_", "CLAUDE_")
+
+
 def _cli_child_env(env: Mapping[str, str] | None) -> dict[str, str]:
     source = dict(env) if env is not None else dict(os.environ)
-    return {key: value for key, value in source.items() if not key.startswith("MKB_")}
+    return {
+        key: value
+        for key, value in source.items()
+        if key in _CLI_ENV_KEYS or key.startswith(_CLI_ENV_PREFIXES)
+    }
+
+
+async def _bounded_communicate(
+    process: asyncio.subprocess.Process,
+    payload: bytes | None,
+    limit: int,
+) -> tuple[bytes, bytes]:
+    if process.stdin is not None:
+        if payload is not None:
+            process.stdin.write(payload)
+            await process.stdin.drain()
+        process.stdin.close()
+    stdout = bytearray()
+    stderr = bytearray()
+
+    async def _read(stream: asyncio.StreamReader | None, bucket: bytearray) -> None:
+        if stream is None:
+            return
+        while True:
+            chunk = await stream.read(65_536)
+            if not chunk:
+                return
+            bucket.extend(chunk)
+            if len(bucket) > limit:
+                await _terminate_process(process)
+                raise MkbError("CLAUDE_CLI_OUTPUT_INVALID", "Claude CLI output exceeded the bounded stdout cap", 502)
+
+    await asyncio.gather(_read(process.stdout, stdout), _read(process.stderr, stderr))
+    await process.wait()
+    return bytes(stdout), bytes(stderr)
 
 
 async def _terminate_process(process: asyncio.subprocess.Process | None) -> None:
@@ -391,7 +432,7 @@ async def _terminate_process(process: asyncio.subprocess.Process | None) -> None
     try:
         await asyncio.wait_for(process.wait(), timeout=2.0)
         return
-    except TimeoutError:
+    except (TimeoutError, asyncio.CancelledError):
         pass
     except ProcessLookupError:
         return
@@ -403,6 +444,11 @@ async def _terminate_process(process: asyncio.subprocess.Process | None) -> None
         await process.wait()
     except ProcessLookupError:
         return
+    except asyncio.CancelledError:
+        try:
+            process.kill()
+        except ProcessLookupError:
+            return
 
 
 ResponseFactory = Callable[[ClaudeCliRequest], ClaudeCliResult | Awaitable[ClaudeCliResult]]

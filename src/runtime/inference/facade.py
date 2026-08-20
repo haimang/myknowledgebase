@@ -389,6 +389,7 @@ class InferenceFacade:
                         raise
                     if exc.code == "INFERENCE_TRANSPORT_RETRYABLE" and attempt + 1 < self._max_attempts:
                         await self._gate.release(lease)
+                        lease = None
                         await self._sleep(self._retry_delay(attempt))
                         lease = await self._gate.try_acquire(capability)
                         if lease is None:
@@ -411,7 +412,8 @@ class InferenceFacade:
                     raise error from exc
             raise AssertionError("bounded inference loop should always return or raise")
         finally:
-            await self._gate.release(lease)
+            if lease is not None:
+                await self._gate.release(lease)
 
     async def _legacy_call(self, capability: InferenceCapability, operation: Callable[[], Awaitable[Any]]) -> Any:
         lease = await self._gate.try_acquire(capability)
@@ -429,7 +431,8 @@ class InferenceFacade:
                     await self._sleep(self._retry_delay(attempt))
             raise AssertionError("bounded inference loop should always return or raise")
         finally:
-            await self._gate.release(lease)
+            if lease is not None:
+                await self._gate.release(lease)
 
     def _preflight(self, capability: InferenceCapability, binding: InferenceBinding) -> None:
         if binding.capability_key != capability:

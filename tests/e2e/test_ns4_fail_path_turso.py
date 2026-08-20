@@ -29,6 +29,7 @@ async def test_fail_path_report_is_queryable_on_turso(tmp_path: Path) -> None:
     try:
         await persistence.migrate()
         record_pending_generation_evidence(
+            process_uuid="00000000-0000-4000-8000-000000000003",
             invocation={
                 "invocation_uuid": "00000000-0000-4000-8000-0000000000aa",
                 "status": "failed",

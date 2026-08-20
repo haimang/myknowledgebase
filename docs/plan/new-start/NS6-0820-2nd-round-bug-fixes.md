@@ -778,3 +778,16 @@ NS6-0820-2nd-round-bug-fixes
 | P2-06 | `✅ done` | `_fail_process_tx` `AND fencing_generation=?` | 旧 fail 不打死新世代 |
 | P2-07 | `✅ done` | `task_commands.cancel` CAS execution/process；projection 去掉 success-wins | Task 不得 succeeded |
 | P2-08 | `✅ done` | `teams.create` IntegrityError → 409/replay | stub UNIQUE |
+
+### 11.4 Phase 3 回填
+
+- **实际执行摘要**：P3-01…P3-04（VF8/9/10/11）。salvage 去掉 BACKPRESSURE；证据强制 process_uuid；Facade retry 释放后 `lease=None`；CLI allowlist + 流式字节帽 + shield terminate。
+- **Phase 偏差**：salvage NI occupancy 复用 CLI `ConcurrencyGate("cli")`（cli.run 已占位），不另开 durable NI Process 行（计划偏差 / substrate-fit：本轮未承诺改 dispatch 状态机）。
+- **测试发现**：`test_ns6_phase3.py` 4 passed；`test_ns5_phase3` / `test_inference_runtime` / `test_claude_cli_port` / `test_ns4_stage_report_tx` 回归绿。
+
+| 工作项 | 状态 | 实际落点 | 备注 |
+|--------|------|----------|------|
+| P3-01 | `✅ done` | `_API_INFERENCE_SALVAGE_CODES` 去掉 BACKPRESSURE | 满门 cli.run 不得再开 |
+| P3-02 | `✅ done` | `generation_evidence.py` 删除 `"_"` 回退 | 省略 uuid 不串台 |
+| P3-03 | `✅ done` | `facade.py` release 后 `lease=None`；finally 只 release 非空 | 取消 sleep 无 RuntimeError |
+| P3-04 | `✅ done` | `_cli_child_env` allowlist；`_bounded_communicate`；terminate 捕 CancelledError | 无 AWS secret；overflow 即杀 |

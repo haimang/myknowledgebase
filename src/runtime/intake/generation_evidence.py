@@ -7,7 +7,6 @@ from typing import Any
 from src.contracts.observability.stage_report import validate_stage_report
 
 _pending: dict[str, list[dict[str, Any]]] = {}
-_DEFAULT_EVIDENCE_KEY = "_"
 
 
 def record_pending_generation_evidence(
@@ -16,6 +15,8 @@ def record_pending_generation_evidence(
     report: dict[str, Any] | None = None,
     process_uuid: str | None = None,
 ) -> None:
+    if not process_uuid:
+        return
     item: dict[str, Any] = {}
     if invocation is not None:
         item["invocation"] = dict(invocation)
@@ -23,13 +24,13 @@ def record_pending_generation_evidence(
         item["report"] = validate_stage_report(report)
     if not item:
         return
-    key = process_uuid or _DEFAULT_EVIDENCE_KEY
-    _pending.setdefault(key, []).append(item)
+    _pending.setdefault(process_uuid, []).append(item)
 
 
 def take_pending_generation_evidence(process_uuid: str | None = None) -> list[dict[str, Any]]:
-    key = process_uuid or _DEFAULT_EVIDENCE_KEY
-    return _pending.pop(key, [])
+    if not process_uuid:
+        return []
+    return _pending.pop(process_uuid, [])
 
 
 async def write_pending_generation_evidence_tx(tx: Any, process: dict[str, Any]) -> None:
@@ -48,8 +49,6 @@ async def write_pending_generation_evidence_tx(tx: Any, process: dict[str, Any])
     task = process.get("task_uuid")
     trace = process.get("trace_uuid")
     items = take_pending_generation_evidence(process_uuid)
-    if not items:
-        items = take_pending_generation_evidence()
     for item in items:
         invocation = item.get("invocation")
         if isinstance(invocation, dict):

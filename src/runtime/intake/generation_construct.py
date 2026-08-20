@@ -109,7 +109,6 @@ _API_INFERENCE_SALVAGE_CODES = frozenset(
         "INFERENCE_VALIDATION_REMOTE",
         "INFERENCE_TRANSPORT_RETRYABLE",
         "INFERENCE_TRANSPORT_EXHAUSTED",
-        "INFERENCE_BACKPRESSURE",
         "INFERENCE_INTERNAL_UNEXPECTED",
         "GENERATION_INFERENCE_FAILED",
         "CONSTRUCT_KERNEL_SUMMARY_INVALID",
@@ -286,7 +285,9 @@ class IntakeGenerationConstructMixin:
                 receipt["status"] = "failed"
                 from src.runtime.intake.generation_evidence import record_pending_generation_evidence
 
-                record_pending_generation_evidence(invocation=dict(receipt))
+                record_pending_generation_evidence(
+                    invocation=dict(receipt), process_uuid=command.process_uuid
+                )
                 raise
             receipt["transport"] = "api_inference"
             receipt["compression_channel"] = "local-inference"
@@ -1032,6 +1033,7 @@ class IntakeGenerationConstructMixin:
                                 "latency_ms": max(0, int((time.monotonic() - started) * 1000)),
                             }
                         ),
+                        process_uuid=command.process_uuid,
                     )
                     await self._emit_generation_diagnostic(
                         command,
@@ -1111,6 +1113,7 @@ class IntakeGenerationConstructMixin:
                                 "latency_ms": max(0, int((time.monotonic() - started) * 1000)),
                             }
                         ),
+                        process_uuid=command.process_uuid,
                     )
                     await self._emit_generation_diagnostic(
                         command,

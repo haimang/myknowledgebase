@@ -8,9 +8,11 @@ from src.runtime.intake.generation_evidence import (
     take_pending_generation_evidence,
 )
 
+_PROCESS = "00000000-0000-4000-8000-0000000000ab"
+
 
 def test_pending_cli_failure_stashes_kind_and_transport_report() -> None:
-    take_pending_generation_evidence()
+    take_pending_generation_evidence(_PROCESS)
     report = validate_stage_report(
         {
             "stage_key": "structurize",
@@ -33,17 +35,19 @@ def test_pending_cli_failure_stashes_kind_and_transport_report() -> None:
             "invocation_ordinal": 0,
         },
         report=report,
+        process_uuid=_PROCESS,
     )
-    items = take_pending_generation_evidence()
+    items = take_pending_generation_evidence(_PROCESS)
     assert len(items) == 1
     assert items[0]["invocation"]["status"] == "failed"
     assert items[0]["report"]["cli_structured_kind"] == "list"
-    assert take_pending_generation_evidence() == []
+    assert take_pending_generation_evidence(_PROCESS) == []
 
 
 def test_pending_admit_mismatch_stashes_histogram_fields() -> None:
-    take_pending_generation_evidence()
+    take_pending_generation_evidence(_PROCESS)
     record_pending_generation_evidence(
+        process_uuid=_PROCESS,
         report=validate_stage_report(
             {
                 "stage_key": "structurize",
@@ -57,14 +61,15 @@ def test_pending_admit_mismatch_stashes_histogram_fields() -> None:
             }
         )
     )
-    items = take_pending_generation_evidence()
+    items = take_pending_generation_evidence(_PROCESS)
     assert items[0]["report"]["has_g0"] is True
     assert items[0]["report"]["layer_counts"]["2"] == 1
 
 
 def test_pending_admit_reject_can_carry_failed_invocation() -> None:
-    take_pending_generation_evidence()
+    take_pending_generation_evidence(_PROCESS)
     record_pending_generation_evidence(
+        process_uuid=_PROCESS,
         invocation={
             "invocation_uuid": "00000000-0000-4000-8000-0000000000ad",
             "status": "failed",
@@ -88,7 +93,7 @@ def test_pending_admit_reject_can_carry_failed_invocation() -> None:
             }
         ),
     )
-    items = take_pending_generation_evidence()
+    items = take_pending_generation_evidence(_PROCESS)
     assert items[0]["invocation"]["status"] == "failed"
     assert items[0]["invocation"]["error_code"] == "STRUCTURE_ANCHOR_MISSING"
     assert items[0]["report"]["disposition"] == "rejected"
