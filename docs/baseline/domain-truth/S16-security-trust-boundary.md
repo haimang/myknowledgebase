@@ -1235,3 +1235,5 @@ on_request(req):
 ---
 
 **文件结束 · S16-v1.1 accepted · 执行 SSOT**
+
+> **NS6 substrate-fit (2026-08-20)**：空 `trusted_proxy_cidrs` **永不**复制 `X-Forwarded-For`；`request_ip` = ASGI peer。只有 `peer ∈ cidrs` 才信任 XFF。mapped IPv6 递归展开不得重开空 CIDR 信任分支。`/metrics` 内部身份不得被私网 XFF 伪造。

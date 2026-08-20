@@ -39,12 +39,13 @@ class LocalObjectStore:
         return self.root / "objects" / team_uuid / "sha256" / digest[:2] / digest[2:4] / digest
 
     def _quarantine_path(self, team_uuid: str, digest: str) -> Path:
-        return self.root / "staging" / "gc-quarantine" / team_uuid / digest
+        return self.root / "quarantine" / team_uuid / digest
 
     def _ensure_root(self) -> None:
         self.root.mkdir(mode=0o700, parents=True, exist_ok=True)
         (self.root / "objects").mkdir(mode=0o700, exist_ok=True)
         (self.root / "staging").mkdir(mode=0o700, exist_ok=True)
+        (self.root / "quarantine").mkdir(mode=0o700, exist_ok=True)
         if not self._identity_path.exists():
             self._identity_path.write_text(json.dumps({"identity": uuid7()}), encoding="utf-8")
             os.chmod(self._identity_path, 0o600)

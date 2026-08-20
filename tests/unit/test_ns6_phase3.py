@@ -43,6 +43,23 @@ async def test_salvage_occupies_ni_and_skips_backpressure(tmp_path: Path) -> Non
     assert gate.in_flight("cli") == 1
     with pytest.raises(MkbError, match="INFERENCE_BACKPRESSURE"):
         await cli.run(ClaudeCliRequest(user_prompt="hello", system_prompt_file="p.md", timeout_seconds=1))
+    salvage_calls = {"n": 0}
+
+    async def occupy_cli(**kwargs: object) -> tuple[dict[str, object], dict[str, object]]:
+        del kwargs
+        salvage_calls["n"] += 1
+        await cli.run(ClaudeCliRequest(user_prompt="hello", system_prompt_file="p.md", timeout_seconds=1))
+        return {}, {}
+
+    mixin._cli_layered_summary = occupy_cli  # type: ignore[method-assign]
+    with pytest.raises(MkbError, match="INFERENCE_BACKPRESSURE"):
+        await mixin._salvage_summary_via_cli(
+            layered_candidate={"ok": True},
+            profile=(0,),
+            state=None,
+            salvage_error=MkbError("INFERENCE_TRANSPORT_RETRYABLE", "retry", 503),
+        )
+    assert salvage_calls["n"] == 1
     await gate.release(held)
 
 

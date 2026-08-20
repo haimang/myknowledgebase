@@ -57,12 +57,10 @@ async def test_sidecar_inserts_into_migrated_turso(tmp_path: Path) -> None:
             now,
         )
     )
-    from src.contracts.common.errors import MkbError
-
-    err = MkbError("STRUCTURE_ANCHOR_MISSING", "missing", 422)
-    boom = TursoDiagnosticSidecar(tmp_path / "missing.db")
-    try:
-        boom.insert(("x",) * 14)
-    except Exception:
-        pass
-    assert err.code == "STRUCTURE_ANCHOR_MISSING"
+    row = sidecar._connect().execute(
+        "SELECT log_code FROM mkb_ops_diagnostic_logs WHERE log_uuid=?",
+        ("11111111-1111-4111-8111-111111111111",),
+    ).fetchone()
+    assert row is not None
+    assert (row[0] if not hasattr(row, "keys") else row["log_code"]) == "GEN_STAGE_TIMING"
+    sidecar._discard()

@@ -267,6 +267,8 @@ S14 ── logical metric hook names / ops knobs
 | `S15-T038` | `ops.alert_raised` 事件：aggregate=`ops`；payload 仅 alert_id/severity/related_metric/component/kind 等低基数；禁 secret。 | T-O-304 |
 | `S15-T039` | Ops-only 通知通道（email/webhook URL）与 Task 业务回调 **分配置键**；默认 `obs.alert.notify_enabled=false`。 | T-O-304/296 |
 | `S15-T040` | Readiness 组件闭集 v1：`schema_migration`、`registry_bootstrap`、`db_primary`、`concurrent_writes`、`native_vector`、`object_root`、`inference_binding`、`obs_tables`、**`sec_token_loaded`**（谓词权威=S16；ActiveTokenSet 空 → not ready / `/ready` 503）。扩展须 change-request。 | T-O-305 |
+
+> **NS6 substrate-fit (2026-08-20)**：叶工人 `/ready` 合取名改为 `write_path_ready`（serial IMMEDIATE 可写）。`concurrent_writes` 仍作为 **非门控** constitution 探针字段保留在 persistence readiness 观察面上；不得从 REQUIRED 删掉探针观察、也不得在 UoW 仍为 IMMEDIATE 时把它重新 AND 进 `/ready`。HealthAggregator TTL 默认 0.5s，fingerprint 在 probe 前捕获；token 轮换不得把旧结果缓存到新 fingerprint 下。
 | `S15-T041` | `obs_tables` 组件谓词（S15 所有）：三表存在且 migration 已应用；缺任一 → readiness false + `OBS_READY_COMPONENT_FAIL`。 | T-O-305 |
 | `S15-T042` | `/ready` 响应 JSON 字段闭集意图：`status`∈{ready,not_ready}、`live` bool、`components[]`{name,ok,code?}、可选 `checked_at`。禁 secret/token/绝对 path/连接串。 | T-O-305 |
 | `S15-T043` | not ready 时拒绝：**新** Task Create / **新** process claim。**交接**：S01 Create 与 S03/S12 claim 路径 **必须** fail-closed 查询 HealthAggregator/`Ready` 标志；HTTP **503** + 业务/OBS ready 码；**不**写 security_audit（非 admission deny）。既有 in-flight 靠 lease。 | T-O-305 |

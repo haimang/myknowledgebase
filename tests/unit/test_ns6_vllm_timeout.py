@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+
 import httpx
 import pytest
 
@@ -15,6 +17,7 @@ class _TimeoutAwareTransport(httpx.AsyncBaseTransport):
     async def handle_async_request(self, request: httpx.Request) -> httpx.Response:
         if request.method == "GET":
             return httpx.Response(200, json={"data": [{"id": "qwen-generate"}]})
+        await asyncio.sleep(6)
         return httpx.Response(
             200,
             json={

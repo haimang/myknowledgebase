@@ -522,3 +522,4 @@ S13-v1.1 把对象存储从「宪法」升格为 **可编码执行台账**，并
 |---|---|---|---|
 | S13-v1.0 | 2026-08-11 | accepted | T-O-111..125；local/CAS/GC；关 G-11 |
 | S13-v1.1 | 2026-08-12 | accepted | **执行 SSOT 强制**；E01–E11；禁止执行依赖 QNA |
+| S13-v1.1-ns6-note | 2026-08-20 | change-request | 物理 GC 删除 = TX1 fence → 将 CAS 字节 **rename** 到 `quarantine/<team_uuid>/` → TX2 proof/tombstone → destroy；TX2 见 live ref 则 restore。缺 quarantine API 必须 fail-closed，禁止回退 `unlink`。 |

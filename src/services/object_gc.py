@@ -283,9 +283,13 @@ class ObjectGcService:
 
     async def _quarantine_candidate(self, candidate: ObjectGcCandidate) -> bool:
         quarantine = getattr(self._storage, "quarantine_object", None)
-        if callable(quarantine):
-            return bool(await quarantine(candidate.team_uuid, candidate.handle))
-        return bool(await self._storage.delete_if_unreferenced(candidate.team_uuid, candidate.handle))
+        if not callable(quarantine):
+            raise MkbError(
+                "OBJECT_UNAVAILABLE_GC",
+                "Object storage does not support quarantine; refusing irreversible unlink",
+                503,
+            )
+        return bool(await quarantine(candidate.team_uuid, candidate.handle))
 
     async def _restore_candidate(self, candidate: ObjectGcCandidate) -> None:
         restore = getattr(self._storage, "restore_quarantined", None)

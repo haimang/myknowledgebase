@@ -46,15 +46,19 @@ def _command() -> ProcessCommand:
 @pytest.mark.asyncio
 async def test_cli_timeout_kills_child(tmp_path: Path) -> None:
     hang = tmp_path / "hang"
-    hang.write_text("#!/bin/sh\nexec sleep 60\n", encoding="utf-8")
+    pidfile = tmp_path / "pid"
+    hang.write_text(f"#!/bin/sh\necho $$ > '{pidfile}'\nexec sleep 60\n", encoding="utf-8")
     hang.chmod(hang.stat().st_mode | stat.S_IEXEC)
     cli = SubprocessClaudeCli(executable=str(hang))
     with pytest.raises(MkbError, match="CLAUDE_CLI_TIMEOUT"):
         await cli.run(
             ClaudeCliRequest(user_prompt="hello", system_prompt_file="p.md", timeout_seconds=0.2)
         )
-    # The hung child must not remain as a process group leader after timeout.
-    assert hang.exists()
+    pid = int(pidfile.read_text(encoding="utf-8").strip())
+    with pytest.raises(ProcessLookupError):
+        import os
+
+        os.kill(pid, 0)
 
 
 @pytest.mark.asyncio

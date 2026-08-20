@@ -197,6 +197,39 @@ async def test_hold_and_explicit_cleanup_fence_block_collection(tmp_path: Path) 
         await seed.persistence.close()
 
 
+class _UnlinkOnlyStore:
+    """Adapter without quarantine must not fall back to irreversible unlink."""
+
+    def __init__(self, inner: LocalObjectStore) -> None:
+        self._inner = inner
+
+    async def promote(self, data: bytes, request: PromoteRequest) -> ObjectStat:
+        return await self._inner.promote(data, request)
+
+    async def read_verified(self, team_uuid: str, handle: ObjectHandle) -> bytes:
+        return await self._inner.read_verified(team_uuid, handle)
+
+    async def delete_if_unreferenced(self, team_uuid: str, handle: ObjectHandle) -> bool:
+        del team_uuid, handle
+        raise AssertionError("unlink fallback is forbidden")
+
+    async def readiness(self) -> bool:
+        return await self._inner.readiness()
+
+
+@pytest.mark.asyncio
+async def test_missing_quarantine_api_is_fail_closed(tmp_path: Path) -> None:
+    seed = await _seed_orphan(tmp_path)
+    try:
+        service = _service(seed, _UnlinkOnlyStore(seed.storage))
+        (candidate,) = await service.collect_candidates()
+        with pytest.raises(MkbError, match="OBJECT_UNAVAILABLE_GC"):
+            await service.delete_candidate(candidate)
+        assert await seed.storage.read_verified(seed.team_uuid, seed.stat.handle)
+    finally:
+        await seed.persistence.close()
+
+
 class _MissingDeleteStore:
     """A storage adapter observation where catalogued bytes have disappeared."""
 
@@ -210,6 +243,10 @@ class _MissingDeleteStore:
         return await self._inner.read_verified(team_uuid, handle)
 
     async def delete_if_unreferenced(self, team_uuid: str, handle: ObjectHandle) -> bool:
+        return False
+
+    async def quarantine_object(self, team_uuid: str, handle: ObjectHandle) -> bool:
+        del team_uuid, handle
         return False
 
     async def readiness(self) -> bool:

@@ -70,6 +70,7 @@ class HealthAggregator:
             if self._cache_valid(now):
                 assert self._last_result is not None
                 return self._last_result
+            captured = self._fingerprint()
             inflight = self._inflight
             if inflight is None:
                 inflight = asyncio.create_task(self._compute())
@@ -81,9 +82,12 @@ class HealthAggregator:
                 self._inflight = None
         async with self._lock:
             self._last_result = result
-            self._last_at = time.monotonic()
             self._last_bootstrap_failures = self.bootstrap_failures
-            self._last_fingerprint = self._fingerprint()
+            self._last_fingerprint = captured
+            if self._fingerprint() != captured:
+                self._last_at = None
+            else:
+                self._last_at = time.monotonic()
         return result
 
     async def _compute(self) -> dict[str, object]:

@@ -46,6 +46,32 @@ def _xff_request(*, peer: str, forwarded: str, cidrs: str = "") -> Request:
 def test_empty_cidr_ignores_private_xff() -> None:
     request = _xff_request(peer="10.0.0.1", forwarded="127.0.0.1")
     assert request_ip(request) == "10.0.0.1"
+    public_peer = _xff_request(peer="203.0.113.10", forwarded="10.0.0.1")
+    assert request_ip(public_peer) == "203.0.113.10"
+
+
+@pytest.mark.asyncio
+async def test_empty_cidr_does_not_admit_metrics_via_xff(tmp_path: Path) -> None:
+    from httpx import ASGITransport, AsyncClient
+
+    from api.app import create_app
+    from src.runtime.config import Settings
+
+    app = create_app(
+        Settings(
+            internal_token="ns6-xff",
+            database_path=tmp_path / "mkb.sqlite3",
+            object_root=tmp_path / "objects",
+            persistence_backend="sqlite",
+            concurrent_writes_required=False,
+            native_vector_required=False,
+            trusted_proxy_cidrs="",
+        )
+    )
+    transport = ASGITransport(app=app, client=("203.0.113.10", 1234))
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        response = await client.get("/metrics", headers={"X-Forwarded-For": "10.0.0.1"})
+        assert response.status_code != 200
 
 
 def test_team_patch_rejects_secret_extras() -> None:
