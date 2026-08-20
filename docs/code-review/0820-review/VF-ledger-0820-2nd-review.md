@@ -487,6 +487,24 @@
 | VF38 | fix | NS5 closure P2-05/P2-07 翻 🟡 | `NS5-0820-bug-fixes-closure.md` |
 | VF6/20/32/86 | deferred | 未改 class | deferred-items-ledger NS6 |
 
+> **NS6 自我审核 ↔ 修复循环回填 `2026-08-20`（append-only；不改 §0–§5 class）**。
+
+| VF | 处置 | 落地 | 验证 |
+|----|------|------|------|
+| VF12 | fix 补强 | 017 把 `ux_vec_coord_active_layer_a` 纳入 `index_generation`；T21 真跑 `_upsert_vector_record_tx` | `test_upsert_does_not_update_indexed_rows` COUNT indexed gen=1 且 gen=2 INSERT |
+| VF13 | fix 补测 | `consume_gate_decision` 经公共 approve；PersistencePort 读 `lifecycle_state` | `test_human_review_approve_activates_item_via_port` |
+| VF14 | fix 补测 | accept 后 `read_verified` sha256；rebuild 不 JSON peel | `test_raw_clean_cas_digests_are_sha256_of_bytes` + HTTP `test_accept_cas_digests_match_read_verified_bytes` |
+| VF15 | fix 补强 | registered_api 同 TX resolve+`normalized_external_key`；accept 同指纹 replay revision/change_set | `test_migration_016_adds_source_external_key_unique` COUNT=1；`test_second_same_external_key_is_replay_not_failed` items=1 + accept succeeded |
+| VF16 | fix 补强 | purge 合同收窄 `channel_filter=all`；e2e 改 PersistencePort、去掉 sqlite3-on-Turso | `test_purge_generation_soft_deletes_only_the_requested_generation`；`test_namespace_key_splits_layer_a` |
+| VF17 | fix 补测 | 两 TX generation CAS，败者 rowcount=0 且无 stranded N+1 | `test_overlapping_vectorize_generation_cas` |
+| VF18 | fix 补测 | body-only 配方；helper 不再把 title 当绿 | `test_full_construct_rejects_title_headers`；`test_title_enters_content_full` body-only |
+| VF25 | fix 补强 | 缺 quarantine API fail-closed；path `quarantine/<team>/` | `test_missing_quarantine_api_is_fail_closed`；`test_ns6_gc_toctou` |
+| VF35 | fix 补强 | journal 真 import `_journal_row`；CLI timeout 断言 pid 已死；sidecar 查库 | `test_ns4_jsonl_journal` / `test_cli_timeout_kills_child` / `test_sidecar_inserts_into_migrated_turso` |
+| VF2 mega | fix 补强 | 默认 Settings（无 CW/NV waiver）ingest→vector COUNT→retrieval | `test_generation_mainchain_is_inspected_via_turso_port` |
+| VF29 | fix 补测 | 空 CIDR + 公网 peer 的 XFF 不得放行 `/metrics` | `test_empty_cidr_does_not_admit_metrics_via_xff` |
+| VF8 | 维持 substrate-fit | salvage 走同一 CLI gate；满门 BACKPRESSURE | `test_salvage_occupies_ni_and_skips_backpressure` 调 `_salvage_summary_via_cli` |
+| VF6/20/32/86 | deferred | 未改 class；(a) sqlite3-on-Turso harness 仍 NS1-V11 | deferred-items-ledger |
+
 ---
 
 ## 7. AGENT 评审绩效（0820 第 2 轮）
@@ -623,3 +641,4 @@
 | `v0.3` | `2026-08-20` | `Grok (0820-2nd-pass-ledger workflow)` | Phase-4 consistency：§1 verify_shard 改为 intake 6 / retrieve 3（UF18 只计 retrieve，去掉双 shard 计数）；§2.2 UF14 标题改为 raw/clean 共用 envelope，digest≠bytes（去掉第 1 轮 VF36 残留）；§2.2 UF28 改为「不在同 TX 栅栏 Execution」。证据纠偏：VF16 purge 断言改引 `test_vector_purge_generation.py:105,200-229`；VF34 limiter 改引 `security.py:215-216` `check_ip` + `dependencies.py:112`；VF35 mainchain 改引真实 HTTP ingest `:16-81,85-105`（非 stub）；VF29 补 `config.py:62` / `dependencies.py:158-174,185-197` / `app.py:518-520`；VF35 e2e 把 Turso waiver 与 `sqlite3.connect` 分行；VF15 UNIQUE 改引 `001_initial.sql:979` 并钉 `acquisition_ingest.py:240-247`。未改 class/verdict/disposition，未丢 VF。 |
 | `v0.4` | `2026-08-20` | `Grok (0820-2nd-pass-ledger workflow)` | Phase-5 agent eval：§7 由占位换成完整 AGENT 评审绩效（Gemini/Grok/Luna/Muse Spark）；最佳 Luna、最高价值 VF3（`luna-R11`）；§1 TL;DR 加一行指针。独立核对六维均值与 §3/§4 映射（7-blocker 覆盖 Gemini/Luna/Muse 5/7、Grok 4/7；唯一 stale 为 `gemini-R14=VF19`），未改分数、未把子项过称升格 INVALID。文档状态仍 `triaged`；§0–§5 除 TL;DR 指针外未改写；§6 仍空 |
 | `v0.5` | `2026-08-20` | `Grok (parent QA after workflow)` | 抽查：72 条 R# 全映射、UF1–UF38 ↔ VF1–VF38 1:1、§1/§4.1 计数对齐；坐实 VF1 `uow.py:26`、VF2 `turso/port.py:171-177`、VF3 `restore_journal_mode=False`、VF7 `local_vllm.py:206-245` `post()` 无 per-request timeout、VF15 `revision_ordinal` 字面 1、VF19 `search()` 已 `begin_request_cache`。修正 §7 校准段维顺序（与评分表对齐，总分不变）。 |
+| `v0.6` | `2026-08-20` | `Grok (NS6 self-audit cycle)` | §6 append：自我审核后补强 VF12/15/16/25/35 与 T21–T26/T35 谓词；不改 §0–§5 class。 |

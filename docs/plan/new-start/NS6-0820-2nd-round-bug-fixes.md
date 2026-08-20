@@ -827,6 +827,12 @@ NS6-0820-2nd-round-bug-fixes
 - **实际执行摘要**：P6-01 假绿短途改为真 SUT；P6-02 NS5 P2-05/P2-07 翻 🟡；P6-03 mega/soak/ruff/build/migration destroy-rebuild；NS6 closure r2。
 - **Phase 偏差**：BEGIN-cancel soak 不再对 sqlite `Connection.execute` 阻塞窗口做 in-process 重复 close（会 SIGSEGV）；改为 patch `uow.asyncio.to_thread` 的 BEGIN 睡眠窗口 ×5。heartbeat raise ×3 仍真跑。
 - **测试发现**：NS6 unit 47 passed；ruff 0；`uv build` 含 016；Turso destroy-rebuild ok；mainchain vector COUNT≥1。全量 pytest / VF86 未宣称。
+
+### 11.8 自我审核循环回填（2026-08-20 11:44 UTC）
+
+- **实际执行摘要**：六轴审核后硬切 in-scope 余项：registered_api unique、017 Layer-A generation unique、GC fail-closed + `quarantine/<team>/`、purge=`all` 经 PersistencePort、默认 Settings mega+retrieval、T21–T26 谓词重写、factory 懒加载 sqlite、glossary 改 Turso。S12/S13/S15/S16/S09/S10 窄回填。观察 `tests/unit tests/domain tests/integration` exit 0。
+- **Phase 偏差**：T24 同指纹二次 ingest 的 structurize outcome-commit 仍可能失败（VF15.r）；T01 soak 仍为 `to_thread` 门（已知 hotfix）。VF86 (a) 未开 harness。
+- **测试发现**：unit/domain/integration exit 0；ruff 0。未宣称 441/441。
 - **后续 handoff**：VF86/6/20/32/62 与 VF4.r/11.r/25.r 见 deferred-items-ledger NS6。
 
 | 工作项 | 状态 | 实际落点 | 备注 |

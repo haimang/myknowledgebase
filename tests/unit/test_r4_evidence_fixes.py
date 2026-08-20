@@ -84,9 +84,10 @@ async def test_admit_reject_stashes_failed_invocation_and_nonzero_latency() -> N
             }
         ],
     }
+    command = _command()
     with pytest.raises(MkbError, match="STRUCTURE_GRANULARITY_SET_MISMATCH"):
         await pipeline._structurize(
-            _command(),
+            command,
             {
                 "clean_text": clean,
                 "clean_digest": stable_digest({"text": clean}),
@@ -95,7 +96,7 @@ async def test_admit_reject_stashes_failed_invocation_and_nonzero_latency() -> N
                 "layered_content_candidate": candidate,
             },
         )
-    items = take_pending_generation_evidence()
+    items = take_pending_generation_evidence(command.process_uuid)
     assert len(items) == 1
     invocation = items[0]["invocation"]
     report = items[0]["report"]

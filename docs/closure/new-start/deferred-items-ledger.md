@@ -66,3 +66,10 @@
 | `NS6-VF4.r` | VF4.r | `[partial-delivery] 剩余切片` | D04 55 表闭集 | 本轮只核心表 | 全表 charter | 下游 |
 | `NS6-VF11.r` | VF11.r | `[partial-delivery] 剩余切片` | 进程组杀孙 | CLI terminate 已 shield | 进程组 charter | 下游 |
 | `NS6-VF25.r` | VF25.r | `[partial-delivery] 剩余切片` | 未编目 orphan / 目录 CAS | T-O-120 | owner 授权磁盘 SSOT | owner |
+| `NS6-VF36.r` | VF36.r | `[partial-delivery] 剩余切片` | sidecar 真有界队列 | TTL cache 已切 | 有界队列 charter | 下游 |
+| `NS6-VF38.r` | VF38.r | `[partial-delivery] 剩余切片` | VF14/VF16 关闭后的文档再核对 | 本循环已切 digest/namespace/purge | 文档 recut | 下游 |
+| `NS6-VF15.r` | VF15 | `[partial-delivery] 剩余切片` | 同指纹二次 ingest 的 structurize outcome-commit | accept replay + items=1 已切 | 再生成 unique / 短路 replay | 下游 |
+| `NS6-VF88` | 第1轮 VF88 | `[true-deferred]` | live GPU | NS5 O3 / NS6 O4 | live_profile | owner |
+| `NS6-VF97` | 第1轮 VF97 | `[true-deferred]` | browser/OCR/Vision | NS5 O3 / NS6 O4 | 能力 charter | owner |
+| `NS6-T01-hotfix` | VF1 soak | `known-hotfix` | BEGIN-cancel 用 `to_thread` 睡眠门 | in-process sqlite BEGIN cancel SIGSEGV | pyturso cancel-during-BEGIN 另开 harness | 文档 |
+| `NS6-VF62` | 第1轮 VF62 | NS5 carry-forward | 重叠 `run_once` 仍关 | **不是**业主 true-deferred；NS6 AP 本轮仍不得打开 | heartbeat soak 后新 charter | owner |

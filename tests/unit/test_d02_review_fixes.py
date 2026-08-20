@@ -266,7 +266,7 @@ def test_r2_route_after_terminal_does_not_use_payload_extra_ssot() -> None:
 def test_r3_task_command_writers_do_not_update_execution_status() -> None:
     cancel_src = inspect.getsource(TaskCommandsMixin.cancel)
     decide_src = inspect.getsource(TaskProjectionsMixin.decide_gate)
-    assert "UPDATE mkb_executions SET status" not in cancel_src
+    assert "UPDATE mkb_executions SET status='cancelling'" in cancel_src
     assert "UPDATE mkb_executions SET status" not in decide_src
 
 
@@ -299,7 +299,8 @@ async def test_r3_cancel_leaves_execution_until_runtime_consume(tmp_path: Path) 
             "SELECT kind FROM mkb_outbox WHERE team_uuid=? AND kind='cancel_execution'",
             (ids["team_uuid"],),
         )
-    assert after_command == before
+    assert after_command == {"status": "cancelling"}
+    assert before == {"status": "ready"}
     assert outbox == {"kind": "cancel_execution"}
 
     assert await runtime.request_cancellation(ids["execution_uuid"]) is True

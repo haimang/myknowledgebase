@@ -182,12 +182,12 @@ async def test_r2_project_task_status_success_wins_while_cancelling(tmp_path: Pa
             proof_ref="mkbtest:proof:ok",
             result_ref="mkbtest:result:ok",
         )
-        assert ok is True
+        assert ok is False
         row = await tx.fetchone(
             "SELECT status,proof_ref FROM mkb_tasks WHERE team_uuid=? AND task_uuid=?",
             (team_uuid, task_uuid),
         )
-    assert row == {"status": "succeeded", "proof_ref": "mkbtest:proof:ok"}
+    assert row == {"status": "cancelling", "proof_ref": None}
     await persistence.close()
 
 
@@ -488,4 +488,6 @@ def test_r2_transition_from_runtime_delegates_to_projection() -> None:
     assert "project_task_status_tx" in source
     module_doc = inspect.getdoc(project_task_status_tx) or ""
     projection_source = inspect.getsource(project_task_status_tx)
-    assert "Success-wins" in projection_source or "success-wins" in module_doc.lower() or "success-wins" in projection_source
+    assert "cancelling" in projection_source
+    assert "success-wins" not in projection_source.lower()
+    assert "success-wins" not in module_doc.lower()

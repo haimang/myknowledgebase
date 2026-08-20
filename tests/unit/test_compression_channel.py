@@ -445,7 +445,7 @@ async def test_kernel_rejected_local_inference_package_salvages_once() -> None:
     pipeline._persist_failed_generation_invocation = _noop_persist  # type: ignore[method-assign]
     prompt = Path("data/prompts/summarizer/promptC.summarizer.v1.md")
     _completed, _summaries, invocations, cli_receipt = await pipeline._complete_construct_summaries(
-        SimpleNamespace(dispatch_pool="local-inference", task_priority="normal"),  # type: ignore[arg-type]
+        SimpleNamespace(dispatch_pool="local-inference", task_priority="normal", process_uuid=uuid7()),  # type: ignore[arg-type]
         {
             "payload": {
                 "compression_channel": "local-inference",
