@@ -14,13 +14,26 @@ data/logs/*
 htmlcov/
 *.db
 *.db-*
+
+# build 环境
 .env
 .venv/
 dist/
 build/
+
+# Agent
 .claude
 .grok
+
+# 部分指定的 output 位置
 .avisuals
-.adocs
+
+# 测试用文件夹
 .experiment/
+
+# 业主提供的上下文
 context/
+
+# 业主自用文件夹
+.anotes
+.adocs
