@@ -182,3 +182,28 @@ P1–P6 代码项的 ✅ 归类为 **observed-OK-at-closure**（短途/unit/ruff
 | 版本 | 日期 | 作者 | 变更 |
 |------|------|------|------|
 | `r1` | 2026-08-20 | Grok | 代码执行段初闭合；测试段待底部续写 |
+| `r2` | 2026-08-20 | Grok | 本地静态/unit/domain/integration 绿；Turso 销毁重建 15 条迁移；e2e sqlite3 路径仍 VF86 |
+
+---
+
+## 测试与收口分析（append · 2026-08-20 05:55 UTC）
+
+Owner 授权的本地静态测试、build 与 migration 销毁重建已跑。结论：
+
+| 闸 | 命令 | 结果 |
+|----|------|------|
+| ruff | `uv run ruff check .` | 0 error |
+| wheel | `uv build` + `unzip -l dist/*.whl` | 含 `001`–`015` `migrations/*.sql` |
+| Turso migrate | 空目录 migrate → `schema_migrations COUNT=15` | PASS |
+| 销毁重建 | `shutil.rmtree` 后二次 migrate COUNT=15 | PASS（只删 `.db` 会留 MVCC log 导致 Corrupt；必须删整目录） |
+| unit+domain+integration | `uv run pytest tests/unit tests/domain tests/integration -q` | PASS（约 440+；无失败） |
+| 关键 e2e | `test_generation_pipeline_contracts` / `test_single_intake_pipeline` | FAIL `sqlite3.DatabaseError: file is not a database` — **VF86 / NS1-V11**，本 AP 不修 |
+| fail-path Turso | `test_ns4_fail_path_turso.py` | PASS（`59a3a8f` 默认 stash 回退） |
+
+Hard-gate 更新：
+
+- NS5-T60 mega 仍 ⏸：主链 e2e 被 VF86 sqlite3 打开 Turso 文件挡住，不能读成 publication 行为未修。
+- NS5-T01–T59 子集与 sidecar soak 保持 observed-OK-at-closure。
+- Close-type 维持 `closed-with-explicit-deferrals`。
+
+**不得宣称**：全量 pytest 441/441；真 GPU；真机 `concurrent_writes=True` constitution e2e。

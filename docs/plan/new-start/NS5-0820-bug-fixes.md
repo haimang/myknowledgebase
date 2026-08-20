@@ -796,7 +796,7 @@ NS5-0820-bug-fixes
 
 > 执行者：`Grok`
 > 执行时间：`2026-08-20`
-> 文档状态：`draft → executing`
+> 文档状态：`draft → executing → executed`
 > 代码改动统计：Phase 1 落地中
 
 - **实际执行摘要**：Phase 1 按 DAG 首段落地 P1-01…P1-10（VF1/2/3/9/10/61–70）；VF62 重叠 `run_once` 保持关闭。
