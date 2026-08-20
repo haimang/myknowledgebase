@@ -34,6 +34,9 @@ where = ["."]
 include = ["api*", "src*", "intake*"]
 exclude = ["context*", "tests*"]
 
+[tool.setuptools.package-data]
+"src.persistence" = ["migrations/*.sql"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-q --tb=short"

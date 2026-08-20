@@ -96,7 +96,7 @@ async def test_turso_adapter_runs_manual_vector_sql(tmp_path: Path) -> None:
         readiness = await persistence.readiness()
         assert readiness["native_vector_probe"] is True
         assert readiness["native_vector"] is True
-        assert "libsql_vector_idx" not in probe_native_vector.__doc__ or True
+        assert "libsql_vector_idx" not in (probe_native_vector.__doc__ or "")
     finally:
         await persistence.close()
 
@@ -123,8 +123,9 @@ async def test_turso_readiness_reports_honest_cw_and_vector(tmp_path: Path) -> N
         assert readiness["schema_migration"] is True
         assert readiness["native_vector_probe"] is True
         assert readiness["native_vector"] is True
-        # CW is true only if MVCC + BEGIN CONCURRENT actually works on this DB.
-        assert readiness["concurrent_writes"] is readiness["concurrent_writes_probe"]
+        if not readiness["concurrent_writes_probe"]:
+            pytest.skip("Turso BEGIN CONCURRENT is not available on this engine")
+        assert readiness["concurrent_writes"] is True
     finally:
         await persistence.close()
 

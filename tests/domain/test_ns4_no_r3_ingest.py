@@ -5,13 +5,15 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
+
 RESULTS = Path(".experiment/0815/runs/MKB-0815-R2/results/runs.jsonl")
 FROZEN = {"N-A5", "N-A3", "N-A6", "N-A2", "Q-A5"}
 
 
 def test_r3_jsonl_rows_stay_on_frozen_cells() -> None:
     if not RESULTS.is_file():
-        return
+        pytest.fail(f"missing experiment journal {RESULTS}")
     for line in RESULTS.read_text(encoding="utf-8").splitlines():
         if not line.strip() or "-r3" not in line:
             continue

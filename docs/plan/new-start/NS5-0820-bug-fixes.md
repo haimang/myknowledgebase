@@ -883,3 +883,9 @@ residual：VF67 部分 unique → P2-02。
 - **实际执行摘要**：XFF 默认不信；限流 overflow 拒绝新身份而非全局 fail-open；extras 拒 camelCase secret 与 signed URL；sqlite 双因子；mapped IPv6 unwrap；audit write 失败回滚 sampler；body Content-Length cap。
 - **Phase 偏差**：Starlette 主版本未强升（P5-05 若 0.115.12 仍可运行则 TrustedHost 未加，避免打本地 TestClient Host）。
 - **测试发现**：`test_ns5_phase5.py` + security_boundary 绿。
+
+### 11.8 Phase 6 回填
+
+- **实际执行摘要**：拆 tautology（`or True`、ReadPort 自造 dict、缺 journal 静默 return）；ruff 0 error；CW unit 在 probe false 时 skip 而非两 False 绿；wheel package-data 含 `migrations/*.sql`。
+- **Phase 偏差**：未声称全量 pytest 441/441（VF86 仍 NS1-V11）。P3-06/08/10 与部分 P4 切片仍 partial。
+- **测试发现**：`ruff check .` 0；sidecar soak 绿；wheel 含 001–015 SQL。

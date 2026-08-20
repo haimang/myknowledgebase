@@ -97,7 +97,7 @@ async def test_invocation_status_check_rejects_unknown(tmp_path: Path) -> None:
     )
     try:
         await persistence.migrate()
-        with pytest.raises(Exception):
+        with pytest.raises(sqlite3.IntegrityError):
             async with persistence.transaction() as tx:
                 await tx.execute(
                     "INSERT INTO mkb_generation_invocations ("

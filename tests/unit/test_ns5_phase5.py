@@ -2,12 +2,11 @@
 
 from __future__ import annotations
 
-import os
-
 import pytest
 from pydantic import ValidationError
 
 from src.contracts.api.models import TeamCreateRequest
+from src.contracts.common.errors import MkbError
 from src.contracts.common.models import assert_safe_public_data
 from src.persistence.factory import sqlite_backend_permitted
 from src.runtime.security import EgressPolicy, FixedWindowRateLimiter, is_internal_ip
@@ -37,7 +36,7 @@ def test_rate_limiter_overflow_does_not_fail_open() -> None:
 
 def test_mapped_ipv6_loopback_is_restricted() -> None:
     policy = EgressPolicy(allow_literal_ip=True)
-    with pytest.raises(Exception):
+    with pytest.raises(MkbError):
         policy.check_url("http://[::ffff:127.0.0.1]/")
     assert is_internal_ip("::ffff:127.0.0.1") is True
 

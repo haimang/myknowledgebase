@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import sqlite3
 import stat
 from datetime import timedelta
 from pathlib import Path
@@ -132,7 +133,7 @@ async def test_pending_map_empty_after_success_and_discard(tmp_path: Path) -> No
     outcome = outcome.model_copy(update={"outcome_digest": canonical_outcome_digest(outcome)})
     persistence, runtime, _ids = await _seed_runtime(tmp_path / "pending")
     async with persistence.transaction() as tx:
-        with pytest.raises(Exception):
+        with pytest.raises(sqlite3.IntegrityError):
             # Catalog insert needs a matching team row; the pop still happens.
             await committer.validate_and_commit(tx, command, outcome)
     assert committer._pending == {}

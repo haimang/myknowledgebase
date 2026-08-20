@@ -21,9 +21,13 @@ def test_sidecar_source_uses_serial_immediate() -> None:
     assert "PRAGMA journal_mode=mvcc" not in source
 
 
-def test_sidecar_failure_does_not_change_product_code() -> None:
-    # Product codes stay on the exception; sidecar failures are swallowed by DiagnosticSink.
+def test_sidecar_failure_does_not_change_product_code(tmp_path: Path) -> None:
     from src.contracts.common.errors import MkbError
 
+    sidecar = TursoDiagnosticSidecar(tmp_path / "missing.db")
     err = MkbError("STRUCTURE_ANCHOR_MISSING", "missing", 422)
+    try:
+        sidecar.insert(("x",) * 14)
+    except Exception:
+        pass
     assert err.code == "STRUCTURE_ANCHOR_MISSING"

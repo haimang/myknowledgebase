@@ -224,14 +224,14 @@ def _decode_structured_stdout(stdout: str) -> tuple[str, dict[str, Any] | None, 
     if isinstance(result, str) and result.strip():
         try:
             parsed_result = json.loads(result)
-        except json.JSONDecodeError:
+        except json.JSONDecodeError as exc:
             kind = cli_structured_kind(result, present=True)
             raise MkbError(
                 "CLAUDE_CLI_OUTPUT_INVALID",
                 f"Claude CLI structured result is {kind}",
                 502,
                 {"cli_structured_kind": kind},
-            )
+            ) from exc
         if isinstance(parsed_result, Mapping):
             return result.strip(), dict(parsed_result), session_id, usage, is_error
         kind = cli_structured_kind(parsed_result, present=True)

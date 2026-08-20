@@ -339,7 +339,7 @@ class InferenceFacade:
                             await self._record_failure(
                                 invocation_uuid, request_digest, capability, request, error.code, started
                             )
-                            raise error
+                            raise error from None
                         continue
                     error = (
                         MkbError("INFERENCE_TRANSPORT_EXHAUSTED", "Inference transport was exhausted", 503)
