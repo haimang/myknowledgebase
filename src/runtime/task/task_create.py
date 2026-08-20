@@ -17,6 +17,20 @@ from src.services.events import DomainEventWriter
 from src.services.teams import TeamService
 
 
+def _creation_fingerprint(request: TaskCreateRequest) -> str:
+    payload = request.model_dump(mode="json")
+    audit = payload.get("audit")
+    if isinstance(audit, dict):
+        audit.pop("created_at", None)
+        audit.pop("reviewed_at", None)
+    return stable_digest(payload)
+
+
+def _is_unique_conflict(exc: BaseException) -> bool:
+    text = str(exc).lower()
+    return "unique" in text or "constraint" in text or type(exc).__name__ == "IntegrityError"
+
+
 class TaskCreateMixin:
     """Task create admission, root execution insert, and enqueue."""
 
@@ -51,7 +65,7 @@ class TaskCreateMixin:
 
 
     async def create(self, request: TaskCreateRequest, caller_token_fingerprint: str) -> tuple[dict[str, Any], bool]:
-        fingerprint = stable_digest(request.model_dump(mode="json"))
+        fingerprint = _creation_fingerprint(request)
         root_execution_uuid = uuid7()
         # First resolve the idempotency identity.  Object promotion happens
         # only for a genuinely new Task, so an exact client replay cannot make
@@ -88,8 +102,9 @@ class TaskCreateMixin:
                 if existing["creation_fingerprint"] != fingerprint:
                     raise ConflictError("task-identity-conflict", "Task identity has a different creation fingerprint")
                 return self._view(existing, await self._open_gate(tx, request.team_uuid, request.task_uuid)), True
-            await tx.execute(
-                "INSERT INTO mkb_tasks "
+            try:
+                await tx.execute(
+                    "INSERT INTO mkb_tasks "
                 "(team_uuid,task_uuid,trace_uuid,schema_version,request_intent,creation_fingerprint,audit_bound,title,"
                 "description,priority,deadline_at,status,row_revision,current_generation,current_root_execution_uuid,received_at,"
                 "created_at,updated_at,payload_extra) "
@@ -112,6 +127,18 @@ class TaskCreateMixin:
                     _json(request.payload_extra),
                 ),
             )
+            except Exception as exc:
+                if not _is_unique_conflict(exc):
+                    raise
+                raced = await tx.fetchone(
+                    "SELECT * FROM mkb_tasks WHERE team_uuid=? AND task_uuid=?",
+                    (request.team_uuid, request.task_uuid),
+                )
+                if raced is None:
+                    raise ConflictError("task-identity-conflict", "Task identity collided") from exc
+                if raced["creation_fingerprint"] != fingerprint:
+                    raise ConflictError("task-identity-conflict", "Task identity has a different creation fingerprint") from exc
+                return self._view(raced, await self._open_gate(tx, request.team_uuid, request.task_uuid)), True
             await tx.execute(
                 "INSERT INTO mkb_task_audits "
                 "(team_uuid,task_uuid,request_envelope_digest,strict_payload_json,caller_token_fingerprint,received_at,payload_extra) "

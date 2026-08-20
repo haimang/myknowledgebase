@@ -130,15 +130,16 @@ def apply_migrations(connection: MigrationConnection, migrations: list[Migration
             # implicitly commit an already-open Python transaction.
             marker = "COMMIT;"
             if migration.sql.rstrip().endswith(marker):
-                ledger_sql = (
+                body = migration.sql.rstrip()[: -len(marker)]
+                _executescript(connection, body)
+                connection.execute(
                     "INSERT INTO mkb_schema_migrations(migration_id, checksum, applied_at, applied_by) "
-                    f"VALUES ({migration.migration_id!r}, {migration.checksum!r}, {utc_now()!r}, 'mkb');\n"
-                    "COMMIT;"
+                    "VALUES (?,?,?,?)",
+                    (migration.migration_id, migration.checksum, utc_now(), "mkb"),
                 )
-                script = migration.sql.rstrip()[: -len(marker)] + ledger_sql
+                connection.execute("COMMIT")
             else:
                 raise MkbError("migration-transaction-missing", "Migration must end with COMMIT", 503)
-            _executescript(connection, script)
         except Exception:
             connection.rollback()
             raise
@@ -150,6 +151,13 @@ def verify_migrations(connection: MigrationConnection, migrations: list[Migratio
         applied = dict(_fetchall(connection, "SELECT migration_id, checksum FROM mkb_schema_migrations"))
     except Exception:
         return False
-    return len(applied) == len(migrations) and all(
-        applied.get(migration.migration_id) == migration.checksum for migration in migrations
-    )
+    if not (
+        len(applied) == len(migrations)
+        and all(applied.get(migration.migration_id) == migration.checksum for migration in migrations)
+    ):
+        return False
+    try:
+        tables = {str(row[0]) for row in _fetchall(connection, "SELECT name FROM sqlite_master WHERE type='table'")}
+    except Exception:
+        return False
+    return "mkb_tasks" in tables

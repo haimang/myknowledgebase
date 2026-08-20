@@ -18,12 +18,28 @@ from src.persistence.migration_runner import apply_migrations, discover_migratio
 from src.persistence.uow import immediate_transaction
 
 
+class _RowcountCursor:
+    """Normalize pyturso cursors that report ``rowcount=-1`` after DML."""
+
+    def __init__(self, cursor: Any, rowcount: int) -> None:
+        self._cursor = cursor
+        self.rowcount = rowcount
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._cursor, name)
+
+
 class TursoUnitOfWork:
     def __init__(self, connection: Any) -> None:
         self._connection = connection
 
     async def execute(self, sql: str, params: tuple[Any, ...] = ()) -> Any:
-        return await asyncio.to_thread(self._connection.execute, sql, params)
+        cursor = await asyncio.to_thread(self._connection.execute, sql, params)
+        rowcount = getattr(cursor, "rowcount", -1)
+        if not isinstance(rowcount, int) or rowcount < 0:
+            changes = getattr(self._connection, "changes", None)
+            rowcount = int(changes()) if callable(changes) else 0
+        return _RowcountCursor(cursor, rowcount)
 
     async def fetchone(self, sql: str, params: tuple[Any, ...] = ()) -> dict[str, Any] | None:
         cursor = await self.execute(sql, params)

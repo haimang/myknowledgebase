@@ -834,3 +834,21 @@ NS5-0820-bug-fixes
 
 `draft → executing（2026-08-20 Phase 1）`。
 residual：VF67 部分 unique → P2-02。
+
+### 11.4 Phase 2 回填
+
+- **实际执行摘要**：P2-01…P2-09（VF4/5/7/8/71–73/94/98–103）。014 改写 32-hex UUID + live tombstone unique。
+- **Phase 偏差**：HealthAggregator 只做 in-flight coalesce，不做跨调用 TTL 缓存（计划偏差 / substrate-fit）——TTL 会把 token 替换后的 /ready 锁成旧结果。journal_mode 抖动已在 P1 探针旁路消除。
+- **测试发现**：`test_ns5_phase2.py` + turso/migration/readiness/task 回归绿。
+
+| 工作项 | 状态 | 实际落点 | 备注 |
+|--------|------|----------|------|
+| P2-01 | `✅ done` | `turso/port.py` `_RowcountCursor` | stale UPDATE rowcount==0 |
+| P2-02 | `✅ done` | `migration_runner.py` 参数化 INSERT；`014_ns5_uuid_and_tombstone.sql` | 含 VF67 部分 unique |
+| P2-03 | `✅ done` | `time.py` us；`artifacts.py` `utc_now()` | |
+| P2-04 | `✅ done` | retry full jitter；gate cancelling noop；`outbox.dead` 事件 | |
+| P2-05 | `✅ done` | HealthAggregator in-flight coalesce | 无跨调用 TTL |
+| P2-06 | `✅ done` | lifespan bootstrap_failures + metric | |
+| P2-07 | `✅ done` | fingerprint 排除 audit 时间；PATCH `{}`；PK 409 | |
+| P2-08 | `✅ done` | `_safe_persisted_error` | |
+| P2-09 | `✅ done` | identity.json parse；`mkb_tasks` sqlite_master | |

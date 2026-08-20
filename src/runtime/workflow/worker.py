@@ -10,7 +10,12 @@ from src.contracts.common.errors import ConflictError, MkbError
 from src.contracts.runtime.models import ProcessCommand, ProcessOutcome
 from src.runtime.workflow.helpers import canonical_outcome_digest
 from src.runtime.workflow.runtime import WorkflowRuntime
+from src.runtime.workflow.runtime_outcome import _safe_persisted_error
 from src.runtime.workflow.types import ProcessStageHandler
+
+
+def _safe_error_message(message: str) -> str:
+    return _safe_persisted_error(message)
 
 
 class WorkflowWorker:
@@ -40,7 +45,7 @@ class WorkflowWorker:
             disposition=disposition,
             outcome_digest="0" * 64,
             error_code=error_code[:128],
-            error_message=error_message[:512],
+            error_message=_safe_error_message(error_message),
         )
         return provisional.model_copy(update={"outcome_digest": canonical_outcome_digest(provisional)})
 

@@ -407,11 +407,13 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     try:
         await container.registry.bootstrap()
     except MkbError:
-        pass
+        container.health.bootstrap_failures += 1
+        container.metrics.increment("mkb_repair_applied_total", 1, outcome="fail")
     try:
         await container.workflows.bootstrap()
     except MkbError:
-        pass
+        container.health.bootstrap_failures += 1
+        container.metrics.increment("mkb_repair_applied_total", 1, outcome="fail")
     await container.storage.readiness()
     stop = asyncio.Event()
     worker_task = asyncio.create_task(container.workflow_supervisor.run(stop), name="mkb-workflow-supervisor")

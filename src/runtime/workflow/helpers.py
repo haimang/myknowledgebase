@@ -51,7 +51,7 @@ def _json(value: Any) -> str:
     return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
 
 
-def _add_seconds(value: str, seconds: int) -> str:
+def _add_seconds(value: str, seconds: int | float) -> str:
     parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
     return (
         (parsed.astimezone(UTC) + timedelta(seconds=seconds)).isoformat(timespec="microseconds").replace("+00:00", "Z")

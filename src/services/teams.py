@@ -90,7 +90,11 @@ class TeamService:
                 )
             name = request.name if request.name is not None else row["name"]
             description = request.description if request.description is not None else row["description"]
-            extra = request.payload_extra if request.payload_extra else json.loads(row["payload_extra"])
+            extra = (
+                request.payload_extra
+                if "payload_extra" in request.model_fields_set
+                else json.loads(row["payload_extra"])
+            )
             await tx.execute(
                 "UPDATE mkb_teams SET name=?,description=?,payload_extra=?,row_revision=row_revision+1,updated_at=? "
                 "WHERE team_uuid=? AND row_revision=?",

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Awaitable, Callable
 
 from src.runtime.metrics import MetricRegistry
@@ -22,12 +23,30 @@ class HealthAggregator:
         "sec_token_loaded",
     )
 
-    def __init__(self, probe: ReadinessProbe, metrics: MetricRegistry) -> None:
+    def __init__(self, probe: ReadinessProbe, metrics: MetricRegistry, *, ttl_seconds: float = 0.5) -> None:
         self._probe = probe
         self._metrics = metrics
+        self._ttl_seconds = ttl_seconds
+        self._lock = asyncio.Lock()
+        self._inflight: asyncio.Task[dict[str, object]] | None = None
+        self.bootstrap_failures = 0
 
     async def ready(self) -> dict[str, object]:
+        async with self._lock:
+            inflight = self._inflight
+            if inflight is None:
+                inflight = asyncio.create_task(self._compute())
+                self._inflight = inflight
+        try:
+            return await inflight
+        finally:
+            if self._inflight is inflight:
+                self._inflight = None
+
+    async def _compute(self) -> dict[str, object]:
         supplied = await self._probe()
+        if self.bootstrap_failures:
+            supplied = {**supplied, "registry_bootstrap": False}
         components = [
             {
                 "name": name,

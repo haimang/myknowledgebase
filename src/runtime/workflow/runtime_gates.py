@@ -183,6 +183,8 @@ class WorkflowGatesMixin:
             if decision["gate_status"] != expected_status:
                 raise ConflictError("gate-decision-state-conflict", "Gate terminal state does not match its decision")
             execution = await self._execution(tx, decision["execution_uuid"])
+            if execution["status"] in {ExecutionStatus.CANCELLING.value, ExecutionStatus.CANCELLED.value}:
+                return True
             if execution["status"] in _TERMINAL_EXECUTION_STATUSES:
                 return False
             if execution["status"] == ExecutionStatus.WAITING.value:

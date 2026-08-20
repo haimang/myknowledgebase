@@ -48,10 +48,11 @@ async def test_migration_013_adds_columns_and_stage_report_table(tmp_path: Path)
 def test_migration_013_maps_historic_transcribe_markdown(tmp_path: Path) -> None:
     db = tmp_path / "hist.db"
     migrations = discover_migrations(Path("src/persistence/migrations"))
-    assert migrations[-1].migration_id == "013_generation_evidence_plane"
+    assert any(item.migration_id == "013_generation_evidence_plane" for item in migrations)
     connection = sqlite3.connect(db)
     try:
-        apply_migrations(connection, migrations[:-1])
+        prefix = [item for item in migrations if item.migration_id < "013_generation_evidence_plane"]
+        apply_migrations(connection, prefix)
         connection.execute("PRAGMA foreign_keys=OFF")
         connection.execute(
             "INSERT INTO mkb_generation_invocations ("

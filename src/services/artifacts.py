@@ -15,6 +15,7 @@ from dataclasses import dataclass
 
 from src.contracts.common.errors import ConflictError, MkbError
 from src.contracts.common.ids import uuid7
+from src.contracts.common.time import utc_now
 from src.contracts.runtime.models import ProcessCommand, ProcessOutcome
 from src.contracts.storage.models import ObjectStat, PromoteRequest
 from src.persistence.ports import UnitOfWork
@@ -147,16 +148,16 @@ class OutcomeArtifactCommitter:
             await tx.execute(
                 "INSERT INTO mkb_stored_objects "
                 "(stored_object_uuid,team_uuid,digest_algorithm,content_digest,size_bytes,media_type,storage_backend,"
-                "created_at,payload_extra) VALUES (?,?, 'sha256',?,?,?,?,strftime('%Y-%m-%dT%H:%M:%fZ','now'),'{}')",
-                (stored_object_uuid, team_uuid, stat.sha256, stat.size_bytes, stat.media_type, "local_fs"),
+                "created_at,payload_extra) VALUES (?,?, 'sha256',?,?,?,?,?,'{}')",
+                (stored_object_uuid, team_uuid, stat.sha256, stat.size_bytes, stat.media_type, "local_fs", utc_now()),
             )
         else:
             stored_object_uuid = existing["stored_object_uuid"]
         await tx.execute(
             "INSERT INTO mkb_object_references "
             "(reference_uuid,team_uuid,stored_object_uuid,purpose,owner_kind,owner_uuid,expected_digest,expected_size,"
-            "created_at,payload_extra) VALUES (?,?,?,'process_io',?,?,?,?,strftime('%Y-%m-%dT%H:%M:%fZ','now'),'{}')",
-            (uuid7(), team_uuid, stored_object_uuid, owner_kind, owner_uuid, stat.sha256, stat.size_bytes),
+            "created_at,payload_extra) VALUES (?,?,?,'process_io',?,?,?,?,?,'{}')",
+            (uuid7(), team_uuid, stored_object_uuid, owner_kind, owner_uuid, stat.sha256, stat.size_bytes, utc_now()),
         )
 
 

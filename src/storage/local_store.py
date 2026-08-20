@@ -135,6 +135,9 @@ class LocalObjectStore:
     async def readiness(self) -> bool:
         try:
             await asyncio.to_thread(self._ensure_root)
-            return self._identity_path.exists() and os.access(self.root, os.W_OK)
-        except OSError:
+            if not self._identity_path.exists() or not os.access(self.root, os.W_OK):
+                return False
+            payload = json.loads(self._identity_path.read_text(encoding="utf-8"))
+            return isinstance(payload, dict) and isinstance(payload.get("identity"), str) and bool(payload["identity"])
+        except (OSError, json.JSONDecodeError, TypeError, ValueError):
             return False

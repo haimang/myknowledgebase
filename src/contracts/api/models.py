@@ -49,7 +49,7 @@ class TeamPatchRequest(PayloadExtraModel):
 
     @model_validator(mode="after")
     def require_change(self) -> TeamPatchRequest:
-        if self.name is None and self.description is None and not self.payload_extra:
+        if self.name is None and self.description is None and "payload_extra" not in self.model_fields_set:
             raise ValueError("at least one mutable Team field is required")
         return self
 

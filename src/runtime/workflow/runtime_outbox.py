@@ -7,6 +7,7 @@ from typing import Any
 
 from src.contracts.common.errors import MkbError
 from src.contracts.common.ids import stable_digest, uuid7
+from src.runtime.workflow.runtime_outcome import _safe_persisted_error
 from src.contracts.common.time import utc_now
 from src.persistence.ports import UnitOfWork
 from src.runtime.workflow.helpers import (
@@ -17,6 +18,10 @@ from src.runtime.workflow.helpers import (
 from src.runtime.workflow.types import (
     OutboxDelivery,
 )
+
+
+def _safe_outbox_error(error: str) -> str:
+    return _safe_persisted_error(error)
 
 
 class WorkflowOutboxMixin:
@@ -338,11 +343,38 @@ class WorkflowOutboxMixin:
     async def _mark_outbox_dead(self, outbox_id: str, lease_owner: str, error: str) -> None:
         now = utc_now()
         async with self.persistence.transaction() as tx:
+            row = await tx.fetchone(
+                "SELECT team_uuid,kind FROM mkb_outbox WHERE outbox_id=?", (outbox_id,)
+            )
             await tx.execute(
                 "UPDATE mkb_outbox SET status='dead',lease_owner=NULL,lease_expires_at=NULL,last_error=?,updated_at=? "
                 "WHERE outbox_id=? AND status='in_flight' AND lease_owner=?",
-                (error[:512], now, outbox_id, lease_owner),
+                (_safe_outbox_error(error), now, outbox_id, lease_owner),
             )
+            if row is not None:
+                await self._record_outbox_dead_tx(tx, row, error=_safe_outbox_error(error))
+
+    async def _record_outbox_dead_tx(self, tx: UnitOfWork, row: dict[str, Any], *, error: str) -> None:
+        from src.services.events import DomainEventWriter
+
+        await DomainEventWriter().write(
+            tx,
+            team_uuid=str(row["team_uuid"]),
+            trace_uuid=uuid7(),
+            event_type="outbox.dead",
+            aggregate="outbox",
+            summary="Outbox delivery marked dead",
+            payload={"kind": row.get("kind"), "error": error[:128]},
+            severity="error",
+            status_after="dead",
+        )
+        metrics = getattr(self, "metrics", None)
+        if metrics is not None:
+            kind = str(row.get("kind") or "wake_process")
+            try:
+                metrics.increment("mkb_outbox_dead_total", 1, kind=kind)
+            except Exception:
+                pass
 
     async def _complete_outbox(self, outbox_id: str, lease_owner: str) -> None:
         now = utc_now()
@@ -361,8 +393,14 @@ class WorkflowOutboxMixin:
             if row is None:
                 return
             status = "dead" if row["attempts"] >= 8 else "pending"
+            safe_error = _safe_outbox_error(error)
+            meta = await tx.fetchone(
+                "SELECT team_uuid,kind FROM mkb_outbox WHERE outbox_id=?", (outbox_id,)
+            )
             await tx.execute(
                 "UPDATE mkb_outbox SET status=?,lease_owner=NULL,lease_expires_at=NULL,last_error=?,available_at=?,updated_at=? "
                 "WHERE outbox_id=? AND status='in_flight' AND lease_owner=?",
-                (status, error[:512], _add_seconds(now, 1), now, outbox_id, lease_owner),
+                (status, safe_error, _add_seconds(now, 1), now, outbox_id, lease_owner),
             )
+            if status == "dead" and meta is not None:
+                await self._record_outbox_dead_tx(tx, meta, error=safe_error)

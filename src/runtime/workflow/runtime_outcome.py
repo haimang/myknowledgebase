@@ -25,6 +25,14 @@ from src.runtime.workflow.helpers import (
 )
 
 
+def _safe_persisted_error(message: str) -> str:
+    from src.runtime.security import redact
+
+    redacted = redact(message)
+    text = redacted if isinstance(redacted, str) else str(redacted)
+    return text[:512]
+
+
 class WorkflowOutcomeMixin:
     """runtime outcome"""
 
@@ -135,7 +143,10 @@ class WorkflowOutcomeMixin:
                         422,
                     )
                 if process["retry_count"] < process["max_retries"]:
-                    due = _add_seconds(now, self.retry_delay_seconds)
+                    import random
+
+                    cap = max(float(self.retry_delay_seconds), 0.001) * (2 ** int(process["retry_count"]))
+                    due = _add_seconds(now, random.uniform(0.0, cap))
                     updated = await tx.execute(
                         "UPDATE mkb_processes SET status='retry_wait',accepted_outcome_digest=?,retry_count=retry_count+1,"
                         "next_retry_at=?,available_at=?,last_failure_retryability=1,error_code=?,error_message=?,"
@@ -148,7 +159,7 @@ class WorkflowOutcomeMixin:
                             due,
                             due,
                             outcome.error_code,
-                            outcome.error_message,
+                            _safe_persisted_error(outcome.error_message),
                             now,
                             process["process_uuid"],
                             outcome.fencing_generation,
@@ -449,7 +460,7 @@ class WorkflowOutcomeMixin:
             (
                 accepted_outcome_digest,
                 error_code,
-                error_message[:512],
+                _safe_persisted_error(error_message),
                 failure_disposition,
                 now,
                 now,
