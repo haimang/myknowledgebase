@@ -162,37 +162,46 @@ class IntakeAcceptanceSnapshotMixin:
                 )
                 initial_semantics = await self._initial_semantics_tx(tx, state)
                 fingerprint = self._semantic_fingerprint(initial_semantics)
-                max_ordinal = await tx.fetchone(
-                    "SELECT MAX(revision_ordinal) AS ordinal FROM mkb_intake_revisions "
-                    "WHERE team_uuid=? AND intake_item_uuid=?",
-                    (command.team_uuid, state["intake_item_uuid"]),
-                )
-                revision_ordinal = int(max_ordinal["ordinal"] or 0) + 1 if max_ordinal is not None else 1
-                predecessor = await tx.fetchone(
+                existing_rev = await tx.fetchone(
                     "SELECT intake_revision_uuid FROM mkb_intake_revisions "
-                    "WHERE team_uuid=? AND intake_item_uuid=? AND revision_ordinal=?",
-                    (command.team_uuid, state["intake_item_uuid"], revision_ordinal - 1),
+                    "WHERE team_uuid=? AND intake_item_uuid=? AND revision_fingerprint=?",
+                    (command.team_uuid, state["intake_item_uuid"], fingerprint),
                 )
-                await tx.execute(
-                    "INSERT INTO mkb_intake_revisions "
-                    "(team_uuid,intake_revision_uuid,intake_item_uuid,revision_ordinal,predecessor_revision_uuid,"
-                    "revision_fingerprint,creation_action_key,"
-                    "creation_action_version,source_snapshot_uuid,created_at,payload_extra) VALUES (?,?,?,?,?,?,?,?,?,?,'{}')",
-                    (
-                        command.team_uuid,
-                        state["intake_revision_uuid"],
-                        state["intake_item_uuid"],
-                        revision_ordinal,
-                        None if predecessor is None else predecessor["intake_revision_uuid"],
-                        fingerprint,
-                        action["action_key"],
-                        action["definition_version"],
-                        state["intake_snapshot_uuid"],
-                        now,
-                    ),
-                )
-                for entry in initial_semantics:
-                    await self._insert_revision_semantic(tx, command.team_uuid, state["intake_revision_uuid"], entry, now)
+                if existing_rev is None:
+                    max_ordinal = await tx.fetchone(
+                        "SELECT MAX(revision_ordinal) AS ordinal FROM mkb_intake_revisions "
+                        "WHERE team_uuid=? AND intake_item_uuid=?",
+                        (command.team_uuid, state["intake_item_uuid"]),
+                    )
+                    revision_ordinal = int(max_ordinal["ordinal"] or 0) + 1 if max_ordinal is not None else 1
+                    predecessor = await tx.fetchone(
+                        "SELECT intake_revision_uuid FROM mkb_intake_revisions "
+                        "WHERE team_uuid=? AND intake_item_uuid=? AND revision_ordinal=?",
+                        (command.team_uuid, state["intake_item_uuid"], revision_ordinal - 1),
+                    )
+                    await tx.execute(
+                        "INSERT INTO mkb_intake_revisions "
+                        "(team_uuid,intake_revision_uuid,intake_item_uuid,revision_ordinal,predecessor_revision_uuid,"
+                        "revision_fingerprint,creation_action_key,"
+                        "creation_action_version,source_snapshot_uuid,created_at,payload_extra) VALUES (?,?,?,?,?,?,?,?,?,?,'{}')",
+                        (
+                            command.team_uuid,
+                            state["intake_revision_uuid"],
+                            state["intake_item_uuid"],
+                            revision_ordinal,
+                            None if predecessor is None else predecessor["intake_revision_uuid"],
+                            fingerprint,
+                            action["action_key"],
+                            action["definition_version"],
+                            state["intake_snapshot_uuid"],
+                            now,
+                        ),
+                    )
+                    for entry in initial_semantics:
+                        await self._insert_revision_semantic(tx, command.team_uuid, state["intake_revision_uuid"], entry, now)
+                else:
+                    state["intake_revision_uuid"] = existing_rev["intake_revision_uuid"]
+                    next_state["intake_revision_uuid"] = existing_rev["intake_revision_uuid"]
                 for artifact_uuid, owner_snapshot, owner_revision, role, digest, size, handle, object_uuid in (
                     (
                         state["raw_artifact_uuid"],
@@ -267,7 +276,7 @@ class IntakeAcceptanceSnapshotMixin:
                     size=output_size,
                 )
                 await tx.execute(
-                    "INSERT INTO mkb_intake_snapshot_memberships "
+                    "INSERT OR IGNORE INTO mkb_intake_snapshot_memberships "
                     "(team_uuid,intake_snapshot_uuid,member_ordinal,normalized_external_key,intake_item_uuid,observed_revision_uuid,"
                     "decision_kind,required,decision_digest,created_at,payload_extra) VALUES (?,?,0,?,?,?,'accepted',1,?,?,'{}')",
                     (
@@ -327,8 +336,8 @@ class IntakeAcceptanceSnapshotMixin:
                         ],
                     }
                 )
-                await tx.execute(
-                    "INSERT INTO mkb_intake_change_sets "
+                inserted_change_set = await tx.execute(
+                    "INSERT OR IGNORE INTO mkb_intake_change_sets "
                     "(change_set_uuid,team_uuid,intake_snapshot_uuid,change_set_digest,created_at,payload_extra) "
                     "VALUES (?,?,?,?,?,'{}')",
                     (
@@ -339,29 +348,37 @@ class IntakeAcceptanceSnapshotMixin:
                         now,
                     ),
                 )
-                fact = {
-                    "kind": "accept_revision",
-                    "member_ordinal": 0,
-                    "intake_item_uuid": state["intake_item_uuid"],
-                    "intake_revision_uuid": state["intake_revision_uuid"],
-                }
-                await tx.execute(
-                    "INSERT INTO mkb_intake_change_set_facts "
-                    "(fact_uuid,change_set_uuid,team_uuid,fact_kind,fact_ordinal,intake_item_uuid,intake_revision_uuid,"
-                    "semantic_key,semantic_definition_version,absence_key,fact_digest,created_at,payload_extra) "
-                    "VALUES (?,?,?,?,?,?,?,NULL,NULL,NULL,?,?,'{}')",
-                    (
-                        uuid7(),
-                        change_set_uuid,
-                        command.team_uuid,
-                        "accept_revision",
-                        0,
-                        state["intake_item_uuid"],
-                        state["intake_revision_uuid"],
-                        stable_digest(fact),
-                        now,
-                    ),
+                stored_change_set = await tx.fetchone(
+                    "SELECT change_set_uuid FROM mkb_intake_change_sets "
+                    "WHERE team_uuid=? AND intake_snapshot_uuid=? AND change_set_digest=?",
+                    (command.team_uuid, state["intake_snapshot_uuid"], change_set_digest),
                 )
+                if stored_change_set is not None:
+                    change_set_uuid = stored_change_set["change_set_uuid"]
+                if inserted_change_set.rowcount == 1:
+                    fact = {
+                        "kind": "accept_revision",
+                        "member_ordinal": 0,
+                        "intake_item_uuid": state["intake_item_uuid"],
+                        "intake_revision_uuid": state["intake_revision_uuid"],
+                    }
+                    await tx.execute(
+                        "INSERT INTO mkb_intake_change_set_facts "
+                        "(fact_uuid,change_set_uuid,team_uuid,fact_kind,fact_ordinal,intake_item_uuid,intake_revision_uuid,"
+                        "semantic_key,semantic_definition_version,absence_key,fact_digest,created_at,payload_extra) "
+                        "VALUES (?,?,?,?,?,?,?,NULL,NULL,NULL,?,?,'{}')",
+                        (
+                            uuid7(),
+                            change_set_uuid,
+                            command.team_uuid,
+                            "accept_revision",
+                            0,
+                            state["intake_item_uuid"],
+                            state["intake_revision_uuid"],
+                            stable_digest(fact),
+                            now,
+                        ),
+                    )
                 task_updated = await tx.execute(
                     "UPDATE mkb_tasks SET intake_snapshot_uuid=?,change_set_uuid=?,row_revision=row_revision+1,updated_at=? "
                     "WHERE team_uuid=? AND task_uuid=? AND current_root_execution_uuid=? AND intake_snapshot_uuid IS NULL",

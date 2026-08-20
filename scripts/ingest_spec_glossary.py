@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import sqlite3
 import time
 from pathlib import Path
 
@@ -39,9 +38,6 @@ def _object_bytes(object_root: Path, team_uuid: str, logical_handle: str) -> byt
 
 def main() -> None:
     settings = Settings(
-        persistence_backend="sqlite",
-        concurrent_writes_required=False,
-        native_vector_required=False,
         live_inference=True,
         ns1_cli_mode="stub",
         inference_probe_enabled=False,
@@ -109,49 +105,51 @@ def main() -> None:
         created.raise_for_status()
         terminal = _wait(client, team_uuid, task_uuid, headers)
         print("terminal", json.dumps(terminal, ensure_ascii=False)[:800])
+        persistence = app.state.container.persistence
+        object_root = settings.resolved_object_root
 
-    db = settings.resolved_database_path
-    object_root = settings.resolved_object_root
-    with sqlite3.connect(db) as connection:
-        connection.row_factory = sqlite3.Row
-        steps = list(
-            connection.execute(
-                "SELECT step_key, status, error_code FROM mkb_processes "
-                "WHERE team_uuid=? AND task_uuid=? ORDER BY created_at",
-                (team_uuid, task_uuid),
-            )
-        )
+        async def inspect() -> tuple[list[dict[str, object]], list[dict[str, object]], list[dict[str, object]], list[dict[str, object]]]:
+            async with persistence.transaction() as tx:
+                steps = list(
+                    await tx.fetchall(
+                        "SELECT step_key, status, error_code FROM mkb_processes "
+                        "WHERE team_uuid=? AND task_uuid=? ORDER BY created_at",
+                        (team_uuid, task_uuid),
+                    )
+                )
+                artifacts = list(
+                    await tx.fetchall(
+                        "SELECT artifact_type, logical_handle, size_bytes FROM mkb_generation_artifacts "
+                        "WHERE team_uuid=? AND task_uuid=? ORDER BY artifact_type",
+                        (team_uuid, task_uuid),
+                    )
+                )
+                vectors = list(
+                    await tx.fetchall(
+                        "SELECT channel, block_or_unit_id, dimension, embedding_model_key, publication_state "
+                        "FROM mkb_vector_records WHERE team_uuid=? ORDER BY channel, block_or_unit_id",
+                        (team_uuid,),
+                    )
+                )
+                namespaces = list(
+                    await tx.fetchall(
+                        "SELECT namespace_key, embedding_model_key, dimension, adapter_kind FROM mkb_vector_namespaces "
+                        "WHERE team_uuid=?",
+                        (team_uuid,),
+                    )
+                )
+            return steps, artifacts, vectors, namespaces
+
+        steps, artifacts, vectors, namespaces = client.portal.call(inspect)
         print("steps:")
         for row in steps:
             print(" ", dict(row))
-        artifacts = list(
-            connection.execute(
-                "SELECT artifact_type, logical_handle, size_bytes FROM mkb_generation_artifacts "
-                "WHERE team_uuid=? AND task_uuid=? ORDER BY artifact_type",
-                (team_uuid, task_uuid),
-            )
-        )
         print("artifacts:")
         for row in artifacts:
             print(" ", dict(row))
-        vectors = list(
-            connection.execute(
-                "SELECT channel, block_or_unit_id, dimension, embedding_model_key, publication_state, "
-                "length(embedding) AS blob_bytes FROM mkb_vector_records "
-                "WHERE team_uuid=? ORDER BY channel, block_or_unit_id",
-                (team_uuid,),
-            )
-        )
         print("vectors:")
         for row in vectors:
             print(" ", dict(row))
-        namespaces = list(
-            connection.execute(
-                "SELECT namespace_key, embedding_model_key, dimension, adapter_kind FROM mkb_vector_namespaces "
-                "WHERE team_uuid=?",
-                (team_uuid,),
-            )
-        )
         print("namespaces:")
         for row in namespaces:
             print(" ", dict(row))

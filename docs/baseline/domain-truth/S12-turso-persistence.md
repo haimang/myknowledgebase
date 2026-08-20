@@ -621,3 +621,4 @@ S12-v1.1 把持久化从「宪法」升格为 **可编码执行台账**，与 D0
 | S12-v1.0 | 2026-08-11 | accepted | T-O-97..110；TX/outbox/CW+vector |
 | S12-v1.0-cal-* | 2026-08-11 | calibrated | S13/D04/S07 校准注 |
 | S12-v1.1 | 2026-08-12 | accepted | **执行 SSOT 强制**；E01–E11；禁止执行依赖 QNA |
+| S12-v1.1-ns6-note | 2026-08-20 | change-request | 叶工人准入 ≠ constitution 探针：`/ready` 合取 `write_path_ready`（serial `BEGIN IMMEDIATE`）；`concurrent_writes_probe` 只在空 scratch 上探测，**不得**改写生产 `journal_mode`，也不得在 UoW 仍为 IMMEDIATE 时把门控 `/ready`。S12-T005 fail-loud 保留为探针语义；待业务 UoW 真切 CONCURRENT 后再并回 REQUIRED。 |

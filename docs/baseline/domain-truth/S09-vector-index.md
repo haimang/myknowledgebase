@@ -720,3 +720,4 @@ S09-v1.0 将 progressive `T-O-231..246` 升格为 **唯一可编码执行真相*
 | 版本 | 日期 | 作者 | 状态 | 变更 |
 |---|---|---|---|---|
 | `S09-v1.0` | `2026-08-12` | `MKB owner + Codex` | `accepted` | 自 `qna-truth/S09.md v1.0`（`T-O-231..246`）升格唯一执行 SSOT；九段式 + E01–E10；对账/Proof/代数/谓词/metric/运维闭包；Round 3 waived |
+| `S09-v1.0-ns6-note` | `2026-08-20` | `Grok` | `change-request` | serving `publication_state='indexed'` 行禁止 UPDATE；新世代 INSERT 新 `vector_record_uuid`。namespace 按 Layer A `(model_key, version, adapter, dimension)` 分键。generation CAS 在 vectorize outcome TX 内 `rowcount==1`。purge 合同收窄为 `channel_filter=all`。 |

@@ -7,15 +7,13 @@ import sys
 from pathlib import Path
 from typing import Literal, Protocol
 
-from src.persistence.sqlite_port import SqlitePersistence
-
 
 def sqlite_backend_permitted() -> bool:
     """Stock sqlite is a pytest fixture only (NS4 T-O-364 / T-O-371).
 
     Both factors are required: the pytest env marker *and* a real pytest
-    import.  Forging ``PYTEST_CURRENT_TEST`` plus ``MKB_ALLOW_SQLITE`` in a
-    production process is not enough.
+    import.  Forging ``PYTEST_CURRENT_TEST`` in a production process is
+    not enough; ``MKB_ALLOW_SQLITE`` is not a permit factor.
     """
 
     return bool(os.environ.get("PYTEST_CURRENT_TEST")) and "pytest" in sys.modules
@@ -45,6 +43,8 @@ def build_persistence(
     if backend == "sqlite":
         if not sqlite_backend_permitted():
             raise ValueError("sqlite persistence is test-only; production and 0815 must use turso")
+        from src.persistence.sqlite_port import SqlitePersistence
+
         return SqlitePersistence(
             database_path,
             migration_directory,

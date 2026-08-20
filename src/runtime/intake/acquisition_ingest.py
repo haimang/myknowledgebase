@@ -362,11 +362,21 @@ class IntakeAcquisitionIngestMixin:
                 )
                 if definition is None:
                     raise MkbError("REGISTRY_NOT_FOUND", "Source kind definition is unavailable", 503)
+                existing = await self._resolve_existing_intake_identity_tx(
+                    tx, command.team_uuid, "registered_api", str(next_state["normalized_external_key"])
+                )
+                if existing is not None:
+                    next_state["intake_source_uuid"] = existing["intake_source_uuid"]
+                    if existing.get("intake_item_uuid"):
+                        next_state["intake_item_uuid"] = existing["intake_item_uuid"]
+                    if existing.get("intake_snapshot_uuid"):
+                        next_state["intake_snapshot_uuid"] = existing["intake_snapshot_uuid"]
                 await tx.execute(
                     "INSERT OR IGNORE INTO mkb_intake_sources "
                     "(team_uuid,intake_source_uuid,source_kind,source_kind_definition_version,source_kind_definition_digest,"
-                    "source_descriptor_ref,source_descriptor_digest,accepts_new_snapshots,created_at,updated_at,payload_extra) "
-                    "VALUES (?,?,?,'v1',?,?,?,1,?,?, '{}')",
+                    "source_descriptor_ref,source_descriptor_digest,accepts_new_snapshots,created_at,updated_at,payload_extra,"
+                    "normalized_external_key) "
+                    "VALUES (?,?,?,'v1',?,?,?,1,?,?, '{}',?)",
                     (
                         command.team_uuid,
                         next_state["intake_source_uuid"],
@@ -376,8 +386,16 @@ class IntakeAcquisitionIngestMixin:
                         stable_digest(descriptor),
                         now,
                         now,
+                        next_state["normalized_external_key"],
                     ),
                 )
+                stored = await tx.fetchone(
+                    "SELECT intake_source_uuid FROM mkb_intake_sources "
+                    "WHERE team_uuid=? AND source_kind='registered_api' AND normalized_external_key=?",
+                    (command.team_uuid, next_state["normalized_external_key"]),
+                )
+                if stored is not None:
+                    next_state["intake_source_uuid"] = stored["intake_source_uuid"]
 
             return material, {}, callback
 

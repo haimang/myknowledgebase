@@ -14,7 +14,7 @@ from pydantic import Field, field_validator, model_validator
 from src.contracts.common.models import PayloadExtraModel, StrictModel, assert_safe_public_data
 
 VectorizeMode = Literal["from_construct", "purge_generation"]
-VectorizeChannelFilter = Literal["all", "original", "summary"]
+VectorizeChannelFilter = Literal["all"]
 
 
 class EmbeddingModelRef(StrictModel):

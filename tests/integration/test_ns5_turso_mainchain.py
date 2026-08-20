@@ -16,20 +16,19 @@ from src.runtime.config import Settings
 def test_generation_mainchain_is_inspected_via_turso_port(tmp_path: Path) -> None:
     team_uuid, task_uuid, trace_uuid = uuid7(), uuid7(), uuid7()
     token = "ns5-t60-token"
-    app = create_app(
-        Settings(
-            internal_token=token,
-            database_path=tmp_path / "mkb.sqlite3",
-            object_root=tmp_path / "objects",
-            inference_probe_enabled=False,
-            live_inference=False,
-            persistence_backend="turso",
-            concurrent_writes_required=False,
-            native_vector_required=False,
-            rate_limit_ip_per_min=1_000,
-            rate_limit_token_per_min=2_000,
-        )
+    settings = Settings(
+        internal_token=token,
+        database_path=tmp_path / "mkb.sqlite3",
+        object_root=tmp_path / "objects",
+        inference_probe_enabled=False,
+        live_inference=False,
+        rate_limit_ip_per_min=1_000,
+        rate_limit_token_per_min=2_000,
     )
+    assert settings.persistence_backend == "turso"
+    assert settings.concurrent_writes_required is True
+    assert settings.native_vector_required is True
+    app = create_app(settings)
     headers = {"Authorization": f"Bearer {token}"}
     with TestClient(app, raise_server_exceptions=True) as client:
         assert (
@@ -114,3 +113,32 @@ def test_generation_mainchain_is_inspected_via_turso_port(tmp_path: Path) -> Non
 
         vector_count = client.portal.call(inspect_vectors)
         assert vector_count >= 1
+        assert type(persistence).__name__ == "TursoPersistence"
+
+        async def namespace_key() -> str:
+            async with persistence.transaction() as tx:
+                row = await tx.fetchone(
+                    "SELECT namespace_key FROM mkb_vector_namespaces WHERE team_uuid=? AND status='active'",
+                    (team_uuid,),
+                )
+            assert row is not None
+            return str(row["namespace_key"])
+
+        key = client.portal.call(namespace_key)
+        retrieved = client.post(
+            f"/v1/teams/{team_uuid}/retrieval:search",
+            headers=headers,
+            json={
+                "schema_version": "mkb.retrieval.v1",
+                "team_uuid": team_uuid,
+                "namespace_key": key,
+                "query": "First evidence sentence",
+                "return_k": 5,
+                "recall_k": 10,
+            },
+        )
+        assert retrieved.status_code == 200, retrieved.text
+        body = retrieved.json()
+        assert body.get("disposition") in {"ok", "empty"}
+        if body.get("disposition") == "ok":
+            assert body.get("results")
