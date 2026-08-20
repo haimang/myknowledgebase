@@ -68,6 +68,12 @@ class VectorGenerationPurger:
     def _assert_purge_command(command: VectorizeCommand) -> None:
         if command.mode != "purge_generation":
             raise MkbError("PURGE_COMMAND_INVALID", "Vector purge service accepts only purge_generation commands", 422)
+        if command.channel_filter != "all":
+            raise MkbError(
+                "PURGE_CHANNEL_FILTER_UNSUPPORTED",
+                "Partial-channel purge would break the publication proof",
+                422,
+            )
 
     async def _assert_targets_tx(self, tx: UnitOfWork, command: VectorizeCommand) -> None:
         placeholders = ",".join("?" for _ in command.target_generation_artifact_uuids)

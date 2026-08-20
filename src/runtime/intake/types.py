@@ -162,8 +162,8 @@ def _extract_pdf_text(value: bytes) -> tuple[str, dict[str, Any]]:
             text = joined.decode("utf-16")
         else:
             text = joined.decode("utf-8")
-    except UnicodeDecodeError:
-        text = joined.decode("latin-1")
+    except UnicodeDecodeError as exc:
+        raise MkbError("DECODE_PDF_INVALID", "PDF text layer is not valid Unicode", 422) from exc
     return _canonical_text(text), {
         "decoder": "local-pdf-literal-text.v1",
         "page_count_hint": len(re.findall(rb"/Type\s*/Page\b", value)),

@@ -871,3 +871,9 @@ residual：VF67 部分 unique → P2-02。
 | P3-08 | `🟩 partial` | salvage 占 NI；无独立 CLI gate 对象 |
 | P3-09 | `✅ done` | 非 text/* 拒 CLI clean |
 | P3-10 | `🟩 partial` | 同 settings caps，非同一 DispatchCaps 实例 |
+
+### 11.6 Phase 4 回填
+
+- **实际执行摘要**：vectorize 超预算 fail-closed；HTML 换行；单调锚；PDF 去 latin-1；检索 LIMIT+1 fail-closed；禁单通道 purge；指针 `active < excluded`；015 unique 含 generation；停用 Team 不可检索。
+- **Phase 偏差**：title→dual、acquisition budget、stub summary≠original、envelope 瘦、layered UUID validator 等未全部展开（P4-05/06/07/11/12/14/17/18 部分仍交后续切片）。
+- **测试发现**：`test_ns5_phase4.py` + adopt/retrieval/d04 绿。

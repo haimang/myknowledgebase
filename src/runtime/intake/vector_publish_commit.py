@@ -144,7 +144,8 @@ class IntakeVectorPublishCommitMixin:
                     changed = await tx.execute(
                         "UPDATE mkb_index_active_pointers SET active_index_generation=?,candidate_index_generation=NULL,"
                         "lifecycle_state='active',last_proof_uuid=?,generation_artifact_uuid=?,pointer_row_revision=pointer_row_revision+1,"
-                        "updated_at=? WHERE team_uuid=? AND intake_item_uuid=? AND namespace_uuid=? AND pointer_row_revision=?",
+                        "updated_at=? WHERE team_uuid=? AND intake_item_uuid=? AND namespace_uuid=? AND pointer_row_revision=?"
+                        " AND active_index_generation < ?",
                         (
                             state["index_generation"],
                             state["publication_proof_uuid"],
@@ -154,6 +155,7 @@ class IntakeVectorPublishCommitMixin:
                             state["intake_item_uuid"],
                             state["namespace_uuid"],
                             pointer["pointer_row_revision"],
+                            state["index_generation"],
                         ),
                     )
                     if changed.rowcount != 1:

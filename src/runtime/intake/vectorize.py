@@ -184,24 +184,14 @@ class IntakeVectorizeMixin:
             vector_inputs = list(plan.required)
             if mode == "live":
                 over_budget = [item for item in vector_inputs if len(item.content_full) > _LIVE_EMBED_CHAR_BUDGET]
-                if any(item.granularity == 0 and item.channel == "summary" for item in over_budget):
+                if over_budget:
                     raise MkbError(
                         "VECTORIZE_BUDGET_CONTENT_FULL",
-                        "g0 summary exceeds the live embedding context budget",
+                        "A required vector unit exceeds the live embedding context budget",
                         422,
                     )
-                embeddable = [
-                    item for item in vector_inputs if len(item.content_full) <= _LIVE_EMBED_CHAR_BUDGET
-                ]
-                if not embeddable:
-                    raise MkbError(
-                        "VECTORIZE_INFERENCE_FAILED",
-                        "No vector units fit the live embedding context budget",
-                        503,
-                    )
-                texts = [item.content_full for item in embeddable]
+                texts = [item.content_full for item in vector_inputs]
                 vectors, layer_a, invocation = await self._live_embeddings(command, texts, frozen_layer_a)
-                vector_inputs = embeddable
             else:
                 texts = [item.content_full for item in vector_inputs]
                 vectors = [deterministic_embedding(text, dimension=int(frozen_layer_a["dimension"])) for text in texts]

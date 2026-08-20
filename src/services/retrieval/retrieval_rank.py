@@ -126,8 +126,15 @@ class RetrievalRankMixin:
             + " AND ".join(where)
             + " ORDER BY r.vector_record_uuid LIMIT ?"
         )
-        params.append(self._candidate_scan_limit)
-        return await tx.fetchall(sql, tuple(params))
+        params.append(self._candidate_scan_limit + 1)
+        rows = await tx.fetchall(sql, tuple(params))
+        if len(rows) > self._candidate_scan_limit:
+            raise MkbError(
+                "RETRIEVE_SCAN_TRUNCATED",
+                "Retrieval candidate scan exceeded the bounded UUID scan limit",
+                503,
+            )
+        return rows
 
     async def _rank_ann_candidates(
         self,

@@ -38,6 +38,7 @@ async def test_migration_chain_includes_scatter_identity_columns(tmp_path: Path)
         assert "010_spark_vl_embed_model_key" in ids
         assert "013_generation_evidence_plane" in ids
         assert "014_ns5_uuid_and_tombstone" in ids
+        assert "015_vec_coord_generation" in ids
         assert "012_dispatch_embed_fifo_index" in ids
         async with persistence.transaction() as tx:
             columns = await tx.fetchall("PRAGMA table_info(mkb_executions)")

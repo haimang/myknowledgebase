@@ -86,6 +86,12 @@ class RetrievalRequestMixin:
 
         try:
             async with self._persistence.transaction() as tx:
+                team = await tx.fetchone(
+                    "SELECT status, deleted_at FROM mkb_teams WHERE team_uuid=?",
+                    (query.team_uuid,),
+                )
+                if team is not None and (team["status"] != "active" or team["deleted_at"] is not None):
+                    raise MkbError("RETRIEVE_TEAM_INACTIVE", "Team is not active for retrieval", 409)
                 namespace = await self._resolve_namespace(tx, query)
                 binding = await self._resolve_embed_binding(tx, query.team_uuid, namespace)
         except MkbError:

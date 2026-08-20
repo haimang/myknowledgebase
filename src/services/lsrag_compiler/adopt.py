@@ -210,6 +210,7 @@ def _adopt_layered_json(*, clean_text: str, layered_json: Mapping[str, object], 
     )
     blocks: list[RetrievalBlock] = []
     anchor_report: list[dict[str, object]] = []
+    search_from: dict[int, int] = {}
     for raw_block in sorted(raw_blocks, key=lambda item: (int(item["granularity"]), int(item["block_id"]))):
         block_id = int(raw_block["block_id"])
         granularity = int(raw_block["granularity"])
@@ -223,14 +224,11 @@ def _adopt_layered_json(*, clean_text: str, layered_json: Mapping[str, object], 
             _fail("STRUCTURE_ANCHOR_MISSING", "The g0 body is not the complete clean artifact")
         if normalized_body not in clean:
             _fail("STRUCTURE_ANCHOR_MISSING", "A layered body is not an exact clean substring")
-        first_char = clean.find(normalized_body)
+        first_char = clean.find(normalized_body, search_from.get(granularity, 0))
         if first_char < 0:
             _fail("STRUCTURE_ANCHOR_MISSING", "A layered body has no exact clean anchor")
-        occurrence_count = 0
-        cursor = first_char
-        while cursor >= 0:
-            occurrence_count += 1
-            cursor = clean.find(normalized_body, cursor + 1)
+        occurrence_count = clean.count(normalized_body)
+        search_from[granularity] = first_char + max(len(normalized_body), 1)
         start = _byte_offset(clean, first_char)
         finish = _byte_offset(clean, first_char + len(normalized_body))
         projection_block_id = f"g{granularity}:b{block_id:04d}"

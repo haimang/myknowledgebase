@@ -106,7 +106,7 @@ def extract_html_text(value: str) -> tuple[str, dict[str, Any]]:
         extractor.close()
     except Exception as exc:  # HTMLParser has a deliberately small error surface.
         raise MkbError("CLEAN_HTML_INVALID", "HTML representation could not be structurally parsed", 422) from exc
-    clean = _SPACE.sub(" ", canonical_text("".join(extractor.parts))).strip()
+    clean = clean_plain_text("".join(extractor.parts))
     return clean, {
         "parser": "stdlib.html-parser.v1",
         "removed_tag_counts": dict(sorted(extractor.removed_tags.items())),
