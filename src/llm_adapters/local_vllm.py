@@ -96,6 +96,7 @@ class LocalVllmAdapter:
             float(generate_timeout_seconds) if generate_timeout_seconds is not None else max(self.timeout_seconds, 180.0)
         )
         self._transport = transport
+        self._client: httpx.AsyncClient | None = None
 
     def _headers(self) -> dict[str, str]:
         if self.secret_slot is None:
@@ -184,32 +185,41 @@ class LocalVllmAdapter:
         del query, documents
         raise MkbError("INFERENCE_CONFIG_RERANK_UNAVAILABLE", "Reranking is not bound", 503)
 
-    async def probe(self) -> bool:
-        try:
-            async with httpx.AsyncClient(
-                timeout=min(self.timeout_seconds, 5),
+    def _shared_client(self, *, timeout: float) -> httpx.AsyncClient:
+        client = self._client
+        if client is None:
+            client = httpx.AsyncClient(
+                timeout=timeout,
                 transport=self._transport,
                 follow_redirects=False,
-            ) as client:
-                response = await client.get(f"{self.base_url}/v1/models", headers=self._headers())
-                return 200 <= response.status_code < 400
+            )
+            self._client = client
+        return client
+
+    async def aclose(self) -> None:
+        client = self._client
+        self._client = None
+        if client is not None:
+            await client.aclose()
+
+    async def probe(self) -> bool:
+        try:
+            client = self._shared_client(timeout=min(self.timeout_seconds, 5))
+            response = await client.get(f"{self.base_url}/v1/models", headers=self._headers())
+            return 200 <= response.status_code < 300
         except (MkbError, httpx.HTTPError):
             return False
 
     async def _request(self, path: str, payload: dict[str, Any], *, timeout: float | None = None) -> dict[str, Any]:
         try:
-            async with httpx.AsyncClient(
-                timeout=self.timeout_seconds if timeout is None else timeout,
-                transport=self._transport,
-                follow_redirects=False,
-            ) as client:
-                response = await client.post(f"{self.base_url}{path}", json=payload, headers=self._headers())
+            client = self._shared_client(timeout=self.timeout_seconds if timeout is None else timeout)
+            response = await client.post(f"{self.base_url}{path}", json=payload, headers=self._headers())
         except MkbError:
             raise
         except httpx.RequestError as exc:
             raise MkbError("INFERENCE_TRANSPORT_RETRYABLE", "Inference transport failed", 503) from exc
 
-        if response.status_code in {429, 503} or response.status_code >= 500:
+        if response.status_code in {408, 425, 429, 503} or response.status_code >= 500:
             raise MkbError("INFERENCE_TRANSPORT_RETRYABLE", "Inference service is unavailable", 503)
         if not 200 <= response.status_code < 300:
             raise MkbError("INFERENCE_VALIDATION_REMOTE", "Inference request was rejected", 502)

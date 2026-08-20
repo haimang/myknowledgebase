@@ -331,7 +331,15 @@ class InferenceFacade:
                     return result
                 except MkbError as exc:
                     if exc.code == "INFERENCE_TRANSPORT_RETRYABLE" and attempt + 1 < self._max_attempts:
+                        await self._gate.release(lease)
                         await self._sleep(self._retry_delay(attempt))
+                        lease = await self._gate.try_acquire(capability)
+                        if lease is None:
+                            error = MkbError("INFERENCE_BACKPRESSURE", "Inference concurrency gate is full", 503)
+                            await self._record_failure(
+                                invocation_uuid, request_digest, capability, request, error.code, started
+                            )
+                            raise error
                         continue
                     error = (
                         MkbError("INFERENCE_TRANSPORT_EXHAUSTED", "Inference transport was exhausted", 503)

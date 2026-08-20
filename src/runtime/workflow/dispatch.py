@@ -30,6 +30,8 @@ GENERATE_PROCESS_KEYS = frozenset(
 OVER_BUDGET_PROCESS_KEYS = frozenset(
     {
         "lsrag.structurize",
+        "lsrag.construct",
+        "lsrag.transcribe_markdown",
         "clean.extract.web_llm",
         "clean.extract.doc_llm",
         "clean.extract.pdf_llm",

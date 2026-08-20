@@ -172,7 +172,7 @@ class IntakeGenerationConstructMixin:
             return False
         if command is None or getattr(command, "dispatch_pool", None) != "local-inference":
             return False
-        if getattr(command, "task_priority", None) != "normal":
+        if getattr(command, "task_priority", None) == "low":
             return False
         billing = getattr(self, "_billing", None)
         if billing is not None and not billing.has_quota("non-interactive"):
@@ -358,7 +358,7 @@ class IntakeGenerationConstructMixin:
     ) -> tuple[Path, str]:
         if role is not None:
             if state is None:
-                raise MkbError(error_code, f"Frozen {role} prompt state is unavailable", 503)
+                raise MkbError("PROMPT_NOT_REGISTERED", f"Frozen {role} prompt state is unavailable", 503)
             path, pointer = self._frozen_prompt_file(state, role=role, error_code=error_code)
             return path, str(pointer["content_sha256"])
         path = (self._prompt_root / relative_path).resolve()

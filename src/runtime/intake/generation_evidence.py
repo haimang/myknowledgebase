@@ -2,18 +2,19 @@
 
 from __future__ import annotations
 
-from contextvars import ContextVar
 from typing import Any
 
 from src.contracts.observability.stage_report import validate_stage_report
 
-_pending: ContextVar[list[dict[str, Any]]] = ContextVar("ns4_generation_evidence", default=())
+_pending: dict[str, list[dict[str, Any]]] = {}
+_DEFAULT_EVIDENCE_KEY = "_"
 
 
 def record_pending_generation_evidence(
     *,
     invocation: dict[str, Any] | None = None,
     report: dict[str, Any] | None = None,
+    process_uuid: str | None = None,
 ) -> None:
     item: dict[str, Any] = {}
     if invocation is not None:
@@ -22,15 +23,13 @@ def record_pending_generation_evidence(
         item["report"] = validate_stage_report(report)
     if not item:
         return
-    current = list(_pending.get())
-    current.append(item)
-    _pending.set(current)
+    key = process_uuid or _DEFAULT_EVIDENCE_KEY
+    _pending.setdefault(key, []).append(item)
 
 
-def take_pending_generation_evidence() -> list[dict[str, Any]]:
-    items = list(_pending.get())
-    _pending.set(())
-    return items
+def take_pending_generation_evidence(process_uuid: str | None = None) -> list[dict[str, Any]]:
+    key = process_uuid or _DEFAULT_EVIDENCE_KEY
+    return _pending.pop(key, [])
 
 
 async def write_pending_generation_evidence_tx(tx: Any, process: dict[str, Any]) -> None:
@@ -48,7 +47,7 @@ async def write_pending_generation_evidence_tx(tx: Any, process: dict[str, Any])
     process_uuid = process["process_uuid"]
     task = process.get("task_uuid")
     trace = process.get("trace_uuid")
-    for item in take_pending_generation_evidence():
+    for item in take_pending_generation_evidence(process_uuid):
         invocation = item.get("invocation")
         if isinstance(invocation, dict):
             from src.contracts.observability.stage_report import evidence_stage_key

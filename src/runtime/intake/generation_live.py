@@ -335,7 +335,7 @@ class IntakeGenerationLiveMixin:
 
             payload = dict(invocation)
             payload.setdefault("status", "failed")
-            record_pending_generation_evidence(invocation=payload)
+            record_pending_generation_evidence(invocation=payload, process_uuid=command.process_uuid)
 
 
     async def _record_generation_and_inference_invocations(
@@ -492,7 +492,7 @@ class IntakeGenerationLiveMixin:
     async def _flush_pending_generation_evidence(self, tx: UnitOfWork, command: ProcessCommand) -> None:
             from src.runtime.intake.generation_evidence import take_pending_generation_evidence
 
-            for item in take_pending_generation_evidence():
+            for item in take_pending_generation_evidence(command.process_uuid):
                 invocation = item.get("invocation")
                 if isinstance(invocation, Mapping):
                     await self._record_generation_and_inference_invocations(tx, command, invocation)

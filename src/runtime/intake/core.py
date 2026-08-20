@@ -192,6 +192,8 @@ class IntakeCoreMixin:
             "INFERENCE_TRANSPORT_RETRYABLE",
             "CLAUDE_CLI_TIMEOUT",
             "CLAUDE_CLI_TRANSPORT_FAILED",
+            "INFERENCE_TRANSPORT_EXHAUSTED",
+            "INFERENCE_BACKPRESSURE",
             "not-ready",
         }
     )

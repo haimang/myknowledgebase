@@ -852,3 +852,22 @@ residual：VF67 部分 unique → P2-02。
 | P2-07 | `✅ done` | fingerprint 排除 audit 时间；PATCH `{}`；PK 409 | |
 | P2-08 | `✅ done` | `_safe_persisted_error` | |
 | P2-09 | `✅ done` | identity.json parse；`mkb_tasks` sqlite_master | |
+
+### 11.5 Phase 3 回填
+
+- **实际执行摘要**：P3-01…P3-10 主切片。salvage 允许 urgent；CLI 正文永久 stdin 且子环境剥离 `MKB_*`；证据按 process_uuid 分桶；EXHAUSTED/BACKPRESSURE 可 process-retry；vLLM 单例 client + 408/425 RETRYABLE；probe 仅 2xx；retry sleep 前放 lease。
+- **Phase 偏差**：Facade 与 DispatchCaps 仍共用 settings 数值而非同一对象引用（partial-delivery VF96 本轮切片）。CLI ConcurrencyGate 走既有 salvage occupancy，未另加进程级 fork 计数器。
+- **测试发现**：`test_ns5_phase3.py` + CLI/inference/compression 回归绿。
+
+| 工作项 | 状态 | 备注 |
+|--------|------|------|
+| P3-01 | `✅ done` | salvage 去掉 normal-only；construct 进 OVER_BUDGET |
+| P3-02 | `✅ done` | role 且 state=None → PROMPT_NOT_REGISTERED |
+| P3-03 | `✅ done` | 单例 client；408/425；放 lease 再 sleep |
+| P3-04 | `✅ done` | stdin-only；strip MKB_* env |
+| P3-05 | `✅ done` | evidence keyed by process_uuid |
+| P3-06 | `🟩 partial` | probe 仅 2xx；schema SHA freeze 未另开 generate 复核（live 路径既有 digest） |
+| P3-07 | `✅ done` | EXHAUSTED/BACKPRESSURE recoverable |
+| P3-08 | `🟩 partial` | salvage 占 NI；无独立 CLI gate 对象 |
+| P3-09 | `✅ done` | 非 text/* 拒 CLI clean |
+| P3-10 | `🟩 partial` | 同 settings caps，非同一 DispatchCaps 实例 |

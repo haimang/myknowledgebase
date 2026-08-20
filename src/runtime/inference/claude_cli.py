@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -58,9 +59,10 @@ class ClaudeCliPort(Protocol):
 
 
 def prompt_transport_for(user_prompt: str) -> Literal["argv", "stdin"]:
-    """Keep small prompts on argv; large material must not hit E2BIG."""
+    """Business body always travels on stdin so it cannot appear in argv."""
 
-    return "stdin" if len(user_prompt.encode("utf-8")) > CLAUDE_CLI_ARGV_PROMPT_LIMIT_BYTES else "argv"
+    del user_prompt
+    return "stdin"
 
 
 def clean_text_from_bjson_material(user_prompt: str) -> str:
@@ -284,7 +286,7 @@ class SubprocessClaudeCli:
 
     def __init__(self, *, executable: str = "claude", env: Mapping[str, str] | None = None) -> None:
         self._executable = executable
-        self._env = dict(env) if env is not None else None
+        self._env = _cli_child_env(env)
 
     async def run(self, request: ClaudeCliRequest) -> ClaudeCliResult:
         transport = prompt_transport_for(request.user_prompt)
@@ -346,6 +348,11 @@ def _digest_text(value: str) -> str:
     import hashlib
 
     return hashlib.sha256(value.encode("utf-8")).hexdigest()
+
+
+def _cli_child_env(env: Mapping[str, str] | None) -> dict[str, str]:
+    source = dict(env) if env is not None else dict(os.environ)
+    return {key: value for key, value in source.items() if not key.startswith("MKB_")}
 
 
 async def _terminate_process(process: asyncio.subprocess.Process | None) -> None:
@@ -412,8 +419,11 @@ class ClaudeCliCleanLanguageModel:
         blob: bytes | None = None,
         media_type: str | None = None,
     ) -> str:
-        del media_type
-        material = text if isinstance(text, str) else blob.decode("utf-8", errors="replace") if blob is not None else ""
+        if media_type is not None and not str(media_type).startswith("text/"):
+            raise MkbError("CLEAN_MEDIA_UNSUPPORTED", "Non-text media cannot be decoded as CLI clean input", 422)
+        if blob is not None and text is None:
+            raise MkbError("CLEAN_MEDIA_UNSUPPORTED", "Binary clean input is not supported on the CLI path", 422)
+        material = text if isinstance(text, str) else ""
         result = await self._cli.run(
             ClaudeCliRequest(
                 user_prompt=material,
