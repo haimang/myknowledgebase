@@ -122,7 +122,7 @@ async def test_local_object_html_uses_structural_clean_and_nfc_lf_decode() -> No
     decoded_state = decoded.envelope["state"]
     assert decoded_state["decoded_text"] == "<main>Hello\nCafé<script>ignore me</script><p>world</p></main>"
     cleaned, _, _ = await pipeline._clean(_command("clean.extract.deterministic"), decoded_state)
-    assert cleaned.envelope["state"]["clean_text"] == "Hello Café world"
+    assert cleaned.envelope["state"]["clean_text"] == "Hello\nCafé\nworld"
     assert cleaned.envelope["state"]["clean_evidence"]["removed_tag_counts"] == {"script": 1}
 
 

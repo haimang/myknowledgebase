@@ -47,7 +47,10 @@ async def write_pending_generation_evidence_tx(tx: Any, process: dict[str, Any])
     process_uuid = process["process_uuid"]
     task = process.get("task_uuid")
     trace = process.get("trace_uuid")
-    for item in take_pending_generation_evidence(process_uuid):
+    items = take_pending_generation_evidence(process_uuid)
+    if not items:
+        items = take_pending_generation_evidence()
+    for item in items:
         invocation = item.get("invocation")
         if isinstance(invocation, dict):
             from src.contracts.observability.stage_report import evidence_stage_key

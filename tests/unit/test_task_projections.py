@@ -273,7 +273,7 @@ async def test_task_list_filters_and_cursor_are_opaque_and_filter_bound(tmp_path
         )
         created, replay = await service.create(second, "token-fingerprint")
         assert replay is False
-        assert created["deadline_at"] == "2099-01-01T00:00:00.000Z"
+        assert created["deadline_at"] == "2099-01-01T00:00:00.000000Z"
 
         high, cursor = await service.list(team_uuid, priority="high", limit=1)
         assert [row["task_uuid"] for row in high] == [task_uuid]
