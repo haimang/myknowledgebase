@@ -53,3 +53,16 @@
 | `NS5-VF36` | VF36 | `[true-bug]` 未关 | raw/clean 共享 envelope digest | 双 CAS 对象 | 后继 serving AP | 下游 |
 | `NS5-VF52` | VF52 | `[true-bug]` 未关 | dim 切换 409 default | namespace 按 (model,ver,adapter,dim) 分键 | 后继 serving AP | 下游 |
 | `NS5-VF62` | VF62 | `[partial-delivery]` 未关 | 重叠 run_once | heartbeat 已绿；supervisor 仍串行 | T04 后再开 | 下游 |
+
+## NS6 — 2026-08-20 0820 second-pass 修复后
+
+| ID | 来源 | 归属 | 摘要 | 后延原因 | reopen 触发器 | 承接 |
+|----|------|------|------|----------|----------------|------|
+| `NS6-VF86` | VF35.r / VF86 | `[true-deferred]` | e2e sqlite3-on-Turso | owner NS1-V11 | harness charter | owner |
+| `NS6-VF6` | VF6 | `[true-deferred]` | 014 脏 unique 自愈 | 001 全行 unique 已拦正常升级 | 真实升级 UNIQUE 失败 | owner |
+| `NS6-VF20` | VF20 | `[true-deferred]` | 检索 `read_transaction` | NS5 交 hydration cache | ingest 期间检索 503 | owner |
+| `NS6-VF32` | VF32 | `[true-deferred]` | `/docs` 默认开 | NS5 O3 | 公网 bind | owner |
+| `NS6-VF62` | VF62 | `[true-deferred]` | 重叠 `run_once` | 本轮仍关 | 后继 charter | owner |
+| `NS6-VF4.r` | VF4.r | `[partial-delivery] 剩余切片` | D04 55 表闭集 | 本轮只核心表 | 全表 charter | 下游 |
+| `NS6-VF11.r` | VF11.r | `[partial-delivery] 剩余切片` | 进程组杀孙 | CLI terminate 已 shield | 进程组 charter | 下游 |
+| `NS6-VF25.r` | VF25.r | `[partial-delivery] 剩余切片` | 未编目 orphan / 目录 CAS | T-O-120 | owner 授权磁盘 SSOT | owner |

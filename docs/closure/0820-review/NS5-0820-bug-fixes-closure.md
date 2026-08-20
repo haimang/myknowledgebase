@@ -42,9 +42,9 @@
 | P2-02 014 UUID+tombstone unique | ✅ | `4ad95c5` + `test_014_rewrites_32hex_model_uuid` + 2026-08-20 05:49 UTC |
 | P2-03 时间戳 us | ✅ | `4ad95c5` + `test_timestamps_share_microsecond_timespec` + 2026-08-20 05:49 UTC |
 | P2-04 jitter/dead/gate | ✅ | `4ad95c5` + runtime_outcome/outbox/gates + 2026-08-20 05:49 UTC |
-| P2-05 ready coalesce | ✅ | `4ad95c5` + `test_health_ready_coalesces_within_ttl` + 2026-08-20 05:49 UTC |
+| P2-05 ready coalesce | 🟡 | NS5 只测 inflight coalesce；跨调用 TTL 由 NS6 VF36/`test_health_ttl_returns_cached_result_on_sequential_ready` 补。原 ✅ 过关叙述撤销 |
 | P2-06 bootstrap 可观测 | ✅ | `4ad95c5` + lifespan `bootstrap_failures` + 2026-08-20 05:49 UTC |
-| P2-07 指纹/extras/409 | ✅ | `4ad95c5` + `test_team_patch_empty_extras_clears` + 2026-08-20 05:49 UTC |
+| P2-07 指纹/extras/409 | 🟡 | extras 清空已有；Team PK UNIQUE→409 由 NS6 VF37/`test_team_create_unique_conflict_maps_to_409` 补。原 ✅ 过关叙述撤销 |
 | P2-08 脱敏 | ✅ | `4ad95c5` + `_safe_persisted_error` + 2026-08-20 05:49 UTC |
 | P2-09 ready 诚实 | ✅ | `4ad95c5` + `test_drop_mkb_tasks_fails_schema_readiness` + 2026-08-20 05:49 UTC |
 | P3-01 salvage/OVER_BUDGET | ✅ | `fd5c969` + `test_ns5_phase3.py` + 2026-08-20 05:49 UTC |

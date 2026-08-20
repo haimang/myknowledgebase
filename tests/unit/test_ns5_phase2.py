@@ -101,14 +101,9 @@ async def test_health_ready_coalesces_within_ttl(tmp_path: Path) -> None:
         return {name: True for name in HealthAggregator.REQUIRED}
 
     health = HealthAggregator(probe, MetricRegistry(), ttl_seconds=5)
-    async def both() -> None:
-        await health.ready()
-        await health.ready()
-
-    import asyncio
-
-    await asyncio.gather(health.ready(), health.ready())
-    assert 1 <= calls["n"] <= 2
+    await health.ready()
+    await health.ready()
+    assert calls["n"] == 1
 
 
 @pytest.mark.asyncio

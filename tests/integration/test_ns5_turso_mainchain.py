@@ -103,3 +103,14 @@ def test_generation_mainchain_is_inspected_via_turso_port(tmp_path: Path) -> Non
             for row in artifacts
             if row["artifact_type"] == "dual_channel_projection"
         )
+
+        async def inspect_vectors() -> int:
+            async with persistence.transaction() as tx:
+                rows = await tx.fetchall(
+                    "SELECT vector_record_uuid FROM mkb_vector_records WHERE team_uuid=?",
+                    (team_uuid,),
+                )
+                return len(rows)
+
+        vector_count = client.portal.call(inspect_vectors)
+        assert vector_count >= 1

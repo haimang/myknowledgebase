@@ -27,7 +27,7 @@
 > - VF-ledger §3 当前 `file:line` + 本 AP §7 内置锚区（落盘前已对 HEAD 抽查）
 > 关联 reference-anchor:
 > - 见 §7 内置锚区
-> 文档状态: `executing`
+> 文档状态: `executed`
 
 ---
 
@@ -729,8 +729,8 @@ NS6-0820-2nd-round-bug-fixes
 
 > 执行者：`Grok`
 > 执行时间：`2026-08-20`
-> 文档状态：`draft → executing`
-> 代码改动统计：Phase 1 落地中
+> 文档状态：`draft → executing → executed`
+> 代码改动统计：P1–P6 已落地；016 schema bump 1
 
 - **实际执行摘要**：Phase 1 按 DAG 首段落地 P1-01…P1-08（VF1/2/3/7/21/22/25/36）。VF62 重叠 `run_once` 保持关闭。
 - **Phase 偏差（计划 vs 实际）**：
@@ -821,3 +821,16 @@ NS6-0820-2nd-round-bug-fixes
 | P5-03 | `✅ done` | `reject_oversize_body` 流式累计 | 无 CL chunked 413 |
 | P5-04 | `✅ done` | `decide` 返回 effective_key；undo 用之 | 第三 IP 仍 DETAIL |
 | P5-05 | `✅ done` | `_is_private_peer`/`_ip_in_cidrs` 递归 mapped | 不重开空 CIDR XFF |
+
+### 11.7 Phase 6 回填
+
+- **实际执行摘要**：P6-01 假绿短途改为真 SUT；P6-02 NS5 P2-05/P2-07 翻 🟡；P6-03 mega/soak/ruff/build/migration destroy-rebuild；NS6 closure r2。
+- **Phase 偏差**：BEGIN-cancel soak 不再对 sqlite `Connection.execute` 阻塞窗口做 in-process 重复 close（会 SIGSEGV）；改为 patch `uow.asyncio.to_thread` 的 BEGIN 睡眠窗口 ×5。heartbeat raise ×3 仍真跑。
+- **测试发现**：NS6 unit 47 passed；ruff 0；`uv build` 含 016；Turso destroy-rebuild ok；mainchain vector COUNT≥1。全量 pytest / VF86 未宣称。
+- **后续 handoff**：VF86/6/20/32/62 与 VF4.r/11.r/25.r 见 deferred-items-ledger NS6。
+
+| 工作项 | 状态 | 实际落点 | 备注 |
+|--------|------|----------|------|
+| P6-01 | `✅ done` | ReadPort 实例化查询；sidecar insert；`_journal_row` exec；TTL 顺序 | 删 inspect.getsource 冒充 |
+| P6-02 | `✅ done` | NS5 closure P2-05/P2-07 🟡 | 不发明 VRX5 |
+| P6-03 | `✅ done` | NS6 closure；VF-ledger §6；deferred NS6 | 硬闸四元组在 closure r2 |

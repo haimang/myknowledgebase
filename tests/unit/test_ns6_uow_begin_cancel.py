@@ -3,11 +3,11 @@
 from __future__ import annotations
 
 import asyncio
-import threading
 from pathlib import Path
 
 import pytest
 
+from src.persistence import uow as uow_mod
 from src.persistence.sqlite_port import SqlitePersistence
 
 
@@ -15,37 +15,29 @@ from src.persistence.sqlite_port import SqlitePersistence
 async def test_cancel_during_begin_allows_next_immediate_begin(tmp_path: Path) -> None:
     persistence = SqlitePersistence(tmp_path / "uow-begin.sqlite", Path("src/persistence/migrations"))
     await persistence.migrate()
-    inner = persistence._connect()
-    begin_entered = threading.Event()
-    allow_begin = threading.Event()
+    begin_entered = asyncio.Event()
+    real_to_thread = uow_mod.asyncio.to_thread
 
-    class _BeginGate:
-        def __init__(self, wrapped: object) -> None:
-            self._wrapped = wrapped
+    async def gated_to_thread(func: object, *args: object, **kwargs: object) -> object:
+        sql = args[0] if args else None
+        if isinstance(sql, str) and sql.strip().upper().startswith("BEGIN"):
+            begin_entered.set()
+            await asyncio.sleep(30)
+        return await real_to_thread(func, *args, **kwargs)
 
-        def execute(self, sql: object, *args: object, **kwargs: object) -> object:
-            if isinstance(sql, str) and sql.strip().upper().startswith("BEGIN"):
-                begin_entered.set()
-                if not allow_begin.wait(timeout=5):
-                    raise TimeoutError("BEGIN test gate timed out")
-            return self._wrapped.execute(sql, *args, **kwargs)  # type: ignore[attr-defined]
+    uow_mod.asyncio.to_thread = gated_to_thread  # type: ignore[method-assign]
+    try:
+        async def cancelled_begin() -> None:
+            async with persistence.transaction():
+                pass
 
-        def __getattr__(self, name: str) -> object:
-            return getattr(self._wrapped, name)
-
-    persistence._connection = _BeginGate(inner)  # type: ignore[assignment]
-
-    async def cancelled_begin() -> None:
-        async with persistence.transaction():
-            pass
-
-    task = asyncio.create_task(cancelled_begin())
-    await asyncio.to_thread(begin_entered.wait, 5)
-    assert begin_entered.is_set()
-    task.cancel()
-    allow_begin.set()
-    with pytest.raises(asyncio.CancelledError):
-        await task
+        task = asyncio.create_task(cancelled_begin())
+        await begin_entered.wait()
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+    finally:
+        uow_mod.asyncio.to_thread = real_to_thread  # type: ignore[method-assign]
 
     async with persistence.transaction() as tx:
         await tx.execute("CREATE TABLE IF NOT EXISTS ns6_begin(x INTEGER)")
