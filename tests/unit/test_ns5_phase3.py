@@ -11,7 +11,6 @@ from src.contracts.common.ids import uuid7
 from src.contracts.runtime.models import ProcessCommand
 from src.runtime.inference.claude_cli import (
     ClaudeCliCleanLanguageModel,
-    ClaudeCliRequest,
     SubprocessClaudeCli,
     prompt_transport_for,
 )

@@ -18,9 +18,9 @@ from src.services.index_retirement import (
 from tests.unit.test_index_generation_retirement import (
     CUTOVER,
     ITEM,
-    MutableClock,
     NAMESPACE,
     TEAM,
+    MutableClock,
     _seed_retired_generation,
     _timestamp,
 )

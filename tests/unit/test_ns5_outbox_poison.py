@@ -9,9 +9,9 @@ import pytest
 
 from src.contracts.common.ids import stable_digest, uuid7
 from src.contracts.common.time import utc_now
+from src.runtime.workflow_engine import WorkflowWorker
 from src.runtime.workflow_supervisor import WorkflowSupervisor
 from tests.unit.test_workflow_runtime import _AlwaysSuccessfulStage, _seed_runtime
-from src.runtime.workflow_engine import WorkflowWorker
 
 
 @pytest.mark.asyncio

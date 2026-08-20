@@ -12,7 +12,6 @@ import threading
 from pathlib import Path
 from typing import Any
 
-
 DIAGNOSTIC_LOG_CODES = frozenset(
     {
         "GEN_STRUCTURIZE_REJECT",

@@ -10,7 +10,6 @@ from __future__ import annotations
 import argparse
 import json
 import shutil
-import sqlite3
 from pathlib import Path
 
 Q_A3_TASK = "01a00887-3cef-7379-92ea-3a6a38fd4188"

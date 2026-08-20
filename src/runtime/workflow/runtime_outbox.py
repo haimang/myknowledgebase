@@ -7,7 +7,6 @@ from typing import Any
 
 from src.contracts.common.errors import MkbError
 from src.contracts.common.ids import stable_digest, uuid7
-from src.runtime.workflow.runtime_outcome import _safe_persisted_error
 from src.contracts.common.time import utc_now
 from src.persistence.ports import UnitOfWork
 from src.runtime.workflow.helpers import (
@@ -15,6 +14,7 @@ from src.runtime.workflow.helpers import (
     _is_sha256_digest,
     _required_payload_uuid,
 )
+from src.runtime.workflow.runtime_outcome import _safe_persisted_error
 from src.runtime.workflow.types import (
     OutboxDelivery,
 )

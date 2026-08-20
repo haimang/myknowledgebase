@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 import re
 from pathlib import Path
 
@@ -18,7 +17,6 @@ from src.runtime.health import HealthAggregator
 from src.runtime.metrics import MetricRegistry
 from src.services.teams import TeamService
 from src.storage.local_store import LocalObjectStore
-
 
 UUID_RE = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$")
 

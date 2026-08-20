@@ -7,10 +7,10 @@ from pathlib import Path
 import pytest
 
 from src.contracts.common.errors import MkbError
-from src.persistence.factory import build_persistence
-from src.persistence.turso.sidecar import TursoDiagnosticSidecar
 from src.contracts.common.ids import uuid7
 from src.contracts.common.time import utc_now
+from src.persistence.factory import build_persistence
+from src.persistence.turso.sidecar import TursoDiagnosticSidecar
 
 
 @pytest.mark.asyncio
