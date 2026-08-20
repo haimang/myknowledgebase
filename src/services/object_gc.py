@@ -5,12 +5,10 @@ release.  Its only authority is to remove *already unowned* local CAS bytes
 after the grace window, recording immutable physical-delete evidence in the
 same database transaction that tombstones the catalogue row.
 
-The physical unlink is intentionally performed while the final persistence
-transaction is held.  Local v1 has one coordinated write authority, so this
-gives the delete-fence recheck a stable interval: a normal reference writer
-cannot commit a new live reference between that recheck and the tombstone.
-If a non-cooperating writer nevertheless appears, the second recheck fails
-closed: no proof and no tombstone are committed.
+Physical unlink runs *outside* the persistence write lock. TX1 rechecks
+blockers; unlink happens after that transaction commits; TX2 rechecks again
+then writes proof + tombstone. If TX2 fails after unlink, the catalogue stays
+live so readers observe a missing-object condition rather than a false delete.
 """
 
 from __future__ import annotations
@@ -214,18 +212,23 @@ class ObjectGcService:
             if blocker is not None:
                 return ObjectGcCandidateResult(candidate, blocker)
 
-            # ``SqlitePersistence`` holds the single write coordinator for the
-            # duration of this UoW.  This turns the immediate pre-unlink
-            # recheck into a real delete fence for v1's coordinated writers.
-            unlinked = await self._storage.delete_if_unreferenced(candidate.team_uuid, candidate.handle)
-            if not unlinked:
-                return ObjectGcCandidateResult(candidate, ObjectGcDisposition.MISSING_BYTES)
+        unlinked = await self._storage.delete_if_unreferenced(candidate.team_uuid, candidate.handle)
+        if not unlinked:
+            return ObjectGcCandidateResult(candidate, ObjectGcDisposition.MISSING_BYTES)
 
-            # A generic PersistencePort could be backed by a different
-            # coordinator.  Recheck again before proving/tombstoning; any
-            # unexpected reference/fence race aborts the transaction and
-            # leaves a conspicuous missing-live-object condition rather than a
-            # false delete proof.
+        async with self._persistence.transaction() as tx:
+            current = await tx.fetchone(
+                "SELECT team_uuid,stored_object_uuid,content_digest,size_bytes,created_at,media_type,"
+                "digest_algorithm,storage_backend,tombstoned_at "
+                "FROM mkb_stored_objects WHERE team_uuid=? AND stored_object_uuid=?",
+                (candidate.team_uuid, candidate.stored_object_uuid),
+            )
+            if not self._same_catalogue_row(candidate, current):
+                raise MkbError(
+                    "OBJECT_CONFLICT_DELETE_FENCE",
+                    "Object catalogue changed during physical unlink",
+                    409,
+                )
             blocker = await self._delete_blocker_tx(tx, candidate)
             if blocker is not None:
                 raise MkbError(

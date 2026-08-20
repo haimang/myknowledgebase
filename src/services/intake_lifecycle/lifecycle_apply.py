@@ -134,6 +134,11 @@ class LifecycleApplyMixin:
         )
         cleanup_intent_uuid = cleanup
         if command.action == "delete":
+            await tx.execute(
+                "UPDATE mkb_object_references SET released_at=? "
+                "WHERE team_uuid=? AND owner_uuid=? AND released_at IS NULL",
+                (now, command.team_uuid, command.intake_item_uuid),
+            )
             cleanup_intent_uuid = await self._ensure_delete_cleanup_tx(
                 tx,
                 team_uuid=command.team_uuid,

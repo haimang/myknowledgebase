@@ -35,19 +35,32 @@ class WorkflowSupervisor:
         self.idle_seconds = idle_seconds
         self.last_error: Exception | None = None
         self.consecutive_failures = 0
+        # VF62: per-pool worker sets may be introduced later. Overlapping
+        # ``run_once`` stays disabled until NS5-T04 heartbeat fencing is green.
+        self.allow_overlapping_run_once = False
 
     async def drain_once(self) -> int:
         """Advance a bounded amount of durable work and return the progress count."""
 
         progressed = 0
         for _ in range(self.max_outbox_per_tick):
-            if not await self.runtime.dispatch_outbox_once(self.lease_owner):
-                break
-            progressed += 1
+            try:
+                if not await self.runtime.dispatch_outbox_once(self.lease_owner):
+                    break
+                progressed += 1
+            except Exception as exc:
+                self.last_error = exc
+                self.consecutive_failures += 1
+                progressed += 1
         for _ in range(self.max_processes_per_tick):
-            if not await self.worker.run_once(self.lease_owner):
-                break
-            progressed += 1
+            try:
+                if not await self.worker.run_once(self.lease_owner):
+                    break
+                progressed += 1
+            except Exception as exc:
+                self.last_error = exc
+                self.consecutive_failures += 1
+                progressed += 1
         return progressed + await self.runtime.repair_once()
 
     async def run(self, stop: asyncio.Event) -> None:

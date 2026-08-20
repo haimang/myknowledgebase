@@ -350,145 +350,123 @@ class WorkflowCoreMixin:
         claim_token = secrets.token_urlsafe(32)
         claim_token_hash = stable_digest({"claim_token": claim_token})
         async with self.persistence.transaction() as tx:
-            # First, check and fail any expired ready process (including waiting/unadmitted)
-            expired = await tx.fetchone(
-                "SELECT p.*, e.trace_uuid, e.status AS execution_status, e.domain_binding_digest,"
-                "e.workflow_uuid,e.workflow_revision_uuid,e.compiled_digest "
-                "FROM mkb_processes AS p JOIN mkb_executions AS e "
-                "ON e.execution_uuid=p.execution_uuid AND e.team_uuid=p.team_uuid "
-                "JOIN mkb_tasks AS t ON t.team_uuid=p.team_uuid AND t.task_uuid=p.task_uuid "
-                "WHERE p.status='ready' AND p.deadline_at IS NOT NULL AND p.deadline_at < ? "
-                "AND e.status IN ('ready','running') AND t.status IN ('queued','running') "
-                "LIMIT 1",
-                (now,),
-            )
-            if expired is not None:
-                await self._assert_execution_binding(tx, expired)
-                await self._fail_process_tx(
-                    tx,
-                    expired,
-                    error_code="deadline-exceeded-before-start",
-                    error_message="The process deadline elapsed before it could be claimed",
-                    failure_disposition="deadline",
+            for _ in range(64):
+                expired = await tx.fetchone(
+                    "SELECT p.*, e.trace_uuid, e.status AS execution_status, e.domain_binding_digest,"
+                    "e.workflow_uuid,e.workflow_revision_uuid,e.compiled_digest "
+                    "FROM mkb_processes AS p JOIN mkb_executions AS e "
+                    "ON e.execution_uuid=p.execution_uuid AND e.team_uuid=p.team_uuid "
+                    "JOIN mkb_tasks AS t ON t.team_uuid=p.team_uuid AND t.task_uuid=p.task_uuid "
+                    "WHERE p.status='ready' AND p.deadline_at IS NOT NULL AND p.deadline_at < ? "
+                    "AND e.status IN ('ready','running') AND t.status IN ('queued','running') "
+                    "LIMIT 1",
+                    (now,),
                 )
-                execution = await self._execution(tx, expired["execution_uuid"])
-                await self._route_after_terminal_process_tx(
-                    tx, execution, expired, WorkflowOutcomeSelector.FAILED, {}, "deadline-exceeded-before-start"
-                )
-                await self._refresh_execution_counts_tx(tx, expired["execution_uuid"])
-                return None
+                if expired is not None:
+                    await self._fail_expired_ready_tx(tx, expired)
+                    continue
 
-            # Same-transaction admission for waiting processes
-            await self._admit_waiting_processes_tx(tx, now)
+                # Same-transaction admission for waiting processes
+                await self._admit_waiting_processes_tx(tx, now)
 
-            # Query pool occupancy to check running capacity
-            occupancies = await get_pool_occupancies(tx)
-            caps = self.dispatch_caps
-            local_can_run = 1 if occupancies["local-inference"].running < caps.local_running else 0
-            ni_can_run = 1 if occupancies["non-interactive"].running < caps.ni_running else 0
-            embed_can_run = occupancies["embed"].running < caps.embed_running
+                # Query pool occupancy to check running capacity
+                occupancies = await get_pool_occupancies(tx)
+                caps = self.dispatch_caps
+                local_can_run = 1 if occupancies["local-inference"].running < caps.local_running else 0
+                ni_can_run = 1 if occupancies["non-interactive"].running < caps.ni_running else 0
+                embed_can_run = occupancies["embed"].running < caps.embed_running
 
-            embed_candidate = None
-            if embed_can_run:
-                embed_candidate = await tx.fetchone(
+                embed_candidate = None
+                if embed_can_run:
+                    embed_candidate = await tx.fetchone(
+                        "SELECT p.*, e.trace_uuid, e.status AS execution_status, e.domain_binding_digest,"
+                        "e.workflow_uuid,e.workflow_revision_uuid,e.compiled_digest, t.priority AS task_priority "
+                        "FROM mkb_processes AS p JOIN mkb_executions AS e "
+                        "ON e.execution_uuid=p.execution_uuid AND e.team_uuid=p.team_uuid "
+                        "JOIN mkb_tasks AS t ON t.team_uuid=p.team_uuid AND t.task_uuid=p.task_uuid "
+                        "WHERE p.status='ready' AND p.available_at<=? AND p.dispatch_admitted = 1 "
+                        "AND p.dispatch_pool = 'embed' "
+                        "AND e.status IN ('ready','running') AND t.status IN ('queued','running') "
+                        "ORDER BY p.available_at ASC, p.created_at ASC, p.process_uuid ASC "
+                        "LIMIT 1",
+                        (now,),
+                    )
+                other_candidate = await tx.fetchone(
                     "SELECT p.*, e.trace_uuid, e.status AS execution_status, e.domain_binding_digest,"
                     "e.workflow_uuid,e.workflow_revision_uuid,e.compiled_digest, t.priority AS task_priority "
                     "FROM mkb_processes AS p JOIN mkb_executions AS e "
                     "ON e.execution_uuid=p.execution_uuid AND e.team_uuid=p.team_uuid "
                     "JOIN mkb_tasks AS t ON t.team_uuid=p.team_uuid AND t.task_uuid=p.task_uuid "
                     "WHERE p.status='ready' AND p.available_at<=? AND p.dispatch_admitted = 1 "
-                    "AND p.dispatch_pool = 'embed' "
+                    "AND ("
+                    "  p.dispatch_pool IS NULL "
+                    "  OR (p.dispatch_pool = 'local-inference' AND ? = 1) "
+                    "  OR (p.dispatch_pool = 'non-interactive' AND ? = 1)"
+                    ") "
                     "AND e.status IN ('ready','running') AND t.status IN ('queued','running') "
-                    "ORDER BY p.available_at ASC, p.created_at ASC, p.process_uuid ASC "
+                    "ORDER BY "
+                    "  p.priority_rank DESC,"
+                    "  p.available_at ASC,"
+                    "  CASE WHEN p.deadline_at IS NULL THEN 1 ELSE 0 END, p.deadline_at ASC,"
+                    "  p.created_at ASC, p.process_uuid ASC "
                     "LIMIT 1",
-                    (now,),
+                    (now, local_can_run, ni_can_run),
                 )
-            other_candidate = await tx.fetchone(
-                "SELECT p.*, e.trace_uuid, e.status AS execution_status, e.domain_binding_digest,"
-                "e.workflow_uuid,e.workflow_revision_uuid,e.compiled_digest, t.priority AS task_priority "
-                "FROM mkb_processes AS p JOIN mkb_executions AS e "
-                "ON e.execution_uuid=p.execution_uuid AND e.team_uuid=p.team_uuid "
-                "JOIN mkb_tasks AS t ON t.team_uuid=p.team_uuid AND t.task_uuid=p.task_uuid "
-                "WHERE p.status='ready' AND p.available_at<=? AND p.dispatch_admitted = 1 "
-                "AND ("
-                "  p.dispatch_pool IS NULL "
-                "  OR (p.dispatch_pool = 'local-inference' AND ? = 1) "
-                "  OR (p.dispatch_pool = 'non-interactive' AND ? = 1)"
-                ") "
-                "AND e.status IN ('ready','running') AND t.status IN ('queued','running') "
-                "ORDER BY "
-                "  p.priority_rank DESC,"
-                "  p.available_at ASC,"
-                "  CASE WHEN p.deadline_at IS NULL THEN 1 ELSE 0 END, p.deadline_at ASC,"
-                "  p.created_at ASC, p.process_uuid ASC "
-                "LIMIT 1",
-                (now, local_can_run, ni_can_run),
-            )
-            if embed_candidate is not None and other_candidate is not None:
-                embed_key = (
-                    embed_candidate["available_at"] or "",
-                    embed_candidate["created_at"] or "",
-                    embed_candidate["process_uuid"],
+                if embed_candidate is not None and other_candidate is not None:
+                    embed_key = (
+                        embed_candidate["available_at"] or "",
+                        embed_candidate["created_at"] or "",
+                        embed_candidate["process_uuid"],
+                    )
+                    other_key = (
+                        other_candidate["available_at"] or "",
+                        other_candidate["created_at"] or "",
+                        other_candidate["process_uuid"],
+                    )
+                    candidate = embed_candidate if embed_key <= other_key else other_candidate
+                else:
+                    candidate = embed_candidate if embed_candidate is not None else other_candidate
+                if candidate is None:
+                    return None
+                # Do not lease a side-effecting Process unless its immutable
+                # revision has a reviewed interpreter in this deployment.  This
+                # closes the gap where an old Execution could be claimed under a
+                # newer graph and only fail after the handler had already run.
+                await self._assert_execution_binding(tx, candidate)
+                if candidate["deadline_at"] is not None and candidate["deadline_at"] < now:
+                    await self._fail_expired_ready_tx(tx, candidate)
+                    continue
+                updated = await tx.execute(
+                    "UPDATE mkb_processes SET status='claimed',claim_token_hash=?,lease_owner=?,lease_expires_at=?,"
+                    "fencing_generation=fencing_generation+1,delivery_count=delivery_count+1,row_revision=row_revision+1,"
+                    "updated_at=? WHERE process_uuid=? AND status='ready' AND row_revision=? AND available_at<=?",
+                    (
+                        claim_token_hash,
+                        lease_owner,
+                        expires_at,
+                        now,
+                        candidate["process_uuid"],
+                        candidate["row_revision"],
+                        now,
+                    ),
                 )
-                other_key = (
-                    other_candidate["available_at"] or "",
-                    other_candidate["created_at"] or "",
-                    other_candidate["process_uuid"],
-                )
-                candidate = embed_candidate if embed_key <= other_key else other_candidate
-            else:
-                candidate = embed_candidate if embed_candidate is not None else other_candidate
-            if candidate is None:
-                return None
-            # Do not lease a side-effecting Process unless its immutable
-            # revision has a reviewed interpreter in this deployment.  This
-            # closes the gap where an old Execution could be claimed under a
-            # newer graph and only fail after the handler had already run.
-            await self._assert_execution_binding(tx, candidate)
-            if candidate["deadline_at"] is not None and candidate["deadline_at"] < now:
-                await self._fail_process_tx(
+                if updated.rowcount != 1:
+                    continue
+                claimed = await self._process_with_execution(tx, candidate["process_uuid"])
+                await self._record_event_tx(
                     tx,
-                    candidate,
-                    error_code="deadline-exceeded-before-start",
-                    error_message="The process deadline elapsed before it could be claimed",
-                    failure_disposition="deadline",
+                    execution=claimed,
+                    event_type="process.claimed",
+                    aggregate="process",
+                    summary="Process claimed with a new lease fence",
+                    process_uuid=claimed["process_uuid"],
+                    status_before=ProcessStatus.READY.value,
+                    status_after=ProcessStatus.CLAIMED.value,
+                    payload={"fencing_generation": claimed["fencing_generation"], "lease_owner": lease_owner},
                 )
-                execution = await self._execution(tx, candidate["execution_uuid"])
-                await self._route_after_terminal_process_tx(
-                    tx, execution, candidate, WorkflowOutcomeSelector.FAILED, {}, "deadline-exceeded-before-start"
-                )
-                await self._refresh_execution_counts_tx(tx, candidate["execution_uuid"])
-                return None
-            updated = await tx.execute(
-                "UPDATE mkb_processes SET status='claimed',claim_token_hash=?,lease_owner=?,lease_expires_at=?,"
-                "fencing_generation=fencing_generation+1,delivery_count=delivery_count+1,row_revision=row_revision+1,"
-                "updated_at=? WHERE process_uuid=? AND status='ready' AND row_revision=? AND available_at<=?",
-                (
-                    claim_token_hash,
-                    lease_owner,
-                    expires_at,
-                    now,
-                    candidate["process_uuid"],
-                    candidate["row_revision"],
-                    now,
-                ),
-            )
-            if updated.rowcount != 1:
-                return None
-            claimed = await self._process_with_execution(tx, candidate["process_uuid"])
-            await self._record_event_tx(
-                tx,
-                execution=claimed,
-                event_type="process.claimed",
-                aggregate="process",
-                summary="Process claimed with a new lease fence",
-                process_uuid=claimed["process_uuid"],
-                status_before=ProcessStatus.READY.value,
-                status_after=ProcessStatus.CLAIMED.value,
-                payload={"fencing_generation": claimed["fencing_generation"], "lease_owner": lease_owner},
-            )
-            command = self._command_from_process(claimed)
-            return ClaimedProcess(command=command, claim_token=claim_token, lease_expires_at=expires_at)
+                command = self._command_from_process(claimed)
+                return ClaimedProcess(command=command, claim_token=claim_token, lease_expires_at=expires_at)
+            return None
 
 
     async def mark_running(self, process_uuid: str, fencing_generation: int) -> bool:
@@ -542,6 +520,21 @@ class WorkflowCoreMixin:
             )
             return True
 
+
+    async def _fail_expired_ready_tx(self, tx: UnitOfWork, row: dict[str, Any]) -> None:
+        await self._assert_execution_binding(tx, row)
+        await self._fail_process_tx(
+            tx,
+            row,
+            error_code="deadline-exceeded-before-start",
+            error_message="The process deadline elapsed before it could be claimed",
+            failure_disposition="deadline",
+        )
+        execution = await self._execution(tx, row["execution_uuid"])
+        await self._route_after_terminal_process_tx(
+            tx, execution, row, WorkflowOutcomeSelector.FAILED, {}, "deadline-exceeded-before-start"
+        )
+        await self._refresh_execution_counts_tx(tx, row["execution_uuid"])
 
     async def heartbeat(self, process_uuid: str, fencing_generation: int, *, lease_seconds: int = 30) -> bool:
         """Extend only the current running lease; stale runners cannot heartbeat."""

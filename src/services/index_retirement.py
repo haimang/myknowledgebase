@@ -43,6 +43,7 @@ class IndexGenerationRetirementDisposition(StrEnum):
     ACTIVE_GENERATION = "active_generation"
     POINTER_UNAVAILABLE = "pointer_unavailable"
     INVALID_TARGET = "invalid_target"
+    ABANDONED = "abandoned"
     ERROR = "error"
 
 
@@ -400,6 +401,15 @@ class IndexGenerationRetirementService:
                 namespace_uuid=namespace_uuid,
             )
             if pointer is None:
+                closed = await self._close_unavailable_intent_tx(
+                    tx,
+                    candidate,
+                    intake_item_uuid=intake_item_uuid,
+                    namespace_uuid=namespace_uuid,
+                    retired_generation=retired_generation,
+                )
+                if closed is not None:
+                    return closed
                 return IndexGenerationRetirementResult(
                     intent_uuid=candidate.intent_uuid,
                     disposition=IndexGenerationRetirementDisposition.POINTER_UNAVAILABLE,
@@ -492,6 +502,52 @@ class IndexGenerationRetirementService:
             intent_uuid=candidate.intent_uuid,
             disposition=IndexGenerationRetirementDisposition.SOFT_PURGED,
             soft_deleted_count=soft_deleted_count,
+        )
+
+    async def _close_unavailable_intent_tx(
+        self,
+        tx: UnitOfWork,
+        candidate: IndexGenerationRetirementCandidate,
+        *,
+        intake_item_uuid: str,
+        namespace_uuid: str,
+        retired_generation: int,
+    ) -> IndexGenerationRetirementResult | None:
+        """Finish intents whose serving item is gone so they cannot occupy the due queue."""
+
+        item = await tx.fetchone(
+            "SELECT lifecycle_state, deleted_at FROM mkb_intake_items "
+            "WHERE team_uuid=? AND intake_item_uuid=?",
+            (candidate.team_uuid, intake_item_uuid),
+        )
+        gone = (
+            item is None
+            or item["deleted_at"] is not None
+            or str(item["lifecycle_state"]) in {"deactivated", "deleted"}
+        )
+        if not gone:
+            return None
+        now = self._timestamp(self._now())
+        await tx.execute(
+            "UPDATE mkb_vector_records SET deleted_at=?,updated_at=? "
+            "WHERE team_uuid=? AND intake_item_uuid=? AND namespace_uuid=? "
+            "AND index_generation=? AND deleted_at IS NULL",
+            (now, now, candidate.team_uuid, intake_item_uuid, namespace_uuid, retired_generation),
+        )
+        abandoned = await tx.execute(
+            "UPDATE mkb_intake_cleanup_intents SET status='abandoned',completed_at=? "
+            "WHERE intent_uuid=? AND status='open'",
+            (now, candidate.intent_uuid),
+        )
+        if abandoned.rowcount != 1:
+            raise MkbError(
+                "INDEX_RETIREMENT_INTENT_FENCE",
+                "The retirement intent changed while abandoning a missing item",
+                409,
+            )
+        return IndexGenerationRetirementResult(
+            intent_uuid=candidate.intent_uuid,
+            disposition=IndexGenerationRetirementDisposition.ABANDONED,
         )
 
     async def _active_pointer_tx(

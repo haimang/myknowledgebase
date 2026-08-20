@@ -10,12 +10,15 @@ from __future__ import annotations
 from typing import Any
 
 
-def probe_concurrent_writes(connection: Any) -> bool:
+def probe_concurrent_writes(connection: Any, *, restore_journal_mode: bool = True) -> bool:
     """Return True only when MVCC + BEGIN CONCURRENT actually works.
 
     manual.md: CONCURRENT transactions exist only in MVCC journal mode.
     If enabling MVCC fails (for example because indexes are present), report
     false. Do not leave a failed probe's transaction open.
+
+    Callers that pass a throwaway bypass connection should set
+    ``restore_journal_mode=False`` so a business handle is never mutated.
     """
 
     previous_mode = _journal_mode(connection)
@@ -33,7 +36,7 @@ def probe_concurrent_writes(connection: Any) -> bool:
             pass
         return False
     finally:
-        if previous_mode and previous_mode != "mvcc":
+        if restore_journal_mode and previous_mode and previous_mode != "mvcc":
             try:
                 _set_journal_mode(connection, previous_mode)
             except Exception:

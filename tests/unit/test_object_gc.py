@@ -245,6 +245,83 @@ async def test_grace_window_and_zero_grace_are_fail_closed(tmp_path: Path) -> No
 
 
 @pytest.mark.asyncio
+async def test_tombstone_lookup_allocates_new_catalog_uuid(tmp_path: Path) -> None:
+    seed = await _seed_orphan(tmp_path)
+    try:
+        result = await _service(seed).scan_once()
+        assert result.deleted_count == 1
+        digest = seed.stat.sha256
+        async with seed.persistence.transaction() as tx:
+            live = await tx.fetchone(
+                "SELECT stored_object_uuid FROM mkb_stored_objects "
+                "WHERE team_uuid=? AND content_digest=? AND size_bytes=? AND tombstoned_at IS NULL",
+                (seed.team_uuid, digest, seed.stat.size_bytes),
+            )
+            tombstoned = await tx.fetchone(
+                "SELECT stored_object_uuid FROM mkb_stored_objects "
+                "WHERE team_uuid=? AND content_digest=? AND tombstoned_at IS NOT NULL",
+                (seed.team_uuid, digest),
+            )
+        assert live is None
+        assert tombstoned == {"stored_object_uuid": seed.stored_object_uuid}
+    finally:
+        await seed.persistence.close()
+
+
+@pytest.mark.asyncio
+async def test_tombstone_update_failure_after_unlink_signals_missing_live(tmp_path: Path) -> None:
+    seed = await _seed_orphan(tmp_path)
+    try:
+        service = _service(seed)
+
+        class BoomTx:
+            def __init__(self, inner: object) -> None:
+                self._inner = inner
+                self._updates = 0
+
+            async def fetchone(self, *args: object, **kwargs: object) -> object:
+                return await self._inner.fetchone(*args, **kwargs)  # type: ignore[attr-defined]
+
+            async def fetchall(self, *args: object, **kwargs: object) -> object:
+                return await self._inner.fetchall(*args, **kwargs)  # type: ignore[attr-defined]
+
+            async def execute(self, sql: str, params: tuple[object, ...] = ()) -> object:
+                if sql.strip().startswith("UPDATE mkb_stored_objects SET tombstoned_at"):
+                    raise RuntimeError("tombstone write failed")
+                return await self._inner.execute(sql, params)  # type: ignore[attr-defined]
+
+        original = seed.persistence.transaction
+
+        class BoomPersistence:
+            def transaction(self) -> object:
+                cm = original()
+
+                class Wrapped:
+                    async def __aenter__(self) -> object:
+                        inner = await cm.__aenter__()
+                        return BoomTx(inner)
+
+                    async def __aexit__(self, *args: object) -> object:
+                        return await cm.__aexit__(*args)
+
+                return Wrapped()
+
+        service._persistence = BoomPersistence()  # type: ignore[assignment]
+        with pytest.raises(RuntimeError, match="tombstone write failed"):
+            await service.delete_candidate((await _service(seed).collect_candidates())[0])
+        with pytest.raises(MkbError, match="OBJECT_MISSING|unavailable"):
+            await seed.storage.read_verified(seed.team_uuid, seed.stat.handle)
+        async with seed.persistence.transaction() as tx:
+            catalog = await tx.fetchone(
+                "SELECT tombstoned_at FROM mkb_stored_objects WHERE stored_object_uuid=?",
+                (seed.stored_object_uuid,),
+            )
+        assert catalog == {"tombstoned_at": None}
+    finally:
+        await seed.persistence.close()
+
+
+@pytest.mark.asyncio
 async def test_runtime_scanner_delegates_bounded_s13_scan(tmp_path: Path) -> None:
     seed = await _seed_orphan(tmp_path)
     try:

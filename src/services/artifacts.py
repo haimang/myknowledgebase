@@ -78,6 +78,8 @@ class OutcomeArtifactCommitter:
             ):
                 raise ConflictError("stage-output-conflict", "A process fence already staged different output bytes")
         else:
+            if len(self._pending) >= 1024:
+                raise MkbError("OBJECT_PENDING_OUTPUT_LIMIT", "Staged output map exceeded the process bound", 503)
             self._pending[key] = _PendingCommit(command=command, output=output, proof=proof, callback=callback)
         return StagedArtifacts(
             output_ref=output.handle.value,
@@ -89,35 +91,42 @@ class OutcomeArtifactCommitter:
     async def validate_and_commit(self, tx: UnitOfWork, command: ProcessCommand, outcome: ProcessOutcome) -> None:
         """Runtime hook: validate opaque refs, catalog them, then run domain TX."""
 
-        pending = self._pending.get((command.process_uuid, command.fencing_generation))
-        if pending is None:
-            raise MkbError(
-                "OBJECT_PENDING_OUTPUT_MISSING", "Promoted stage output is unavailable for outcome commit", 409
+        key = (command.process_uuid, command.fencing_generation)
+        try:
+            pending = self._pending.get(key)
+            if pending is None:
+                raise MkbError(
+                    "OBJECT_PENDING_OUTPUT_MISSING", "Promoted stage output is unavailable for outcome commit", 409
+                )
+            if pending.command != command:
+                raise ConflictError("stage-command-conflict", "Staged bytes do not belong to this Process command")
+            if (
+                outcome.output_manifest_ref != pending.output.handle.value
+                or outcome.output_manifest_digest != pending.output.sha256
+                or outcome.proof_ref != pending.proof.handle.value
+                or outcome.proof_digest != pending.proof.sha256
+            ):
+                raise ConflictError("stage-output-integrity", "Process outcome does not match staged CAS bytes")
+            await self._catalog_stat(
+                tx,
+                team_uuid=command.team_uuid,
+                stat=pending.output,
+                owner_kind="process_output",
+                owner_uuid=command.process_uuid,
             )
-        if pending.command != command:
-            raise ConflictError("stage-command-conflict", "Staged bytes do not belong to this Process command")
-        if (
-            outcome.output_manifest_ref != pending.output.handle.value
-            or outcome.output_manifest_digest != pending.output.sha256
-            or outcome.proof_ref != pending.proof.handle.value
-            or outcome.proof_digest != pending.proof.sha256
-        ):
-            raise ConflictError("stage-output-integrity", "Process outcome does not match staged CAS bytes")
-        await self._catalog_stat(
-            tx,
-            team_uuid=command.team_uuid,
-            stat=pending.output,
-            owner_kind="process_output",
-            owner_uuid=command.process_uuid,
-        )
-        await self._catalog_stat(
-            tx,
-            team_uuid=command.team_uuid,
-            stat=pending.proof,
-            owner_kind="process_proof",
-            owner_uuid=command.process_uuid,
-        )
-        await pending.callback(tx)
+            await self._catalog_stat(
+                tx,
+                team_uuid=command.team_uuid,
+                stat=pending.proof,
+                owner_kind="process_proof",
+                owner_uuid=command.process_uuid,
+            )
+            await pending.callback(tx)
+        finally:
+            self._pending.pop(key, None)
+
+    def discard(self, command: ProcessCommand) -> None:
+        self._pending.pop((command.process_uuid, command.fencing_generation), None)
 
     async def _catalog_stat(
         self,
@@ -129,7 +138,8 @@ class OutcomeArtifactCommitter:
         owner_uuid: str,
     ) -> None:
         existing = await tx.fetchone(
-            "SELECT stored_object_uuid FROM mkb_stored_objects WHERE team_uuid=? AND content_digest=? AND size_bytes=?",
+            "SELECT stored_object_uuid FROM mkb_stored_objects "
+            "WHERE team_uuid=? AND content_digest=? AND size_bytes=? AND tombstoned_at IS NULL",
             (team_uuid, stat.sha256, stat.size_bytes),
         )
         if existing is None:

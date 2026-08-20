@@ -17,6 +17,7 @@ from typing import Any, Literal, Protocol
 from src.contracts.common.errors import MkbError
 
 CLAUDE_CLI_ARGV_PROMPT_LIMIT_BYTES = 16_384
+CLAUDE_CLI_STDOUT_LIMIT_BYTES = 8 * 1024 * 1024
 BJSON_MATERIAL_SCHEMA = "mkb.b-json-material.v1"
 
 
@@ -288,6 +289,7 @@ class SubprocessClaudeCli:
     async def run(self, request: ClaudeCliRequest) -> ClaudeCliResult:
         transport = prompt_transport_for(request.user_prompt)
         argv = build_claude_argv(request, executable=self._executable, prompt_transport=transport)
+        process: asyncio.subprocess.Process | None = None
         try:
             process = await asyncio.create_subprocess_exec(
                 *argv,
@@ -299,9 +301,17 @@ class SubprocessClaudeCli:
             payload = request.user_prompt.encode("utf-8") if transport == "stdin" else None
             stdout_bytes, stderr_bytes = await asyncio.wait_for(process.communicate(payload), request.timeout_seconds)
         except TimeoutError as exc:
+            await _terminate_process(process)
             raise MkbError("CLAUDE_CLI_TIMEOUT", "Claude CLI invocation timed out", 503) from exc
+        except asyncio.CancelledError:
+            await _terminate_process(process)
+            raise
         except OSError as exc:
+            await _terminate_process(process)
             raise MkbError("CLAUDE_CLI_TRANSPORT_FAILED", "Claude CLI could not be started", 503) from exc
+        if len(stdout_bytes) > CLAUDE_CLI_STDOUT_LIMIT_BYTES or len(stderr_bytes) > CLAUDE_CLI_STDOUT_LIMIT_BYTES:
+            await _terminate_process(process)
+            raise MkbError("CLAUDE_CLI_OUTPUT_INVALID", "Claude CLI output exceeded the bounded stdout cap", 502)
         stdout = stdout_bytes.decode("utf-8", errors="replace")
         stderr = stderr_bytes.decode("utf-8", errors="replace")
         exit_code = process.returncode if process.returncode is not None else -1
@@ -336,6 +346,32 @@ def _digest_text(value: str) -> str:
     import hashlib
 
     return hashlib.sha256(value.encode("utf-8")).hexdigest()
+
+
+async def _terminate_process(process: asyncio.subprocess.Process | None) -> None:
+    """terminate → wait → kill → wait so a timed-out child cannot linger."""
+
+    if process is None or process.returncode is not None:
+        return
+    try:
+        process.terminate()
+    except ProcessLookupError:
+        return
+    try:
+        await asyncio.wait_for(process.wait(), timeout=2.0)
+        return
+    except TimeoutError:
+        pass
+    except ProcessLookupError:
+        return
+    try:
+        process.kill()
+    except ProcessLookupError:
+        return
+    try:
+        await process.wait()
+    except ProcessLookupError:
+        return
 
 
 ResponseFactory = Callable[[ClaudeCliRequest], ClaudeCliResult | Awaitable[ClaudeCliResult]]

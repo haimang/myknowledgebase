@@ -50,8 +50,8 @@ async def test_sidecar_concurrent_inserts_leave_product_code_alone(tmp_path: Pat
             )
         )
 
-    # This engine aborts if many threads open BEGIN CONCURRENT together.
-    # Soak the sidecar serially: the product code must stay untouched.
-    for index in range(8):
-        _one(index)
+    from concurrent.futures import ThreadPoolExecutor
+
+    with ThreadPoolExecutor(max_workers=4) as pool:
+        list(pool.map(_one, range(80)))
     assert product.code == "STRUCTURE_ANCHOR_MISSING"

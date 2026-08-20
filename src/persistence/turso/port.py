@@ -15,6 +15,7 @@ from typing import Any
 
 from src.persistence.engine import apply_capability_gates, probe_concurrent_writes, probe_native_vector
 from src.persistence.migration_runner import apply_migrations, discover_migrations, verify_migrations
+from src.persistence.uow import immediate_transaction
 
 
 class TursoUnitOfWork:
@@ -63,6 +64,17 @@ class TursoPersistence:
         self._write_lock = asyncio.Lock()
         self._connection: Any | None = None
 
+    def _discard_connection(self) -> None:
+        connection = self._connection
+        self._connection = None
+        if connection is not None:
+            close = getattr(connection, "close", None)
+            if close is not None:
+                try:
+                    close()
+                except Exception:
+                    pass
+
     def _connect(self) -> Any:
         if self._connection is None:
             self.database_path.parent.mkdir(parents=True, exist_ok=True)
@@ -70,11 +82,35 @@ class TursoPersistence:
 
             connection = turso.connect(str(self.database_path))
             try:
+                connection.execute("PRAGMA busy_timeout = 5000")
+            except Exception:
+                pass
+            try:
                 connection.execute("PRAGMA foreign_keys = ON")
+            except Exception:
+                pass
+            try:
+                cursor = connection.execute("PRAGMA foreign_keys")
+                row = cursor.fetchone() if hasattr(cursor, "fetchone") else None
+                if row is not None:
+                    value = row[0] if not isinstance(row, dict) else next(iter(row.values()))
+                    if int(value or 0) != 1:
+                        raise RuntimeError("foreign_keys pragma did not read back as 1")
+            except RuntimeError:
+                try:
+                    connection.close()
+                except Exception:
+                    pass
+                raise
             except Exception:
                 pass
             self._connection = connection
         return self._connection
+
+    def _open_probe_connection(self) -> Any:
+        import turso
+
+        return turso.connect(str(self.database_path))
 
     async def migrate(self) -> None:
         async with self._write_lock:
@@ -88,14 +124,8 @@ class TursoPersistence:
     async def transaction(self) -> AsyncIterator[TursoUnitOfWork]:
         async with self._write_lock:
             connection = self._connect()
-            await asyncio.to_thread(connection.execute, "BEGIN IMMEDIATE")
-            try:
+            async with immediate_transaction(connection, discard=self._discard_connection):
                 yield TursoUnitOfWork(connection)
-            except Exception:
-                await asyncio.to_thread(connection.rollback)
-                raise
-            else:
-                await asyncio.to_thread(connection.commit)
 
     async def readiness(self) -> dict[str, bool]:
         try:
@@ -103,8 +133,19 @@ class TursoPersistence:
                 connection = self._connect()
                 migrations = discover_migrations(self.migration_directory)
                 schema_ok = await asyncio.to_thread(verify_migrations, connection, migrations)
-                cw = await asyncio.to_thread(probe_concurrent_writes, connection)
-                vector = await asyncio.to_thread(probe_native_vector, connection)
+                probe = self._open_probe_connection()
+                try:
+                    cw = await asyncio.to_thread(
+                        probe_concurrent_writes, probe, restore_journal_mode=False
+                    )
+                    vector = await asyncio.to_thread(probe_native_vector, probe)
+                finally:
+                    close = getattr(probe, "close", None)
+                    if close is not None:
+                        try:
+                            close()
+                        except Exception:
+                            pass
             gates = apply_capability_gates(
                 concurrent_writes=cw,
                 native_vector=vector,
@@ -135,3 +176,6 @@ class TursoPersistence:
             close = getattr(connection, "close", None)
             if close is not None:
                 await asyncio.to_thread(close)
+
+
+

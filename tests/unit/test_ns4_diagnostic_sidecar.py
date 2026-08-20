@@ -12,12 +12,13 @@ def test_log_code_closed_set() -> None:
     assert "GEN_CLI_ENVELOPE" in DIAGNOSTIC_LOG_CODES
 
 
-def test_sidecar_source_uses_begin_concurrent() -> None:
+def test_sidecar_source_uses_serial_immediate() -> None:
     from pathlib import Path
 
     source = Path("src/persistence/turso/sidecar.py").read_text(encoding="utf-8")
-    assert "BEGIN CONCURRENT" in source
-    assert "PRAGMA journal_mode=mvcc" in source
+    assert 'connection.execute("BEGIN IMMEDIATE")' in source
+    assert 'connection.execute("BEGIN CONCURRENT")' not in source
+    assert "PRAGMA journal_mode=mvcc" not in source
 
 
 def test_sidecar_failure_does_not_change_product_code() -> None:

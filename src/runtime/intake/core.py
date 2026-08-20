@@ -164,9 +164,20 @@ class IntakeCoreMixin:
                 )
                 return provisional.model_copy(update={"outcome_digest": canonical_outcome_digest(provisional)})
             except MkbError as exc:
+                discard = getattr(self._committer, "discard", None)
+                if callable(discard):
+                    discard(command)
                 return self._outcome_from_error(command, exc)
             except (TypeError, ValueError, json.JSONDecodeError):
+                discard = getattr(self._committer, "discard", None)
+                if callable(discard):
+                    discard(command)
                 return self._failed(command, "PIPELINE_INPUT_INVALID", "Stage input is invalid")
+            except BaseException:
+                discard = getattr(self._committer, "discard", None)
+                if callable(discard):
+                    discard(command)
+                raise
 
     # Transient transport / capacity failures may auto-retry the same Process.
     # Closed code set only. Permanent capability / config gaps stay terminal

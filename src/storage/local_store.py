@@ -126,10 +126,11 @@ class LocalObjectStore:
         if match.group(1) != team_uuid:
             raise MkbError("OBJECT_AUTH_TEAM_MISMATCH", "Object handle belongs to a different Team", 403)
         path = self._object_path(team_uuid, match.group(2))
-        if not path.exists():
-            return False
-        await asyncio.to_thread(path.unlink)
-        return True
+        async with self._write_lock:
+            if not path.exists():
+                return False
+            await asyncio.to_thread(path.unlink)
+            return True
 
     async def readiness(self) -> bool:
         try:

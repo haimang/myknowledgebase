@@ -27,11 +27,17 @@ class WorkflowOutboxMixin:
 
         if not lease_owner:
             raise MkbError("invalid-lease-owner", "lease_owner must be non-empty", 422)
+        leased = await self._lease_outbox_row(lease_owner, lease_seconds=lease_seconds)
+        if leased is None:
+            return None
+        row, delivery_lease_owner = leased
+        return await self._parse_or_kill_outbox(row, delivery_lease_owner)
+
+    async def _lease_outbox_row(
+        self, lease_owner: str, *, lease_seconds: int
+    ) -> tuple[dict[str, Any], str] | None:
         now = utc_now()
         expires_at = _add_seconds(now, lease_seconds)
-        # `mkb_outbox` has no fencing column, so use a fresh opaque delivery
-        # owner as the compare-and-swap token.  A worker that wakes after its
-        # lease was reclaimed cannot mark a newer delivery done or pending.
         delivery_lease_owner = f"{lease_owner}:{uuid7()}"
         if len(delivery_lease_owner) > 256:
             raise MkbError("invalid-lease-owner", "lease_owner is too long for a unique delivery lease", 422)
@@ -51,19 +57,24 @@ class WorkflowOutboxMixin:
             )
             if updated.rowcount != 1:
                 return None
-            try:
-                payload = json.loads(row["payload_json"])
-            except json.JSONDecodeError as exc:
-                raise MkbError("outbox-payload-invalid", "Outbox payload is not valid JSON", 500) from exc
-            if not isinstance(payload, dict) or stable_digest(payload) != row["payload_digest"]:
-                raise MkbError("outbox-payload-invalid", "Outbox payload digest is invalid", 500)
-            return OutboxDelivery(
-                row["outbox_id"],
-                row["team_uuid"],
-                row["kind"],
-                payload,
-                delivery_lease_owner,
-            )
+            return dict(row), delivery_lease_owner
+
+    async def _parse_or_kill_outbox(self, row: dict[str, Any], delivery_lease_owner: str) -> OutboxDelivery | None:
+        try:
+            payload = json.loads(row["payload_json"])
+        except (json.JSONDecodeError, TypeError):
+            await self._mark_outbox_dead(row["outbox_id"], delivery_lease_owner, "Outbox payload is not valid JSON")
+            return None
+        if not isinstance(payload, dict) or stable_digest(payload) != row["payload_digest"]:
+            await self._mark_outbox_dead(row["outbox_id"], delivery_lease_owner, "Outbox payload digest is invalid")
+            return None
+        return OutboxDelivery(
+            row["outbox_id"],
+            row["team_uuid"],
+            row["kind"],
+            payload,
+            delivery_lease_owner,
+        )
 
 
     async def dispatch_outbox_once(self, lease_owner: str, *, lease_seconds: int = 30) -> bool:
@@ -74,9 +85,15 @@ class WorkflowOutboxMixin:
         the Process from the database.
         """
 
-        delivery = await self.claim_outbox(lease_owner, lease_seconds=lease_seconds)
-        if delivery is None:
+        if not lease_owner:
+            raise MkbError("invalid-lease-owner", "lease_owner must be non-empty", 422)
+        leased = await self._lease_outbox_row(lease_owner, lease_seconds=lease_seconds)
+        if leased is None:
             return False
+        row, delivery_lease_owner = leased
+        delivery = await self._parse_or_kill_outbox(row, delivery_lease_owner)
+        if delivery is None:
+            return True
         try:
             if delivery.kind == "wake_execution":
                 await self.materialize_root(_required_payload_uuid(delivery.payload, "execution_uuid"))
@@ -317,6 +334,15 @@ class WorkflowOutboxMixin:
             )
         return row
 
+
+    async def _mark_outbox_dead(self, outbox_id: str, lease_owner: str, error: str) -> None:
+        now = utc_now()
+        async with self.persistence.transaction() as tx:
+            await tx.execute(
+                "UPDATE mkb_outbox SET status='dead',lease_owner=NULL,lease_expires_at=NULL,last_error=?,updated_at=? "
+                "WHERE outbox_id=? AND status='in_flight' AND lease_owner=?",
+                (error[:512], now, outbox_id, lease_owner),
+            )
 
     async def _complete_outbox(self, outbox_id: str, lease_owner: str) -> None:
         now = utc_now()

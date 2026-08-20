@@ -19,6 +19,7 @@ from src.persistence.migration_runner import (
     discover_migrations,
     verify_migrations,
 )
+from src.persistence.uow import immediate_transaction
 
 
 class SqliteUnitOfWork:
@@ -80,18 +81,26 @@ class SqlitePersistence:
                 discover_migrations(self.migration_directory),
             )
 
+    def _discard_connection(self) -> None:
+        connection = self._connection
+        self._connection = None
+        if connection is not None:
+            try:
+                connection.close()
+            except Exception:
+                pass
+
     @asynccontextmanager
     async def transaction(self) -> AsyncIterator[SqliteUnitOfWork]:
         async with self._write_lock:
             connection = self._connect()
-            await asyncio.to_thread(connection.execute, "BEGIN IMMEDIATE")
-            try:
+            async with immediate_transaction(connection, discard=self._discard_connection):
                 yield SqliteUnitOfWork(connection)
-            except Exception:
-                await asyncio.to_thread(connection.rollback)
-                raise
-            else:
-                await asyncio.to_thread(connection.commit)
+
+    def _open_probe_connection(self) -> sqlite3.Connection:
+        connection = sqlite3.connect(self.database_path, check_same_thread=False, isolation_level=None)
+        connection.row_factory = sqlite3.Row
+        return connection
 
     async def readiness(self) -> dict[str, bool]:
         try:
@@ -99,13 +108,20 @@ class SqlitePersistence:
             # Readiness verification touches that connection too, so it must
             # share the transaction lock; otherwise concurrent claims can race
             # a PRAGMA/schema query against BEGIN IMMEDIATE and falsely fence
-            # healthy work as not-ready.
+            # healthy work as not-ready. Capability probes use a bypass
+            # connection so they never flip the live journal_mode.
             async with self._write_lock:
                 connection = self._connect()
                 migrations = discover_migrations(self.migration_directory)
                 schema_ok = await asyncio.to_thread(verify_migrations, connection, migrations)
-                cw = await asyncio.to_thread(probe_concurrent_writes, connection)
-                vector = await asyncio.to_thread(self._probe_native_vector, connection)
+                probe = self._open_probe_connection()
+                try:
+                    cw = await asyncio.to_thread(
+                        probe_concurrent_writes, probe, restore_journal_mode=False
+                    )
+                    vector = await asyncio.to_thread(self._probe_native_vector, probe)
+                finally:
+                    probe.close()
             gates = apply_capability_gates(
                 concurrent_writes=cw,
                 native_vector=vector,

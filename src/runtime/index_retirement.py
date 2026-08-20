@@ -39,7 +39,17 @@ class IndexGenerationRetirementScanner:
 
     async def run_forever(self, stop_event: asyncio.Event) -> None:
         while not stop_event.is_set():
-            await self.run_once()
+            try:
+                await self.run_once()
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                timeout = max(self._schedule.interval.total_seconds(), 1.0)
+                try:
+                    await asyncio.wait_for(stop_event.wait(), timeout=timeout)
+                except TimeoutError:
+                    continue
+                return
             try:
                 await asyncio.wait_for(stop_event.wait(), timeout=self._schedule.interval.total_seconds())
             except TimeoutError:
