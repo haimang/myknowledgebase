@@ -9,6 +9,7 @@ from src.contracts.common.errors import MkbError
 from src.contracts.common.ids import stable_digest, uuid7
 from src.contracts.common.time import utc_now
 from src.contracts.runtime.models import ProcessCommand
+from src.contracts.storage.models import PromoteRequest
 from src.persistence.ports import UnitOfWork
 from src.runtime.intake.types import (
     _digest_bytes,
@@ -48,6 +49,22 @@ class IntakeAcceptanceSnapshotMixin:
                 raise MkbError("PIPELINE_INPUT_INVALID", "Accepted snapshot is missing immutable intake coordinates", 422)
             next_state = dict(state)
             next_state["accepted_at"] = utc_now()
+            raw_bytes = str(state.get("raw_text") or "").encode("utf-8")
+            clean_bytes = str(state.get("clean_text") or "").encode("utf-8")
+            raw_stat = await self._storage.promote(
+                raw_bytes,
+                PromoteRequest(team_uuid=command.team_uuid, purpose="process_io", media_type="text/plain"),
+            )
+            clean_stat = await self._storage.promote(
+                clean_bytes,
+                PromoteRequest(team_uuid=command.team_uuid, purpose="process_io", media_type="text/plain"),
+            )
+            next_state["raw_cas_digest"] = raw_stat.sha256
+            next_state["raw_cas_size"] = raw_stat.size_bytes
+            next_state["raw_cas_handle"] = raw_stat.handle.value
+            next_state["clean_cas_digest"] = clean_stat.sha256
+            next_state["clean_cas_size"] = clean_stat.size_bytes
+            next_state["clean_cas_handle"] = clean_stat.handle.value
             material = self._material(
                 command,
                 next_state,
@@ -68,6 +85,22 @@ class IntakeAcceptanceSnapshotMixin:
                 stored_object_uuid = await self._stored_object_uuid(tx, command.team_uuid, output_digest, output_size)
                 if stored_object_uuid is None:
                     raise MkbError("OBJECT_CATALOGUE_MISSING", "Accepted stage output was not catalogued", 503)
+                raw_object_uuid = await self._catalog_cas_object_tx(
+                    tx,
+                    command.team_uuid,
+                    digest=str(next_state["raw_cas_digest"]),
+                    size=int(next_state["raw_cas_size"]),
+                    media_type="text/plain",
+                    now=now,
+                )
+                clean_object_uuid = await self._catalog_cas_object_tx(
+                    tx,
+                    command.team_uuid,
+                    digest=str(next_state["clean_cas_digest"]),
+                    size=int(next_state["clean_cas_size"]),
+                    media_type="text/plain",
+                    now=now,
+                )
                 action = await tx.fetchone(
                     "SELECT action_key,definition_version FROM mkb_intake_action_definitions "
                     "WHERE action_key='accept_revision' AND definition_version='v1'"
@@ -129,14 +162,28 @@ class IntakeAcceptanceSnapshotMixin:
                 )
                 initial_semantics = await self._initial_semantics_tx(tx, state)
                 fingerprint = self._semantic_fingerprint(initial_semantics)
+                max_ordinal = await tx.fetchone(
+                    "SELECT MAX(revision_ordinal) AS ordinal FROM mkb_intake_revisions "
+                    "WHERE team_uuid=? AND intake_item_uuid=?",
+                    (command.team_uuid, state["intake_item_uuid"]),
+                )
+                revision_ordinal = int(max_ordinal["ordinal"] or 0) + 1 if max_ordinal is not None else 1
+                predecessor = await tx.fetchone(
+                    "SELECT intake_revision_uuid FROM mkb_intake_revisions "
+                    "WHERE team_uuid=? AND intake_item_uuid=? AND revision_ordinal=?",
+                    (command.team_uuid, state["intake_item_uuid"], revision_ordinal - 1),
+                )
                 await tx.execute(
                     "INSERT INTO mkb_intake_revisions "
-                    "(team_uuid,intake_revision_uuid,intake_item_uuid,revision_ordinal,revision_fingerprint,creation_action_key,"
-                    "creation_action_version,source_snapshot_uuid,created_at,payload_extra) VALUES (?,?,?,1,?,?,?,?,?,'{}')",
+                    "(team_uuid,intake_revision_uuid,intake_item_uuid,revision_ordinal,predecessor_revision_uuid,"
+                    "revision_fingerprint,creation_action_key,"
+                    "creation_action_version,source_snapshot_uuid,created_at,payload_extra) VALUES (?,?,?,?,?,?,?,?,?,?,'{}')",
                     (
                         command.team_uuid,
                         state["intake_revision_uuid"],
                         state["intake_item_uuid"],
+                        revision_ordinal,
+                        None if predecessor is None else predecessor["intake_revision_uuid"],
                         fingerprint,
                         action["action_key"],
                         action["definition_version"],
@@ -146,20 +193,26 @@ class IntakeAcceptanceSnapshotMixin:
                 )
                 for entry in initial_semantics:
                     await self._insert_revision_semantic(tx, command.team_uuid, state["intake_revision_uuid"], entry, now)
-                for artifact_uuid, owner_snapshot, owner_revision, role, digest in (
+                for artifact_uuid, owner_snapshot, owner_revision, role, digest, size, handle, object_uuid in (
                     (
                         state["raw_artifact_uuid"],
                         state["intake_snapshot_uuid"],
                         None,
                         "raw_acquisition",
-                        state["raw_digest"],
+                        next_state["raw_cas_digest"],
+                        next_state["raw_cas_size"],
+                        next_state["raw_cas_handle"],
+                        raw_object_uuid,
                     ),
                     (
                         state["clean_artifact_uuid"],
                         None,
                         state["intake_revision_uuid"],
                         "clean_text",
-                        state["clean_digest"],
+                        next_state["clean_cas_digest"],
+                        next_state["clean_cas_size"],
+                        next_state["clean_cas_handle"],
+                        clean_object_uuid,
                     ),
                 ):
                     await tx.execute(
@@ -173,16 +226,36 @@ class IntakeAcceptanceSnapshotMixin:
                             owner_snapshot,
                             owner_revision,
                             role,
-                            "application/json",
+                            "text/plain",
                             digest,
-                            output_size,
-                            refs["output_ref"],
-                            stored_object_uuid,
+                            size,
+                            handle,
+                            object_uuid,
                             command.execution_uuid,
                             command.process_uuid,
                             now,
                         ),
                     )
+                await self._reference_object(
+                    tx,
+                    team_uuid=command.team_uuid,
+                    stored_object_uuid=raw_object_uuid,
+                    purpose="intake_snapshot_artifact",
+                    owner_kind="intake_snapshot",
+                    owner_uuid=state["intake_snapshot_uuid"],
+                    digest=str(next_state["raw_cas_digest"]),
+                    size=int(next_state["raw_cas_size"]),
+                )
+                await self._reference_object(
+                    tx,
+                    team_uuid=command.team_uuid,
+                    stored_object_uuid=clean_object_uuid,
+                    purpose="intake_revision_artifact",
+                    owner_kind="intake_revision",
+                    owner_uuid=state["intake_revision_uuid"],
+                    digest=str(next_state["clean_cas_digest"]),
+                    size=int(next_state["clean_cas_size"]),
+                )
                 await self._reference_object(
                     tx,
                     team_uuid=command.team_uuid,
@@ -373,6 +446,30 @@ class IntakeAcceptanceSnapshotMixin:
 
             return material, {"admission_result": admission}, callback
 
+
+    async def _catalog_cas_object_tx(
+            self,
+            tx: UnitOfWork,
+            team_uuid: str,
+            *,
+            digest: str,
+            size: int,
+            media_type: str,
+            now: str,
+        ) -> str:
+            from src.services.artifacts import live_stored_object_uuid
+
+            existing = await live_stored_object_uuid(tx, team_uuid, digest, size)
+            if existing is not None:
+                return existing
+            stored_object_uuid = uuid7()
+            await tx.execute(
+                "INSERT INTO mkb_stored_objects "
+                "(stored_object_uuid,team_uuid,digest_algorithm,content_digest,size_bytes,media_type,storage_backend,"
+                "created_at,payload_extra) VALUES (?,?, 'sha256',?,?,?,?,?,'{}')",
+                (stored_object_uuid, team_uuid, digest, size, media_type, "local_fs", now),
+            )
+            return stored_object_uuid
 
     async def _accept_registered_api_collection(
             self, command: ProcessCommand, state: dict[str, Any]

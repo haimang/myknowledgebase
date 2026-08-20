@@ -265,6 +265,15 @@ class WorkflowGatesMixin:
                 )
             typed = await self._typed_route_context_tx(tx, execution)
             typed["gate_action"] = decision["action"]
+            now = utc_now()
+            if decision["action"] == "approve":
+                await self._apply_human_review_item_lifecycle_tx(
+                    tx, execution=execution, now=now, lifecycle_state="active"
+                )
+            elif decision["action"] == "reject":
+                await self._apply_human_review_item_lifecycle_tx(
+                    tx, execution=execution, now=now, lifecycle_state="deactivated"
+                )
             decision_result = self._route_decision(
                 plan=plan,
                 execution=execution,

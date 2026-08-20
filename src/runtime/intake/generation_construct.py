@@ -880,7 +880,7 @@ class IntakeGenerationConstructMixin:
                     accepted_layered_json=accepted,
                 )
                 title = _title_from_layered(completed if isinstance(completed, Mapping) else accepted)
-                metadata_headers = {"title": title} if title else None
+                metadata_headers = None if self._construct_mode(state) == "full_construct" else ({"title": title} if title else None)
                 required_granularities = frozenset(self._layered_profile(state, error_code="CONSTRUCT_TO_VECTORIZE_GATE"))
             construction_uuid = self._generation_state_text(
                 state, "construction_artifact_uuid", "CONSTRUCT_TO_VECTORIZE_GATE"
@@ -1325,7 +1325,7 @@ class IntakeGenerationConstructMixin:
                     raise MkbError("CONSTRUCT_KERNEL_SUMMARY_INVALID", "Completed layered JSON package is unavailable", 422)
                 required_granularities = frozenset(profile)
                 title = _title_from_layered(completed_layered_candidate or accepted_layered_candidate)
-                metadata_headers = {"title": title} if title else None
+                metadata_headers = None if construct_mode == "full_construct" else ({"title": title} if title else None)
             construction_artifact_uuid = uuid7()
             dual_channel_artifact_uuid = uuid7()
             validation_artifact_uuid = uuid7()

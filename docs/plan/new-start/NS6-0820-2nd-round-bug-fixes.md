@@ -791,3 +791,19 @@ NS6-0820-2nd-round-bug-fixes
 | P3-02 | `✅ done` | `generation_evidence.py` 删除 `"_"` 回退 | 省略 uuid 不串台 |
 | P3-03 | `✅ done` | `facade.py` release 后 `lease=None`；finally 只 release 非空 | 取消 sleep 无 RuntimeError |
 | P3-04 | `✅ done` | `_cli_child_env` allowlist；`_bounded_communicate`；terminate 捕 CancelledError | 无 AWS secret；overflow 即杀 |
+
+### 11.5 Phase 4 回填
+
+- **实际执行摘要**：P4-01…P4-07（VF12–18）。upsert 只碰 withdrawn+同代；consume_gate_decision 激活 HITL；raw/clean 分 CAS；016 unique external_key；namespace 按 Layer A 分键；generation TX 内 CAS；full_construct 不传 title headers。
+- **Phase 偏差**：T22/T24 全链 ingest e2e 未在本 Phase 短途展开（计划偏差 / 测试分层）——以 consume_gate_decision 接线 + 016 unique + 同 TX resolve 为代码收口；mega 在 P6。
+- **测试发现**：`test_ns6_phase4.py` + `test_ns5_phase4` / construct / compiler / dispatch embed 回归绿。
+
+| 工作项 | 状态 | 实际落点 | 备注 |
+|--------|------|----------|------|
+| P4-01 | `✅ done` | `_existing_vector_coordinate_uuid` / upsert SELECT `withdrawn`+generation | indexed COUNT 不被 UPDATE |
+| P4-02 | `✅ done` | `consume_gate_decision` 调 `_apply_human_review_item_lifecycle_tx` | approve→active |
+| P4-03 | `✅ done` | acceptance promote raw/clean；rebuild 读 sha256(bytes) | 禁止 JSON peel |
+| P4-04 | `✅ done` | `016_ns6_source_external_key.sql`；callback 同 TX resolve；ordinal MAX+1 | unique (team,kind,key) |
+| P4-05 | `✅ done` | namespace_key=`model\|version\|adapter\|dimension` | 改维新 ns |
+| P4-06 | `✅ done` | vectorize callback `index_generation` CAS | 并发不得双写 N+1 |
+| P4-07 | `✅ done` | full_construct `metadata_headers=None` | binder 409 与 body-only 一致 |

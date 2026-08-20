@@ -75,8 +75,8 @@ class IntakeVectorizeMixin:
             return vectorize_command
 
 
-    @staticmethod
     def _from_construct_vectorize_command(
+            self,
             command: ProcessCommand,
             state: Mapping[str, Any],
             *,
@@ -99,7 +99,7 @@ class IntakeVectorizeMixin:
                     content_full_recipe_version="content_full.v1",
                     intake_item_uuid=str(state["intake_item_uuid"]),
                     intake_revision_uuid=str(state["intake_revision_uuid"]),
-                    namespace_key="default",
+                    namespace_key=self._namespace_key(layer_a),
                     namespace_uuid=namespace_uuid,
                     embedding_model_ref=layer_a_ref,
                 )
@@ -166,8 +166,8 @@ class IntakeVectorizeMixin:
             plan = compiler.vectorization_plan(document=construction, dual=dual, metadata_headers=metadata_headers)
             if not plan.required:
                 raise MkbError("CONSTRUCT_TO_VECTORIZE_GATE", "Construct package has no required vector units", 409)
-            namespace_uuid, next_generation = await self._namespace_coordinates(command.team_uuid)
             mode, frozen_layer_a = await self._embedding_profile(command)
+            namespace_uuid, next_generation = await self._namespace_coordinates(command.team_uuid, frozen_layer_a)
             vectorize_command = self._from_construct_vectorize_command(
                 command,
                 state,
@@ -207,6 +207,7 @@ class IntakeVectorizeMixin:
                     unit_id=item.unit_id,
                     channel=item.channel,
                     embedding_model=layer_a["model_key"],
+                    index_generation=next_generation,
                 )
                 persisted_records.append(
                     {
@@ -272,7 +273,7 @@ class IntakeVectorizeMixin:
                 next_state,
                 {
                     "vectorization_receipt": {
-                        "namespace_key": "default",
+                        "namespace_key": self._namespace_key(layer_a),
                         "namespace_uuid": namespace_uuid,
                         "index_generation": next_generation,
                         "expected_count": len(next_state["vector_records"]),
@@ -287,6 +288,19 @@ class IntakeVectorizeMixin:
                 del refs
                 await self._assert_construct_to_vectorize_gate_tx(tx, command, state)
                 await self._ensure_namespace(tx, command.team_uuid, namespace_uuid, layer_a)
+                claimed = await tx.execute(
+                    "UPDATE mkb_vector_namespaces SET index_generation=?,updated_at=? "
+                    "WHERE namespace_uuid=? AND team_uuid=? AND status='active' AND index_generation=?",
+                    (
+                        next_generation,
+                        utc_now(),
+                        namespace_uuid,
+                        command.team_uuid,
+                        next_generation - 1,
+                    ),
+                )
+                if claimed.rowcount != 1:
+                    raise MkbError("VECTORIZE_GENERATION_FENCE", "Index generation was reserved by a concurrent vectorize", 409)
                 if invocation is not None:
                     await self._record_embedding_invocation(tx, command, invocation)
                 for record in persisted_records:

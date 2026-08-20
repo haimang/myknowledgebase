@@ -103,7 +103,8 @@ class IntakeAcquisitionIngestMixin:
             )
             if existing is not None:
                 next_state["intake_source_uuid"] = existing["intake_source_uuid"]
-                next_state["intake_item_uuid"] = existing["intake_item_uuid"]
+                if existing.get("intake_item_uuid"):
+                    next_state["intake_item_uuid"] = existing["intake_item_uuid"]
                 if existing.get("intake_snapshot_uuid"):
                     next_state["intake_snapshot_uuid"] = existing["intake_snapshot_uuid"]
             material = self._material(
@@ -132,11 +133,21 @@ class IntakeAcquisitionIngestMixin:
                 )
                 if definition is None:
                     raise MkbError("REGISTRY_NOT_FOUND", "Source kind definition is unavailable", 503)
+                existing = await self._resolve_existing_intake_identity_tx(
+                    tx, command.team_uuid, source_kind, str(next_state["normalized_external_key"])
+                )
+                if existing is not None:
+                    next_state["intake_source_uuid"] = existing["intake_source_uuid"]
+                    if existing.get("intake_item_uuid"):
+                        next_state["intake_item_uuid"] = existing["intake_item_uuid"]
+                    if existing.get("intake_snapshot_uuid"):
+                        next_state["intake_snapshot_uuid"] = existing["intake_snapshot_uuid"]
                 await tx.execute(
                     "INSERT OR IGNORE INTO mkb_intake_sources "
                     "(team_uuid,intake_source_uuid,source_kind,source_kind_definition_version,source_kind_definition_digest,"
-                    "source_descriptor_ref,source_descriptor_digest,accepts_new_snapshots,created_at,updated_at,payload_extra) "
-                    "VALUES (?,?,?,'v1',?,?,?,1,?,?, '{}')",
+                    "source_descriptor_ref,source_descriptor_digest,accepts_new_snapshots,created_at,updated_at,payload_extra,"
+                    "normalized_external_key) "
+                    "VALUES (?,?,?,'v1',?,?,?,1,?,?, '{}',?)",
                     (
                         command.team_uuid,
                         next_state["intake_source_uuid"],
@@ -146,8 +157,16 @@ class IntakeAcquisitionIngestMixin:
                         stable_digest(descriptor),
                         now,
                         now,
+                        next_state["normalized_external_key"],
                     ),
                 )
+                stored = await tx.fetchone(
+                    "SELECT intake_source_uuid FROM mkb_intake_sources "
+                    "WHERE team_uuid=? AND source_kind=? AND normalized_external_key=?",
+                    (command.team_uuid, source_kind, next_state["normalized_external_key"]),
+                )
+                if stored is not None:
+                    next_state["intake_source_uuid"] = stored["intake_source_uuid"]
 
             return material, {}, callback
 
@@ -156,22 +175,36 @@ class IntakeAcquisitionIngestMixin:
             self, team_uuid: str, source_kind: str, normalized_external_key: str
         ) -> dict[str, Any] | None:
             async with self._persistence.transaction() as tx:
-                row = await tx.fetchone(
-                    "SELECT s.intake_source_uuid, i.intake_item_uuid "
-                    "FROM mkb_intake_items AS i "
-                    "JOIN mkb_intake_sources AS s "
-                    "ON s.team_uuid=i.team_uuid AND s.intake_source_uuid=i.intake_source_uuid "
-                    "WHERE i.team_uuid=? AND s.source_kind=? AND i.normalized_external_key=? "
-                    "AND i.deleted_at IS NULL ORDER BY i.created_at ASC LIMIT 1",
+                return await self._resolve_existing_intake_identity_tx(
+                    tx, team_uuid, source_kind, normalized_external_key
+                )
+
+    async def _resolve_existing_intake_identity_tx(
+            self, tx: UnitOfWork, team_uuid: str, source_kind: str, normalized_external_key: str
+        ) -> dict[str, Any] | None:
+            row = await tx.fetchone(
+                "SELECT s.intake_source_uuid, i.intake_item_uuid "
+                "FROM mkb_intake_items AS i "
+                "JOIN mkb_intake_sources AS s "
+                "ON s.team_uuid=i.team_uuid AND s.intake_source_uuid=i.intake_source_uuid "
+                "WHERE i.team_uuid=? AND s.source_kind=? AND i.normalized_external_key=? "
+                "AND i.deleted_at IS NULL ORDER BY i.created_at ASC LIMIT 1",
+                (team_uuid, source_kind, normalized_external_key),
+            )
+            if row is None:
+                source = await tx.fetchone(
+                    "SELECT intake_source_uuid FROM mkb_intake_sources "
+                    "WHERE team_uuid=? AND source_kind=? AND normalized_external_key=?",
                     (team_uuid, source_kind, normalized_external_key),
                 )
-                if row is None:
+                if source is None:
                     return None
-                snapshot = await tx.fetchone(
-                    "SELECT intake_snapshot_uuid FROM mkb_intake_snapshots "
-                    "WHERE team_uuid=? AND intake_source_uuid=? AND observation_key=?",
-                    (team_uuid, row["intake_source_uuid"], normalized_external_key),
-                )
+                row = {"intake_source_uuid": source["intake_source_uuid"], "intake_item_uuid": None}
+            snapshot = await tx.fetchone(
+                "SELECT intake_snapshot_uuid FROM mkb_intake_snapshots "
+                "WHERE team_uuid=? AND intake_source_uuid=? AND observation_key=?",
+                (team_uuid, row["intake_source_uuid"], normalized_external_key),
+            )
             result = dict(row)
             if snapshot is not None:
                 result["intake_snapshot_uuid"] = snapshot["intake_snapshot_uuid"]

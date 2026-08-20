@@ -498,10 +498,12 @@ class IntakeCoreMixin:
             assert isinstance(clean, dict)
             try:
                 data = await self._storage.read_verified(command.team_uuid, ObjectHandle(value=clean["logical_handle"]))
-                envelope = json.loads(data)
-                text = envelope["state"]["clean_text"]
-            except (KeyError, TypeError, ValueError, json.JSONDecodeError, MkbError) as exc:
+            except MkbError as exc:
                 raise MkbError("INTAKE_REBUILD_INPUT_MISSING", "Frozen clean artifact is unavailable", 409) from exc
-            if not isinstance(text, str) or stable_digest({"text": text}) != clean.get("content_digest"):
+            expected = clean.get("content_digest")
+            if hashlib.sha256(data).hexdigest() != expected:
                 raise MkbError("INTAKE_REBUILD_INPUT_INVALID", "Frozen clean artifact failed its digest fence", 409)
-            return text
+            try:
+                return data.decode("utf-8")
+            except UnicodeDecodeError as exc:
+                raise MkbError("INTAKE_REBUILD_INPUT_INVALID", "Frozen clean artifact failed its digest fence", 409) from exc

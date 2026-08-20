@@ -262,19 +262,22 @@ class IntakeVectorPublishCommitMixin:
                 raise MkbError("PUBLICATION_HANDOFF_INVALID", "Vectorize handoff Layer A differs from the record binding", 409)
 
 
-    async def _namespace_coordinates(self, team_uuid: str) -> tuple[str, int]:
-            """Reserve a logical default namespace coordinate for one Process.
+    @staticmethod
+    def _namespace_key(layer_a: Mapping[str, Any]) -> str:
+        return (
+            f"{layer_a['model_key']}|{layer_a['model_version']}|"
+            f"{layer_a['adapter_kind']}|{layer_a['dimension']}"
+        )
 
-            The publish callback still performs the durable row CAS.  This early
-            read exists solely so the vectorization receipt and its later
-            publication proof freeze the same explicit generation coordinate.
-            """
+    async def _namespace_coordinates(self, team_uuid: str, layer_a: Mapping[str, Any]) -> tuple[str, int]:
+            """Read the live namespace for this Layer A; generation is CAS'd in the outcome TX."""
 
+            key = self._namespace_key(layer_a)
             async with self._persistence.transaction() as tx:
                 row = await tx.fetchone(
                     "SELECT namespace_uuid,index_generation FROM mkb_vector_namespaces "
-                    "WHERE team_uuid=? AND namespace_key='default' AND status='active' AND deleted_at IS NULL",
-                    (team_uuid,),
+                    "WHERE team_uuid=? AND namespace_key=? AND status='active' AND deleted_at IS NULL",
+                    (team_uuid, key),
                 )
             if row is None:
                 return uuid7(), 1
@@ -289,20 +292,15 @@ class IntakeVectorPublishCommitMixin:
             layer_a: Mapping[str, Any],
         ) -> None:
             layer_a = self._validate_layer_a(layer_a)
+            key = self._namespace_key(layer_a)
             row = await tx.fetchone(
                 "SELECT namespace_uuid,embedding_model_key,embedding_model_version,adapter_kind,dimension "
-                "FROM mkb_vector_namespaces WHERE team_uuid=? AND namespace_key='default'",
-                (team_uuid,),
+                "FROM mkb_vector_namespaces WHERE team_uuid=? AND namespace_key=?",
+                (team_uuid, key),
             )
             if row is not None:
-                if (
-                    row["namespace_uuid"] != namespace_uuid
-                    or row["embedding_model_key"] != layer_a["model_key"]
-                    or row["embedding_model_version"] != layer_a["model_version"]
-                    or row["adapter_kind"] != layer_a["adapter_kind"]
-                    or row["dimension"] != layer_a["dimension"]
-                ):
-                    raise MkbError("VECTOR_NAMESPACE_BINDING_CONFLICT", "Default namespace binding conflicts", 409)
+                if row["namespace_uuid"] != namespace_uuid:
+                    raise MkbError("VECTOR_NAMESPACE_BINDING_CONFLICT", "Namespace binding conflicts", 409)
                 return
             model = await tx.fetchone(
                 "SELECT model_key FROM mkb_model_catalog WHERE model_key=? AND model_version=? AND status='active'",
@@ -315,11 +313,13 @@ class IntakeVectorPublishCommitMixin:
                 "INSERT INTO mkb_vector_namespaces "
                 "(namespace_uuid,team_uuid,namespace_key,display_name,embedding_model,embedding_model_key,embedding_model_version,"
                 "adapter_kind,dimension,distance_metric,status,index_generation,created_at,updated_at,payload_extra) "
-                "VALUES (?,?, 'default','Default retrieval namespace',?,?,?,?,?,'cosine',"
+                "VALUES (?,?,?,? ,?,?,?,?,?,'cosine',"
                 "'active',0,?,?,'{}')",
                 (
                     namespace_uuid,
                     team_uuid,
+                    key,
+                    key,
                     layer_a["model_key"],
                     layer_a["model_key"],
                     layer_a["model_version"],
@@ -340,13 +340,22 @@ class IntakeVectorPublishCommitMixin:
             unit_id: str,
             channel: str,
             embedding_model: str,
+            index_generation: int,
         ) -> str | None:
             async with self._persistence.transaction() as tx:
                 row = await tx.fetchone(
                     "SELECT vector_record_uuid FROM mkb_vector_records WHERE team_uuid=? AND namespace_uuid=? "
                     "AND generation_artifact_uuid=? AND block_or_unit_id=? AND channel=? AND embedding_model=? "
-                    "AND deleted_at IS NULL",
-                    (team_uuid, namespace_uuid, generation_artifact_uuid, unit_id, channel, embedding_model),
+                    "AND index_generation=? AND publication_state='withdrawn' AND deleted_at IS NULL",
+                    (
+                        team_uuid,
+                        namespace_uuid,
+                        generation_artifact_uuid,
+                        unit_id,
+                        channel,
+                        embedding_model,
+                        index_generation,
+                    ),
                 )
             return None if row is None else str(row["vector_record_uuid"])
 
@@ -381,8 +390,16 @@ class IntakeVectorPublishCommitMixin:
             existing = await tx.fetchone(
                 "SELECT vector_record_uuid FROM mkb_vector_records WHERE team_uuid=? AND namespace_uuid=? "
                 "AND generation_artifact_uuid=? AND block_or_unit_id=? AND channel=? AND embedding_model=? "
-                "AND deleted_at IS NULL",
-                (command.team_uuid, namespace_uuid, artifact_uuid, unit_id, channel, layer_a["model_key"]),
+                "AND index_generation=? AND publication_state='withdrawn' AND deleted_at IS NULL",
+                (
+                    command.team_uuid,
+                    namespace_uuid,
+                    artifact_uuid,
+                    unit_id,
+                    channel,
+                    layer_a["model_key"],
+                    index_generation,
+                ),
             )
             now = utc_now()
             if existing is not None:
