@@ -145,6 +145,17 @@ class IntakeGenerationLiveMixin:
                     )
             if schema_row is None or not schema_row["schema_digest"]:
                 raise MkbError("REGISTRY_NOT_FOUND", "Generation schema definition is unavailable", 503)
+            frozen_l4 = snapshot.get("l4") if isinstance(snapshot.get("l4"), dict) else {}
+            frozen_schemas = frozen_l4.get("schemas") if isinstance(frozen_l4.get("schemas"), dict) else {}
+            frozen = frozen_schemas.get(f"{schema_key}@{schema_version}")
+            if isinstance(frozen, dict) and frozen.get("schema_digest") and frozen["schema_digest"] != schema_row["schema_digest"]:
+                raise MkbError("GENERATION_SCHEMA_DRIFT", "Frozen schema digest no longer matches the registry", 409)
+            layered_path = Path("data/schemas/lsrag.layered_content.v1.json")
+            frozen_layered = frozen_l4.get("layered_schema_sha256")
+            if isinstance(frozen_layered, str) and layered_path.is_file():
+                current_layered = hashlib.sha256(layered_path.read_bytes()).hexdigest()
+                if current_layered != frozen_layered:
+                    raise MkbError("GENERATION_SCHEMA_DRIFT", "Layered JSON schema bytes drifted from the freeze", 409)
             try:
                 binding = InferenceBinding(
                     capability_key=capability_key,

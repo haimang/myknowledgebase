@@ -207,6 +207,7 @@ class ConfigSnapshotService:
                 "overrides": semantic_overrides,
                 "override_digest": override_digest,
             },
+            "l4": await self._load_l4_schema_freeze(),
             "flag_bundle": flag_bundle,
             "flag_bundle_digest": flag_bundle_digest,
             "semantic_knobs": semantic_knobs,
@@ -568,6 +569,30 @@ class ConfigSnapshotService:
         if not prompts or not models:
             raise MkbError("REGISTRY_NOT_FOUND", "Registry bootstrap rows are unavailable", 503)
         return {"prompts": prompts, "models": models, "bindings": bindings}
+
+    async def _load_l4_schema_freeze(self) -> dict[str, Any]:
+        """Freeze registry schema SHA plus the checked-in layered JSON schema file."""
+
+        async with self.persistence.transaction() as tx:
+            structure_rows = await tx.fetchall(
+                "SELECT schema_key,schema_version,schema_digest FROM mkb_structure_schema_definitions "
+                "ORDER BY schema_key,schema_version"
+            )
+            construction_rows = await tx.fetchall(
+                "SELECT schema_key,schema_version,schema_digest FROM mkb_construction_schema_definitions "
+                "ORDER BY schema_key,schema_version"
+            )
+        schemas = {
+            f"{row['schema_key']}@{row['schema_version']}": {
+                "schema_key": row["schema_key"],
+                "schema_version": row["schema_version"],
+                "schema_digest": row["schema_digest"],
+            }
+            for row in (*structure_rows, *construction_rows)
+        }
+        layered_path = Path("data/schemas/lsrag.layered_content.v1.json")
+        layered_sha = hashlib.sha256(layered_path.read_bytes()).hexdigest() if layered_path.is_file() else None
+        return {"schemas": schemas, "layered_schema_sha256": layered_sha}
 
     @staticmethod
     def _resolve_compression_channel(request: TaskCreateRequest) -> tuple[str, str]:

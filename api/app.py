@@ -11,6 +11,7 @@ from datetime import timedelta
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse, PlainTextResponse
+from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from api.dependencies import require_metrics_access
 from api.internal.routes import router as internal_router
@@ -25,7 +26,7 @@ from src.runtime.health import HealthAggregator
 from src.runtime.http_acquisition import HttpAcquirer
 from src.runtime.index_retirement import IndexGenerationRetirementScanner, IndexGenerationRetirementSchedule
 from src.runtime.inference.claude_cli import DeterministicNs1Stub, SubprocessClaudeCli
-from src.runtime.inference.facade import InferenceFacade
+from src.runtime.inference.facade import ConcurrencyGate, InferenceFacade
 from src.runtime.inference.supply import SupplyBinding, SupplyFence
 from src.runtime.intake_pipeline import IntakePipeline
 from src.runtime.metrics import MetricRegistry, default_metrics
@@ -178,7 +179,7 @@ async def _probe(container: Container) -> dict[str, bool]:
     except Exception:
         obs_tables = False
     inference_ok = registry_ok
-    if inference_ok and container.settings.inference_probe_enabled:
+    if inference_ok and (container.settings.inference_probe_enabled or container.settings.live_inference):
         try:
             # Probe the same exact L1 winners that admission freezes into L4;
             # a generic transport ping cannot prove the model/adapter/supply
@@ -238,17 +239,29 @@ def create_container(settings: Settings | None = None) -> Container:
             for binding in default_enabled_inference_bindings()
         ]
     )
+    dispatch_caps = DispatchCaps.from_settings(settings)
+    inference_gate = ConcurrencyGate(
+        settings.inference_max_in_flight,
+        capability_limits={
+            "embed": dispatch_caps.embed_running,
+            "structured_generate": dispatch_caps.local_running,
+            "text_generate": dispatch_caps.local_running,
+            "cli": dispatch_caps.ni_running,
+        },
+    )
     inference = InferenceFacade(
         adapter,
         max_in_flight=settings.inference_max_in_flight,
         max_attempts=settings.inference_max_attempts,
         capability_limits={
-            "embed": settings.dispatch_embed_running,
-            "structured_generate": settings.dispatch_local_running,
-            "text_generate": settings.dispatch_local_running,
+            "embed": dispatch_caps.embed_running,
+            "structured_generate": dispatch_caps.local_running,
+            "text_generate": dispatch_caps.local_running,
         },
         supply_fence=supply_fence,
         metrics=metrics,
+        dispatch_caps=dispatch_caps,
+        gate=inference_gate,
     )
     config_snapshots = ConfigSnapshotService(
         persistence, storage, workflows, settings, security_audit=security_audit
@@ -291,7 +304,7 @@ def create_container(settings: Settings | None = None) -> Container:
         readiness=workflow_claim_readiness,
         outcome_committer=outcome_committer,
         billing=DefaultBillingService(),
-        dispatch_caps=DispatchCaps.from_settings(settings),
+        dispatch_caps=dispatch_caps,
         live_inference=settings.live_inference,
         cleanup_recovery_window_seconds=settings.workflow_cleanup_recovery_window_seconds,
     )
@@ -303,9 +316,9 @@ def create_container(settings: Settings | None = None) -> Container:
     )
     ns1_cli = None
     if settings.ns1_cli_mode == "stub":
-        ns1_cli = DeterministicNs1Stub()
+        ns1_cli = DeterministicNs1Stub(concurrency_gate=inference_gate)
     elif settings.ns1_cli_mode == "subprocess":
-        ns1_cli = SubprocessClaudeCli(executable=settings.ns1_cli_executable)
+        ns1_cli = SubprocessClaudeCli(executable=settings.ns1_cli_executable, concurrency_gate=inference_gate)
     diagnostic_sidecar = None
     if settings.persistence_backend == "turso":
         from src.persistence.turso.sidecar import TursoDiagnosticSidecar
@@ -322,6 +335,7 @@ def create_container(settings: Settings | None = None) -> Container:
             inference=inference,
             claude_cli=ns1_cli,
             live_inference=settings.live_inference,
+            acquisition_max_response_bytes=settings.acquisition_max_response_bytes,
             billing=DefaultBillingService(),
             lifecycle=lifecycle,
             index_retirement=index_retirement,
@@ -450,8 +464,12 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:
+    settings = settings or Settings()
     app = FastAPI(title="MKB leaf worker", version="1.0.0", lifespan=lifespan)
     app.state.container = create_container(settings)
+    hosts = [item.strip() for item in settings.http_trusted_hosts.split(",") if item.strip()]
+    if hosts:
+        app.add_middleware(TrustedHostMiddleware, allowed_hosts=hosts)
 
     @app.exception_handler(MkbError)
     async def mkb_error_handler(request: Request, exc: MkbError) -> JSONResponse:

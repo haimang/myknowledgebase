@@ -56,6 +56,7 @@ class IntakeCoreMixin:
             embedding_dimension: int = 64,
             prompt_root: Path | None = None,
             diagnostics: object | None = None,
+            acquisition_max_response_bytes: int = 8 * 1024 * 1024,
         ) -> None:
             if embedding_dimension < 1:
                 raise ValueError("embedding_dimension must be positive")
@@ -87,6 +88,7 @@ class IntakeCoreMixin:
             # enter L4/output manifests or either invocation ledger.
             self._prompt_root = (prompt_root or Path(__file__).resolve().parents[3] / "data" / "prompts").resolve()
             self._vector_purger = VectorGenerationPurger(persistence)
+            self._acquisition_max_response_bytes = max(1, int(acquisition_max_response_bytes))
 
     def _frozen_prompt_file(
         self,
@@ -394,7 +396,7 @@ class IntakeCoreMixin:
                 "process_key": command.process_key,
                 "process_uuid": command.process_uuid,
                 "fencing_generation": command.fencing_generation,
-                "state": state,
+                "state": self._envelope_state(command.process_key, state),
                 "output": dict(output),
             }
             output_bytes = canonical_json(envelope)
@@ -409,6 +411,23 @@ class IntakeCoreMixin:
                 }
             )
             return _StageMaterial(envelope=envelope, output_bytes=output_bytes, proof_bytes=proof_bytes)
+
+    @staticmethod
+    def _envelope_state(process_key: str, state: Mapping[str, Any]) -> dict[str, Any]:
+        """Late serving stages keep receipts/handles/digests, not source bodies."""
+
+        if process_key not in {"lsrag.vectorize", "index.validate_publication", "index.rebuild"}:
+            return dict(state)
+        drop = {
+            "raw_text",
+            "clean_text",
+            "markdown_text",
+            "layered_content",
+            "layered_content_constructed",
+            "layered_content_candidate",
+            "accepted_layered_candidate",
+        }
+        return {key: value for key, value in state.items() if key not in drop}
 
     async def _passthrough(
             self, command: ProcessCommand, state: dict[str, Any]

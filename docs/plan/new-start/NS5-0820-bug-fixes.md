@@ -796,7 +796,7 @@ NS5-0820-bug-fixes
 
 > 执行者：`Grok`
 > 执行时间：`2026-08-20`
-> 文档状态：`draft → executing → executed`
+> 文档状态：`draft → executing`（T60 mega 被 VF86 e2e sqlite3 挡住，不得标 `executed`）
 > 代码改动统计：Phase 1 落地中
 
 - **实际执行摘要**：Phase 1 按 DAG 首段落地 P1-01…P1-10（VF1/2/3/9/10/61–70）；VF62 重叠 `run_once` 保持关闭。
@@ -855,8 +855,8 @@ residual：VF67 部分 unique → P2-02。
 
 ### 11.5 Phase 3 回填
 
-- **实际执行摘要**：P3-01…P3-10 主切片。salvage 允许 urgent；CLI 正文永久 stdin 且子环境剥离 `MKB_*`；证据按 process_uuid 分桶；EXHAUSTED/BACKPRESSURE 可 process-retry；vLLM 单例 client + 408/425 RETRYABLE；probe 仅 2xx；retry sleep 前放 lease。
-- **Phase 偏差**：Facade 与 DispatchCaps 仍共用 settings 数值而非同一对象引用（partial-delivery VF96 本轮切片）。CLI ConcurrencyGate 走既有 salvage occupancy，未另加进程级 fork 计数器。
+- **实际执行摘要**：P3-01…P3-10。salvage 允许 urgent；CLI 正文永久 stdin 且子环境剥离 `MKB_*`；证据按 process_uuid 分桶；EXHAUSTED/BACKPRESSURE 可 process-retry；vLLM 单例 client + 408/425 RETRYABLE；L4 冻 schema SHA 且 generate 复核漂移；vLLM 传真实 json_schema；live_inference 强制精确 probe（仅 2xx + 模型 id）；CLI/stub 走同一 ConcurrencyGate；Facade 与 Runtime 注入同一 DispatchCaps + gate。
+- **Phase 偏差**：无 in-scope 代码偏差。T60 mega 仍不跟 VF86 sqlite3-on-Turso。
 - **测试发现**：`test_ns5_phase3.py` + CLI/inference/compression 回归绿。
 
 | 工作项 | 状态 | 备注 |
@@ -866,26 +866,26 @@ residual：VF67 部分 unique → P2-02。
 | P3-03 | `✅ done` | 单例 client；408/425；放 lease 再 sleep |
 | P3-04 | `✅ done` | stdin-only；strip MKB_* env |
 | P3-05 | `✅ done` | evidence keyed by process_uuid |
-| P3-06 | `🟩 partial` | probe 仅 2xx；schema SHA freeze 未另开 generate 复核（live 路径既有 digest） |
+| P3-06 | `✅ done` | L4 schema SHA + generate 漂移 fail-closed；json_schema 真 schema；302/错模型 probe false |
 | P3-07 | `✅ done` | EXHAUSTED/BACKPRESSURE recoverable |
-| P3-08 | `🟩 partial` | salvage 占 NI；无独立 CLI gate 对象 |
+| P3-08 | `✅ done` | CLI/stub/RecordingStub 共用 ConcurrencyGate；max=1 第二次 BACKPRESSURE |
 | P3-09 | `✅ done` | 非 text/* 拒 CLI clean |
-| P3-10 | `🟩 partial` | 同 settings caps，非同一 DispatchCaps 实例 |
+| P3-10 | `✅ done` | 同一 DispatchCaps 与 gate；embed 满门 = caps.embed_running |
 
 ### 11.6 Phase 4 回填
 
-- **实际执行摘要**：vectorize 超预算 fail-closed；HTML 换行；单调锚；PDF 去 latin-1；检索 LIMIT+1 fail-closed；禁单通道 purge；指针 `active < excluded`；015 unique 含 generation；停用 Team 不可检索。
-- **Phase 偏差**：title→dual、acquisition budget、stub summary≠original、envelope 瘦、layered UUID validator 等未全部展开（P4-05/06/07/11/12/14/17/18 部分仍交后续切片）。
-- **测试发现**：`test_ns5_phase4.py` + adopt/retrieval/d04 绿。
+- **实际执行摘要**：vectorize 超预算 fail-closed；HTML 换行；单调锚；PDF 去 latin-1；检索 LIMIT+1 fail-closed；禁单通道 purge；指针 `active < excluded`；015 unique 含 generation；停用 Team 不可检索；acquisition cap `{limit,observed}` + 同 key 复用 Source/Item；stub summary≠original；JSON 栈匹配拒多顶层对象；markdown transport 抄 receipt；human_review 前 deactivated、reject 保持非 active；SPACE_VIOLATION 原样上抛；body-only embed；vectorize envelope 去正文；layered UUID/array/URI/date-time；inflate 剥 channel + pack root 去重 + request-scoped hydration；upsert 事件用 dual UUID；rebuild 跳过非 serving；title 进 content_full。
+- **Phase 偏差**：VF30.r 完整 PDF 库、VF37.r 生产默认切 stub、VF41.r S06 全树、VF46.r 全程 jsonschema 仍为 AP §2.2 O4 余项。
+- **测试发现**：`test_ns5_phase4.py` + adopt/retrieval/d04/ns1_generation_cli 绿。
 
 ### 11.7 Phase 5 回填
 
-- **实际执行摘要**：XFF 默认不信；限流 overflow 拒绝新身份而非全局 fail-open；extras 拒 camelCase secret 与 signed URL；sqlite 双因子；mapped IPv6 unwrap；audit write 失败回滚 sampler；body Content-Length cap。
-- **Phase 偏差**：Starlette 主版本未强升（P5-05 若 0.115.12 仍可运行则 TrustedHost 未加，避免打本地 TestClient Host）。
-- **测试发现**：`test_ns5_phase5.py` + security_boundary 绿。
+- **实际执行摘要**：XFF 默认不信；限流 overflow 拒绝新身份而非全局 fail-open；extras 拒 camelCase secret 与 signed URL；sqlite 双因子；mapped IPv6 unwrap；audit write 失败回滚 sampler；body Content-Length cap；FastAPI 0.141.1 / Starlette 1.6.0 + TrustedHost（testserver/localhost/127.0.0.1）。
+- **Phase 偏差**：无 in-scope 代码偏差。
+- **测试发现**：`test_ns5_phase5.py` + security_boundary 绿；`starlette.__version__ >= 1.0.1`。
 
 ### 11.8 Phase 6 回填
 
-- **实际执行摘要**：拆 tautology（`or True`、ReadPort 自造 dict、缺 journal 静默 return）；ruff 0 error；CW unit 在 probe false 时 skip 而非两 False 绿；wheel package-data 含 `migrations/*.sql`。
-- **Phase 偏差**：未声称全量 pytest 441/441（VF86 仍 NS1-V11）。P3-06/08/10 与部分 P4 切片仍 partial。
-- **测试发现**：`ruff check .` 0；sidecar soak 绿；wheel 含 001–015 SQL。
+- **实际执行摘要**：拆 tautology（`or True`、ReadPort 自造 dict、缺 journal 静默 return）；ruff 0 error；CW unit 在 probe false 时 skip 而非两 False 绿；wheel package-data 含 `migrations/*.sql`；sidecar 4×20 soak 复跑绿；VF-ledger §6 与 deferred ledger 窄回填。
+- **Phase 偏差**：未声称全量 pytest 441/441（VF86 仍 NS1-V11）。T60 生成+vectorize+retrieval mega 不跟 sqlite3-on-Turso，故文档状态保持 `executing`。
+- **测试发现**：`ruff check .` 0；`tests/unit`+`domain`+`integration` 绿；sidecar soak 绿；wheel 含 001–015 SQL。

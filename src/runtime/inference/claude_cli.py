@@ -8,6 +8,7 @@ domains.  No shell is used and no credential is accepted as an argv field.
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import os
 from collections.abc import Awaitable, Callable, Mapping, Sequence
@@ -16,6 +17,7 @@ from pathlib import Path
 from typing import Any, Literal, Protocol
 
 from src.contracts.common.errors import MkbError
+from src.runtime.inference.facade import ConcurrencyGate
 
 CLAUDE_CLI_ARGV_PROMPT_LIMIT_BYTES = 16_384
 CLAUDE_CLI_STDOUT_LIMIT_BYTES = 8 * 1024 * 1024
@@ -111,10 +113,13 @@ _STUB_G0_SUMMARY_CHAR_BUDGET = 16_000
 
 
 def _stub_summary_body(original: str, granularity: int) -> str:
-    if granularity != 0 or len(original) <= _STUB_G0_SUMMARY_CHAR_BUDGET:
-        return original
+    digest = hashlib.sha256(original.encode("utf-8")).hexdigest()[:16]
     first_line = next((line.strip() for line in original.splitlines() if line.strip()), "document")
-    return f"Document summary: {first_line[:400]}"
+    if granularity != 0:
+        return f"summary:{digest}:{first_line[:200]}"
+    if len(original) <= _STUB_G0_SUMMARY_CHAR_BUDGET:
+        return f"Document summary [{digest}]: {first_line[:400]}"
+    return f"Document summary [{digest}]: {first_line[:400]}"
 
 
 def _stub_layered_blocks(material: str, profile: tuple[int, ...]) -> list[dict[str, object]]:
@@ -284,11 +289,30 @@ def _decode_plain_stdout(stdout: str) -> tuple[str, str | None, Mapping[str, obj
 class SubprocessClaudeCli:
     """Production port using ``claude`` argv without shell interpolation."""
 
-    def __init__(self, *, executable: str = "claude", env: Mapping[str, str] | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        executable: str = "claude",
+        env: Mapping[str, str] | None = None,
+        concurrency_gate: ConcurrencyGate | None = None,
+    ) -> None:
         self._executable = executable
         self._env = _cli_child_env(env)
+        self._gate = concurrency_gate
 
     async def run(self, request: ClaudeCliRequest) -> ClaudeCliResult:
+        lease = None
+        if self._gate is not None:
+            lease = await self._gate.try_acquire("cli")
+            if lease is None:
+                raise MkbError("INFERENCE_BACKPRESSURE", "Claude CLI concurrency gate is full", 503)
+        try:
+            return await self._run_transport(request)
+        finally:
+            if lease is not None:
+                await self._gate.release(lease)
+
+    async def _run_transport(self, request: ClaudeCliRequest) -> ClaudeCliResult:
         transport = prompt_transport_for(request.user_prompt)
         argv = build_claude_argv(request, executable=self._executable, prompt_transport=transport)
         process: asyncio.subprocess.Process | None = None
@@ -391,8 +415,21 @@ class RecordingStub:
     responses: Sequence[ClaudeCliResult] = field(default_factory=tuple)
     response_factory: ResponseFactory | None = None
     requests: list[ClaudeCliRequest] = field(default_factory=list)
+    concurrency_gate: ConcurrencyGate | None = None
 
     async def run(self, request: ClaudeCliRequest) -> ClaudeCliResult:
+        lease = None
+        if self.concurrency_gate is not None:
+            lease = await self.concurrency_gate.try_acquire("cli")
+            if lease is None:
+                raise MkbError("INFERENCE_BACKPRESSURE", "Claude CLI concurrency gate is full", 503)
+        try:
+            return await self._run_recorded(request)
+        finally:
+            if lease is not None:
+                await self.concurrency_gate.release(lease)
+
+    async def _run_recorded(self, request: ClaudeCliRequest) -> ClaudeCliResult:
         self.requests.append(request)
         if self.response_factory is not None:
             response = self.response_factory(request)
@@ -439,10 +476,23 @@ class ClaudeCliCleanLanguageModel:
 class DeterministicNs1Stub:
     """No-network local worker used by offline app tests and local proofs."""
 
-    def __init__(self) -> None:
+    def __init__(self, *, concurrency_gate: ConcurrencyGate | None = None) -> None:
         self.requests: list[ClaudeCliRequest] = []
+        self._gate = concurrency_gate
 
     async def run(self, request: ClaudeCliRequest) -> ClaudeCliResult:
+        lease = None
+        if self._gate is not None:
+            lease = await self._gate.try_acquire("cli")
+            if lease is None:
+                raise MkbError("INFERENCE_BACKPRESSURE", "Claude CLI concurrency gate is full", 503)
+        try:
+            return await self._run_stub(request)
+        finally:
+            if lease is not None:
+                await self._gate.release(lease)
+
+    async def _run_stub(self, request: ClaudeCliRequest) -> ClaudeCliResult:
         self.requests.append(request)
         if request.role == "summarizer":
             try:

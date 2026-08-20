@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 import unicodedata
 from collections.abc import Mapping
 from typing import Any
@@ -26,6 +27,9 @@ _DATE_KEYS = {"processed_at", "published_at"}
 _TREE_KEYS = {"original_file_uuid", "upstream_file_uuids", "downstream_file_uuids"}
 _BLOCK_KEYS = {"block_id", "granularity", "original_content", "llm_summary"}
 _CHANNEL_KEYS = {"title", "body"}
+_UUID = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$")
+_URI = re.compile(r"^[a-zA-Z][a-zA-Z0-9+.-]*:")
+_DATETIME = re.compile(r"^\d{4}-\d{2}-\d{2}T")
 
 
 def normalize_layered_text(value: str) -> str:
@@ -93,6 +97,26 @@ def validate_layered_content(
             result["date"][key] = _nullable_text(value, f"date.{key}")
     if "knowledge_tree" in result:
         result["knowledge_tree"] = _object(result["knowledge_tree"], "knowledge_tree", _TREE_KEYS)
+        tree = result["knowledge_tree"]
+        if "original_file_uuid" in tree and tree["original_file_uuid"] is not None:
+            if not isinstance(tree["original_file_uuid"], str) or not _UUID.match(tree["original_file_uuid"]):
+                raise MkbError("STRUCTURE_SCHEMA_INVALID", "original_file_uuid must be a UUID string", 422)
+        for key in ("upstream_file_uuids", "downstream_file_uuids"):
+            if key not in tree:
+                continue
+            value = tree[key]
+            if value is None:
+                continue
+            if not isinstance(value, list) or any(not isinstance(item, str) or not _UUID.match(item) for item in value):
+                raise MkbError("STRUCTURE_SCHEMA_INVALID", f"{key} must be an array of UUID strings", 422)
+    if "context_meta" in result and isinstance(result["context_meta"].get("source_url"), str):
+        url = result["context_meta"]["source_url"]
+        if url and not _URI.match(url):
+            raise MkbError("STRUCTURE_SCHEMA_INVALID", "context_meta.source_url must be a URI", 422)
+    if "date" in result:
+        for key, value in result["date"].items():
+            if isinstance(value, str) and value and not _DATETIME.match(value):
+                raise MkbError("STRUCTURE_SCHEMA_INVALID", f"date.{key} must be date-time", 422)
     blocks = result["layered_content"]
     if not isinstance(blocks, list) or not blocks:
         raise MkbError("STRUCTURE_SCHEMA_INVALID", "layered_content must be a non-empty array", 422)

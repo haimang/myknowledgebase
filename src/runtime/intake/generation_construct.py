@@ -43,6 +43,30 @@ from src.services.prompt_profiles import COMPRESSION_CHANNELS, DEFAULT_COMPRESSI
 STRUCTURE_REJECT_SCHEMA = "mkb.structure-reject.v1"
 
 
+def _title_from_layered(layered: Mapping[str, object] | None) -> str | None:
+    """Project a document/block title into content_full headers (VF95)."""
+
+    if not isinstance(layered, Mapping):
+        return None
+    meta = layered.get("context_meta")
+    candidates: list[object] = []
+    if isinstance(meta, Mapping):
+        candidates.append(meta.get("title"))
+    blocks = layered.get("layered_content")
+    if isinstance(blocks, list):
+        for block in blocks:
+            if not isinstance(block, Mapping) or block.get("granularity") != 0:
+                continue
+            original = block.get("original_content")
+            if isinstance(original, Mapping):
+                candidates.append(original.get("title"))
+            break
+    for value in candidates:
+        if isinstance(value, str) and value.strip():
+            return value.replace("\n", " ").replace("\r", " ").strip()[:200]
+    return None
+
+
 def layered_reject_histogram(
     candidate: object, profile: tuple[int, ...] | list[int] | None
 ) -> dict[str, Any]:
@@ -619,7 +643,7 @@ class IntakeGenerationConstructMixin:
                 "markdown_artifact": {
                     "content_digest": next_state["markdown_digest"],
                     "char_count": len(markdown),
-                    "transport": "claude_cli",
+                    "transport": receipt.get("transport"),
                 }
             },
         )
@@ -854,7 +878,8 @@ class IntakeGenerationConstructMixin:
                     projection=projection,
                     accepted_layered_json=accepted,
                 )
-                metadata_headers = None
+                title = _title_from_layered(completed if isinstance(completed, Mapping) else accepted)
+                metadata_headers = {"title": title} if title else None
                 required_granularities = frozenset(self._layered_profile(state, error_code="CONSTRUCT_TO_VECTORIZE_GATE"))
             construction_uuid = self._generation_state_text(
                 state, "construction_artifact_uuid", "CONSTRUCT_TO_VECTORIZE_GATE"
@@ -1296,7 +1321,8 @@ class IntakeGenerationConstructMixin:
                 if completed_layered_candidate is None:
                     raise MkbError("CONSTRUCT_KERNEL_SUMMARY_INVALID", "Completed layered JSON package is unavailable", 422)
                 required_granularities = frozenset(profile)
-                metadata_headers = None
+                title = _title_from_layered(completed_layered_candidate or accepted_layered_candidate)
+                metadata_headers = {"title": title} if title else None
             construction_artifact_uuid = uuid7()
             dual_channel_artifact_uuid = uuid7()
             validation_artifact_uuid = uuid7()

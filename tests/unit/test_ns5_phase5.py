@@ -34,6 +34,13 @@ def test_rate_limiter_overflow_does_not_fail_open() -> None:
     assert limiter.check_ip("4.4.4.4").allowed is False
 
 
+def test_starlette_left_badhost_cve_range() -> None:
+    import starlette
+
+    parts = tuple(int(part) for part in starlette.__version__.split(".")[:3])
+    assert parts >= (1, 0, 1)
+
+
 def test_mapped_ipv6_loopback_is_restricted() -> None:
     policy = EgressPolicy(allow_literal_ip=True)
     with pytest.raises(MkbError):

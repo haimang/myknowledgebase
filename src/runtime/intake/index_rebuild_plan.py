@@ -258,10 +258,11 @@ class IntakeIndexRebuildPlanMixin:
                     if (
                         item is None
                         or item["lifecycle_state"] != "active"
-                        or item["latest_revision_uuid"] != revision_uuid
+                        or not item["serving_revision_uuid"]
+                        or item["serving_revision_uuid"] != item["latest_revision_uuid"]
                         or item["serving_revision_uuid"] != revision_uuid
                     ):
-                        raise MkbError("INDEX_REBUILD_TARGET_STALE", "Frozen index rebuild target is no longer serving", 409)
+                        continue
                     pointers = await tx.fetchall(
                         "SELECT p.namespace_uuid,p.active_index_generation,p.pointer_row_revision,p.lifecycle_state,"
                         "p.last_proof_uuid,p.generation_artifact_uuid,n.embedding_model,n.embedding_model_key,"

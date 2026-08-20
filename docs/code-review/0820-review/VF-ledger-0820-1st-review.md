@@ -798,27 +798,48 @@
 
 ## 6. 处置执行回填（fixes 落地后 · append-only）
 
-> Phase-4 前占位。本节只允许后续 append，**不改写 §0–§5**。本 Phase-3 工作流未执行修复。
+> NS5 落地回填。本节只允许后续 append，**不改写 §0–§5**。执行 AP：`docs/plan/new-start/NS5-0820-bug-fixes.md`。closure：`docs/closure/0820-review/NS5-0820-bug-fixes-closure.md`。
 
 ### 6.1 逐项处置结果表
 
-（空 · 待 Phase-4 append）
+| VF | NS5 项 | 处置 | 证据 |
+|----|--------|------|------|
+| VF1–VF10, VF61–VF70 | P1 | 代码落地 | `d728d0b` + `tests/unit/test_ns5_*.py` |
+| VF4/5/7/8/71–73/94/98–103 | P2 | 代码落地 | `4ad95c5` + `test_ns5_phase2.py` |
+| VF11–19, VF21–22, VF24, VF26, VF96 | P3 | 代码落地（含 remainder P3-06/08/10） | `fd5c969` + remainder commit；CLI gate / schema freeze / 同源 caps |
+| VF27–31, VF34–56, VF58–60, VF95 | P4 | in-scope 落地；`.r` 余项见 §6.5 | `52e3913` + remainder：budget/stub/JSON/review/embed/envelope/validator/pack/rebuild/title |
+| VF75–76, VF78, VF80–84 | P5 | 代码落地（含 Starlette≥1.0.1） | `34c86b6` + FastAPI 0.141.1 / Starlette 1.6.0 |
+| VF85, VF87, VF91 unit, VF93 | P6 | 代码落地 | `7bffb70` / `f7bec3f`；ruff 0；wheel 含 001–015 SQL |
+| VF86 | — | **不修** | NS1-V11；不以 e2e sqlite3-on-Turso 为 DoD |
+| VF23, VF88, VF97 | — | **不修** | AP O3 owner-deferred |
 
 ### 6.2 Blocker / Follow-up 状态汇总
 
-（空 · 待 Phase-4 append）
+- 14 remaining-critical in-scope VF 均已进入 NS5 代码路径；不以 live GPU / 全量 e2e 441 为关闭闸。
+- Owner 二次授权后，先前被误标为 O4 remainder 的 P3-06/08/10 与 P4-05…18、P5-05 已收口。
+- 仍 open：VF86 harness、T60 mega（被 VF86 挡住）、§5.4 `.r` 余项。
 
 ### 6.3 变更文件清单
 
-（空 · 待 Phase-4 append）
+- 运行时/持久化：`src/persistence/*`、`src/runtime/**`、`api/app.py`
+- 检索/编译：`src/services/retrieval/*`、`src/services/lsrag_compiler/*`、`src/contracts/lsrag/layered_content.py`
+- 安全/包装：`src/runtime/security.py`、`pyproject.toml`、`uv.lock`
+- 测试：`tests/unit/test_ns5_*.py` 及既有 CLI/compression/architecture 回归
 
 ### 6.4 验证结果
 
-（空 · 待 Phase-4 append）
+- `uv run ruff check .` 0
+- `uv run pytest tests/unit tests/domain tests/integration -q` PASS
+- sidecar soak / heartbeat unit PASS
+- `starlette.__version__ == 1.6.0`（≥1.0.1，离开 GHSA-86qp-5c8j-p5mr）
+- e2e `sqlite3.DatabaseError: file is not a database` 仍 VF86，未当生产证据
 
 ### 6.5 残留与下一轮 entry
 
-（空 · 待 Phase-4 append）
+- VF86 / NS1-V11 harness charter
+- VF23 billing、VF97 未接线能力、VF88 live GPU
+- VF30.r PDF 库、VF37.r 生产默认切 stub、VF41.r S06 全树、VF46.r 全程 jsonschema、VF66.r 目录 CAS、VF91.r 真机 CW e2e
+- T60 主链 mega：仅在无 sqlite3-on-Turso 的 harness 下重开
 
 ---
 

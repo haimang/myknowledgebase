@@ -182,14 +182,18 @@ async def test_local_adapter_sends_system_prompt_and_json_object_for_qwen() -> N
     )
 
     assert captured["url"] == "https://models.example:8443/v1/chat/completions"
-    assert captured["body"] == {
+    body = captured["body"]
+    format_block = body.pop("response_format")
+    assert format_block["type"] == "json_schema"
+    assert format_block["json_schema"]["name"] == "lsrag.layered_content.default@v1"
+    assert format_block["json_schema"]["schema"]["type"] == "object"
+    assert body == {
         "model": SPARK_QWEN_GENERATE_MODEL_KEY,
         "messages": [
             {"role": "system", "content": "You are the summarizer worker."},
             {"role": "user", "content": '{"layered_content":[]}'},
         ],
         "stream": False,
-        "response_format": {"type": "json_object"},
         "chat_template_kwargs": {"enable_thinking": False},
     }
     assert "max_tokens" not in captured["body"]

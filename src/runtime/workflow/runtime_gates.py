@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Mapping
 from typing import Any
 
 from src.contracts.common.errors import ConflictError, MkbError, NotFoundError
@@ -97,6 +98,9 @@ class WorkflowGatesMixin:
                 raise ConflictError("gate-revision-conflict", "Execution Gate changed during decision")
             control = self._control_step(plan, gate["gate_kind"])
             if action == "approve":
+                await self._apply_human_review_item_lifecycle_tx(
+                    tx, execution=execution, now=now, lifecycle_state="active"
+                )
                 await tx.execute(
                     "UPDATE mkb_executions SET status='ready',waiting_reason=NULL,waiting_ref=NULL,next_wake_at=NULL,"
                     "row_revision=row_revision+1,updated_at=? WHERE execution_uuid=? AND status='waiting' AND waiting_ref=?",
@@ -120,6 +124,9 @@ class WorkflowGatesMixin:
                     terminal_error=None,
                 )
             elif action == "reject":
+                await self._apply_human_review_item_lifecycle_tx(
+                    tx, execution=execution, now=now, lifecycle_state="deactivated"
+                )
                 decision = self._route_decision(
                     plan=plan,
                     execution=execution,
@@ -154,6 +161,38 @@ class WorkflowGatesMixin:
             await self._refresh_execution_counts_tx(tx, execution["execution_uuid"])
             return True
 
+    async def _apply_human_review_item_lifecycle_tx(
+        self,
+        tx: UnitOfWork,
+        *,
+        execution: Mapping[str, Any],
+        now: str,
+        lifecycle_state: str,
+    ) -> None:
+        """Approve activates the reviewed Item; reject leaves it non-active."""
+
+        snapshot_uuid = execution.get("intake_snapshot_uuid")
+        team_uuid = execution.get("team_uuid")
+        if not isinstance(snapshot_uuid, str) or not snapshot_uuid or not isinstance(team_uuid, str):
+            return
+        if lifecycle_state == "active":
+            await tx.execute(
+                "UPDATE mkb_intake_items SET lifecycle_state='active',deactivated_at=NULL,"
+                "row_revision=row_revision+1,updated_at=? "
+                "WHERE team_uuid=? AND lifecycle_state='deactivated' AND intake_item_uuid IN ("
+                "SELECT intake_item_uuid FROM mkb_intake_snapshot_memberships "
+                "WHERE team_uuid=? AND intake_snapshot_uuid=?)",
+                (now, team_uuid, team_uuid, snapshot_uuid),
+            )
+            return
+        await tx.execute(
+            "UPDATE mkb_intake_items SET lifecycle_state='deactivated',serving_revision_uuid=NULL,"
+            "deactivated_at=?,row_revision=row_revision+1,updated_at=? "
+            "WHERE team_uuid=? AND lifecycle_state='active' AND intake_item_uuid IN ("
+            "SELECT intake_item_uuid FROM mkb_intake_snapshot_memberships "
+            "WHERE team_uuid=? AND intake_snapshot_uuid=?)",
+            (now, now, team_uuid, team_uuid, snapshot_uuid),
+        )
 
     async def consume_gate_decision(self, decision_uuid: str) -> bool:
         """Advance an already committed Task-surface Gate decision exactly once.

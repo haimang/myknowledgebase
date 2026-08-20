@@ -190,10 +190,10 @@ class IntakeVectorizeMixin:
                         "A required vector unit exceeds the live embedding context budget",
                         422,
                     )
-                texts = [item.content_full for item in vector_inputs]
+                texts = self._embed_bodies(vector_inputs, metadata_headers)
                 vectors, layer_a, invocation = await self._live_embeddings(command, texts, frozen_layer_a)
             else:
-                texts = [item.content_full for item in vector_inputs]
+                texts = self._embed_bodies(vector_inputs, metadata_headers)
                 vectors = [deterministic_embedding(text, dimension=int(frozen_layer_a["dimension"])) for text in texts]
                 layer_a = frozen_layer_a
             if len(vectors) != len(vector_inputs):
@@ -322,8 +322,8 @@ class IntakeVectorizeMixin:
                         process_uuid=command.process_uuid,
                         payload={
                             "vector_record_uuid": vector_record_uuid,
-                            "generation_artifact_uuid": record.get("generation_artifact_uuid")
-                            or state.get("construction_dual_channel_artifact_uuid"),
+                            "generation_artifact_uuid": state.get("dual_channel_artifact_uuid")
+                            or record.get("generation_artifact_uuid"),
                             "channel": record["channel"],
                         },
                     )
@@ -415,6 +415,12 @@ class IntakeVectorizeMixin:
                     raise MkbError("VECTORIZE_INFERENCE_FAILED", "Embedding inference returned no batches", 503)
                 response = response.model_copy(update={"vectors": packed_vectors, "dimension": int(layer_a["dimension"])})
             except MkbError as exc:
+                if exc.code == "INFERENCE_SPACE_VIOLATION" or (
+                    exc.status_code is not None
+                    and 400 <= exc.status_code < 500
+                    and exc.status_code not in {408, 425, 429}
+                ):
+                    raise
                 raise MkbError("VECTORIZE_INFERENCE_FAILED", exc.message, 503) from exc
             except Exception as exc:
                 raise MkbError("VECTORIZE_INFERENCE_FAILED", "Embedding inference failed", 503) from exc
@@ -452,6 +458,18 @@ class IntakeVectorizeMixin:
             }
             return vectors, layer_a, invocation
 
+    @staticmethod
+    def _embed_bodies(items: list[Any], metadata_headers: Mapping[str, str] | None) -> list[str]:
+        """Embed channel bodies; headers stay facets so they do not pull cosine down."""
+
+        if not metadata_headers:
+            return [item.content_full for item in items]
+        prefix = "\n".join(f"{key}: {metadata_headers[key]}" for key in sorted(metadata_headers)) + "\n\n"
+        texts: list[str] = []
+        for item in items:
+            content = item.content_full
+            texts.append(content[len(prefix) :] if content.startswith(prefix) else content)
+        return texts
 
     @staticmethod
     def _validate_layer_a(raw: Mapping[str, Any]) -> dict[str, Any]:

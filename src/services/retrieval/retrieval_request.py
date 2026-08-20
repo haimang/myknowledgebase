@@ -83,7 +83,17 @@ class RetrievalRequestMixin:
         query_digest = hashlib.sha256(query.query.encode("utf-8")).hexdigest()
         if not query.query.strip():
             return self._empty_bundle(query, query_digest, "blank_query").model_dump(mode="json")
+        body_port = getattr(self, "_body_port", None)
+        begin_cache = getattr(body_port, "begin_request_cache", None) if body_port is not None else None
+        end_cache = getattr(body_port, "end_request_cache", None) if body_port is not None else None
+        cache_token = begin_cache() if callable(begin_cache) else None
+        try:
+            return await self._search_with_query(query, query_digest)
+        finally:
+            if cache_token is not None and callable(end_cache):
+                end_cache(cache_token)
 
+    async def _search_with_query(self, query: _SearchInput, query_digest: str) -> dict[str, Any]:
         try:
             async with self._persistence.transaction() as tx:
                 team = await tx.fetchone(

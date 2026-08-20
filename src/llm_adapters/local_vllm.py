@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import json
 import math
+from pathlib import Path
 from typing import Any, Protocol, runtime_checkable
 from urllib.parse import urlsplit
 
@@ -26,6 +28,23 @@ class SecretValueResolver(Protocol):
     """Structural port shared with S16's logical-slot SecretResolver."""
 
     def resolve(self, slot: str) -> str: ...
+
+
+def _structured_json_schema(request: StructuredGenerateRequest) -> dict[str, Any]:
+    """Send the checked-in layered schema, never a dummy `{type: object}`."""
+
+    supplied = getattr(request, "json_schema", None)
+    if isinstance(supplied, dict) and supplied:
+        return supplied
+    path = Path("data/schemas/lsrag.layered_content.v1.json")
+    if path.is_file():
+        try:
+            loaded = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+            loaded = None
+        if isinstance(loaded, dict) and loaded:
+            return loaded
+    return {"type": "object"}
 
 
 def _normalize_base_url(value: str) -> str:
@@ -160,7 +179,15 @@ class LocalVllmAdapter:
             "chat_template_kwargs": {"enable_thinking": False},
         }
         if isinstance(request, StructuredGenerateRequest):
-            payload["response_format"] = {"type": "json_object"}
+            schema_name = (request.json_schema_ref or "mkb_structured")[:64]
+            payload["response_format"] = {
+                "type": "json_schema",
+                "json_schema": {
+                    "name": schema_name or "mkb_structured",
+                    "schema": _structured_json_schema(request),
+                    "strict": True,
+                },
+            }
         response = await self._request(
             "/v1/chat/completions",
             payload,
@@ -202,11 +229,22 @@ class LocalVllmAdapter:
         if client is not None:
             await client.aclose()
 
-    async def probe(self) -> bool:
+    async def probe(self, model_key: str | None = None) -> bool:
         try:
             client = self._shared_client(timeout=min(self.timeout_seconds, 5))
             response = await client.get(f"{self.base_url}/v1/models", headers=self._headers())
-            return 200 <= response.status_code < 300
+            if not 200 <= response.status_code < 300:
+                return False
+            if not model_key:
+                return True
+            try:
+                payload = response.json()
+            except (TypeError, ValueError):
+                return False
+            models = payload.get("data") if isinstance(payload, dict) else None
+            if not isinstance(models, list):
+                return False
+            return any(isinstance(item, dict) and item.get("id") == model_key for item in models)
         except (MkbError, httpx.HTTPError):
             return False
 

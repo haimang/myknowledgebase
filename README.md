@@ -579,7 +579,7 @@ curl -fsS -X POST "$MKB_BASE_URL/v1/teams/$TEAM_UUID/retrieval:search" \
 | 编号 | 事项 | 当前影响 | 关闭 / reopen 触发器 |
 |---|---|---|---|
 | K1 | 全量 pytest 为 `433 passed / 8 failed` | 不能声明全绿；5 个失败落在已登记的 raw sqlite/pyturso inspection harness，另有 3 个 E2E 在全量运行中未进入预期终态；其中 inline isolated rerun 通过，generation/source isolated 仍停在 `running` | 修复 [`deferred-items-ledger.md`](docs/closure/new-start/deferred-items-ledger.md) 的 NS1-V11 类项，并让全量套件无排除通过 |
-| K2 | Ruff 当前有 9 个错误 | 静态检查门未关闭；集中在迁移脚本、CLI、sidecar/soak 测试和测试变量 | `uv run ruff check .` 为 0 |
+| K2 | Ruff 静态门 | NS5 已清零（`uv run ruff check .` 0） | 回归时保持 0 |
 | K3 | R4 四个 live cell 均失败 | 真实 A/Markdown/B/C 链不能称为 live；失败包括 g0 anchor/granularity 与 Claude CLI empty result | 修复并重跑 [`after-MKB-0815-R4-first-wave.md`](docs/eval/new-start/after-MKB-0815-R4-first-wave.md) 中的 corpus/cell |
 | K4 | R5 仅是 `WAIT_OWNER_TO_EXECUTE` 方案 | system-owned g0、quoted cuts、候选组装未在当前代码中存在 | owner 批准并落地代码、schema、prompt、migration、tests 后重新核对 |
 | K5 | browser/OCR/Vision/doc-LLM/web-LLM 未注入 | 对应 source profile 会稳定拒绝或不可用 | 部署经过 review 的 capability，实现注入并补 readiness/live test |

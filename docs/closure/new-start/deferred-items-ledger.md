@@ -33,3 +33,19 @@
 | `NS2-O4` | AP O4 | `[true-deferred]` | urgent 插队老化 | 本阶段只提供 priority_rank 队头 | 若 high 被持续饿死 | 后继调度 charter |
 | `NS2-O7` | AP O7 / NS1-V11 | `[true-deferred]` | pyturso raw sqlite inspection I/O | 非 NS2 引入；owner 禁止本阶段改 harness | harness charter 落地后重跑 `tests/e2e` | `NS1-V11` |
 | `NS2-GPU` | AP §8.4 | `[true-deferred]` | 真机 GPU 双流争用 soak | 无稳定 GPU CI；AP 明确不假装覆盖 | owner 授权手工 soak | owner |
+
+## NS5 — 2026-08-20 0820 first-round 修复后
+
+| ID | 来源 | 归属 | 摘要 | 后延原因 | reopen 触发器 | 承接 |
+|----|------|------|------|----------|----------------|------|
+| `NS5-VF86` | VF86 / NS1-V11 | `[true-deferred]` | e2e 用 `sqlite3.connect` 打开 Turso 文件 | owner 冻结为 harness charter；NS5 不以全量 pytest 为 DoD | harness 去掉 sqlite3-on-Turso 后重跑 e2e | NS1-V11 |
+| `NS5-T60` | AP P6-05 | `[true-deferred]` | 生成+vectorize+retrieval 主链 mega | 被 VF86 挡住，禁止用 sqlite3 路径当绿 | 无 sqlite3-on-Turso 的 mega harness | owner |
+| `NS5-VF23` | VF23 | `[true-deferred]` | billing always-permit | AP O3 | billing AP | billing AP |
+| `NS5-VF88` | VF88 | `[true-deferred]` | live GPU | AP O3 | NS2-GPU | owner |
+| `NS5-VF97` | VF97 | `[true-deferred]` | browser/OCR/Vision 未接线 | AP O3 | capability charter | owner |
+| `NS5-VF30.r` | VF30 余项 | `[partial-delivery] 剩余切片` | 完整 PDF 库 | 本轮只去 latin-1 回退 | PDF charter | 下游 |
+| `NS5-VF37.r` | VF37 余项 | `[partial-delivery] 剩余切片` | 生产默认切 stub | stub 已可区分双通道；默认切生产模型需单独授权 | 生产模型默认 charter | 下游 |
+| `NS5-VF41.r` | VF41 余项 | `[partial-delivery] 剩余切片` | S06 全树 | v1 两节点诚实 | 全树 charter | 下游 |
+| `NS5-VF46.r` | VF46 余项 | `[partial-delivery] 剩余切片` | 全程 jsonschema | layered validator 已补 UUID/array/URI/date-time | 契约升级 | 下游 |
+| `NS5-VF66.r` | VF66 余项 | `[true-deferred]` | 目录 CAS SSOT | T-O-120 | owner 授权 | owner |
+| `NS5-VF91.r` | VF91 余项 | `[partial-delivery] 剩余切片` | 真机 CW e2e | unit 已 skipIf；constitution e2e 依赖真机 | NS4 constitution e2e | 下游 |

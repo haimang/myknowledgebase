@@ -47,7 +47,11 @@ _V = TypeVar("_V")
 
 
 def coerce_json_object_text(text: str) -> str:
-    """Accept a raw model string, optional fences, and return a JSON object text."""
+    """Accept a raw model string, optional fences, and return one JSON object text.
+
+    Extra top-level objects/arrays after the first value are rejected.  A
+    first-to-last brace slice would otherwise swallow ``see {a} or {b}``.
+    """
 
     stripped = text.strip()
     if stripped.startswith("```"):
@@ -57,13 +61,37 @@ def coerce_json_object_text(text: str) -> str:
         if lines and lines[-1].strip() == "```":
             lines = lines[:-1]
         stripped = "\n".join(lines).strip()
-    if stripped.startswith("{") and stripped.endswith("}"):
+    if not stripped:
         return stripped
-    start = stripped.find("{")
-    end = stripped.rfind("}")
-    if start >= 0 and end > start:
-        return stripped[start : end + 1]
-    return stripped
+    start = 0 if stripped.startswith("{") else stripped.find("{")
+    if start < 0:
+        return stripped
+    decoder = json.JSONDecoder()
+    try:
+        _, end = decoder.raw_decode(stripped, start)
+    except json.JSONDecodeError as exc:
+        raise MkbError("INFERENCE_VALIDATION_STRUCTURED", "Structured model response is not a JSON object", 502) from exc
+    rest = stripped[end:].lstrip()
+    extra_start = -1
+    if rest.startswith("{") or rest.startswith("["):
+        extra_start = 0
+    else:
+        brace = rest.find("{")
+        bracket = rest.find("[")
+        candidates = [index for index in (brace, bracket) if index >= 0]
+        extra_start = min(candidates) if candidates else -1
+    if extra_start >= 0:
+        try:
+            decoder.raw_decode(rest, extra_start)
+        except json.JSONDecodeError:
+            extra_start = -1
+        else:
+            raise MkbError(
+                "INFERENCE_VALIDATION_STRUCTURED",
+                "Structured model response contains multiple top-level values",
+                502,
+            )
+    return stripped[start:end]
 
 
 @dataclass(frozen=True, slots=True)
@@ -114,6 +142,11 @@ class ConcurrencyGate:
             else:
                 self._by_capability[lease.capability] = count - 1
 
+    def in_flight(self, capability: str | None = None) -> int:
+        if capability is None:
+            return self._global_in_flight
+        return self._by_capability.get(capability, 0)
+
 
 class InferenceFacade:
     """The sole provider-neutral model-call boundary for domain code."""
@@ -131,13 +164,16 @@ class InferenceFacade:
         supply_fence: SupplyFence | None = None,
         invocation_recorder: InferenceInvocationRecorder | None = None,
         metrics: MetricRegistry | None = None,
+        dispatch_caps: Any | None = None,
+        gate: ConcurrencyGate | None = None,
     ) -> None:
         if not 1 <= max_attempts <= 10:
             raise ValueError("max_attempts must be between 1 and 10")
         if initial_delay_seconds < 0 or max_delay_seconds < initial_delay_seconds:
             raise ValueError("inference retry delays are invalid")
         self._adapter = adapter
-        self._gate = ConcurrencyGate(max_in_flight, capability_limits=capability_limits)
+        self.dispatch_caps = dispatch_caps
+        self._gate = gate or ConcurrencyGate(max_in_flight, capability_limits=capability_limits)
         self._max_attempts = max_attempts
         self._initial_delay_seconds = initial_delay_seconds
         self._max_delay_seconds = max_delay_seconds
@@ -292,7 +328,18 @@ class InferenceFacade:
             self._preflight(binding.capability_key, binding)
         except MkbError:
             return False
-        return await self.probe()
+        probe = getattr(self._adapter, "probe", None)
+        if probe is None:
+            return await self.probe()
+        try:
+            result = probe(model_key=binding.model_key)
+            if hasattr(result, "__await__"):
+                result = await result
+            return bool(result)
+        except TypeError:
+            return await self.probe()
+        except Exception:
+            return False
 
     async def _invoke(
         self,
@@ -330,6 +377,11 @@ class InferenceFacade:
                     await self._record_success(capability, request, result)
                     return result
                 except MkbError as exc:
+                    if exc.code == "INFERENCE_SPACE_VIOLATION":
+                        await self._record_failure(
+                            invocation_uuid, request_digest, capability, request, exc.code, started
+                        )
+                        raise
                     if exc.code == "INFERENCE_TRANSPORT_RETRYABLE" and attempt + 1 < self._max_attempts:
                         await self._gate.release(lease)
                         await self._sleep(self._retry_delay(attempt))

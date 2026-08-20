@@ -297,7 +297,9 @@ async def test_local_vllm_adapter_sends_exact_qwen_json_object_payload() -> None
         {"role": "system", "content": "System instructions"},
         {"role": "user", "content": '{"data": "val"}'},
     ]
-    assert body["response_format"] == {"type": "json_object"}
+    assert body["response_format"]["type"] == "json_schema"
+    assert body["response_format"]["json_schema"]["name"] == "schema"
+    assert isinstance(body["response_format"]["json_schema"]["schema"], dict)
     assert "max_tokens" not in body
     assert body["chat_template_kwargs"] == {"enable_thinking": False}
     assert response.text == '{"summary": "clean content"}'

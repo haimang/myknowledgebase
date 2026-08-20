@@ -18,6 +18,7 @@ import hashlib
 import hmac
 import json
 from collections.abc import Mapping, Sequence
+from contextvars import ContextVar, Token
 from dataclasses import dataclass
 from typing import Any
 
@@ -39,6 +40,19 @@ class _ProjectionUnit:
     unit_id: str
     granularity: int
     channels: Mapping[str, str]
+
+
+_HYDRATION_CACHE: ContextVar[dict[tuple[str, str], dict[str, _ProjectionUnit]] | None] = ContextVar(
+    "mkb_retrieval_hydration_cache", default=None
+)
+
+
+def begin_hydration_cache() -> Token[dict[tuple[str, str], dict[str, _ProjectionUnit]] | None]:
+    return _HYDRATION_CACHE.set({})
+
+
+def end_hydration_cache(token: Token[dict[tuple[str, str], dict[str, _ProjectionUnit]] | None]) -> None:
+    _HYDRATION_CACHE.reset(token)
 
 
 class ArtifactRetrievalAccess(IntakeEligibilityPort, RetrievalBodyPort):
@@ -95,6 +109,14 @@ class ArtifactRetrievalAccess(IntakeEligibilityPort, RetrievalBodyPort):
         # common 999-variable ceiling, while still being a genuine batch fence.
         self._candidate_chunk_size = min(candidate_chunk_size, 250)
         self._max_artifact_bytes = max_artifact_bytes
+
+    @staticmethod
+    def begin_request_cache() -> Token[dict[tuple[str, str], dict[str, _ProjectionUnit]] | None]:
+        return begin_hydration_cache()
+
+    @staticmethod
+    def end_request_cache(token: Token[dict[tuple[str, str], dict[str, _ProjectionUnit]] | None]) -> None:
+        end_hydration_cache(token)
 
     async def filter_retrieval_eligible(self, *, team_uuid: str, candidates: Sequence[Mapping[str, str]]) -> set[str]:
         """Return only candidates whose current S04 serving fence still holds.
@@ -165,47 +187,53 @@ class ArtifactRetrievalAccess(IntakeEligibilityPort, RetrievalBodyPort):
         ):
             return None
 
-        async with self._persistence.transaction() as tx:
-            artifact = await tx.fetchone(
-                "SELECT generation_artifact_uuid,logical_handle,media_type,size_bytes,content_digest "
-                "FROM mkb_generation_artifacts "
-                "WHERE team_uuid=? AND generation_artifact_uuid=? "
-                "  AND artifact_type='dual_channel_projection' "
-                "  AND validation_disposition='full_valid'",
-                (team_uuid, generation_artifact_uuid),
+        cache = _HYDRATION_CACHE.get()
+        cache_key = (team_uuid, generation_artifact_uuid)
+        units = None if cache is None else cache.get(cache_key)
+        if units is None:
+            async with self._persistence.transaction() as tx:
+                artifact = await tx.fetchone(
+                    "SELECT generation_artifact_uuid,logical_handle,media_type,size_bytes,content_digest "
+                    "FROM mkb_generation_artifacts "
+                    "WHERE team_uuid=? AND generation_artifact_uuid=? "
+                    "  AND artifact_type='dual_channel_projection' "
+                    "  AND validation_disposition='full_valid'",
+                    (team_uuid, generation_artifact_uuid),
+                )
+            if artifact is None:
+                # Do not reveal whether the same opaque generation exists in a
+                # different Team.  S10 will retain its safe fallback ref instead.
+                return None
+
+            declared_size = self._as_declared_size(artifact.get("size_bytes"))
+            if declared_size > self._max_artifact_bytes:
+                raise MkbError("RETRIEVE_BODY_BUDGET", "Retrieval artifact exceeds the configured hydration budget", 422)
+            media_type = str(artifact.get("media_type") or "").split(";", maxsplit=1)[0].strip().casefold()
+            if media_type not in _JSON_MEDIA_TYPES and not media_type.endswith("+json"):
+                raise MkbError("RETRIEVE_BODY_MEDIA_TYPE", "Retrieval artifact has an unsupported media type", 422)
+            try:
+                handle = ObjectHandle(value=str(artifact["logical_handle"]))
+            except Exception as exc:
+                raise MkbError("RETRIEVE_BODY_HANDLE_INVALID", "Retrieval artifact handle is invalid", 422) from exc
+
+            # The object-store implementation enforces the Team encoded in the
+            # logical handle and verifies its own content-addressed digest.  We
+            # additionally compare with the immutable generation ledger so a bad
+            # catalog row cannot cause a different valid object to be served.
+            data = await self._storage.read_verified(team_uuid, handle)
+            if len(data) != declared_size:
+                raise MkbError("RETRIEVE_BODY_INTEGRITY", "Retrieval artifact size does not match its ledger", 503)
+            actual_digest = hashlib.sha256(data).hexdigest()
+            expected_digest = str(artifact.get("content_digest") or "")
+            if not hmac.compare_digest(actual_digest, expected_digest):
+                raise MkbError("RETRIEVE_BODY_INTEGRITY", "Retrieval artifact digest does not match its ledger", 503)
+
+            units = self._parse_projection(
+                data,
+                expected_generation_artifact_uuid=generation_artifact_uuid,
             )
-        if artifact is None:
-            # Do not reveal whether the same opaque generation exists in a
-            # different Team.  S10 will retain its safe fallback ref instead.
-            return None
-
-        declared_size = self._as_declared_size(artifact.get("size_bytes"))
-        if declared_size > self._max_artifact_bytes:
-            raise MkbError("RETRIEVE_BODY_BUDGET", "Retrieval artifact exceeds the configured hydration budget", 422)
-        media_type = str(artifact.get("media_type") or "").split(";", maxsplit=1)[0].strip().casefold()
-        if media_type not in _JSON_MEDIA_TYPES and not media_type.endswith("+json"):
-            raise MkbError("RETRIEVE_BODY_MEDIA_TYPE", "Retrieval artifact has an unsupported media type", 422)
-        try:
-            handle = ObjectHandle(value=str(artifact["logical_handle"]))
-        except Exception as exc:
-            raise MkbError("RETRIEVE_BODY_HANDLE_INVALID", "Retrieval artifact handle is invalid", 422) from exc
-
-        # The object-store implementation enforces the Team encoded in the
-        # logical handle and verifies its own content-addressed digest.  We
-        # additionally compare with the immutable generation ledger so a bad
-        # catalog row cannot cause a different valid object to be served.
-        data = await self._storage.read_verified(team_uuid, handle)
-        if len(data) != declared_size:
-            raise MkbError("RETRIEVE_BODY_INTEGRITY", "Retrieval artifact size does not match its ledger", 503)
-        actual_digest = hashlib.sha256(data).hexdigest()
-        expected_digest = str(artifact.get("content_digest") or "")
-        if not hmac.compare_digest(actual_digest, expected_digest):
-            raise MkbError("RETRIEVE_BODY_INTEGRITY", "Retrieval artifact digest does not match its ledger", 503)
-
-        units = self._parse_projection(
-            data,
-            expected_generation_artifact_uuid=generation_artifact_uuid,
-        )
+            if cache is not None:
+                cache[cache_key] = units
         selected = units.get(unit_id)
         if selected is None:
             return None
@@ -413,4 +441,9 @@ class ArtifactRetrievalAccess(IntakeEligibilityPort, RetrievalBodyPort):
         raise ValueError(f"non-finite JSON constant: {value}")
 
 
-__all__ = ["ArtifactRetrievalAccess", "DUAL_CHANNEL_PROJECTION_SCHEMA"]
+__all__ = [
+    "ArtifactRetrievalAccess",
+    "DUAL_CHANNEL_PROJECTION_SCHEMA",
+    "begin_hydration_cache",
+    "end_hydration_cache",
+]

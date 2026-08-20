@@ -41,15 +41,25 @@ async def test_b_json_uses_material_and_c_runs_once_for_the_whole_package() -> N
         (block["block_id"], block["granularity"], block["original_content"])
         for block in whole_package["layered_content"]
     ]
-    assert all(block["llm_summary"]["body"] == block["original_content"]["body"] for block in completed["layered_content"])
+    assert all(
+        isinstance(block["llm_summary"]["body"], str)
+        and block["llm_summary"]["body"] != block["original_content"]["body"]
+        for block in completed["layered_content"]
+    )
 
 
 def test_stub_g0_summary_is_compact_when_original_exceeds_embed_budget() -> None:
     long_original = "Title line\n" + ("body " * 4000)
-    assert _stub_summary_body(long_original, 0).startswith("Document summary: Title line")
-    assert len(_stub_summary_body(long_original, 0)) < len(long_original)
-    assert _stub_summary_body("short original", 0) == "short original"
-    assert _stub_summary_body(long_original, 1) == long_original
+    compact = _stub_summary_body(long_original, 0)
+    assert compact.startswith("Document summary [")
+    assert "Title line" in compact
+    assert len(compact) < len(long_original)
+    short = _stub_summary_body("short original", 0)
+    assert short != "short original"
+    assert "short original" in short
+    g1 = _stub_summary_body(long_original, 1)
+    assert g1 != long_original
+    assert g1.startswith("summary:")
 
 
 @pytest.mark.asyncio

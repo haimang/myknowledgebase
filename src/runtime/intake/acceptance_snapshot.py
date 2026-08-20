@@ -74,41 +74,58 @@ class IntakeAcceptanceSnapshotMixin:
                 )
                 if action is None:
                     raise MkbError("REGISTRY_NOT_FOUND", "Intake acceptance action is unavailable", 503)
-                await tx.execute(
-                    "INSERT INTO mkb_intake_snapshots "
-                    "(team_uuid,intake_snapshot_uuid,intake_source_uuid,observation_key,observation_fingerprint,candidate_root_digest,"
-                    "completeness,preflight_outcome_ref,preflight_outcome_digest,s05_binding_digest,observed_at,accepted_at,"
-                    "producer_execution_uuid,raw_artifact_uuid,payload_extra) VALUES (?,?,?,?,?,?, 'complete',?,?,?,?,?,?,?,'{}')",
-                    (
-                        command.team_uuid,
-                        state["intake_snapshot_uuid"],
-                        state["intake_source_uuid"],
-                        state["normalized_external_key"],
-                        state["raw_digest"],
-                        state["candidate_root_digest"],
-                        command.input_manifest_ref,
-                        command.input_manifest_digest,
-                        command.binding_digest,
-                        state["observed_at"],
-                        now,
-                        command.execution_uuid,
-                        state["raw_artifact_uuid"],
-                    ),
+                existing_snap = await tx.fetchone(
+                    "SELECT intake_snapshot_uuid FROM mkb_intake_snapshots "
+                    "WHERE team_uuid=? AND intake_source_uuid=? AND observation_key=?",
+                    (command.team_uuid, state["intake_source_uuid"], state["normalized_external_key"]),
                 )
+                if existing_snap is not None:
+                    state["intake_snapshot_uuid"] = existing_snap["intake_snapshot_uuid"]
+                else:
+                    await tx.execute(
+                        "INSERT INTO mkb_intake_snapshots "
+                        "(team_uuid,intake_snapshot_uuid,intake_source_uuid,observation_key,observation_fingerprint,candidate_root_digest,"
+                        "completeness,preflight_outcome_ref,preflight_outcome_digest,s05_binding_digest,observed_at,accepted_at,"
+                        "producer_execution_uuid,raw_artifact_uuid,payload_extra) VALUES (?,?,?,?,?,?, 'complete',?,?,?,?,?,?,?,'{}')",
+                        (
+                            command.team_uuid,
+                            state["intake_snapshot_uuid"],
+                            state["intake_source_uuid"],
+                            state["normalized_external_key"],
+                            state["raw_digest"],
+                            state["candidate_root_digest"],
+                            command.input_manifest_ref,
+                            command.input_manifest_digest,
+                            command.binding_digest,
+                            state["observed_at"],
+                            now,
+                            command.execution_uuid,
+                            state["raw_artifact_uuid"],
+                        ),
+                    )
+                lifecycle = "deactivated" if state.get("require_human_review") else "active"
+                deactivated_at = now if lifecycle == "deactivated" else None
                 await tx.execute(
-                    "INSERT INTO mkb_intake_items "
+                    "INSERT OR IGNORE INTO mkb_intake_items "
                     "(team_uuid,intake_item_uuid,intake_source_uuid,normalized_external_key,lifecycle_state,latest_revision_uuid,"
-                    "serving_revision_uuid,row_revision,created_at,updated_at,payload_extra) "
-                    "VALUES (?,?,?,?, 'active',?,NULL,0,?,?,'{}')",
+                    "serving_revision_uuid,row_revision,created_at,updated_at,deactivated_at,payload_extra) "
+                    "VALUES (?,?,?,?,?,?,NULL,0,?,?,?,'{}')",
                     (
                         command.team_uuid,
                         state["intake_item_uuid"],
                         state["intake_source_uuid"],
                         state["normalized_external_key"],
+                        lifecycle,
                         state["intake_revision_uuid"],
                         now,
                         now,
+                        deactivated_at,
                     ),
+                )
+                await tx.execute(
+                    "UPDATE mkb_intake_items SET latest_revision_uuid=?,row_revision=row_revision+1,updated_at=? "
+                    "WHERE team_uuid=? AND intake_item_uuid=?",
+                    (state["intake_revision_uuid"], now, command.team_uuid, state["intake_item_uuid"]),
                 )
                 initial_semantics = await self._initial_semantics_tx(tx, state)
                 fingerprint = self._semantic_fingerprint(initial_semantics)

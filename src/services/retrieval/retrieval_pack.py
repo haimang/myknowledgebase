@@ -201,6 +201,7 @@ class RetrievalPackMixin:
                     namespace,
                     query,
                     generation_artifact_ids=targets,
+                    force_channel="original",
                 )
         except Exception:
             # Inflation is a bounded enhancement.  A failure is observable per
@@ -305,6 +306,7 @@ class RetrievalPackMixin:
         used_chars = 0
         included_hits = 0
         truncated = False
+        packed_roots: set[str] = set()
         for index, result in enumerate(results):
             if included_hits >= self._pack_max_hits:
                 truncated = True
@@ -325,6 +327,8 @@ class RetrievalPackMixin:
             if focus.content:
                 text_parts.append(focus.content)
             truncated = truncated or focus_truncated
+            if result.granularity == 0:
+                packed_roots.add(result.coordinate.generation_artifact_uuid)
             if result.inflation_status in {"attached", "truncated"}:
                 root_coordinate = result.inflation_root_coordinate
                 if root_coordinate is None:
@@ -333,6 +337,10 @@ class RetrievalPackMixin:
                     # but make the omitted enhancement observable.
                     truncated = True
                     continue
+                root_key = root_coordinate.generation_artifact_uuid
+                if root_key in packed_roots:
+                    continue
+                packed_roots.add(root_key)
                 root, root_chars, root_truncated = self._pack_segment(
                     tier="document_root",
                     coordinate=root_coordinate,

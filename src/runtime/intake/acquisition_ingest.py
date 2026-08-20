@@ -98,6 +98,14 @@ class IntakeAcquisitionIngestMixin:
                 "observed_at": now,
                 "payload": payload,
             }
+            existing = await self._resolve_existing_intake_identity(
+                command.team_uuid, source_kind, next_state["normalized_external_key"]
+            )
+            if existing is not None:
+                next_state["intake_source_uuid"] = existing["intake_source_uuid"]
+                next_state["intake_item_uuid"] = existing["intake_item_uuid"]
+                if existing.get("intake_snapshot_uuid"):
+                    next_state["intake_snapshot_uuid"] = existing["intake_snapshot_uuid"]
             material = self._material(
                 command,
                 next_state,
@@ -142,6 +150,32 @@ class IntakeAcquisitionIngestMixin:
                 )
 
             return material, {}, callback
+
+
+    async def _resolve_existing_intake_identity(
+            self, team_uuid: str, source_kind: str, normalized_external_key: str
+        ) -> dict[str, Any] | None:
+            async with self._persistence.transaction() as tx:
+                row = await tx.fetchone(
+                    "SELECT s.intake_source_uuid, i.intake_item_uuid "
+                    "FROM mkb_intake_items AS i "
+                    "JOIN mkb_intake_sources AS s "
+                    "ON s.team_uuid=i.team_uuid AND s.intake_source_uuid=i.intake_source_uuid "
+                    "WHERE i.team_uuid=? AND s.source_kind=? AND i.normalized_external_key=? "
+                    "AND i.deleted_at IS NULL ORDER BY i.created_at ASC LIMIT 1",
+                    (team_uuid, source_kind, normalized_external_key),
+                )
+                if row is None:
+                    return None
+                snapshot = await tx.fetchone(
+                    "SELECT intake_snapshot_uuid FROM mkb_intake_snapshots "
+                    "WHERE team_uuid=? AND intake_source_uuid=? AND observation_key=?",
+                    (team_uuid, row["intake_source_uuid"], normalized_external_key),
+                )
+            result = dict(row)
+            if snapshot is not None:
+                result["intake_snapshot_uuid"] = snapshot["intake_snapshot_uuid"]
+            return result
 
 
     @staticmethod
@@ -453,8 +487,8 @@ class IntakeAcquisitionIngestMixin:
             )
 
 
-    @staticmethod
     def _representation_from_bytes(
+            self,
             data: bytes,
             *,
             declared_media_type: str | None,
@@ -482,6 +516,15 @@ class IntakeAcquisitionIngestMixin:
                     "bom": data.startswith(b"\xef\xbb\xbf"),
                     "replacement_count": 0,
                 }
+            limit = int(getattr(self, "_acquisition_max_response_bytes", 8 * 1024 * 1024) or 8 * 1024 * 1024)
+            observed = len(data)
+            if observed > limit:
+                raise MkbError(
+                    "ACQUISITION_BUDGET_EXCEEDED",
+                    "Acquisition exceeded the configured response budget",
+                    413,
+                    {"limit": limit, "observed": observed},
+                )
             evidence = {
                 "schema_version": "mkb.acquisition-evidence.v1",
                 "source_kind": source_kind,
@@ -491,9 +534,10 @@ class IntakeAcquisitionIngestMixin:
                 "detected_media_type": detected,
                 "verified_media_type": verified,
                 "raw_byte_digest": _digest_bytes(data),
-                "raw_byte_size": len(data),
+                "raw_byte_size": observed,
                 "encoding": encoding,
                 "budget_verdict": "within_configured_acquisition_budget",
+                "budget": {"limit": limit, "observed": observed},
                 **dict(extra_evidence or {}),
             }
             return _AcquiredContent(raw_text=raw_text, is_binary=binary, media_type=verified, evidence=evidence)
