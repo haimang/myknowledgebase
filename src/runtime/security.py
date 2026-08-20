@@ -248,7 +248,9 @@ class DenialAuditSampler:
         self._buckets: dict[tuple[str, str, int], tuple[int, bool]] = {}
         self._lock = threading.Lock()
 
-    def decide(self, *, category: str, source_identity: str | None, limit: int) -> AuditSampleDisposition:
+    def decide(
+        self, *, category: str, source_identity: str | None, limit: int
+    ) -> tuple[AuditSampleDisposition, tuple[str, str, int]]:
         if limit < 1:
             raise ValueError("audit sample limit must be positive")
         bucket = int(self._clock() // self.window_seconds)
@@ -274,13 +276,20 @@ class DenialAuditSampler:
                 result = AuditSampleDisposition.SUMMARY
             else:
                 result = AuditSampleDisposition.DROP
-            return result
+            return result, key
 
-    def undo(self, *, category: str, source_identity: str | None, disposition: AuditSampleDisposition) -> None:
+    def undo(
+        self,
+        *,
+        category: str,
+        source_identity: str | None,
+        disposition: AuditSampleDisposition,
+        effective_key: tuple[str, str, int] | None = None,
+    ) -> None:
         if disposition is AuditSampleDisposition.DROP:
             return
         bucket = int(self._clock() // self.window_seconds)
-        key = (category, source_identity or "unknown", bucket)
+        key = effective_key if effective_key is not None else (category, source_identity or "unknown", bucket)
         with self._lock:
             detail_count, summary_written = self._buckets.get(key, (0, False))
             if disposition is AuditSampleDisposition.DETAIL and detail_count > 0:
@@ -489,12 +498,7 @@ def request_ip(request: Request) -> str | None:
     if forwarded:
         presented = forwarded.split(",")[0].strip()
         if presented and len(presented) <= 255:
-            if cidrs:
-                if peer and _ip_in_cidrs(peer, cidrs):
-                    return presented
-            elif peer and _is_private_peer(peer):
-                # Empty CIDR: a private ASGI peer is treated as an untrusted
-                # reverse proxy, so the forwarded client is the identity.
+            if cidrs and peer and _ip_in_cidrs(peer, cidrs):
                 return presented
     return peer
 
@@ -504,6 +508,9 @@ def _is_private_peer(value: str) -> bool:
         address = ipaddress.ip_address(value)
     except ValueError:
         return False
+    mapped = getattr(address, "ipv4_mapped", None)
+    if mapped is not None:
+        return _is_private_peer(str(mapped))
     return address.is_private or address.is_loopback or address.is_link_local
 
 
@@ -512,6 +519,9 @@ def _ip_in_cidrs(value: str, cidrs: list[str]) -> bool:
         address = ipaddress.ip_address(value)
     except ValueError:
         return False
+    mapped = getattr(address, "ipv4_mapped", None)
+    if mapped is not None:
+        return _ip_in_cidrs(str(mapped), cidrs)
     for cidr in cidrs:
         try:
             if address in ipaddress.ip_network(cidr, strict=False):

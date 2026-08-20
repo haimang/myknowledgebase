@@ -56,6 +56,7 @@ class TeamPatchRequest(PayloadExtraModel):
     def require_change(self) -> TeamPatchRequest:
         if self.name is None and self.description is None and "payload_extra" not in self.model_fields_set:
             raise ValueError("at least one mutable Team field is required")
+        assert_safe_public_data(self.payload_extra)
         return self
 
 
@@ -374,6 +375,7 @@ class TaskPatchRequest(PayloadExtraModel):
             and "payload_extra" not in self.model_fields_set
         ):
             raise ValueError("at least one mutable Task field is required")
+        assert_safe_public_data(self.payload_extra)
         return self
 
 

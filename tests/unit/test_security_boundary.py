@@ -153,7 +153,7 @@ def test_denial_sampler_caps_detail_rows_and_keeps_one_summary_per_window() -> N
     now = [10.0]
     sampler = DenialAuditSampler(clock=lambda: now[0])
 
-    decisions = [sampler.decide(category="invalid_token", source_identity="ip", limit=2) for _ in range(5)]
+    decisions = [sampler.decide(category="invalid_token", source_identity="ip", limit=2)[0] for _ in range(5)]
     assert decisions == [
         AuditSampleDisposition.DETAIL,
         AuditSampleDisposition.DETAIL,
@@ -162,14 +162,14 @@ def test_denial_sampler_caps_detail_rows_and_keeps_one_summary_per_window() -> N
         AuditSampleDisposition.DROP,
     ]
     now[0] += 60
-    assert sampler.decide(category="invalid_token", source_identity="ip", limit=2) is AuditSampleDisposition.DETAIL
+    assert sampler.decide(category="invalid_token", source_identity="ip", limit=2)[0] is AuditSampleDisposition.DETAIL
 
     bounded = DenialAuditSampler(max_buckets=1, clock=lambda: 100.0)
-    assert bounded.decide(category="invalid_token", source_identity="first", limit=1) is AuditSampleDisposition.DETAIL
+    assert bounded.decide(category="invalid_token", source_identity="first", limit=1)[0] is AuditSampleDisposition.DETAIL
     # New attacker-controlled source IDs collapse into one bounded aggregate
     # witness instead of expanding an in-memory audit cache indefinitely.
-    assert bounded.decide(category="invalid_token", source_identity="second", limit=1) is AuditSampleDisposition.DETAIL
-    assert bounded.decide(category="invalid_token", source_identity="third", limit=1) is AuditSampleDisposition.SUMMARY
+    assert bounded.decide(category="invalid_token", source_identity="second", limit=1)[0] is AuditSampleDisposition.DETAIL
+    assert bounded.decide(category="invalid_token", source_identity="third", limit=1)[0] is AuditSampleDisposition.SUMMARY
 
 
 @pytest.mark.asyncio

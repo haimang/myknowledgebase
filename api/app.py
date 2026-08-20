@@ -544,6 +544,15 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                     return JSONResponse(status_code=413, content=error.as_dict(_public_request_id(request)))
             except ValueError:
                 pass
+        chunks: list[bytes] = []
+        total = 0
+        async for chunk in request.stream():
+            total += len(chunk)
+            if total > cap:
+                error = MkbError("REQUEST_BODY_TOO_LARGE", "Request body exceeds the configured cap", 413)
+                return JSONResponse(status_code=413, content=error.as_dict(_public_request_id(request)))
+            chunks.append(chunk)
+        request._body = b"".join(chunks)  # type: ignore[attr-defined]
         return await call_next(request)
 
     app.include_router(public_router)

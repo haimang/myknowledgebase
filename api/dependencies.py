@@ -62,7 +62,7 @@ async def _audit_denial(
 
     container = request.app.state.container
     remote_ip = request_ip(request)
-    disposition = _sampler_for(request).decide(
+    disposition, sample_key = _sampler_for(request).decide(
         category=category,
         source_identity=hash_remote_address(remote_ip),
         limit=_sample_limit(request, category),
@@ -98,6 +98,7 @@ async def _audit_denial(
                 category=category,
                 source_identity=hash_remote_address(remote_ip),
                 disposition=disposition,
+                effective_key=sample_key,
             )
         except Exception:
             pass

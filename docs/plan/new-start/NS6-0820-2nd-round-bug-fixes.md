@@ -807,3 +807,17 @@ NS6-0820-2nd-round-bug-fixes
 | P4-05 | `✅ done` | namespace_key=`model\|version\|adapter\|dimension` | 改维新 ns |
 | P4-06 | `✅ done` | vectorize callback `index_generation` CAS | 并发不得双写 N+1 |
 | P4-07 | `✅ done` | full_construct `metadata_headers=None` | binder 409 与 body-only 一致 |
+
+### 11.6 Phase 5 回填
+
+- **实际执行摘要**：P5-01…P5-05（VF29–34）。空 CIDR 永不抄 XFF；PATCH extras 拒密；chunked 流式累计 413；overflow undo 退回 overflow 桶；ipv4_mapped 对齐。
+- **Phase 偏差**：无。
+- **测试发现**：`test_ns6_phase5.py` + `test_security_boundary` / `test_ns5_phase5` 回归绿。
+
+| 工作项 | 状态 | 实际落点 | 备注 |
+|--------|------|----------|------|
+| P5-01 | `✅ done` | `request_ip` 删除 empty-CIDR 私网 XFF 分支 | peer 10.0.0.1 不被 127.0.0.1 顶替 |
+| P5-02 | `✅ done` | TeamPatch/TaskPatch `assert_safe_public_data` | PATCH apiKey → ValidationError |
+| P5-03 | `✅ done` | `reject_oversize_body` 流式累计 | 无 CL chunked 413 |
+| P5-04 | `✅ done` | `decide` 返回 effective_key；undo 用之 | 第三 IP 仍 DETAIL |
+| P5-05 | `✅ done` | `_is_private_peer`/`_ip_in_cidrs` 递归 mapped | 不重开空 CIDR XFF |
