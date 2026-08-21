@@ -84,7 +84,7 @@ DEFAULT_CATALOG_PROMPTS = (
     ("promptB.documentation.code-review", "v1", "markdown/promptB.documentation.code-review.v1.md", "markdown", None),
     ("promptB.documentation.default", "v2", "json/promptB.documentation.default.v2.md", "json", (0, 1, 2)),
     ("promptB.documentation.g0", "v1", "json/promptB.documentation.g0.v1.md", "json", (0,)),
-    ("promptB.documentation.g1", "v4", "json/promptB.documentation.g1.v4.md", "json", (0, 1)),
+    ("promptB.documentation.g1", "v5", "json/promptB.documentation.g1.v5.md", "json", (0, 1)),
     ("promptB.documentation.g2", "v2", "json/promptB.documentation.g2.v2.md", "json", (0, 1, 2)),
     ("promptC.documentation.default", "v2", "summarizer/promptC.documentation.default.v2.md", "summarizer", None),
 )
@@ -776,6 +776,34 @@ class RegistryService:
                     stable_digest({"invariants": "layered_content.v1"}),
                     stable_digest({"media": "application/json"}),
                     __import__("json").dumps(layered_body, sort_keys=True, separators=(",", ":")),
+                    now,
+                ),
+            )
+        cuts_body = {
+            "artifact": "cuts",
+            "schema_key": "mkb.b-json-cuts",
+            "version": "v1",
+        }
+        cuts_digest = stable_digest(cuts_body)
+        row = await tx.fetchone(
+            "SELECT schema_digest FROM mkb_structure_schema_definitions "
+            "WHERE schema_key='mkb.b-json-cuts' AND schema_version='v1'"
+        )
+        if row is not None and row["schema_digest"] != cuts_digest:
+            raise MkbError("REGISTRY_DIGEST_MISMATCH", "Cuts schema definition conflicts", 503)
+        if row is None:
+            await tx.execute(
+                "INSERT INTO mkb_structure_schema_definitions "
+                "(schema_key,schema_version,schema_digest,schema_dialect,deterministic_kernel_schema_digest,"
+                "semantic_invariant_manifest_digest,artifact_type,media_contracts_digest,registration_origin,"
+                "definition_body_json,registered_at,payload_extra) "
+                "VALUES ('mkb.b-json-cuts','v1',?,'json',?,?, 'cuts',?,'code_bootstrap',?,?,'{}')",
+                (
+                    cuts_digest,
+                    stable_digest({"kernel": "mkb.b-json-cuts.v1"}),
+                    stable_digest({"invariants": "cuts.v1"}),
+                    stable_digest({"media": "application/json"}),
+                    __import__("json").dumps(cuts_body, sort_keys=True, separators=(",", ":")),
                     now,
                 ),
             )

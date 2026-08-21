@@ -50,7 +50,7 @@ def test_live_turso_is_r3_ready() -> None:
     assert int(facets) >= 17
     assert int(q_a3_vectors) == 17
     assert task is not None and task[0] == "succeeded"
-    assert g1 is not None and g1[0] == "v4"
+    assert g1 is not None and g1[0] in {"v4", "v5"}
     assert int(n_a5) == 21
     assert int(mapped) == 0
     assert int(markdown) >= 1

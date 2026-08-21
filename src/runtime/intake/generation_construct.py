@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 import time
 from collections.abc import Awaitable, Callable, Mapping
 from pathlib import Path
@@ -13,9 +14,15 @@ from src.contracts.common.errors import MkbError
 from src.contracts.common.ids import canonical_json, stable_digest, uuid7
 from src.contracts.common.time import utc_now
 from src.contracts.inference.models import InferenceBinding, InvocationContext, TextGenerateRequest
+from src.contracts.lsrag.cuts import CUTS_SCHEMA_VERSION
 from src.contracts.runtime.models import ProcessCommand
 from src.persistence.ports import UnitOfWork
 from src.runtime.inference.claude_cli import BJSON_MATERIAL_SCHEMA, ClaudeCliRequest
+from src.runtime.intake.generation_assemble import (
+    assemble_from_cuts,
+    overlay_system_g0,
+    realign_construct_original,
+)
 from src.runtime.intake.types import (
     _is_sha256_digest,
     _json,
@@ -67,9 +74,7 @@ def _title_from_layered(layered: Mapping[str, object] | None) -> str | None:
     return None
 
 
-def layered_reject_histogram(
-    candidate: object, profile: tuple[int, ...] | list[int] | None
-) -> dict[str, Any]:
+def layered_reject_histogram(candidate: object, profile: tuple[int, ...] | list[int] | None) -> dict[str, Any]:
     """Redacted layer histogram for a rejected B candidate. Never copies text."""
 
     counts: dict[str, int] = {}
@@ -99,6 +104,7 @@ def layered_reject_histogram(
         "invalid_granularity_count": invalid,
         "profile": [int(item) for item in profile] if profile else [],
     }
+
 
 # Lightning returned no usable C result.  One explicit non-interactive salvage
 # is allowed.  Config/fence gaps stay fail-closed and never switch channels.
@@ -145,7 +151,10 @@ class IntakeGenerationConstructMixin:
         if not isinstance(raw, list | tuple) or not raw:
             raise MkbError(error_code, "Layered granularity profile is unavailable", 409)
         values = tuple(sorted(set(raw)))
-        if any(isinstance(value, bool) or not isinstance(value, int) or value not in {0, 1, 2} for value in values) or 0 not in values:
+        if (
+            any(isinstance(value, bool) or not isinstance(value, int) or value not in {0, 1, 2} for value in values)
+            or 0 not in values
+        ):
             raise MkbError(error_code, "Layered granularity profile is invalid", 409)
         return values
 
@@ -243,6 +252,10 @@ class IntakeGenerationConstructMixin:
                 profile=profile,
                 state=state,
             )
+            completed = realign_construct_original(
+                accepted=accepted_layered_candidate,
+                completed=completed,
+            )
             summaries = compiler.layered_summary_map(
                 layered_json=completed,
                 projection=projection,
@@ -265,7 +278,10 @@ class IntakeGenerationConstructMixin:
             )
             if not isinstance(completed_value, Mapping):
                 raise MkbError("CONSTRUCT_KERNEL_SUMMARY_INVALID", "C did not return a layered JSON package", 422)
-            completed = dict(completed_value)
+            completed = realign_construct_original(
+                accepted=accepted_layered_candidate,
+                completed=dict(completed_value),
+            )
             try:
                 summaries = compiler.layered_summary_map(
                     layered_json=completed,
@@ -285,9 +301,7 @@ class IntakeGenerationConstructMixin:
                 receipt["status"] = "failed"
                 from src.runtime.intake.generation_evidence import record_pending_generation_evidence
 
-                record_pending_generation_evidence(
-                    invocation=dict(receipt), process_uuid=command.process_uuid
-                )
+                record_pending_generation_evidence(invocation=dict(receipt), process_uuid=command.process_uuid)
                 raise
             receipt["transport"] = "api_inference"
             receipt["compression_channel"] = "local-inference"
@@ -300,6 +314,10 @@ class IntakeGenerationConstructMixin:
                 profile=profile,
                 state=state,
                 salvage_error=exc,
+            )
+            completed = realign_construct_original(
+                accepted=accepted_layered_candidate,
+                completed=completed,
             )
             summaries = compiler.layered_summary_map(
                 layered_json=completed,
@@ -398,6 +416,34 @@ class IntakeGenerationConstructMixin:
     def _ns1_schema_path() -> Path:
         return Path(__file__).resolve().parents[3] / "data" / "schemas" / "lsrag.layered_content.v1.json"
 
+    @staticmethod
+    def _cuts_schema_path() -> Path:
+        return Path(__file__).resolve().parents[3] / "data" / "schemas" / "mkb.b-json-cuts.v1.json"
+
+    @staticmethod
+    def _should_use_cuts(candidate: Mapping[str, Any] | None) -> bool:
+        if not isinstance(candidate, Mapping):
+            return False
+        return candidate.get("schema_version") == CUTS_SCHEMA_VERSION or "cuts" in candidate
+
+    @staticmethod
+    def _live_cuts_text_fallback(raw_text: str) -> dict[str, Any] | None:
+        """Extract cuts json object if model wrapped in markdown code fence."""
+        if not raw_text:
+            return None
+        text = raw_text.strip()
+        if text.startswith("```"):
+            lines = text.splitlines()
+            if len(lines) >= 2 and lines[0].startswith("```") and lines[-1].startswith("```"):
+                text = "\n".join(lines[1:-1]).strip()
+        try:
+            parsed = json.loads(text)
+            if isinstance(parsed, dict) and ("cuts" in parsed or parsed.get("schema_version") == CUTS_SCHEMA_VERSION):
+                return parsed
+        except Exception:
+            pass
+        return None
+
     async def _cli_layered_candidate(
         self,
         *,
@@ -417,15 +463,94 @@ class IntakeGenerationConstructMixin:
             state=state,
             role="json" if state is not None else None,
         )
+        prompt_rel = self._prompt_relative_path(prompt_path)
+        is_cuts = "cuts" in prompt_rel or "g1.v5" in prompt_rel
+        schema_path = self._cuts_schema_path() if is_cuts else self._ns1_schema_path()
+        schema_rel_path = (
+            "data/schemas/mkb.b-json-cuts.v1.json" if is_cuts else "data/schemas/lsrag.layered_content.v1.json"
+        )
         try:
-            schema = json.loads(self._ns1_schema_path().read_text(encoding="utf-8"))
+            schema = json.loads(schema_path.read_text(encoding="utf-8"))
         except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
             raise MkbError("STRUCTURE_SCHEMA_UNAVAILABLE", "Layered content schema bytes are unavailable", 503) from exc
         if not isinstance(schema, Mapping):
             raise MkbError("STRUCTURE_SCHEMA_UNAVAILABLE", "Layered content schema is invalid", 503)
+
+        prompt_input = clean_text if input_text is None else input_text
+        if is_cuts and len(prompt_input) > 10000:
+            sections = re.split(r"(?=\n#+ )", "\n" + prompt_input)
+            chunks: list[str] = []
+            cur_chunk: list[str] = []
+            cur_len = 0
+            for sec in sections:
+                sec = sec.strip("\n")
+                if not sec:
+                    continue
+                if cur_len + len(sec) > 10000 and cur_chunk:
+                    chunks.append("\n\n".join(cur_chunk))
+                    cur_chunk = [sec]
+                    cur_len = len(sec)
+                else:
+                    cur_chunk.append(sec)
+                    cur_len += len(sec)
+            if cur_chunk:
+                chunks.append("\n\n".join(cur_chunk))
+
+            all_cuts: list[dict[str, Any]] = []
+            combined_usage: dict[str, int] = {"input_tokens": 0, "output_tokens": 0, "total_tokens": 0}
+            last_session_id = None
+            last_exit_code = 0
+
+            for chunk in chunks:
+                chunk_result = await cli.run(
+                    ClaudeCliRequest(
+                        user_prompt=chunk,
+                        system_prompt_file=prompt_path,
+                        json_schema=schema,
+                        role="json",
+                        granularity_set=profile,
+                    )
+                )
+                if not isinstance(chunk_result.structured_output, Mapping):
+                    raise MkbError("STRUCTURE_CANDIDATE_INVALID", "B.json worker did not return structured output", 422)
+                chunk_output = dict(chunk_result.structured_output)
+                chunk_cuts = chunk_output.get("cuts")
+                if isinstance(chunk_cuts, list):
+                    for c in chunk_cuts:
+                        if isinstance(c, Mapping):
+                            all_cuts.append(dict(c))
+                if chunk_result.usage is not None:
+                    for k in ("input_tokens", "output_tokens", "total_tokens"):
+                        val = chunk_result.usage.get(k)
+                        if isinstance(val, int):
+                            combined_usage[k] += val
+                last_session_id = chunk_result.session_id
+                last_exit_code = chunk_result.exit_code
+
+            candidate = {
+                "schema_version": "mkb.b-json-cuts.v1",
+                "cuts": all_cuts,
+            }
+            pointer = None
+            if state is not None:
+                _, pointer = self._frozen_prompt_file(state, role="json", error_code="PROMPT_HASH_MISMATCH")
+            receipt: dict[str, object] = {
+                "transport": "claude_cli",
+                "role": "json",
+                "prompt_relative_path": prompt_rel,
+                "prompt_version": None if pointer is None else pointer.get("version") or pointer.get("prompt_version"),
+                "prompt_sha256": prompt_digest,
+                "schema_relative_path": schema_rel_path,
+                "session_id": last_session_id,
+                "usage": combined_usage,
+                "exit_code": last_exit_code,
+                "output_digest": stable_digest(candidate),
+            }
+            return candidate, receipt
+
         result = await cli.run(
             ClaudeCliRequest(
-                user_prompt=clean_text if input_text is None else input_text,
+                user_prompt=prompt_input,
                 system_prompt_file=prompt_path,
                 json_schema=schema,
                 role="json",
@@ -441,10 +566,10 @@ class IntakeGenerationConstructMixin:
         receipt: dict[str, object] = {
             "transport": "claude_cli",
             "role": "json",
-            "prompt_relative_path": self._prompt_relative_path(prompt_path),
+            "prompt_relative_path": prompt_rel,
             "prompt_version": None if pointer is None else pointer.get("version") or pointer.get("prompt_version"),
             "prompt_sha256": prompt_digest,
-            "schema_relative_path": "data/schemas/lsrag.layered_content.v1.json",
+            "schema_relative_path": schema_rel_path,
             "session_id": result.session_id,
             "usage": None if result.usage is None else dict(result.usage),
             "exit_code": result.exit_code,
@@ -525,7 +650,9 @@ class IntakeGenerationConstructMixin:
         try:
             raw_binding = snapshot["l1"]["bindings"]["text_generate"]
         except (KeyError, TypeError) as exc:
-            raise MkbError("GENERATION_CONFIG_SNAPSHOT_INVALID", "Frozen text_generate binding is invalid", 503) from exc
+            raise MkbError(
+                "GENERATION_CONFIG_SNAPSHOT_INVALID", "Frozen text_generate binding is invalid", 503
+            ) from exc
         if not isinstance(raw_binding, dict):
             raise MkbError("GENERATION_CONFIG_SNAPSHOT_INVALID", "Frozen text_generate binding is invalid", 503)
         try:
@@ -537,7 +664,9 @@ class IntakeGenerationConstructMixin:
                 binding_digest=str(raw_binding["binding_digest"]),
             )
         except (KeyError, TypeError, ValueError) as exc:
-            raise MkbError("GENERATION_CONFIG_SNAPSHOT_INVALID", "Frozen text_generate binding is invalid", 503) from exc
+            raise MkbError(
+                "GENERATION_CONFIG_SNAPSHOT_INVALID", "Frozen text_generate binding is invalid", 503
+            ) from exc
         try:
             system_text = prompt_path.read_text(encoding="utf-8")
         except OSError as exc:
@@ -663,523 +792,786 @@ class IntakeGenerationConstructMixin:
         return material, {}, callback
 
     async def _reconstruct_metadata_refresh_contract(
-            self,
-            command: ProcessCommand,
-            state: Mapping[str, Any],
-        ) -> tuple[LsragContractCompiler, StructureDocument, RetrievalBlockProjection, dict[str, str], dict[str, str]]:
-            """Re-prove S06 and copy source summaries for typed metadata refresh.
+        self,
+        command: ProcessCommand,
+        state: Mapping[str, Any],
+    ) -> tuple[LsragContractCompiler, StructureDocument, RetrievalBlockProjection, dict[str, str], dict[str, str]]:
+        """Re-prove S06 and copy source summaries for typed metadata refresh.
 
-            The source construction can have an earlier metadata header projection,
-            so it is deliberately not reconstructed from a guessed old header map.
-            Instead, its immutable S06 bytes, construction binding, validation
-            member, and every dual-channel body/digest are verified before the
-            exact summary strings are supplied to a *new* construction generation.
-            """
+        The source construction can have an earlier metadata header projection,
+        so it is deliberately not reconstructed from a guessed old header map.
+        Instead, its immutable S06 bytes, construction binding, validation
+        member, and every dual-channel body/digest are verified before the
+        exact summary strings are supplied to a *new* construction generation.
+        """
 
-            source = await self._assert_metadata_refresh_source(command, state)
-            headers = self._metadata_refresh_headers_from_state(state)
-            members = source["members"]
-            assert isinstance(members, Mapping)
-            structure_receipt = members["structure_document"]
-            projection_receipt = members["retrieval_block_projection"]
-            structure_validation_receipt = members["structure_validation_report"]
-            construction_receipt = members["construction_document"]
-            dual_receipt = members["dual_channel_projection"]
-            construction_validation_receipt = members["construction_validation_report"]
-            assert all(
-                isinstance(receipt, Mapping)
-                for receipt in (
-                    structure_receipt,
-                    projection_receipt,
-                    structure_validation_receipt,
-                    construction_receipt,
-                    dual_receipt,
-                    construction_validation_receipt,
-                )
+        source = await self._assert_metadata_refresh_source(command, state)
+        headers = self._metadata_refresh_headers_from_state(state)
+        members = source["members"]
+        assert isinstance(members, Mapping)
+        structure_receipt = members["structure_document"]
+        projection_receipt = members["retrieval_block_projection"]
+        structure_validation_receipt = members["structure_validation_report"]
+        construction_receipt = members["construction_document"]
+        dual_receipt = members["dual_channel_projection"]
+        construction_validation_receipt = members["construction_validation_report"]
+        assert all(
+            isinstance(receipt, Mapping)
+            for receipt in (
+                structure_receipt,
+                projection_receipt,
+                structure_validation_receipt,
+                construction_receipt,
+                dual_receipt,
+                construction_validation_receipt,
             )
-            clean = self._generation_clean_text(state, error_code="METADATA_REFRESH_SOURCE_INVALID")
-            structure_data = await self._read_metadata_refresh_member(
-                command, structure_receipt, error_code="METADATA_REFRESH_SOURCE_INVALID"
+        )
+        clean = self._generation_clean_text(state, error_code="METADATA_REFRESH_SOURCE_INVALID")
+        structure_data = await self._read_metadata_refresh_member(
+            command, structure_receipt, error_code="METADATA_REFRESH_SOURCE_INVALID"
+        )
+        projection_data = await self._read_metadata_refresh_member(
+            command, projection_receipt, error_code="METADATA_REFRESH_SOURCE_INVALID"
+        )
+        compiler, structure, projection = LsragConstructService().reprove_structure_from_stored_payloads(
+            clean_text=clean,
+            structure_data=structure_data,
+            projection_data=projection_data,
+        )
+        structure_validation_data = await self._read_metadata_refresh_member(
+            command, structure_validation_receipt, error_code="METADATA_REFRESH_SOURCE_INVALID"
+        )
+        expected_structure_validation = canonical_json(
+            self._structure_validation_report_payload(
+                validation_artifact_uuid=str(structure_validation_receipt["generation_artifact_uuid"]),
+                structure=structure,
+                projection=projection,
             )
-            projection_data = await self._read_metadata_refresh_member(
-                command, projection_receipt, error_code="METADATA_REFRESH_SOURCE_INVALID"
+        )
+        if structure_validation_data != expected_structure_validation:
+            raise MkbError(
+                "METADATA_REFRESH_SOURCE_INVALID",
+                "Frozen source structure validation report is inconsistent",
+                409,
             )
-            compiler, structure, projection = LsragConstructService().reprove_structure_from_stored_payloads(
-                clean_text=clean,
-                structure_data=structure_data,
-                projection_data=projection_data,
-            )
-            structure_validation_data = await self._read_metadata_refresh_member(
-                command, structure_validation_receipt, error_code="METADATA_REFRESH_SOURCE_INVALID"
-            )
-            expected_structure_validation = canonical_json(
-                self._structure_validation_report_payload(
-                    validation_artifact_uuid=str(structure_validation_receipt["generation_artifact_uuid"]),
-                    structure=structure,
-                    projection=projection,
-                )
-            )
-            if structure_validation_data != expected_structure_validation:
-                raise MkbError(
-                    "METADATA_REFRESH_SOURCE_INVALID",
-                    "Frozen source structure validation report is inconsistent",
-                    409,
-                )
 
-            construction_data = await self._read_metadata_refresh_member(
-                command, construction_receipt, error_code="METADATA_REFRESH_SOURCE_INVALID"
-            )
-            dual_data = await self._read_metadata_refresh_member(
-                command, dual_receipt, error_code="METADATA_REFRESH_SOURCE_INVALID"
-            )
-            construction_validation_data = await self._read_metadata_refresh_member(
-                command, construction_validation_receipt, error_code="METADATA_REFRESH_SOURCE_INVALID"
-            )
-            try:
-                source_construction = json.loads(construction_data)
-                source_dual = json.loads(dual_data)
-                source_construction_validation = json.loads(construction_validation_data)
-            except (TypeError, UnicodeDecodeError, json.JSONDecodeError) as exc:
-                raise MkbError(
-                    "METADATA_REFRESH_SOURCE_INVALID",
-                    "Frozen source construction family is not deterministic JSON",
-                    409,
-                ) from exc
-            if not isinstance(source_construction, dict) or not isinstance(source_dual, dict):
-                raise MkbError("METADATA_REFRESH_SOURCE_INVALID", "Frozen source construction payload is invalid", 409)
-            expected_construction_keys = {
-                "schema_version",
-                "generation_artifact_uuid",
-                "structure_generation_artifact_uuid",
-                "projection_generation_artifact_uuid",
-                "structure_document_digest",
-                "projection_digest",
-                "metadata_projection_digest",
-                "recipe_version",
-                "units",
-                "proof_digest",
-            }
+        construction_data = await self._read_metadata_refresh_member(
+            command, construction_receipt, error_code="METADATA_REFRESH_SOURCE_INVALID"
+        )
+        dual_data = await self._read_metadata_refresh_member(
+            command, dual_receipt, error_code="METADATA_REFRESH_SOURCE_INVALID"
+        )
+        construction_validation_data = await self._read_metadata_refresh_member(
+            command, construction_validation_receipt, error_code="METADATA_REFRESH_SOURCE_INVALID"
+        )
+        try:
+            source_construction = json.loads(construction_data)
+            source_dual = json.loads(dual_data)
+            source_construction_validation = json.loads(construction_validation_data)
+        except (TypeError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+            raise MkbError(
+                "METADATA_REFRESH_SOURCE_INVALID",
+                "Frozen source construction family is not deterministic JSON",
+                409,
+            ) from exc
+        if not isinstance(source_construction, dict) or not isinstance(source_dual, dict):
+            raise MkbError("METADATA_REFRESH_SOURCE_INVALID", "Frozen source construction payload is invalid", 409)
+        expected_construction_keys = {
+            "schema_version",
+            "generation_artifact_uuid",
+            "structure_generation_artifact_uuid",
+            "projection_generation_artifact_uuid",
+            "structure_document_digest",
+            "projection_digest",
+            "metadata_projection_digest",
+            "recipe_version",
+            "units",
+            "proof_digest",
+        }
+        if (
+            set(source_construction) != expected_construction_keys
+            or source_construction.get("schema_version") != "mkb.construction-document.v1"
+            or source_construction.get("generation_artifact_uuid") != construction_receipt["generation_artifact_uuid"]
+            or source_construction.get("structure_generation_artifact_uuid") != structure.generation_artifact_uuid
+            or source_construction.get("projection_generation_artifact_uuid") != projection.generation_artifact_uuid
+            or source_construction.get("structure_document_digest") != structure_document_digest(structure)
+            or source_construction.get("projection_digest") != projection_digest(projection)
+            or source_construction.get("recipe_version") != "content_full.v1"
+            or not _is_sha256_digest(source_construction.get("metadata_projection_digest"))
+            or not _is_sha256_digest(source_construction.get("proof_digest"))
+            or not isinstance(source_construction.get("units"), list)
+        ):
+            raise MkbError("METADATA_REFRESH_SOURCE_INVALID", "Frozen source construction binding is invalid", 409)
+        if (
+            set(source_dual) != {"schema_version", "generation_artifact_uuid", "recipe_version", "units"}
+            or source_dual.get("schema_version") != "mkb.dual-channel-projection.v1"
+            or source_dual.get("generation_artifact_uuid") != dual_receipt["generation_artifact_uuid"]
+            or source_dual.get("recipe_version") != "content_full.v1"
+            or not isinstance(source_dual.get("units"), list)
+            or len(source_construction["units"]) != len(projection.blocks)
+            or len(source_dual["units"]) != len(projection.blocks)
+        ):
+            raise MkbError("METADATA_REFRESH_SOURCE_INVALID", "Frozen source dual-channel family is incomplete", 409)
+
+        summaries: dict[str, str] = {}
+        for block, construction_unit, dual_unit in zip(
+            projection.blocks,
+            source_construction["units"],
+            source_dual["units"],
+            strict=True,
+        ):
             if (
-                set(source_construction) != expected_construction_keys
-                or source_construction.get("schema_version") != "mkb.construction-document.v1"
-                or source_construction.get("generation_artifact_uuid") != construction_receipt["generation_artifact_uuid"]
-                or source_construction.get("structure_generation_artifact_uuid") != structure.generation_artifact_uuid
-                or source_construction.get("projection_generation_artifact_uuid") != projection.generation_artifact_uuid
-                or source_construction.get("structure_document_digest") != structure_document_digest(structure)
-                or source_construction.get("projection_digest") != projection_digest(projection)
-                or source_construction.get("recipe_version") != "content_full.v1"
-                or not _is_sha256_digest(source_construction.get("metadata_projection_digest"))
-                or not _is_sha256_digest(source_construction.get("proof_digest"))
-                or not isinstance(source_construction.get("units"), list)
-            ):
-                raise MkbError("METADATA_REFRESH_SOURCE_INVALID", "Frozen source construction binding is invalid", 409)
-            if (
-                set(source_dual) != {"schema_version", "generation_artifact_uuid", "recipe_version", "units"}
-                or source_dual.get("schema_version") != "mkb.dual-channel-projection.v1"
-                or source_dual.get("generation_artifact_uuid") != dual_receipt["generation_artifact_uuid"]
-                or source_dual.get("recipe_version") != "content_full.v1"
-                or not isinstance(source_dual.get("units"), list)
-                or len(source_construction["units"]) != len(projection.blocks)
-                or len(source_dual["units"]) != len(projection.blocks)
-            ):
-                raise MkbError("METADATA_REFRESH_SOURCE_INVALID", "Frozen source dual-channel family is incomplete", 409)
-
-            summaries: dict[str, str] = {}
-            for block, construction_unit, dual_unit in zip(
-                projection.blocks,
-                source_construction["units"],
-                source_dual["units"],
-                strict=True,
-            ):
-                if (
-                    not isinstance(construction_unit, Mapping)
-                    or set(construction_unit) != {"unit_id", "granularity", "coordinate"}
-                    or construction_unit.get("unit_id") != block.block_id
-                    or construction_unit.get("granularity") != block.granularity
-                    or construction_unit.get("coordinate")
-                    != f"{structure.generation_artifact_uuid}:{projection.generation_artifact_uuid}:{block.block_id}"
-                    or not isinstance(dual_unit, Mapping)
-                    or set(dual_unit) != {
-                        "unit_id",
-                        "granularity",
-                        "original",
-                        "summary",
-                        "original_digest",
-                        "summary_digest",
-                    }
-                    or dual_unit.get("unit_id") != block.block_id
-                    or dual_unit.get("granularity") != block.granularity
-                    or dual_unit.get("original") != block.original_text
-                    or dual_unit.get("original_digest") != block.original_digest
-                    or not isinstance(dual_unit.get("summary"), str)
-                    or not dual_unit["summary"].strip()
-                    or dual_unit.get("summary_digest") != stable_digest({"text": dual_unit["summary"]})
-                ):
-                    raise MkbError(
-                        "METADATA_REFRESH_SOURCE_INVALID",
-                        "Frozen source dual-channel summaries do not align to the source projection",
-                        409,
-                    )
-                summaries[block.block_id] = dual_unit["summary"]
-
-            expected_construction_validation_keys = {
-                "schema_version",
-                "generation_artifact_uuid",
-                "disposition",
-                "construction_generation_artifact_uuid",
-                "construction_document_digest",
-                "dual_channel_generation_artifact_uuid",
-                "dual_channel_proof_digest",
-                "proof_digest",
-            }
-            if (
-                not isinstance(source_construction_validation, Mapping)
-                or set(source_construction_validation) != expected_construction_validation_keys
-                or source_construction_validation.get("schema_version") != "mkb.construction-validation-report.v1"
-                or source_construction_validation.get("generation_artifact_uuid")
-                != construction_validation_receipt["generation_artifact_uuid"]
-                or source_construction_validation.get("disposition") != "full_valid"
-                or source_construction_validation.get("construction_generation_artifact_uuid")
-                != construction_receipt["generation_artifact_uuid"]
-                or source_construction_validation.get("dual_channel_generation_artifact_uuid")
-                != dual_receipt["generation_artifact_uuid"]
-                or any(
-                    not _is_sha256_digest(source_construction_validation.get(key))
-                    for key in ("construction_document_digest", "dual_channel_proof_digest", "proof_digest")
-                )
+                not isinstance(construction_unit, Mapping)
+                or set(construction_unit) != {"unit_id", "granularity", "coordinate"}
+                or construction_unit.get("unit_id") != block.block_id
+                or construction_unit.get("granularity") != block.granularity
+                or construction_unit.get("coordinate")
+                != f"{structure.generation_artifact_uuid}:{projection.generation_artifact_uuid}:{block.block_id}"
+                or not isinstance(dual_unit, Mapping)
+                or set(dual_unit)
+                != {
+                    "unit_id",
+                    "granularity",
+                    "original",
+                    "summary",
+                    "original_digest",
+                    "summary_digest",
+                }
+                or dual_unit.get("unit_id") != block.block_id
+                or dual_unit.get("granularity") != block.granularity
+                or dual_unit.get("original") != block.original_text
+                or dual_unit.get("original_digest") != block.original_digest
+                or not isinstance(dual_unit.get("summary"), str)
+                or not dual_unit["summary"].strip()
+                or dual_unit.get("summary_digest") != stable_digest({"text": dual_unit["summary"]})
             ):
                 raise MkbError(
                     "METADATA_REFRESH_SOURCE_INVALID",
-                    "Frozen source construction validation report is inconsistent",
+                    "Frozen source dual-channel summaries do not align to the source projection",
                     409,
                 )
-            return compiler, structure, projection, summaries, headers
+            summaries[block.block_id] = dual_unit["summary"]
 
+        expected_construction_validation_keys = {
+            "schema_version",
+            "generation_artifact_uuid",
+            "disposition",
+            "construction_generation_artifact_uuid",
+            "construction_document_digest",
+            "dual_channel_generation_artifact_uuid",
+            "dual_channel_proof_digest",
+            "proof_digest",
+        }
+        if (
+            not isinstance(source_construction_validation, Mapping)
+            or set(source_construction_validation) != expected_construction_validation_keys
+            or source_construction_validation.get("schema_version") != "mkb.construction-validation-report.v1"
+            or source_construction_validation.get("generation_artifact_uuid")
+            != construction_validation_receipt["generation_artifact_uuid"]
+            or source_construction_validation.get("disposition") != "full_valid"
+            or source_construction_validation.get("construction_generation_artifact_uuid")
+            != construction_receipt["generation_artifact_uuid"]
+            or source_construction_validation.get("dual_channel_generation_artifact_uuid")
+            != dual_receipt["generation_artifact_uuid"]
+            or any(
+                not _is_sha256_digest(source_construction_validation.get(key))
+                for key in ("construction_document_digest", "dual_channel_proof_digest", "proof_digest")
+            )
+        ):
+            raise MkbError(
+                "METADATA_REFRESH_SOURCE_INVALID",
+                "Frozen source construction validation report is inconsistent",
+                409,
+            )
+        return compiler, structure, projection, summaries, headers
 
     async def _reconstruct_construct_contract(
-            self,
-            command: ProcessCommand,
-            state: Mapping[str, Any],
-        ) -> tuple[LsragContractCompiler, ConstructionDocument, DualChannelProjection]:
-            """Load and re-prove the exact full-valid S07 handoff before S08."""
+        self,
+        command: ProcessCommand,
+        state: Mapping[str, Any],
+    ) -> tuple[LsragContractCompiler, ConstructionDocument, DualChannelProjection]:
+        """Load and re-prove the exact full-valid S07 handoff before S08."""
 
-            if self._construct_mode(state) == "metadata_refresh":
-                compiler, structure, projection, summaries, metadata_headers = await self._reconstruct_metadata_refresh_contract(
-                    command, state
-                )
-                required_granularities = frozenset(block.granularity for block in projection.blocks)
-            else:
-                compiler, structure, projection = await self._reconstruct_structure_contract(command, state)
-                accepted = self._layered_state_candidate(state, error_code="CONSTRUCT_TO_VECTORIZE_GATE")
-                completed = state.get("layered_content_constructed")
-                if not isinstance(completed, Mapping):
-                    raise MkbError("CONSTRUCT_TO_VECTORIZE_GATE", "Completed layered summary package is unavailable", 409)
-                summaries = compiler.layered_summary_map(
-                    layered_json=completed,
-                    projection=projection,
-                    accepted_layered_json=accepted,
-                )
-                title = _title_from_layered(completed if isinstance(completed, Mapping) else accepted)
-                metadata_headers = None if self._construct_mode(state) == "full_construct" else ({"title": title} if title else None)
-                required_granularities = frozenset(self._layered_profile(state, error_code="CONSTRUCT_TO_VECTORIZE_GATE"))
-            construction_uuid = self._generation_state_text(
-                state, "construction_artifact_uuid", "CONSTRUCT_TO_VECTORIZE_GATE"
+        if self._construct_mode(state) == "metadata_refresh":
+            (
+                compiler,
+                structure,
+                projection,
+                summaries,
+                metadata_headers,
+            ) = await self._reconstruct_metadata_refresh_contract(command, state)
+            required_granularities = frozenset(block.granularity for block in projection.blocks)
+        else:
+            compiler, structure, projection = await self._reconstruct_structure_contract(command, state)
+            accepted = self._layered_state_candidate(state, error_code="CONSTRUCT_TO_VECTORIZE_GATE")
+            completed = state.get("layered_content_constructed")
+            if not isinstance(completed, Mapping):
+                raise MkbError("CONSTRUCT_TO_VECTORIZE_GATE", "Completed layered summary package is unavailable", 409)
+            summaries = compiler.layered_summary_map(
+                layered_json=completed,
+                projection=projection,
+                accepted_layered_json=accepted,
             )
-            dual_uuid = self._generation_state_text(state, "dual_channel_artifact_uuid", "CONSTRUCT_TO_VECTORIZE_GATE")
-            construct_service = LsragConstructService(compiler)
-            construction, dual = construct_service.admit(
-                bind_construct(
-                    mode=self._construct_mode(state),
-                    clean_text=self._generation_clean_text(state, error_code="CONSTRUCT_TO_VECTORIZE_GATE"),
-                    structure=structure,
-                    projection=projection,
-                    summaries_by_block_id=summaries,
-                    construction_artifact_uuid=construction_uuid,
-                    dual_channel_artifact_uuid=dual_uuid,
-                    metadata_headers=metadata_headers,
-                    required_granularities=required_granularities,
-                )
+            title = _title_from_layered(completed if isinstance(completed, Mapping) else accepted)
+            metadata_headers = (
+                None if self._construct_mode(state) == "full_construct" else ({"title": title} if title else None)
             )
-            construction_data = await self._read_frozen_generation_asset(
-                command,
-                state,
-                artifact_uuid_key="construction_artifact_uuid",
-                logical_handle_key="construction_artifact_ref",
-                content_digest_key="construction_artifact_content_digest",
-                size_bytes_key="construction_artifact_size_bytes",
-                error_code="CONSTRUCT_TO_VECTORIZE_GATE",
+            required_granularities = frozenset(self._layered_profile(state, error_code="CONSTRUCT_TO_VECTORIZE_GATE"))
+        construction_uuid = self._generation_state_text(
+            state, "construction_artifact_uuid", "CONSTRUCT_TO_VECTORIZE_GATE"
+        )
+        dual_uuid = self._generation_state_text(state, "dual_channel_artifact_uuid", "CONSTRUCT_TO_VECTORIZE_GATE")
+        construct_service = LsragConstructService(compiler)
+        construction, dual = construct_service.admit(
+            bind_construct(
+                mode=self._construct_mode(state),
+                clean_text=self._generation_clean_text(state, error_code="CONSTRUCT_TO_VECTORIZE_GATE"),
+                structure=structure,
+                projection=projection,
+                summaries_by_block_id=summaries,
+                construction_artifact_uuid=construction_uuid,
+                dual_channel_artifact_uuid=dual_uuid,
+                metadata_headers=metadata_headers,
+                required_granularities=required_granularities,
             )
-            dual_data = await self._read_frozen_generation_asset(
-                command,
-                state,
-                artifact_uuid_key="dual_channel_artifact_uuid",
-                logical_handle_key="dual_channel_artifact_ref",
-                content_digest_key="dual_channel_artifact_content_digest",
-                size_bytes_key="dual_channel_artifact_size_bytes",
-                error_code="CONSTRUCT_TO_VECTORIZE_GATE",
-            )
-            construct_service.assert_construction_bytes(
-                construction=construction,
-                dual=dual,
-                construction_data=construction_data,
-                dual_data=dual_data,
-                construction_digest=state.get("construction_document_digest")
-                if isinstance(state.get("construction_document_digest"), str)
-                else None,
-            )
-            return compiler, construction, dual
-
+        )
+        construction_data = await self._read_frozen_generation_asset(
+            command,
+            state,
+            artifact_uuid_key="construction_artifact_uuid",
+            logical_handle_key="construction_artifact_ref",
+            content_digest_key="construction_artifact_content_digest",
+            size_bytes_key="construction_artifact_size_bytes",
+            error_code="CONSTRUCT_TO_VECTORIZE_GATE",
+        )
+        dual_data = await self._read_frozen_generation_asset(
+            command,
+            state,
+            artifact_uuid_key="dual_channel_artifact_uuid",
+            logical_handle_key="dual_channel_artifact_ref",
+            content_digest_key="dual_channel_artifact_content_digest",
+            size_bytes_key="dual_channel_artifact_size_bytes",
+            error_code="CONSTRUCT_TO_VECTORIZE_GATE",
+        )
+        construct_service.assert_construction_bytes(
+            construction=construction,
+            dual=dual,
+            construction_data=construction_data,
+            dual_data=dual_data,
+            construction_digest=state.get("construction_document_digest")
+            if isinstance(state.get("construction_document_digest"), str)
+            else None,
+        )
+        return compiler, construction, dual
 
     def _require_diagnostics(self) -> None:
-            if getattr(self, "_diagnostics", None) is None:
-                raise MkbError("OBS_DIAGNOSTIC_SINK_MISSING", "Generate stages require a DiagnosticSink", 503)
+        if getattr(self, "_diagnostics", None) is None:
+            raise MkbError("OBS_DIAGNOSTIC_SINK_MISSING", "Generate stages require a DiagnosticSink", 503)
 
-    async def _emit_generation_diagnostic(self, command: ProcessCommand, *, log_code: str, message: str, payload: dict[str, Any] | None = None) -> None:
-            sink = getattr(self, "_diagnostics", None)
-            if sink is None:
-                return
-            try:
-                await sink.write(
-                    log_code=log_code,
-                    message=message,
-                    calling_module="runtime.intake.generation",
-                    team_uuid=command.team_uuid,
-                    trace_uuid=command.trace_uuid,
-                    task_uuid=command.task_uuid,
-                    execution_uuid=command.execution_uuid,
-                    process_uuid=command.process_uuid,
-                    payload=payload or {},
-                )
-            except Exception:
-                return
+    async def _emit_generation_diagnostic(
+        self, command: ProcessCommand, *, log_code: str, message: str, payload: dict[str, Any] | None = None
+    ) -> None:
+        sink = getattr(self, "_diagnostics", None)
+        if sink is None:
+            return
+        try:
+            await sink.write(
+                log_code=log_code,
+                message=message,
+                calling_module="runtime.intake.generation",
+                team_uuid=command.team_uuid,
+                trace_uuid=command.trace_uuid,
+                task_uuid=command.task_uuid,
+                execution_uuid=command.execution_uuid,
+                process_uuid=command.process_uuid,
+                payload=payload or {},
+            )
+        except Exception:
+            return
 
     async def _structurize(
-            self, command: ProcessCommand, state: dict[str, Any]
-        ) -> tuple[_StageMaterial, dict[str, Any], Callable[[UnitOfWork, Mapping[str, str]], Awaitable[None]]]:
-            self._require_diagnostics()
-            started = time.monotonic()
-            clean = self._generation_clean_text(state, error_code="STRUCTURE_BINDING_CLEAN_DIGEST")
-            clean_artifact_uuid = self._generation_state_text(state, "clean_artifact_uuid", "STRUCTURE_BINDING_CLEAN_ARTIFACT")
-            structure_artifact_uuid = uuid7()
-            projection_artifact_uuid = uuid7()
-            validation_artifact_uuid = uuid7()
-            # S11 live profile freezes binding/prompt/schema, calls the facade once,
-            # then the kernel admits the returned layered candidate.  There is no
-            # clean-text compiler fallback: a missing or malformed candidate is a
-            # typed structure failure.
-            generation_invocation: dict[str, Any] | None = None
-            cli_receipt: dict[str, object] | None = None
-            layered_candidate: Mapping[str, object] | None = None
-            profile = self._layered_profile(state, error_code="STRUCTURE_PROFILE_INVALID")
-            structurize_input = self._structurize_input_text(state, clean)
-            channel = self._compression_channel(state, command)
-            if state.get("layered_content_candidate") is None and channel == "local-inference":
-                generation_invocation = await self._live_structured_generate(
-                    command,
-                    stage_key="structurize",
-                    input_text=structurize_input,
-                    prompt_key="promptB.json.generic",
-                    prompt_version="v1",
-                    prompt_role="json",
-                    schema_key="lsrag.layered_content.default",
-                    schema_version="v1",
-                    input_digest=stable_digest({"clean_digest": state["clean_digest"], "stage": "structurize"}),
-                )
-                live_candidate = generation_invocation.pop("_structured_output", None)
-                if isinstance(live_candidate, Mapping):
-                    layered_candidate = live_candidate
-            elif (
-                state.get("layered_content_candidate") is None
-                and channel == "non-interactive"
-                and getattr(self, "_claude_cli", None) is not None
-            ):
-                try:
-                    generated_candidate, cli_receipt = await self._cli_layered_candidate(
-                        clean_text=clean,
-                        input_text=structurize_input,
-                        profile=profile,
-                        state=state,
-                    )
-                except MkbError as exc:
-                    from src.contracts.observability.stage_report import validate_stage_report
-                    from src.runtime.intake.generation_evidence import record_pending_generation_evidence
+        self, command: ProcessCommand, state: dict[str, Any]
+    ) -> tuple[_StageMaterial, dict[str, Any], Callable[[UnitOfWork, Mapping[str, str]], Awaitable[None]]]:
+        self._require_diagnostics()
+        started = time.monotonic()
+        clean = self._generation_clean_text(state, error_code="STRUCTURE_BINDING_CLEAN_DIGEST")
+        clean_artifact_uuid = self._generation_state_text(
+            state, "clean_artifact_uuid", "STRUCTURE_BINDING_CLEAN_ARTIFACT"
+        )
+        structure_artifact_uuid = uuid7()
+        projection_artifact_uuid = uuid7()
+        validation_artifact_uuid = uuid7()
+        # S11 live profile freezes binding/prompt/schema, calls the facade once,
+        # then the kernel admits the returned layered candidate.  There is no
+        # clean-text compiler fallback: a missing or malformed candidate is a
+        # typed structure failure.
+        generation_invocation: dict[str, Any] | None = None
+        cli_receipt: dict[str, object] | None = None
+        layered_candidate: Mapping[str, object] | None = None
+        profile = self._layered_profile(state, error_code="STRUCTURE_PROFILE_INVALID")
+        structurize_input = self._structurize_input_text(state, clean)
+        channel = self._compression_channel(state, command)
+        if state.get("layered_content_candidate") is None and channel == "local-inference":
+            prompt_key = "promptB.documentation.g1"
+            prompt_version = "v5"
+            schema_key = "mkb.b-json-cuts"
+            schema_version = "v1"
+            if state is not None and self._has_frozen_prompt_selection(state, "json"):
+                _, pointer = self._frozen_prompt_file(state, role="json", error_code="PROMPT_HASH_MISMATCH")
+                if pointer:
+                    prompt_key = str(pointer.get("prompt_key", prompt_key))
+                    prompt_version = str(pointer.get("version") or pointer.get("prompt_version") or prompt_version)
 
-                    kind = None
-                    if isinstance(exc.details, dict):
-                        raw_kind = exc.details.get("cli_structured_kind")
-                        if isinstance(raw_kind, str):
-                            kind = raw_kind
-                    record_pending_generation_evidence(
-                        invocation={
-                            "invocation_uuid": uuid7(),
-                            "invocation_ordinal": 0,
-                            "process_attempt": command.fencing_generation,
-                            "capability_key": "structured_generate",
-                            "stage_key": "structurize",
-                            "input_digest": stable_digest(
-                                {"clean_digest": state.get("clean_digest"), "stage": "structurize"}
-                            ),
-                            "status": "failed",
-                            "error_code": exc.code,
-                            "adapter_kind": "claude_cli",
-                            "cli_structured_kind": kind,
-                        },
-                        report=validate_stage_report(
-                            {
-                                "stage_key": "structurize",
-                                "disposition": "transport_failed",
-                                "error_code": exc.code,
-                                "cli_structured_kind": kind,
-                                "latency_ms": max(0, int((time.monotonic() - started) * 1000)),
-                            }
-                        ),
-                        process_uuid=command.process_uuid,
-                    )
-                    await self._emit_generation_diagnostic(
-                        command,
-                        log_code="GEN_CLI_ENVELOPE",
-                        message=exc.code,
-                        payload={"cli_structured_kind": kind},
-                    )
-                    raise
-                layered_candidate = generated_candidate
-            if layered_candidate is None:
-                layered_candidate = self._layered_state_candidate(
-                    state,
-                    error_code="STRUCTURE_CANDIDATE_MISSING",
-                )
-            profile = self._layered_profile(state, error_code="STRUCTURE_PROFILE_INVALID")
-            try:
-                admitted = LsragStructurizeService().admit(
-                    bind_structurize(
+            generation_invocation = await self._live_structured_generate(
+                command,
+                stage_key="structurize",
+                input_text=structurize_input,
+                prompt_key=prompt_key,
+                prompt_version=prompt_version,
+                prompt_role="json",
+                schema_key=schema_key,
+                schema_version=schema_version,
+                input_digest=stable_digest({"clean_digest": state["clean_digest"], "stage": "structurize"}),
+            )
+            live_candidate = generation_invocation.pop("_structured_output", None)
+            if isinstance(live_candidate, Mapping):
+                if self._should_use_cuts(live_candidate):
+                    layered_candidate = assemble_from_cuts(
                         clean_text=clean,
-                        clean_artifact_uuid=clean_artifact_uuid,
-                        clean_digest=state["clean_digest"],
-                        layered_candidate=layered_candidate,
-                        granularity_set=profile,
-                        structure_artifact_uuid=structure_artifact_uuid,
-                        projection_artifact_uuid=projection_artifact_uuid,
+                        cuts_pack=live_candidate,
+                        profile=profile,
                     )
+                else:
+                    layered_candidate = live_candidate
+        elif (
+            state.get("layered_content_candidate") is None
+            and channel == "non-interactive"
+            and getattr(self, "_claude_cli", None) is not None
+        ):
+            try:
+                generated_candidate, cli_receipt = await self._cli_layered_candidate(
+                    clean_text=clean,
+                    input_text=structurize_input,
+                    profile=profile,
+                    state=state,
                 )
             except MkbError as exc:
-                if exc.code.startswith("STRUCTURE_"):
-                    from src.contracts.observability.stage_report import validate_stage_report
-                    from src.runtime.intake.generation_evidence import record_pending_generation_evidence
+                from src.contracts.observability.stage_report import validate_stage_report
+                from src.runtime.intake.generation_evidence import record_pending_generation_evidence
 
-                    histogram = layered_reject_histogram(layered_candidate, profile)
-                    gran_set = ",".join(str(item) for item in histogram.get("set") or [])
-                    failed_invocation: dict[str, Any]
-                    if generation_invocation is not None:
-                        generation_invocation["status"] = "failed"
-                        generation_invocation["error_code"] = exc.code
-                        failed_invocation = generation_invocation
-                    elif cli_receipt is not None:
-                        failed_invocation = self._cli_invocation_from_receipt(
-                            command,
-                            cli_receipt,
-                            stage_key="structurize",
-                            capability_key="structured_generate",
-                            input_digest=stable_digest(
-                                {"clean_digest": state.get("clean_digest"), "stage": "structurize"}
-                            ),
-                        )
-                        failed_invocation["status"] = "failed"
-                        failed_invocation["error_code"] = exc.code
-                    else:
-                        failed_invocation = {
-                            "invocation_uuid": uuid7(),
-                            "invocation_ordinal": 0,
-                            "process_attempt": command.fencing_generation,
-                            "capability_key": "structured_generate",
-                            "stage_key": "structurize",
-                            "input_digest": stable_digest(
-                                {"clean_digest": state.get("clean_digest"), "stage": "structurize"}
-                            ),
-                            "status": "failed",
-                            "error_code": exc.code,
-                            "adapter_kind": "local_vllm" if channel == "local-inference" else "claude_cli",
-                        }
-                    record_pending_generation_evidence(
-                        invocation=failed_invocation,
-                        report=validate_stage_report(
-                            {
-                                "stage_key": "structurize",
-                                "disposition": "rejected",
-                                "error_code": exc.code,
-                                "has_g0": bool(histogram.get("has_g0")),
-                                "block_count": histogram.get("block_count"),
-                                "granularity_set": gran_set,
-                                "layer_counts": histogram.get("counts") or {},
-                                "latency_ms": max(0, int((time.monotonic() - started) * 1000)),
-                            }
+                kind = None
+                if isinstance(exc.details, dict):
+                    raw_kind = exc.details.get("cli_structured_kind")
+                    if isinstance(raw_kind, str):
+                        kind = raw_kind
+                record_pending_generation_evidence(
+                    invocation={
+                        "invocation_uuid": uuid7(),
+                        "invocation_ordinal": 0,
+                        "process_attempt": command.fencing_generation,
+                        "capability_key": "structured_generate",
+                        "stage_key": "structurize",
+                        "input_digest": stable_digest(
+                            {"clean_digest": state.get("clean_digest"), "stage": "structurize"}
                         ),
-                        process_uuid=command.process_uuid,
-                    )
-                    await self._emit_generation_diagnostic(
-                        command,
-                        log_code="GEN_STRUCTURIZE_REJECT",
-                        message=exc.code,
-                        payload={"granularity_set": gran_set, "schema_digest": histogram.get("schema")},
-                    )
-                    raise MkbError(exc.code, exc.message, exc.status_code) from exc
+                        "status": "failed",
+                        "error_code": exc.code,
+                        "adapter_kind": "claude_cli",
+                        "cli_structured_kind": kind,
+                    },
+                    report=validate_stage_report(
+                        {
+                            "stage_key": "structurize",
+                            "disposition": "transport_failed",
+                            "error_code": exc.code,
+                            "cli_structured_kind": kind,
+                            "latency_ms": max(0, int((time.monotonic() - started) * 1000)),
+                        }
+                    ),
+                    process_uuid=command.process_uuid,
+                )
+                await self._emit_generation_diagnostic(
+                    command,
+                    log_code="GEN_CLI_ENVELOPE",
+                    message=exc.code,
+                    payload={"cli_structured_kind": kind},
+                )
                 raise
-            accepted_candidate = admitted.accepted_candidate
-            structure = admitted.structure
-            projection = admitted.projection
-            adoption_report = admitted.adoption_report
-            structure_semantic_digest = structure_document_digest(structure)
-            projection_semantic_digest = projection_digest(projection)
-            structure_asset = await self._promote_generation_member(
-                command,
-                artifact_uuid=structure_artifact_uuid,
-                artifact_type="structure_document",
-                payload=structure_payload(structure),
+            layered_candidate = generated_candidate
+        if layered_candidate is None:
+            layered_candidate = self._layered_state_candidate(
+                state,
+                error_code="STRUCTURE_CANDIDATE_MISSING",
             )
-            projection_asset = await self._promote_generation_member(
-                command,
-                artifact_uuid=projection_artifact_uuid,
-                artifact_type="retrieval_block_projection",
-                payload=retrieval_projection_payload(projection),
+        profile = self._layered_profile(state, error_code="STRUCTURE_PROFILE_INVALID")
+        if self._should_use_cuts(layered_candidate):
+            layered_candidate = assemble_from_cuts(
+                clean_text=clean,
+                cuts_pack=layered_candidate,
+                profile=profile,
             )
-            validation_asset = await self._promote_generation_member(
-                command,
-                artifact_uuid=validation_artifact_uuid,
-                artifact_type="structure_validation_report",
-                payload=self._structure_validation_report_payload(
-                    validation_artifact_uuid=validation_artifact_uuid,
-                    structure=structure,
-                    projection=projection,
-                ),
+        else:
+            layered_candidate = overlay_system_g0(
+                clean_text=clean,
+                candidate=layered_candidate,
+                profile=profile,
             )
-            next_state = dict(state)
+        try:
+            admitted = LsragStructurizeService().admit(
+                bind_structurize(
+                    clean_text=clean,
+                    clean_artifact_uuid=clean_artifact_uuid,
+                    clean_digest=state["clean_digest"],
+                    layered_candidate=layered_candidate,
+                    granularity_set=profile,
+                    structure_artifact_uuid=structure_artifact_uuid,
+                    projection_artifact_uuid=projection_artifact_uuid,
+                )
+            )
+        except MkbError as exc:
+            if exc.code.startswith("STRUCTURE_"):
+                from src.contracts.observability.stage_report import validate_stage_report
+                from src.runtime.intake.generation_evidence import record_pending_generation_evidence
+
+                histogram = layered_reject_histogram(layered_candidate, profile)
+                gran_set = ",".join(str(item) for item in histogram.get("set") or [])
+                failed_invocation: dict[str, Any]
+                if generation_invocation is not None:
+                    generation_invocation["status"] = "failed"
+                    generation_invocation["error_code"] = exc.code
+                    failed_invocation = generation_invocation
+                elif cli_receipt is not None:
+                    failed_invocation = self._cli_invocation_from_receipt(
+                        command,
+                        cli_receipt,
+                        stage_key="structurize",
+                        capability_key="structured_generate",
+                        input_digest=stable_digest({"clean_digest": state.get("clean_digest"), "stage": "structurize"}),
+                    )
+                    failed_invocation["status"] = "failed"
+                    failed_invocation["error_code"] = exc.code
+                else:
+                    failed_invocation = {
+                        "invocation_uuid": uuid7(),
+                        "invocation_ordinal": 0,
+                        "process_attempt": command.fencing_generation,
+                        "capability_key": "structured_generate",
+                        "stage_key": "structurize",
+                        "input_digest": stable_digest(
+                            {"clean_digest": state.get("clean_digest"), "stage": "structurize"}
+                        ),
+                        "status": "failed",
+                        "error_code": exc.code,
+                        "adapter_kind": "local_vllm" if channel == "local-inference" else "claude_cli",
+                    }
+                record_pending_generation_evidence(
+                    invocation=failed_invocation,
+                    report=validate_stage_report(
+                        {
+                            "stage_key": "structurize",
+                            "disposition": "rejected",
+                            "error_code": exc.code,
+                            "has_g0": bool(histogram.get("has_g0")),
+                            "block_count": histogram.get("block_count"),
+                            "granularity_set": gran_set,
+                            "layer_counts": histogram.get("counts") or {},
+                            "latency_ms": max(0, int((time.monotonic() - started) * 1000)),
+                        }
+                    ),
+                    process_uuid=command.process_uuid,
+                )
+                await self._emit_generation_diagnostic(
+                    command,
+                    log_code="GEN_STRUCTURIZE_REJECT",
+                    message=exc.code,
+                    payload={"granularity_set": gran_set, "schema_digest": histogram.get("schema")},
+                )
+                raise MkbError(exc.code, exc.message, exc.status_code) from exc
+            raise
+        accepted_candidate = admitted.accepted_candidate
+        structure = admitted.structure
+        projection = admitted.projection
+        adoption_report = admitted.adoption_report
+        structure_semantic_digest = structure_document_digest(structure)
+        projection_semantic_digest = projection_digest(projection)
+        structure_asset = await self._promote_generation_member(
+            command,
+            artifact_uuid=structure_artifact_uuid,
+            artifact_type="structure_document",
+            payload=structure_payload(structure),
+        )
+        projection_asset = await self._promote_generation_member(
+            command,
+            artifact_uuid=projection_artifact_uuid,
+            artifact_type="retrieval_block_projection",
+            payload=retrieval_projection_payload(projection),
+        )
+        validation_asset = await self._promote_generation_member(
+            command,
+            artifact_uuid=validation_artifact_uuid,
+            artifact_type="structure_validation_report",
+            payload=self._structure_validation_report_payload(
+                validation_artifact_uuid=validation_artifact_uuid,
+                structure=structure,
+                projection=projection,
+            ),
+        )
+        next_state = dict(state)
+        next_state.update(
+            {
+                "structure_artifact_uuid": structure_artifact_uuid,
+                "structure_artifact_ref": structure_asset.stat.handle.value,
+                "structure_artifact_content_digest": structure_asset.stat.sha256,
+                "structure_artifact_size_bytes": structure_asset.stat.size_bytes,
+                "structure_document_digest": structure_semantic_digest,
+                "retrieval_block_projection_artifact_uuid": projection_artifact_uuid,
+                "retrieval_block_projection_ref": projection_asset.stat.handle.value,
+                "retrieval_block_projection_content_digest": projection_asset.stat.sha256,
+                "retrieval_block_projection_size_bytes": projection_asset.stat.size_bytes,
+                "retrieval_block_projection_digest": projection_semantic_digest,
+                "structure_validation_artifact_uuid": validation_artifact_uuid,
+                "structure_validation_artifact_ref": validation_asset.stat.handle.value,
+                "structure_validation_artifact_content_digest": validation_asset.stat.sha256,
+                "structure_validation_artifact_size_bytes": validation_asset.stat.size_bytes,
+                "layered_content_candidate": accepted_candidate,
+                "layered_content_candidate_digest": stable_digest(accepted_candidate),
+                "layered_content_profile": list(profile),
+                "layered_adoption_report": adoption_report,
+            }
+        )
+        if cli_receipt is not None:
+            next_state["structure_cli_receipt"] = cli_receipt
+        if generation_invocation is not None:
+            # Body-free receipt only: digests, identity, and token counts.
+            next_state["structure_generation_invocation"] = {
+                key: generation_invocation[key]
+                for key in (
+                    "invocation_uuid",
+                    "invocation_ordinal",
+                    "process_attempt",
+                    "capability_key",
+                    "stage_key",
+                    "input_digest",
+                    "output_digest",
+                    "error_digest",
+                    "status",
+                    "error_code",
+                    "model_key",
+                    "model_version",
+                    "adapter_kind",
+                    "prompt_key",
+                    "prompt_version",
+                    "prompt_digest",
+                    "schema_key",
+                    "schema_version",
+                    "schema_digest",
+                    "request_digest",
+                    "latency_ms",
+                    "input_tokens",
+                    "output_tokens",
+                    "total_tokens",
+                )
+                if key in generation_invocation
+            }
+        material = self._material(
+            command,
+            next_state,
+            {
+                "structure_artifact": {
+                    "structure_document": self._generation_asset_receipt(structure_asset, structure_semantic_digest),
+                    "retrieval_block_projection": self._generation_asset_receipt(
+                        projection_asset, projection_semantic_digest
+                    ),
+                    "validation_report": self._generation_asset_receipt(validation_asset),
+                }
+            },
+        )
+
+        async def callback(tx: UnitOfWork, refs: Mapping[str, str]) -> None:
+            schema = await tx.fetchone(
+                "SELECT schema_digest FROM mkb_structure_schema_definitions "
+                "WHERE schema_key='lsrag.structure.default' AND schema_version='v1'"
+            )
+            if schema is None:
+                raise MkbError("REGISTRY_NOT_FOUND", "Structure schema definition is unavailable", 503)
+            if generation_invocation is not None:
+                await self._record_generation_and_inference_invocations(tx, command, generation_invocation)
+            elif cli_receipt is not None:
+                await self._record_generation_and_inference_invocations(
+                    tx,
+                    command,
+                    self._cli_invocation_from_receipt(
+                        command,
+                        cli_receipt,
+                        stage_key="structurize",
+                        capability_key="structured_generate",
+                        input_digest=stable_digest({"clean_digest": state["clean_digest"], "stage": "structurize"}),
+                    ),
+                )
+            for asset in (structure_asset, projection_asset, validation_asset):
+                stored_object_uuid = await self._catalog_generation_object(tx, command.team_uuid, asset.stat)
+                await self._insert_generation_artifact(
+                    tx,
+                    command=command,
+                    artifact_uuid=asset.artifact_uuid,
+                    artifact_type=asset.artifact_type,
+                    stored_object_uuid=stored_object_uuid,
+                    logical_handle=asset.stat.handle.value,
+                    content_digest=asset.stat.sha256,
+                    size_bytes=asset.stat.size_bytes,
+                    intake_item_uuid=state["intake_item_uuid"],
+                    intake_revision_uuid=state["intake_revision_uuid"],
+                    clean_artifact_uuid=clean_artifact_uuid,
+                    clean_artifact_digest=state["clean_digest"],
+                    schema_key="lsrag.structure.default",
+                    schema_version="v1",
+                    schema_digest=schema["schema_digest"],
+                    validation_report_ref=validation_asset.stat.handle.value,
+                    validation_report_digest=validation_asset.stat.sha256,
+                    proof_ref=refs["proof_ref"],
+                    proof_digest=refs["proof_digest"],
+                )
+                await self._reference_object(
+                    tx,
+                    team_uuid=command.team_uuid,
+                    stored_object_uuid=stored_object_uuid,
+                    purpose="generation_artifact",
+                    owner_kind="generation_artifact",
+                    owner_uuid=asset.artifact_uuid,
+                    digest=asset.stat.sha256,
+                    size=asset.stat.size_bytes,
+                )
+            for asset in (structure_asset, projection_asset, validation_asset):
+                await self._advance_generation_pointer(
+                    tx,
+                    command=command,
+                    artifact_type=asset.artifact_type,
+                    artifact_uuid=asset.artifact_uuid,
+                )
+
+        return material, {}, callback
+
+    async def _construct(
+        self, command: ProcessCommand, state: dict[str, Any]
+    ) -> tuple[_StageMaterial, dict[str, Any], Callable[[UnitOfWork, Mapping[str, str]], Awaitable[None]]]:
+        self._require_diagnostics()
+        construct_mode = self._construct_mode(state)
+        generation_invocations: list[dict[str, Any]] = []
+        cli_receipt: dict[str, object] | None = None
+        completed_layered_candidate: dict[str, object] | None = None
+        accepted_layered_candidate: Mapping[str, object] | None = None
+        if construct_mode == "metadata_refresh":
+            (
+                compiler,
+                structure,
+                projection,
+                summaries,
+                metadata_headers,
+            ) = await self._reconstruct_metadata_refresh_contract(command, state)
+            required_granularities = frozenset(block.granularity for block in projection.blocks)
+        else:
+            compiler, structure, projection = await self._reconstruct_structure_contract(command, state)
+            accepted_layered_candidate = self._layered_state_candidate(
+                state,
+                error_code="CONSTRUCT_BINDING_CANDIDATE_MISSING",
+            )
+            profile = self._layered_profile(state, error_code="CONSTRUCT_BINDING_PROFILE_INVALID")
+            (
+                completed_layered_candidate,
+                summaries,
+                generation_invocations,
+                cli_receipt,
+            ) = await self._complete_construct_summaries(
+                command,
+                state,
+                compiler=compiler,
+                projection=projection,
+                accepted_layered_candidate=accepted_layered_candidate,
+                profile=profile,
+            )
+            if completed_layered_candidate is None:
+                raise MkbError("CONSTRUCT_KERNEL_SUMMARY_INVALID", "Completed layered JSON package is unavailable", 422)
+            required_granularities = frozenset(profile)
+            title = _title_from_layered(completed_layered_candidate or accepted_layered_candidate)
+            metadata_headers = None if construct_mode == "full_construct" else ({"title": title} if title else None)
+        construction_artifact_uuid = uuid7()
+        dual_channel_artifact_uuid = uuid7()
+        validation_artifact_uuid = uuid7()
+        construction, dual = LsragConstructService(compiler).admit(
+            bind_construct(
+                mode=construct_mode,
+                clean_text=self._generation_clean_text(state, error_code="CONSTRUCT_BINDING_CLEAN_DIGEST"),
+                structure=structure,
+                projection=projection,
+                summaries_by_block_id=summaries,
+                construction_artifact_uuid=construction_artifact_uuid,
+                dual_channel_artifact_uuid=dual_channel_artifact_uuid,
+                metadata_headers=metadata_headers,
+                required_granularities=required_granularities,
+            )
+        )
+        construction_semantic_digest = construction_document_digest(construction)
+        construction_asset = await self._promote_generation_member(
+            command,
+            artifact_uuid=construction_artifact_uuid,
+            artifact_type="construction_document",
+            payload=construction_payload(construction),
+        )
+        dual_asset = await self._promote_generation_member(
+            command,
+            artifact_uuid=dual_channel_artifact_uuid,
+            artifact_type="dual_channel_projection",
+            payload=dual_channel_payload(dual),
+        )
+        validation_asset = await self._promote_generation_member(
+            command,
+            artifact_uuid=validation_artifact_uuid,
+            artifact_type="construction_validation_report",
+            payload=self._construction_validation_report_payload(
+                validation_artifact_uuid=validation_artifact_uuid,
+                construction=construction,
+                dual=dual,
+            ),
+        )
+        next_state = dict(state)
+        next_state.update(
+            {
+                "compression_channel": self._compression_channel(state, command),
+                "construct_mode": construct_mode,
+                "construction_artifact_uuid": construction_artifact_uuid,
+                "construction_artifact_ref": construction_asset.stat.handle.value,
+                "construction_artifact_content_digest": construction_asset.stat.sha256,
+                "construction_artifact_size_bytes": construction_asset.stat.size_bytes,
+                "construction_document_digest": construction_semantic_digest,
+                "dual_channel_artifact_uuid": dual_channel_artifact_uuid,
+                "dual_channel_artifact_ref": dual_asset.stat.handle.value,
+                "dual_channel_artifact_content_digest": dual_asset.stat.sha256,
+                "dual_channel_artifact_size_bytes": dual_asset.stat.size_bytes,
+                "construction_validation_artifact_uuid": validation_artifact_uuid,
+                "construction_validation_artifact_ref": validation_asset.stat.handle.value,
+                "construction_validation_artifact_content_digest": validation_asset.stat.sha256,
+                "construction_validation_artifact_size_bytes": validation_asset.stat.size_bytes,
+            }
+        )
+        if completed_layered_candidate is not None:
             next_state.update(
                 {
-                    "structure_artifact_uuid": structure_artifact_uuid,
-                    "structure_artifact_ref": structure_asset.stat.handle.value,
-                    "structure_artifact_content_digest": structure_asset.stat.sha256,
-                    "structure_artifact_size_bytes": structure_asset.stat.size_bytes,
-                    "structure_document_digest": structure_semantic_digest,
-                    "retrieval_block_projection_artifact_uuid": projection_artifact_uuid,
-                    "retrieval_block_projection_ref": projection_asset.stat.handle.value,
-                    "retrieval_block_projection_content_digest": projection_asset.stat.sha256,
-                    "retrieval_block_projection_size_bytes": projection_asset.stat.size_bytes,
-                    "retrieval_block_projection_digest": projection_semantic_digest,
-                    "structure_validation_artifact_uuid": validation_artifact_uuid,
-                    "structure_validation_artifact_ref": validation_asset.stat.handle.value,
-                    "structure_validation_artifact_content_digest": validation_asset.stat.sha256,
-                    "structure_validation_artifact_size_bytes": validation_asset.stat.size_bytes,
-                    "layered_content_candidate": accepted_candidate,
-                    "layered_content_candidate_digest": stable_digest(accepted_candidate),
-                    "layered_content_profile": list(profile),
-                    "layered_adoption_report": adoption_report,
+                    "layered_content_constructed": completed_layered_candidate,
+                    "layered_content_constructed_digest": stable_digest(completed_layered_candidate),
                 }
             )
-            if cli_receipt is not None:
-                next_state["structure_cli_receipt"] = cli_receipt
-            if generation_invocation is not None:
-                # Body-free receipt only: digests, identity, and token counts.
-                next_state["structure_generation_invocation"] = {
-                    key: generation_invocation[key]
+        if cli_receipt is not None:
+            next_state["construct_cli_receipt"] = cli_receipt
+            if cli_receipt.get("salvage_from") == "local-inference":
+                next_state["compression_salvage"] = {
+                    "from": "local-inference",
+                    "to": "non-interactive",
+                    "error_code": cli_receipt.get("salvage_error_code"),
+                }
+        if generation_invocations:
+            next_state["construction_generation_invocations"] = [
+                {
+                    key: item[key]
                     for key in (
                         "invocation_uuid",
                         "invocation_ordinal",
@@ -1201,354 +1593,130 @@ class IntakeGenerationConstructMixin:
                         "schema_version",
                         "schema_digest",
                         "request_digest",
+                        "transport",
+                        "compression_channel",
+                        "salvage_from",
+                        "salvage_error_code",
                         "latency_ms",
                         "input_tokens",
                         "output_tokens",
                         "total_tokens",
                     )
-                    if key in generation_invocation
+                    if key in item
                 }
-            material = self._material(
-                command,
-                next_state,
-                {
-                    "structure_artifact": {
-                        "structure_document": self._generation_asset_receipt(structure_asset, structure_semantic_digest),
-                        "retrieval_block_projection": self._generation_asset_receipt(
-                            projection_asset, projection_semantic_digest
-                        ),
-                        "validation_report": self._generation_asset_receipt(validation_asset),
-                    }
-                },
-            )
-
-            async def callback(tx: UnitOfWork, refs: Mapping[str, str]) -> None:
-                schema = await tx.fetchone(
-                    "SELECT schema_digest FROM mkb_structure_schema_definitions "
-                    "WHERE schema_key='lsrag.structure.default' AND schema_version='v1'"
-                )
-                if schema is None:
-                    raise MkbError("REGISTRY_NOT_FOUND", "Structure schema definition is unavailable", 503)
-                if generation_invocation is not None:
-                    await self._record_generation_and_inference_invocations(tx, command, generation_invocation)
-                elif cli_receipt is not None:
-                    await self._record_generation_and_inference_invocations(
-                        tx,
-                        command,
-                        self._cli_invocation_from_receipt(
-                            command,
-                            cli_receipt,
-                            stage_key="structurize",
-                            capability_key="structured_generate",
-                            input_digest=stable_digest({"clean_digest": state["clean_digest"], "stage": "structurize"}),
-                        ),
-                    )
-                for asset in (structure_asset, projection_asset, validation_asset):
-                    stored_object_uuid = await self._catalog_generation_object(tx, command.team_uuid, asset.stat)
-                    await self._insert_generation_artifact(
-                        tx,
-                        command=command,
-                        artifact_uuid=asset.artifact_uuid,
-                        artifact_type=asset.artifact_type,
-                        stored_object_uuid=stored_object_uuid,
-                        logical_handle=asset.stat.handle.value,
-                        content_digest=asset.stat.sha256,
-                        size_bytes=asset.stat.size_bytes,
-                        intake_item_uuid=state["intake_item_uuid"],
-                        intake_revision_uuid=state["intake_revision_uuid"],
-                        clean_artifact_uuid=clean_artifact_uuid,
-                        clean_artifact_digest=state["clean_digest"],
-                        schema_key="lsrag.structure.default",
-                        schema_version="v1",
-                        schema_digest=schema["schema_digest"],
-                        validation_report_ref=validation_asset.stat.handle.value,
-                        validation_report_digest=validation_asset.stat.sha256,
-                        proof_ref=refs["proof_ref"],
-                        proof_digest=refs["proof_digest"],
-                    )
-                    await self._reference_object(
-                        tx,
-                        team_uuid=command.team_uuid,
-                        stored_object_uuid=stored_object_uuid,
-                        purpose="generation_artifact",
-                        owner_kind="generation_artifact",
-                        owner_uuid=asset.artifact_uuid,
-                        digest=asset.stat.sha256,
-                        size=asset.stat.size_bytes,
-                    )
-                for asset in (structure_asset, projection_asset, validation_asset):
-                    await self._advance_generation_pointer(
-                        tx,
-                        command=command,
-                        artifact_type=asset.artifact_type,
-                        artifact_uuid=asset.artifact_uuid,
-                    )
-
-            return material, {}, callback
-
-
-    async def _construct(
-            self, command: ProcessCommand, state: dict[str, Any]
-        ) -> tuple[_StageMaterial, dict[str, Any], Callable[[UnitOfWork, Mapping[str, str]], Awaitable[None]]]:
-            self._require_diagnostics()
-            construct_mode = self._construct_mode(state)
-            generation_invocations: list[dict[str, Any]] = []
-            cli_receipt: dict[str, object] | None = None
-            completed_layered_candidate: dict[str, object] | None = None
-            accepted_layered_candidate: Mapping[str, object] | None = None
-            if construct_mode == "metadata_refresh":
-                compiler, structure, projection, summaries, metadata_headers = await self._reconstruct_metadata_refresh_contract(
-                    command, state
-                )
-                required_granularities = frozenset(block.granularity for block in projection.blocks)
-            else:
-                compiler, structure, projection = await self._reconstruct_structure_contract(command, state)
-                accepted_layered_candidate = self._layered_state_candidate(
-                    state,
-                    error_code="CONSTRUCT_BINDING_CANDIDATE_MISSING",
-                )
-                profile = self._layered_profile(state, error_code="CONSTRUCT_BINDING_PROFILE_INVALID")
-                (
-                    completed_layered_candidate,
-                    summaries,
-                    generation_invocations,
-                    cli_receipt,
-                ) = await self._complete_construct_summaries(
-                    command,
-                    state,
-                    compiler=compiler,
-                    projection=projection,
-                    accepted_layered_candidate=accepted_layered_candidate,
-                    profile=profile,
-                )
-                if completed_layered_candidate is None:
-                    raise MkbError("CONSTRUCT_KERNEL_SUMMARY_INVALID", "Completed layered JSON package is unavailable", 422)
-                required_granularities = frozenset(profile)
-                title = _title_from_layered(completed_layered_candidate or accepted_layered_candidate)
-                metadata_headers = None if construct_mode == "full_construct" else ({"title": title} if title else None)
-            construction_artifact_uuid = uuid7()
-            dual_channel_artifact_uuid = uuid7()
-            validation_artifact_uuid = uuid7()
-            construction, dual = LsragConstructService(compiler).admit(
-                bind_construct(
-                    mode=construct_mode,
-                    clean_text=self._generation_clean_text(state, error_code="CONSTRUCT_BINDING_CLEAN_DIGEST"),
-                    structure=structure,
-                    projection=projection,
-                    summaries_by_block_id=summaries,
-                    construction_artifact_uuid=construction_artifact_uuid,
-                    dual_channel_artifact_uuid=dual_channel_artifact_uuid,
-                    metadata_headers=metadata_headers,
-                    required_granularities=required_granularities,
-                )
-            )
-            construction_semantic_digest = construction_document_digest(construction)
-            construction_asset = await self._promote_generation_member(
-                command,
-                artifact_uuid=construction_artifact_uuid,
-                artifact_type="construction_document",
-                payload=construction_payload(construction),
-            )
-            dual_asset = await self._promote_generation_member(
-                command,
-                artifact_uuid=dual_channel_artifact_uuid,
-                artifact_type="dual_channel_projection",
-                payload=dual_channel_payload(dual),
-            )
-            validation_asset = await self._promote_generation_member(
-                command,
-                artifact_uuid=validation_artifact_uuid,
-                artifact_type="construction_validation_report",
-                payload=self._construction_validation_report_payload(
-                    validation_artifact_uuid=validation_artifact_uuid,
-                    construction=construction,
-                    dual=dual,
-                ),
-            )
-            next_state = dict(state)
-            next_state.update(
-                {
-                    "compression_channel": self._compression_channel(state, command),
-                    "construct_mode": construct_mode,
-                    "construction_artifact_uuid": construction_artifact_uuid,
-                    "construction_artifact_ref": construction_asset.stat.handle.value,
-                    "construction_artifact_content_digest": construction_asset.stat.sha256,
-                    "construction_artifact_size_bytes": construction_asset.stat.size_bytes,
-                    "construction_document_digest": construction_semantic_digest,
-                    "dual_channel_artifact_uuid": dual_channel_artifact_uuid,
-                    "dual_channel_artifact_ref": dual_asset.stat.handle.value,
-                    "dual_channel_artifact_content_digest": dual_asset.stat.sha256,
-                    "dual_channel_artifact_size_bytes": dual_asset.stat.size_bytes,
-                    "construction_validation_artifact_uuid": validation_artifact_uuid,
-                    "construction_validation_artifact_ref": validation_asset.stat.handle.value,
-                    "construction_validation_artifact_content_digest": validation_asset.stat.sha256,
-                    "construction_validation_artifact_size_bytes": validation_asset.stat.size_bytes,
+                for item in generation_invocations
+            ]
+        material = self._material(
+            command,
+            next_state,
+            {
+                "construct_package": {
+                    "mode": construct_mode,
+                    "content_full": True,
+                    "construction_document": self._generation_asset_receipt(
+                        construction_asset, construction_semantic_digest
+                    ),
+                    "dual_channel_projection": self._generation_asset_receipt(dual_asset),
+                    "validation_report": self._generation_asset_receipt(validation_asset),
                 }
+            },
+        )
+
+        async def callback(tx: UnitOfWork, refs: Mapping[str, str]) -> None:
+            schema = await tx.fetchone(
+                "SELECT schema_digest FROM mkb_construction_schema_definitions "
+                "WHERE schema_key='lsrag.construction.default' AND schema_version='v1'"
             )
-            if completed_layered_candidate is not None:
-                next_state.update(
-                    {
-                        "layered_content_constructed": completed_layered_candidate,
-                        "layered_content_constructed_digest": stable_digest(completed_layered_candidate),
-                    }
-                )
+            if schema is None:
+                raise MkbError("REGISTRY_NOT_FOUND", "Construction schema definition is unavailable", 503)
+            for item in generation_invocations:
+                await self._record_generation_and_inference_invocations(tx, command, item)
             if cli_receipt is not None:
-                next_state["construct_cli_receipt"] = cli_receipt
-                if cli_receipt.get("salvage_from") == "local-inference":
-                    next_state["compression_salvage"] = {
-                        "from": "local-inference",
-                        "to": "non-interactive",
-                        "error_code": cli_receipt.get("salvage_error_code"),
-                    }
-            if generation_invocations:
-                next_state["construction_generation_invocations"] = [
-                    {
-                        key: item[key]
-                        for key in (
-                            "invocation_uuid",
-                            "invocation_ordinal",
-                            "process_attempt",
-                            "capability_key",
-                            "stage_key",
-                            "input_digest",
-                            "output_digest",
-                            "error_digest",
-                            "status",
-                            "error_code",
-                            "model_key",
-                            "model_version",
-                            "adapter_kind",
-                            "prompt_key",
-                            "prompt_version",
-                            "prompt_digest",
-                            "schema_key",
-                            "schema_version",
-                            "schema_digest",
-                            "request_digest",
-                            "transport",
-                            "compression_channel",
-                            "salvage_from",
-                            "salvage_error_code",
-                            "latency_ms",
-                            "input_tokens",
-                            "output_tokens",
-                            "total_tokens",
-                        )
-                        if key in item
-                    }
-                    for item in generation_invocations
-                ]
-            material = self._material(
-                command,
-                next_state,
-                {
-                    "construct_package": {
-                        "mode": construct_mode,
-                        "content_full": True,
-                        "construction_document": self._generation_asset_receipt(
-                            construction_asset, construction_semantic_digest
-                        ),
-                        "dual_channel_projection": self._generation_asset_receipt(dual_asset),
-                        "validation_report": self._generation_asset_receipt(validation_asset),
-                    }
-                },
-            )
-
-            async def callback(tx: UnitOfWork, refs: Mapping[str, str]) -> None:
-                schema = await tx.fetchone(
-                    "SELECT schema_digest FROM mkb_construction_schema_definitions "
-                    "WHERE schema_key='lsrag.construction.default' AND schema_version='v1'"
-                )
-                if schema is None:
-                    raise MkbError("REGISTRY_NOT_FOUND", "Construction schema definition is unavailable", 503)
-                for item in generation_invocations:
-                    await self._record_generation_and_inference_invocations(tx, command, item)
-                if cli_receipt is not None:
-                    await self._record_generation_and_inference_invocations(
-                        tx,
+                await self._record_generation_and_inference_invocations(
+                    tx,
+                    command,
+                    self._cli_invocation_from_receipt(
                         command,
-                        self._cli_invocation_from_receipt(
-                            command,
-                            cli_receipt,
-                            stage_key="construct",
-                            capability_key="structured_generate",
-                            input_digest=(
-                                stable_digest(accepted_layered_candidate)
-                                if accepted_layered_candidate is not None
-                                else stable_digest({"construct_mode": construct_mode})
-                            ),
+                        cli_receipt,
+                        stage_key="construct",
+                        capability_key="structured_generate",
+                        input_digest=(
+                            stable_digest(accepted_layered_candidate)
+                            if accepted_layered_candidate is not None
+                            else stable_digest({"construct_mode": construct_mode})
                         ),
-                    )
-                for asset in (construction_asset, dual_asset, validation_asset):
-                    stored_object_uuid = await self._catalog_generation_object(tx, command.team_uuid, asset.stat)
-                    await self._insert_generation_artifact(
-                        tx,
-                        command=command,
-                        artifact_uuid=asset.artifact_uuid,
-                        artifact_type=asset.artifact_type,
-                        stored_object_uuid=stored_object_uuid,
-                        logical_handle=asset.stat.handle.value,
-                        content_digest=asset.stat.sha256,
-                        size_bytes=asset.stat.size_bytes,
-                        intake_item_uuid=state["intake_item_uuid"],
-                        intake_revision_uuid=state["intake_revision_uuid"],
-                        clean_artifact_uuid=state["clean_artifact_uuid"],
-                        clean_artifact_digest=state["clean_digest"],
-                        schema_key="lsrag.construction.default",
-                        schema_version="v1",
-                        schema_digest=schema["schema_digest"],
-                        validation_report_ref=validation_asset.stat.handle.value,
-                        validation_report_digest=validation_asset.stat.sha256,
-                        proof_ref=refs["proof_ref"],
-                        proof_digest=refs["proof_digest"],
-                    )
-                    await self._reference_object(
-                        tx,
-                        team_uuid=command.team_uuid,
-                        stored_object_uuid=stored_object_uuid,
-                        purpose="generation_artifact",
-                        owner_kind="generation_artifact",
-                        owner_uuid=asset.artifact_uuid,
-                        digest=asset.stat.sha256,
-                        size=asset.stat.size_bytes,
-                    )
-                for asset in (construction_asset, dual_asset, validation_asset):
-                    await self._advance_generation_pointer(
-                        tx,
-                        command=command,
-                        artifact_type=asset.artifact_type,
-                        artifact_uuid=asset.artifact_uuid,
-                    )
-                outbox_payload = {
-                    "schema_version": "mkb.vectorize-construct-intent.v1",
-                    "team_uuid": command.team_uuid,
-                    "task_uuid": command.task_uuid,
-                    "execution_uuid": command.execution_uuid,
-                    "construction_artifact_uuid": construction_artifact_uuid,
-                    "construction_ref": construction_asset.stat.handle.value,
-                    "construction_content_digest": construction_asset.stat.sha256,
-                    "dual_channel_artifact_uuid": dual_channel_artifact_uuid,
-                    "dual_channel_ref": dual_asset.stat.handle.value,
-                    "dual_channel_content_digest": dual_asset.stat.sha256,
-                    "construction_schema_digest": schema["schema_digest"],
-                    "content_full_recipe_version": "content_full.v1",
-                }
-                now = utc_now()
-                await tx.execute(
-                    "INSERT OR IGNORE INTO mkb_outbox "
-                    "(outbox_id,team_uuid,kind,payload_json,payload_digest,dedupe_key,status,available_at,created_at,updated_at,payload_extra) "
-                    "VALUES (?,?,?,?,?,?,'pending',?,?,?,'{}')",
-                    (
-                        uuid7(),
-                        command.team_uuid,
-                        "vectorize_construct",
-                        _json(outbox_payload),
-                        stable_digest(outbox_payload),
-                        f"vectorize-construct:{stable_digest(outbox_payload)}",
-                        now,
-                        now,
-                        now,
                     ),
                 )
+            for asset in (construction_asset, dual_asset, validation_asset):
+                stored_object_uuid = await self._catalog_generation_object(tx, command.team_uuid, asset.stat)
+                await self._insert_generation_artifact(
+                    tx,
+                    command=command,
+                    artifact_uuid=asset.artifact_uuid,
+                    artifact_type=asset.artifact_type,
+                    stored_object_uuid=stored_object_uuid,
+                    logical_handle=asset.stat.handle.value,
+                    content_digest=asset.stat.sha256,
+                    size_bytes=asset.stat.size_bytes,
+                    intake_item_uuid=state["intake_item_uuid"],
+                    intake_revision_uuid=state["intake_revision_uuid"],
+                    clean_artifact_uuid=state["clean_artifact_uuid"],
+                    clean_artifact_digest=state["clean_digest"],
+                    schema_key="lsrag.construction.default",
+                    schema_version="v1",
+                    schema_digest=schema["schema_digest"],
+                    validation_report_ref=validation_asset.stat.handle.value,
+                    validation_report_digest=validation_asset.stat.sha256,
+                    proof_ref=refs["proof_ref"],
+                    proof_digest=refs["proof_digest"],
+                )
+                await self._reference_object(
+                    tx,
+                    team_uuid=command.team_uuid,
+                    stored_object_uuid=stored_object_uuid,
+                    purpose="generation_artifact",
+                    owner_kind="generation_artifact",
+                    owner_uuid=asset.artifact_uuid,
+                    digest=asset.stat.sha256,
+                    size=asset.stat.size_bytes,
+                )
+            for asset in (construction_asset, dual_asset, validation_asset):
+                await self._advance_generation_pointer(
+                    tx,
+                    command=command,
+                    artifact_type=asset.artifact_type,
+                    artifact_uuid=asset.artifact_uuid,
+                )
+            outbox_payload = {
+                "schema_version": "mkb.vectorize-construct-intent.v1",
+                "team_uuid": command.team_uuid,
+                "task_uuid": command.task_uuid,
+                "execution_uuid": command.execution_uuid,
+                "construction_artifact_uuid": construction_artifact_uuid,
+                "construction_ref": construction_asset.stat.handle.value,
+                "construction_content_digest": construction_asset.stat.sha256,
+                "dual_channel_artifact_uuid": dual_channel_artifact_uuid,
+                "dual_channel_ref": dual_asset.stat.handle.value,
+                "dual_channel_content_digest": dual_asset.stat.sha256,
+                "construction_schema_digest": schema["schema_digest"],
+                "content_full_recipe_version": "content_full.v1",
+            }
+            now = utc_now()
+            await tx.execute(
+                "INSERT OR IGNORE INTO mkb_outbox "
+                "(outbox_id,team_uuid,kind,payload_json,payload_digest,dedupe_key,status,available_at,created_at,updated_at,payload_extra) "
+                "VALUES (?,?,?,?,?,?,'pending',?,?,?,'{}')",
+                (
+                    uuid7(),
+                    command.team_uuid,
+                    "vectorize_construct",
+                    _json(outbox_payload),
+                    stable_digest(outbox_payload),
+                    f"vectorize-construct:{stable_digest(outbox_payload)}",
+                    now,
+                    now,
+                    now,
+                ),
+            )
 
-            return material, {}, callback
+        return material, {}, callback

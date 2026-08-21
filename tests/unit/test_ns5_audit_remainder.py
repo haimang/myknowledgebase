@@ -26,7 +26,9 @@ def test_schema_freeze_fails_closed_on_missing_or_drifted_digest() -> None:
         snapshot, schema_key="lsrag.structure.default", schema_version="v1", registry_digest=digest
     )
     with pytest.raises(MkbError, match="GENERATION_SCHEMA_DRIFT"):
-        assert_frozen_schema_matches({}, schema_key="lsrag.structure.default", schema_version="v1", registry_digest=digest)
+        assert_frozen_schema_matches(
+            {}, schema_key="lsrag.structure.default", schema_version="v1", registry_digest=digest
+        )
     with pytest.raises(MkbError, match="GENERATION_SCHEMA_DRIFT"):
         assert_frozen_schema_matches(
             snapshot, schema_key="lsrag.structure.default", schema_version="v1", registry_digest="b" * 64
@@ -48,7 +50,7 @@ def test_structured_schema_is_not_dummy_object() -> None:
     assert schema.get("additionalProperties") is False
     assert schema != {"type": "object"}
     from src.contracts.inference.models import InferenceBinding, StructuredGenerateRequest
-    from src.llm_adapters.local_vllm import _structured_json_schema
+    from src.llm_adapters.local_vllm import _structured_json_schema, cleanse_guided_schema_for_vllm
 
     request = StructuredGenerateRequest(
         team_uuid="team-a",
@@ -66,7 +68,7 @@ def test_structured_schema_is_not_dummy_object() -> None:
         json_schema_digest="b" * 64,
     )
     sent = _structured_json_schema(request)
-    assert sent == schema
+    assert sent == cleanse_guided_schema_for_vllm(schema)
 
 
 def test_title_from_layered_context_meta() -> None:
@@ -131,7 +133,10 @@ def test_dedup_keeps_high_score_original_over_resolved_summary() -> None:
             hit_channel=channel,  # type: ignore[arg-type]
             payload_content=channel,
             coordinate=GenerationScopedCoordinate(
-                generation_artifact_uuid=gen, unit_id=unit, granularity=1, channel=channel  # type: ignore[arg-type]
+                generation_artifact_uuid=gen,
+                unit_id=unit,
+                granularity=1,
+                channel=channel,  # type: ignore[arg-type]
             ),
             granularity=1,
             generation_refs=RetrievalGenerationRefs(
@@ -158,9 +163,7 @@ def test_dedup_keeps_high_score_original_over_resolved_summary() -> None:
         )
         return _ResultWork(candidate=candidate, result=result)
 
-    kept = RetrievalPackMixin._deduplicate(
-        [work("summary", 0.10, "resolved"), work("original", 0.99, "not_needed")]
-    )
+    kept = RetrievalPackMixin._deduplicate([work("summary", 0.10, "resolved"), work("original", 0.99, "not_needed")])
     assert len(kept) == 1
     assert kept[0].result.hit_channel == "original"
     assert kept[0].result.ann_score == 0.99

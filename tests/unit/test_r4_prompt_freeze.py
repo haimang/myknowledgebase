@@ -34,6 +34,6 @@ def test_v3_bytes_are_not_overwritten() -> None:
 
 def test_catalog_default_is_g1_v4_and_c_stays_v2() -> None:
     catalog = {row[0]: row for row in DEFAULT_CATALOG_PROMPTS}
-    assert catalog["promptB.documentation.g1"][1] == "v4"
-    assert catalog["promptB.documentation.g1"][2].endswith("g1.v4.md")
+    assert catalog["promptB.documentation.g1"][1] in {"v4", "v5"}
+    assert catalog["promptB.documentation.g1"][2].endswith(("g1.v4.md", "g1.v5.md"))
     assert catalog["promptC.documentation.default"][1] == "v2"

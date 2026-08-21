@@ -46,15 +46,20 @@ def probe_concurrent_writes(connection: Any, *, restore_journal_mode: bool = Tru
 
 
 def probe_concurrent_writes_scratch(connect: Callable[[str], Any], scratch_path: Path) -> bool:
-    """Measure BEGIN CONCURRENT on a throwaway file, never the live database.
-
-    ``PRAGMA journal_mode`` is database-wide. Probing the production file —
-    even through a bypass connection — can flip a live ``wal`` database to
-    ``mvcc``. Scratch isolation keeps the constitution probe honest without
-    mutating the leaf worker's primary file.
-    """
+    """Measure BEGIN CONCURRENT on a throwaway file, never the live database."""
 
     scratch_path.parent.mkdir(parents=True, exist_ok=True)
+    prefix = scratch_path.name
+    try:
+        for leftover in list(scratch_path.parent.iterdir()):
+            if leftover.name.startswith(prefix):
+                try:
+                    leftover.unlink()
+                except OSError:
+                    pass
+    except OSError:
+        pass
+
     connection = connect(str(scratch_path))
     try:
         return probe_concurrent_writes(connection, restore_journal_mode=False)
@@ -65,11 +70,15 @@ def probe_concurrent_writes_scratch(connect: Callable[[str], Any], scratch_path:
                 closer()
             except Exception:
                 pass
-        for leftover in scratch_path.parent.glob(scratch_path.name + "*"):
-            try:
-                leftover.unlink()
-            except OSError:
-                pass
+        try:
+            for leftover in list(scratch_path.parent.iterdir()):
+                if leftover.name.startswith(prefix):
+                    try:
+                        leftover.unlink()
+                    except OSError:
+                        pass
+        except OSError:
+            pass
 
 
 def probe_native_vector(connection: Any) -> bool:

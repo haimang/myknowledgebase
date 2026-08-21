@@ -157,7 +157,7 @@ class TursoPersistence:
 
             return turso.connect(path)
 
-        scratch = self.database_path.parent / f".{self.database_path.name}.cw-probe"
+        scratch = self.database_path.parent / f"cw_probe_scratch_{self.database_path.stem}.db"
         self._cw_probe_cache = probe_concurrent_writes_scratch(connect, scratch)
         return self._cw_probe_cache
 

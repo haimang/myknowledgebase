@@ -225,6 +225,18 @@ class IntakeGenerationLiveMixin:
                 schema_key=schema_key,
                 schema_version=schema_version,
             )
+            schema_path = (
+                Path("data/schemas/mkb.b-json-cuts.v1.json")
+                if "cuts" in schema_key
+                else Path("data/schemas/lsrag.layered_content.v1.json")
+            )
+            schema_json = None
+            if schema_path.is_file():
+                try:
+                    schema_json = json.loads(schema_path.read_text(encoding="utf-8"))
+                except Exception:
+                    pass
+
             generation_uuid = uuid7()
             request = StructuredGenerateRequest(
                 team_uuid=command.team_uuid,
@@ -235,6 +247,7 @@ class IntakeGenerationLiveMixin:
                 system_text=config.prompt_text,
                 json_schema_ref=config.schema_ref,
                 json_schema_digest=config.schema_digest,
+                payload_extra={"json_schema": schema_json} if schema_json is not None else {},
                 invocation=InvocationContext(
                     trace_uuid=command.trace_uuid,
                     task_uuid=command.task_uuid,

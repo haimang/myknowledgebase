@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import json
 import math
+from collections.abc import Mapping
+from pathlib import Path
 from typing import Any, Protocol, runtime_checkable
 from urllib.parse import urlsplit
 
@@ -29,13 +32,63 @@ class SecretValueResolver(Protocol):
     def resolve(self, slot: str) -> str: ...
 
 
+def cleanse_guided_schema_for_vllm(schema: Mapping[str, Any]) -> dict[str, Any]:
+    """Cleanse json schema for Outlines / vLLM compatibility."""
+    if not isinstance(schema, Mapping):
+        return {}
+    cleaned = dict(schema)
+    cleaned.pop("$id", None)
+    cleaned.pop("$schema", None)
+    cleaned.pop("title", None)
+    cleaned.pop("description", None)
+
+    props = cleaned.get("properties")
+    if isinstance(props, Mapping):
+        new_props: dict[str, Any] = {}
+        for k, v in props.items():
+            if isinstance(v, Mapping):
+                v_clean = dict(v)
+                v_clean.pop("$id", None)
+                v_clean.pop("$schema", None)
+                v_clean.pop("title", None)
+                v_clean.pop("description", None)
+                items = v_clean.get("items")
+                if isinstance(items, Mapping):
+                    items_clean = dict(items)
+                    items_clean.pop("$id", None)
+                    items_clean.pop("$schema", None)
+                    items_clean.pop("title", None)
+                    items_clean.pop("description", None)
+                    v_clean["items"] = items_clean
+                new_props[k] = v_clean
+            else:
+                new_props[k] = v
+        cleaned["properties"] = new_props
+    return cleaned
+
+
 def _structured_json_schema(request: StructuredGenerateRequest) -> dict[str, Any]:
     """Send the checked-in layered schema. Dummy `{type: object}` is forbidden."""
 
     supplied = getattr(request, "json_schema", None)
+    if not supplied and hasattr(request, "payload_extra") and isinstance(request.payload_extra, Mapping):
+        supplied = request.payload_extra.get("json_schema")
     if isinstance(supplied, dict) and supplied:
-        return supplied
-    return load_layered_json_schema()
+        return cleanse_guided_schema_for_vllm(supplied)
+
+    schema_ref = getattr(request, "json_schema_ref", "") or ""
+    if "mkb.b-json-cuts" in schema_ref or "cuts" in schema_ref:
+        schema_path = Path(__file__).resolve().parents[2] / "data" / "schemas" / "mkb.b-json-cuts.v1.json"
+        if not schema_path.is_file():
+            schema_path = Path("data/schemas/mkb.b-json-cuts.v1.json")
+        if schema_path.is_file():
+            try:
+                cuts_schema = json.loads(schema_path.read_text(encoding="utf-8"))
+                if isinstance(cuts_schema, Mapping):
+                    return cleanse_guided_schema_for_vllm(cuts_schema)
+            except Exception:
+                pass
+    return cleanse_guided_schema_for_vllm(load_layered_json_schema())
 
 
 def _normalize_base_url(value: str) -> str:
@@ -103,7 +156,9 @@ class LocalVllmAdapter:
         self._secret_resolver = secret_resolver
         self.timeout_seconds = float(timeout_seconds)
         self.generate_timeout_seconds = (
-            float(generate_timeout_seconds) if generate_timeout_seconds is not None else max(self.timeout_seconds, 180.0)
+            float(generate_timeout_seconds)
+            if generate_timeout_seconds is not None
+            else max(self.timeout_seconds, 180.0)
         )
         self._transport = transport
         self._client: httpx.AsyncClient | None = None
@@ -141,7 +196,9 @@ class LocalVllmAdapter:
         if len(vectors) != len(request.texts) or not vectors:
             raise MkbError("INFERENCE_VALIDATION_RESPONSE", "Embedding response is malformed", 502)
         dimension = len(vectors[0])
-        if dimension == 0 or any(len(vector) != dimension or not all(math.isfinite(value) for value in vector) for vector in vectors):
+        if dimension == 0 or any(
+            len(vector) != dimension or not all(math.isfinite(value) for value in vector) for vector in vectors
+        ):
             raise MkbError("INFERENCE_VALIDATION_RESPONSE", "Embedding response is malformed", 502)
         try:
             return EmbeddingResponse(
@@ -295,9 +352,7 @@ class LocalVllmAdapter:
     @staticmethod
     def _assert_provider_model(response: dict[str, Any], binding: InferenceBinding) -> None:
         reported_model = response.get("model")
-        if reported_model is not None and (
-            not isinstance(reported_model, str) or reported_model != binding.model_key
-        ):
+        if reported_model is not None and (not isinstance(reported_model, str) or reported_model != binding.model_key):
             raise MkbError("INFERENCE_SPACE_VIOLATION", "Inference response conflicts with the frozen binding", 422)
 
     @staticmethod

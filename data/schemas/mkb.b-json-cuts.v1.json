@@ -1,0 +1,29 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "mkb://schemas/mkb.b-json-cuts.v1",
+  "title": "MKB B-JSON cuts v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "cuts"],
+  "properties": {
+    "schema_version": { "const": "mkb.b-json-cuts.v1" },
+    "context_meta": {
+      "type": "object",
+      "additionalProperties": true
+    },
+    "cuts": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["start", "end"],
+        "properties": {
+          "title": { "type": ["string", "null"] },
+          "start": { "type": "string", "minLength": 1 },
+          "end": { "type": "string", "minLength": 1 }
+        }
+      }
+    }
+  }
+}
