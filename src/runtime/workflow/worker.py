@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from contextlib import suppress
 from typing import Literal
 
@@ -12,6 +13,8 @@ from src.runtime.workflow.helpers import canonical_outcome_digest
 from src.runtime.workflow.runtime import WorkflowRuntime
 from src.runtime.workflow.runtime_outcome import _safe_persisted_error
 from src.runtime.workflow.types import ProcessStageHandler
+
+logger = logging.getLogger(__name__)
 
 
 def _safe_error_message(message: str) -> str:
@@ -121,6 +124,13 @@ class WorkflowWorker:
                 # Unexpected commit failures can be transient (for example a
                 # database adapter interruption).  The Process retry policy owns
                 # the bounded retry/recovery decision; do not expose raw details.
+                # The traceback stays server-side only so the failure stays
+                # diagnosable without leaking details through the API.
+                logger.exception(
+                    "outcome commit failed for process %s step %s",
+                    claim.command.process_uuid,
+                    claim.command.process_key,
+                )
                 self._discard_pending(claim.command)
                 await self.runtime.accept_outcome(
                     self._failure_outcome(

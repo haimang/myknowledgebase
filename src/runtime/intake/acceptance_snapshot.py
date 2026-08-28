@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Awaitable, Callable, Mapping
 from typing import Any
 
-from src.contracts.common.errors import MkbError
+from src.contracts.common.errors import ConflictError, MkbError
 from src.contracts.common.ids import stable_digest, uuid7
 from src.contracts.common.time import utc_now
 from src.contracts.runtime.models import ProcessCommand
@@ -65,6 +65,25 @@ class IntakeAcceptanceSnapshotMixin:
             next_state["clean_cas_digest"] = clean_stat.sha256
             next_state["clean_cas_size"] = clean_stat.size_bytes
             next_state["clean_cas_handle"] = clean_stat.handle.value
+            # The replay decision must be made before the output state is
+            # materialized: the fingerprint replay below reuses an existing
+            # revision row, and downstream processes commit generation
+            # artifacts that FK-reference exactly the revision uuid published
+            # here.  Deciding inside the outcome TX came too late — the
+            # materialized state kept the fresh uuid, which was never
+            # inserted, and the next commit died on a FOREIGN KEY violation.
+            async with self._persistence.transaction() as probe_tx:
+                initial_semantics = await self._initial_semantics_tx(probe_tx, state)
+                replay_fingerprint = self._semantic_fingerprint(initial_semantics)
+                fresh_revision_uuid = str(state["intake_revision_uuid"])
+                replayed_rev = await probe_tx.fetchone(
+                    "SELECT intake_revision_uuid FROM mkb_intake_revisions "
+                    "WHERE team_uuid=? AND intake_item_uuid=? AND revision_fingerprint=?",
+                    (command.team_uuid, state["intake_item_uuid"], replay_fingerprint),
+                )
+            if replayed_rev is not None:
+                state["intake_revision_uuid"] = replayed_rev["intake_revision_uuid"]
+                next_state["intake_revision_uuid"] = replayed_rev["intake_revision_uuid"]
             material = self._material(
                 command,
                 next_state,
@@ -160,14 +179,19 @@ class IntakeAcceptanceSnapshotMixin:
                     "WHERE team_uuid=? AND intake_item_uuid=?",
                     (state["intake_revision_uuid"], now, command.team_uuid, state["intake_item_uuid"]),
                 )
-                initial_semantics = await self._initial_semantics_tx(tx, state)
-                fingerprint = self._semantic_fingerprint(initial_semantics)
+                tx_initial_semantics = await self._initial_semantics_tx(tx, state)
+                fingerprint = self._semantic_fingerprint(tx_initial_semantics)
                 existing_rev = await tx.fetchone(
                     "SELECT intake_revision_uuid FROM mkb_intake_revisions "
                     "WHERE team_uuid=? AND intake_item_uuid=? AND revision_fingerprint=?",
                     (command.team_uuid, state["intake_item_uuid"], fingerprint),
                 )
                 if existing_rev is None:
+                    if state["intake_revision_uuid"] != fresh_revision_uuid:
+                        raise ConflictError(
+                            "Replayed intake revision disappeared before commit",
+                            409,
+                        )
                     max_ordinal = await tx.fetchone(
                         "SELECT MAX(revision_ordinal) AS ordinal FROM mkb_intake_revisions "
                         "WHERE team_uuid=? AND intake_item_uuid=?",
@@ -197,11 +221,13 @@ class IntakeAcceptanceSnapshotMixin:
                             now,
                         ),
                     )
-                    for entry in initial_semantics:
+                    for entry in tx_initial_semantics:
                         await self._insert_revision_semantic(tx, command.team_uuid, state["intake_revision_uuid"], entry, now)
-                else:
-                    state["intake_revision_uuid"] = existing_rev["intake_revision_uuid"]
-                    next_state["intake_revision_uuid"] = existing_rev["intake_revision_uuid"]
+                elif existing_rev["intake_revision_uuid"] != state["intake_revision_uuid"]:
+                    raise ConflictError(
+                        "Intake revision was adopted concurrently under the same fingerprint",
+                        409,
+                    )
                 for artifact_uuid, owner_snapshot, owner_revision, role, digest, size, handle, object_uuid in (
                     (
                         state["raw_artifact_uuid"],
