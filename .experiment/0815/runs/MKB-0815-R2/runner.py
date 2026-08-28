@@ -113,6 +113,7 @@ def _settings() -> Settings:
         inference_generate_timeout_seconds=900,
         rate_limit_ip_per_min=10_000,
         rate_limit_token_per_min=10_000,
+        http_trusted_hosts="127.0.0.1,localhost,testserver",
     )
 
 
