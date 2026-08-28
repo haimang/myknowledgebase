@@ -8,11 +8,11 @@
 >
 > **维护者**：MKB maintainers
 >
-> **最后核对（against HEAD）**：2026-08-21 @ `86037dd`（`main`）
+> **最后核对（against HEAD）**：2026-08-28 @ `d57a971`（`main`）
 >
 > **对外地址**：N/A；仓库未提供部署清单、生产域名或已发布实例
 >
-> **总体状态**：核心合同、API、持久化、工作流、对象存储、检索和观测面已落地；NS5–NS8 把 fail-closed 边界、系统写 g0、quoted cuts 与 10k 自适应分段写入代码；确定性离线配置可本地运行；当前全量测试为 `558 passed / 11 failed`，Ruff 为 0；R4 真实推理评估仍为 `conditional-ready`；R5/R6/R7 代码相已完成，live 发车仍待业主授权
+> **总体状态**：核心合同、API、持久化、工作流、对象存储、检索和观测面已落地；NS5–NS8 把 fail-closed 边界、系统写 g0、quoted cuts 与 10k 自适应分段写入代码；确定性离线配置可本地运行；当前全量测试为 `561 passed / 11 failed`，Ruff 为 0；R4 真实推理评估仍为 `conditional-ready`；R7 已于 2026-08-28 实弹 4/4 入库（见 [`NS9-0815-R7-live-firing-closure.md`](docs/closure/new-start/NS9-0815-R7-live-firing-closure.md)），R4-R6 的既有结论不变
 
 状态词说明：`已落地` 表示有代码和本仓证据；`条件可用` 表示依赖特定配置或仍有未闭合验证；`合同已落地 / 未接线` 表示类型、流程或拒绝语义存在，但默认组合根没有可运行实现；`代码已落地 / live 待验证` 表示实现与本地测试在，但真实推理发车尚未授权；`计划中` 表示只有方案；`占位` 表示目录或接口预留但无业务实现。本文不以 `frozen`、历史 closure 或单次样例代替当前 `live` 证据。
 
@@ -41,9 +41,9 @@ MKB 是一个内部服务，而不是面向终端用户的聊天产品。调用�
 | 浏览器渲染、OCR、Vision、文档/网页 LLM 清洗 | `合同已落地 / 未接线` | 工作流和稳定拒绝路径存在；[`api/app.py`](api/app.py) 未注入 browser/OCR/clean-LLM runtime |
 | registered API scatter | `已落地（调用方冻结输入）` | [`intake/api/registry.py`](intake/api/registry.py)、[`src/workflows/builtin_scatter.py`](src/workflows/builtin_scatter.py)；不是实时供应商客户端 |
 | 离线 stub 生成与 deterministic-hash 检索 | `已落地` | 默认 `MKB_NS1_CLI_MODE=stub`、`MKB_LIVE_INFERENCE=false`；README 离线 smoke 通过 |
-| 本地 vLLM / Claude CLI 真实推理 | `条件可用` | 适配器、cuts schema 路由与 10k 分段已接线；最新 R4 四个真实 cell 均未通过；R6/R7 live 尚未发车 |
+| 本地 vLLM / Claude CLI 真实推理 | `条件可用` | 适配器、cuts schema 路由与 10k 分段已接线；R7 四格已于 2026-08-28 实弹 4/4 入库（N-A3/N-A6/N-A2 走 NI，Q-A5 走 Qwen local-vLLM cuts）；R4 的 conditional-ready 结论不变 |
 | 发布栅栏、双通道向量与 context-only retrieval | `已落地` | [`src/services/retrieval/`](src/services/retrieval/)；检索必须带 `namespace_key` 或 `namespace_uuid` |
-| 系统写 g0、quoted cuts、10k 自适应分段 | `代码已落地 / live 待验证` | [`src/runtime/intake/generation_assemble.py`](src/runtime/intake/generation_assemble.py)、[`data/schemas/mkb.b-json-cuts.v1.json`](data/schemas/mkb.b-json-cuts.v1.json)、g1 catalog `v5`；NS7/NS8 closure 等待业主 live |
+| 系统写 g0、quoted cuts、10k 自适应分段 | `已落地（live 已验证）` | [`src/runtime/intake/generation_assemble.py`](src/runtime/intake/generation_assemble.py)、[`data/schemas/mkb.b-json-cuts.v1.json`](data/schemas/mkb.b-json-cuts.v1.json)、g1 catalog `v5`；R7 实弹 4/4（88→174 向量） |
 | TrustedHost、请求体上限、空 CIDR 不信 XFF | `已落地` | [`api/app.py`](api/app.py)、[`src/runtime/security.py`](src/runtime/security.py) |
 | 前端与静态站点 | `占位` | `frontend/`、`public/` 仅有 `.gitkeep` |
 | 生产部署与公开 URL | `未提供` | 仓库无 Dockerfile、Compose、Kubernetes、CI/CD 或 Sites hosting 配置 |
@@ -500,7 +500,7 @@ curl -fsS -X POST "$MKB_BASE_URL/v1/teams/$TEAM_UUID/retrieval:search" \
 | `tests/integration` | 跨服务/持久化组合 | 5 collected；全量中无失败 |
 | `tests/intake` | 来源类型与清洗 | 19 collected；1 failed（REA HTML 换行期望） |
 | `tests/e2e` | 完整 Task、scatter、lifecycle、publication、retrieval | 20 collected；10 failed，见 §12.2 K1 |
-| 全量 `pytest` | 全仓 569 个 collected case | `558 passed, 11 failed`（约 479 秒），**不是全绿** |
+| 全量 `pytest` | 全仓 572 个 collected case | `561 passed, 11 failed`，**不是全绿**（11 项为存量，见 §12.2 K1） |
 | Ruff | `E/F/I/UP/B` | `All checks passed` |
 | `uv build` | sdist + wheel | `PASS`；wheel 含 `001`–`017` SQL 与 `src/contracts/lsrag/*.json`；有 `project.license` TOML table 的 setuptools deprecation warning |
 | 新 Turso 库 readiness smoke | `/ready` REQUIRED 组件 | 全部为真，含 `write_path_ready` |
@@ -610,7 +610,7 @@ curl -fsS -X POST "$MKB_BASE_URL/v1/teams/$TEAM_UUID/retrieval:search" \
 | K1 | 全量 pytest 为 `558 passed / 11 failed` | 不能声明全绿。10 个 e2e + 1 个 intake：5 个检索用例未带必填 namespace；2 个 scatter 仍是 sqlite3-on-Turso `disk I/O error`（`NS1-V11` / `NS6-VF86`）；`rebuild_and_metadata` 进入 failed；`source_capability_paths` 停在 `running`；`live_profile` 在默认环境返回 503；REA intake 仍期望把 `<br>` 压成空格，与已落地的段落换行冲突 | 先让 e2e 带上 Layer A namespace；harness 去掉 sqlite3-on-Turso；对齐 HTML 换行合同；再无排除重跑全量 |
 | K2 | Ruff 静态门 | 本次 `uv run ruff check .` 为 0 | 回归时保持 0 |
 | K3 | R4 四个 live cell 均失败 | 真实 A/Markdown/B/C 链不能称为 live；失败包括 g0 anchor/granularity 与 Claude CLI empty result | 修复并重跑 [`after-MKB-0815-R4-first-wave.md`](docs/eval/new-start/after-MKB-0815-R4-first-wave.md) 中的 corpus/cell；R5 代码相不能代替这次记分 |
-| K4 | R5/R6/R7 live 未发车 | 系统写 g0、quoted cuts、v5 prompt、10k 分段和 vLLM cuts 路由已在代码中；NS7/NS8 状态为 `implementation-complete-awaiting-live-verification`。[`R5-system-g0-and-quoted-cuts.md`](docs/eval/new-start/R5-system-g0-and-quoted-cuts.md) 页眉仍写 `WAIT_OWNER_TO_EXECUTE`，只表示 live 枪未开 | 业主授权 `-r6`/`-r7` 发车并留下可复现记分 |
+| K4 | R5/R6/R7 live 未发车 → **R7 已发车（2026-08-28）** | R7 四格实弹 4/4 入库（88→174 向量、检索无 422），发车中修复 NS9-FX1（vLLM grammar 拒绝 `contains`）与 NS9-FX2（identity replay 悬空 revision 指针），见 [`NS9-0815-R7-live-firing-closure.md`](docs/closure/new-start/NS9-0815-R7-live-firing-closure.md)；R5/R6 的历史结论不变 | 已闭合；后续波次承接 Q 通道 megafile 耗时归因 |
 | K5 | browser/OCR/Vision/doc-LLM/web-LLM 未注入 | 对应 source profile 会稳定拒绝或不可用 | 部署经过 review 的 capability，实现注入并补 readiness/live test |
 | K6 | registered API 没有供应商客户端 | 不能实时调用 chinatax/domain/realestate；分页与 exhaust 由调用方冻结证明 | 若产品要求实时连接器，另建 token/client/retry/pagination/egress 边界并验收 |
 | K7 | `.env.example` 端口与 Settings 默认不一致，且 `.env` 不自动加载 | 新贡献者可能连接错误 endpoint 或以为配置已生效 | 统一端口/加载政策并加配置测试；此前以 `Settings` 和显式 export 为准 |
@@ -660,3 +660,4 @@ curl -fsS -X POST "$MKB_BASE_URL/v1/teams/$TEAM_UUID/retrieval:search" \
 |---|---|---|---|
 | v1.0 | 2026-08-20 | Codex（按 MKB maintainers 委托） | 扫描全仓并按架构 README 模板重写；对齐 `5e64a1e` 的 API、运行时、配置、测试和 R4/R5 状态 |
 | v1.1 | 2026-08-21 | Grok（按 MKB maintainers 委托） | 对账 `86037dd`：FastAPI 0.141.1、migration 001–017、g1 v5/cuts、必填 namespace、`write_path_ready`、TrustedHost/XFF/body cap、全量 `558/11`、Ruff 0；R5 改为代码已落地 / live 待验证 |
+| v1.2 | 2026-08-28 | Antigravity Pair Engineer | R7 实弹 4/4（88→174 向量、Layer A 检索无 422）：系统写 g0/quoted cuts/10k 分段改 `已落地（live 已验证）`；发车中修复 NS9-FX1/FX2；全量 `561/11`（572 collected）|
