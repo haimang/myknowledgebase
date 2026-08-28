@@ -10,7 +10,8 @@ from src.contracts.inference.models import (
     StructuredGenerateRequest,
     StructuredGenerateResponse,
 )
-from src.llm_adapters.local_vllm import _structured_json_schema
+from src.contracts.lsrag.layered_content import load_layered_json_schema
+from src.llm_adapters.local_vllm import _structured_json_schema, cleanse_guided_schema_for_vllm
 from src.runtime.inference.claude_cli import ClaudeCliResult
 
 
@@ -196,3 +197,44 @@ async def test_ns8_t02_live_structured_generate_schema_passthrough() -> None:
     schema_in_req = getattr(call_req, "json_schema", None) or call_req.payload_extra.get("json_schema")
     assert isinstance(schema_in_req, dict)
     assert "cuts" in schema_in_req.get("properties", {})
+
+
+def _iter_keys(node: object) -> set[str]:
+    keys: set[str] = set()
+    if isinstance(node, dict):
+        for key, value in node.items():
+            keys.add(key)
+            keys |= _iter_keys(value)
+    elif isinstance(node, list):
+        for item in node:
+            keys |= _iter_keys(item)
+    return keys
+
+
+def test_ns9_t01_vllm_cleansed_layered_schema_has_no_contains() -> None:
+    """NS9-T01: layered schema 'contains' (unsupported by vLLM grammar) must be stripped recursively."""
+    layered_schema = load_layered_json_schema()
+    assert "contains" in _iter_keys(layered_schema), "precondition: checked-in schema uses contains"
+
+    cleansed = cleanse_guided_schema_for_vllm(layered_schema)
+    assert "contains" not in _iter_keys(cleansed), "cleanse must strip 'contains' at every depth"
+    assert cleansed.get("type") == "object"
+    assert "layered_content" in cleansed.get("properties", {})
+
+
+def test_ns9_t02_structured_request_schema_via_payload_extra_strips_contains() -> None:
+    """NS9-T02: payload_extra-supplied schema goes through the same recursive cleanse."""
+    request = StructuredGenerateRequest(
+        team_uuid="01a00000-0000-7000-8000-000000000000",
+        binding=_make_dummy_binding(),
+        prompt_ref="mkb://prompts/x",
+        prompt_digest="a" * 64,
+        input_text="hello",
+        system_text="sys",
+        json_schema_ref="mkb://schemas/lsrag.layered_content.v1",
+        json_schema_digest="b" * 64,
+        payload_extra={"json_schema": load_layered_json_schema()},
+        invocation=None,
+    )
+    wire_schema = _structured_json_schema(request)
+    assert "contains" not in _iter_keys(wire_schema)

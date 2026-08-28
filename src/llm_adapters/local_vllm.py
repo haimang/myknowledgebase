@@ -32,39 +32,32 @@ class SecretValueResolver(Protocol):
     def resolve(self, slot: str) -> str: ...
 
 
+_GRAMMAR_METADATA_KEYS = ("$id", "$schema", "title", "description")
+# vLLM guided grammars (xgrammar) reject assertion keywords they do not
+# implement with a hard 400 ("Unimplemented keys"), which kills the whole
+# generate call. `contains` in the layered schema is such a keyword; the
+# g0-presence invariant is enforced by pipeline validation instead.
+_GRAMMAR_UNSUPPORTED_KEYWORDS = ("contains", "minContains", "maxContains")
+
+
+def _cleanse_guided_node(node: Any) -> Any:
+    if isinstance(node, Mapping):
+        cleaned: dict[str, Any] = {}
+        for key, value in node.items():
+            if key in _GRAMMAR_UNSUPPORTED_KEYWORDS or key in _GRAMMAR_METADATA_KEYS:
+                continue
+            cleaned[key] = _cleanse_guided_node(value)
+        return cleaned
+    if isinstance(node, list):
+        return [_cleanse_guided_node(item) for item in node]
+    return node
+
+
 def cleanse_guided_schema_for_vllm(schema: Mapping[str, Any]) -> dict[str, Any]:
-    """Cleanse json schema for Outlines / vLLM compatibility."""
+    """Cleanse json schema for Outlines / vLLM compatibility at every depth."""
     if not isinstance(schema, Mapping):
         return {}
-    cleaned = dict(schema)
-    cleaned.pop("$id", None)
-    cleaned.pop("$schema", None)
-    cleaned.pop("title", None)
-    cleaned.pop("description", None)
-
-    props = cleaned.get("properties")
-    if isinstance(props, Mapping):
-        new_props: dict[str, Any] = {}
-        for k, v in props.items():
-            if isinstance(v, Mapping):
-                v_clean = dict(v)
-                v_clean.pop("$id", None)
-                v_clean.pop("$schema", None)
-                v_clean.pop("title", None)
-                v_clean.pop("description", None)
-                items = v_clean.get("items")
-                if isinstance(items, Mapping):
-                    items_clean = dict(items)
-                    items_clean.pop("$id", None)
-                    items_clean.pop("$schema", None)
-                    items_clean.pop("title", None)
-                    items_clean.pop("description", None)
-                    v_clean["items"] = items_clean
-                new_props[k] = v_clean
-            else:
-                new_props[k] = v
-        cleaned["properties"] = new_props
-    return cleaned
+    return _cleanse_guided_node(schema)
 
 
 def _structured_json_schema(request: StructuredGenerateRequest) -> dict[str, Any]:
