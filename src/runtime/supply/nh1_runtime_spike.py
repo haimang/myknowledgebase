@@ -355,6 +355,8 @@ def _first_version_line(binary: Path) -> str:
             )
         except (OSError, subprocess.TimeoutExpired):
             continue
+        if completed.returncode != 0:
+            continue
         line = next((item.strip() for item in completed.stdout.splitlines() if item.strip()), "")
         if line:
             return line[:256]
