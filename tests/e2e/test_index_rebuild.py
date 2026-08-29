@@ -99,9 +99,13 @@ def test_scoped_index_rebuild_promotes_generation_without_new_intake_revision(tm
                     "json_prompt_id": "promptB.json.generic",
                     "source": {
                         "source_kind": "inline_payload",
+                        "realm": "documentation",
+                        "type": "article",
+                        "channel": "general",
+                        "source_name": "test-fixture",
                         "external_key": "index-rebuild-document",
                         "content": "A retained document must survive an index generation rebuild.",
-                    }
+                    },
                 },
                 "audit": _audit(team_uuid, ingest_task_uuid, ingest_trace_uuid),
             },
@@ -290,9 +294,13 @@ def test_index_rebuild_stale_fence_fails_without_cutover_and_old_generation_rema
                     "json_prompt_id": "promptB.json.generic",
                     "source": {
                         "source_kind": "inline_payload",
+                        "realm": "documentation",
+                        "type": "article",
+                        "channel": "general",
+                        "source_name": "test-fixture",
                         "external_key": f"index-rebuild-stale-{drift}",
                         "content": "The old active generation remains grounded after a rejected rebuild.",
-                    }
+                    },
                 },
                 "audit": _audit(team_uuid, ingest_task_uuid, ingest_trace_uuid),
             },

@@ -17,6 +17,13 @@ def _optional_text(value: object) -> str | None:
     return text or None
 
 
+def _required_text(value: object, field: str) -> str:
+    text = _optional_text(value)
+    if text is None or text.casefold() == "unknown":
+        raise ValueError(f"ChinaTax {field} is required")
+    return text
+
+
 def unpack_chinatax_envelope(envelope: ChinaTaxEnvelope) -> list[ChinaTaxRawMember]:
     raw = envelope.searchResultAll.searchTotal
     if raw is None:
@@ -30,8 +37,8 @@ def parse_chinatax_member(raw: ChinaTaxRawMember) -> MappedProviderMember:
         raise ValueError("ChinaTax content id must not be blank")
     parsed = ChinaTaxParsedMember(
         content_id=content_id,
-        type=_optional_text(raw.label) or "unknown",
-        channel=_optional_text(raw.column) or "unknown",
+        type=_required_text(raw.label, "label"),
+        channel=_required_text(raw.column, "column"),
         title=_optional_text(raw.title),
         description=_optional_text(raw.content),
         link=_optional_text(raw.url),

@@ -48,6 +48,10 @@ def test_namespace_is_required_then_real_layer_a_key_hits(tmp_path: Path) -> Non
                     "json_prompt_id": "promptB.json.generic",
                     "source": {
                         "source_kind": "inline_payload",
+                        "realm": "documentation",
+                        "type": "article",
+                        "channel": "general",
+                        "source_name": "test-fixture",
                         "external_key": "nh1-layer-a-golden",
                         "content": source_content,
                         "media_type": "text/plain",

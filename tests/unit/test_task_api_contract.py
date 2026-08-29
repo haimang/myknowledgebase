@@ -41,9 +41,13 @@ def _body(team_uuid: str, task_uuid: str, trace_uuid: str) -> dict[str, object]:
             "json_prompt_id": "promptB.json.generic",
             "source": {
                 "source_kind": "inline_payload",
+                "realm": "documentation",
+                "type": "article",
+                "channel": "general",
+                "source_name": "test-fixture",
                 "external_key": "contract-test",
                 "content": "safe body",
-            }
+            },
         },
         "audit": {
             "schema_version": "mkb.task-audit.v1",

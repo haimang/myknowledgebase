@@ -34,6 +34,10 @@ def _payload(**extra: object) -> dict[str, object]:
     value: dict[str, object] = {
         "source": {
             "source_kind": "inline_payload",
+            "realm": "documentation",
+            "type": "article",
+            "channel": "general",
+            "source_name": "test-fixture",
             "external_key": "compression-channel",
             "content": "source text",
         },
@@ -219,7 +223,9 @@ def test_adapter_keeps_content_and_drops_reasoning() -> None:
     )
     assert text == '{"ok":true}'
     with pytest.raises(MkbError) as rejected:
-        LocalVllmAdapter._completion_content({"choices": [{"message": {"reasoning": "only thinking", "content": None}}]})
+        LocalVllmAdapter._completion_content(
+            {"choices": [{"message": {"reasoning": "only thinking", "content": None}}]}
+        )
     assert rejected.value.code == "INFERENCE_VALIDATION_RESPONSE"
 
 
@@ -275,7 +281,10 @@ def test_local_inference_errors_are_salvageable_only_with_cli() -> None:
     assert bare._can_salvage_local_inference(empty, command) is False
     assert with_cli._can_salvage_local_inference(empty, command) is True
     assert with_cli._can_salvage_local_inference(MkbError("PROMPT_HASH_MISMATCH", "drift", 503), command) is False
-    assert with_cli._can_salvage_local_inference(MkbError("CONSTRUCT_KERNEL_SUMMARY_INVALID", "bad json", 422), command) is True
+    assert (
+        with_cli._can_salvage_local_inference(MkbError("CONSTRUCT_KERNEL_SUMMARY_INVALID", "bad json", 422), command)
+        is True
+    )
     low_command = command.model_copy(update={"task_priority": "low"})
     assert with_cli._can_salvage_local_inference(empty, low_command) is False
 

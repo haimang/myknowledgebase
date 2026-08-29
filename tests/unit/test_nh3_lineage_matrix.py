@@ -33,9 +33,7 @@ async def _task_service(tmp_path: Path):
     teams = TeamService(persistence)
     service = TaskService(persistence, teams, DomainEventWriter())
     team_uuid = uuid7()
-    await teams.create(
-        TeamCreateRequest(schema_version="mkb.team.v1", team_uuid=team_uuid, name="nh3-lineage")
-    )
+    await teams.create(TeamCreateRequest(schema_version="mkb.team.v1", team_uuid=team_uuid, name="nh3-lineage"))
     return persistence, service, team_uuid
 
 
@@ -45,7 +43,15 @@ def _request(team_uuid: str, *, intent: str, task_uuid: str | None = None) -> Ta
     payload = (
         {
             "json_prompt_id": "promptB.json.generic",
-            "source": {"source_kind": "inline_payload", "external_key": task_uuid, "content": "lineage"},
+            "source": {
+                "source_kind": "inline_payload",
+                "realm": "documentation",
+                "type": "article",
+                "channel": "general",
+                "source_name": "test-fixture",
+                "external_key": task_uuid,
+                "content": "lineage",
+            },
         }
         if intent == "intake.ingest"
         else {"intake_item_uuid": uuid7()}

@@ -16,7 +16,9 @@ from src.runtime.config import Settings
 from src.runtime.intake_pipeline import IntakePipeline
 
 
-def _task_request(*, team_uuid: str, task_uuid: str, trace_uuid: str, external_key: str, content: str) -> dict[str, object]:
+def _task_request(
+    *, team_uuid: str, task_uuid: str, trace_uuid: str, external_key: str, content: str
+) -> dict[str, object]:
     return {
         "schema_version": "mkb.task.v1",
         "team_uuid": team_uuid,
@@ -27,10 +29,14 @@ def _task_request(*, team_uuid: str, task_uuid: str, trace_uuid: str, external_k
             "json_prompt_id": "promptB.json.generic",
             "source": {
                 "source_kind": "inline_payload",
+                "realm": "documentation",
+                "type": "article",
+                "channel": "general",
+                "source_name": "test-fixture",
                 "external_key": external_key,
                 "content": content,
                 "media_type": "text/plain",
-            }
+            },
         },
         "audit": {
             "schema_version": "mkb.task-audit.v1",
@@ -45,7 +51,9 @@ def _task_request(*, team_uuid: str, task_uuid: str, trace_uuid: str, external_k
     }
 
 
-def _wait_for_terminal(client: TestClient, *, team_uuid: str, task_uuid: str, headers: dict[str, str]) -> dict[str, object]:
+def _wait_for_terminal(
+    client: TestClient, *, team_uuid: str, task_uuid: str, headers: dict[str, str]
+) -> dict[str, object]:
     deadline = time.monotonic() + 8
     while time.monotonic() < deadline:
         response = client.get(f"/v1/teams/{team_uuid}/tasks/{task_uuid}", headers=headers)

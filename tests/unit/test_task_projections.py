@@ -34,7 +34,15 @@ async def _service(tmp_path: Path) -> tuple[SqlitePersistence, TaskService, str,
             "request_intent": "intake.ingest",
             "payload": {
                 "json_prompt_id": "promptB.json.generic",
-                "source": {"source_kind": "inline_payload", "external_key": "one", "content": "hello"},
+                "source": {
+                    "source_kind": "inline_payload",
+                    "realm": "documentation",
+                    "type": "article",
+                    "channel": "general",
+                    "source_name": "test-fixture",
+                    "external_key": "one",
+                    "content": "hello",
+                },
             },
             "audit": {
                 "schema_version": "mkb.task-audit.v1",
@@ -214,7 +222,9 @@ async def test_generation_restart_and_lineage_are_task_scoped_summaries(tmp_path
         assert bindings[0]["actual_binding_digest"] == bindings[1]["actual_binding_digest"] == actual_digest
         assert bindings[0]["actual_binding_state"] == bindings[1]["actual_binding_state"] == "sealed"
         assert bindings[0]["seal_generation"] == bindings[1]["seal_generation"] == 1
-        assert bindings[0]["actual_selected_route_digest"] == bindings[1]["actual_selected_route_digest"] == route_digest
+        assert (
+            bindings[0]["actual_selected_route_digest"] == bindings[1]["actual_selected_route_digest"] == route_digest
+        )
         assert bindings[0]["actual_clean_process_key"] == bindings[1]["actual_clean_process_key"]
         for key in ("workflow_revision_uuid", "compiled_digest", "domain_binding_digest"):
             assert bindings[0][key] == bindings[1][key]
@@ -277,7 +287,15 @@ async def test_task_list_filters_and_cursor_are_opaque_and_filter_bound(tmp_path
                 "deadline_at": "2099-01-01T00:00:00Z",
                 "payload": {
                     "json_prompt_id": "promptB.json.generic",
-                    "source": {"source_kind": "inline_payload", "external_key": "two", "content": "world"},
+                    "source": {
+                        "source_kind": "inline_payload",
+                        "realm": "documentation",
+                        "type": "article",
+                        "channel": "general",
+                        "source_name": "test-fixture",
+                        "external_key": "two",
+                        "content": "world",
+                    },
                 },
                 "audit": {
                     "schema_version": "mkb.task-audit.v1",

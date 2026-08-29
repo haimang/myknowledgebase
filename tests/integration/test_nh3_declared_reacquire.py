@@ -93,9 +93,7 @@ async def _declared_path(tmp_path: Path, name: str, browser_body: str):
     )
     async with persistence.transaction() as tx:
         await append_representation_tx(tx, first)
-        execution = await tx.fetchone(
-            "SELECT * FROM mkb_executions WHERE execution_uuid=?", (ids["execution_uuid"],)
-        )
+        execution = await tx.fetchone("SELECT * FROM mkb_executions WHERE execution_uuid=?", (ids["execution_uuid"],))
         assert execution is not None
         context = await runtime._typed_route_context_tx(tx, execution)  # noqa: SLF001
     decision = runtime._route_decision(  # noqa: SLF001
@@ -119,6 +117,10 @@ async def _declared_path(tmp_path: Path, name: str, browser_body: str):
         "payload": {
             "source": {
                 "source_kind": "http_resource",
+                "realm": "documentation",
+                "type": "article",
+                "channel": "general",
+                "source_name": "test-fixture",
                 "external_key": f"{name}-source",
                 "url": "https://public.example/reacquire",
                 "acquisition_mode": "static",
@@ -140,9 +142,7 @@ async def _declared_path(tmp_path: Path, name: str, browser_body: str):
 
 @pytest.mark.asyncio
 async def test_declared_static_to_browser_history_len_2(tmp_path: Path) -> None:
-    persistence, first, rows, calls = await _declared_path(
-        tmp_path, "declared-two", "<main>browser main text</main>"
-    )
+    persistence, first, rows, calls = await _declared_path(tmp_path, "declared-two", "<main>browser main text</main>")
     try:
         assert calls == ["https://public.example/reacquire"]
         assert [row["ordinal"] for row in rows] == [1, 2]
@@ -157,9 +157,7 @@ async def test_declared_static_to_browser_history_len_2(tmp_path: Path) -> None:
                 await append_representation_tx(tx, first)
         assert raised.value.code == "representation-step-conflict"
         async with persistence.transaction() as tx:
-            count = await tx.fetchone(
-                "SELECT COUNT(*) AS count FROM mkb_acquire_decode_history"
-            )
+            count = await tx.fetchone("SELECT COUNT(*) AS count FROM mkb_acquire_decode_history")
         assert count == {"count": 2}
     finally:
         await persistence.close()
@@ -169,9 +167,7 @@ async def test_declared_static_to_browser_history_len_2(tmp_path: Path) -> None:
 async def test_two_paths_differ_same_path_stable(tmp_path: Path) -> None:
     first_p, _, first_rows, _ = await _declared_path(tmp_path, "stable-a", "<main>same</main>")
     second_p, _, second_rows, _ = await _declared_path(tmp_path, "stable-b", "<main>same</main>")
-    different_p, _, different_rows, _ = await _declared_path(
-        tmp_path, "different", "<main>different</main>"
-    )
+    different_p, _, different_rows, _ = await _declared_path(tmp_path, "different", "<main>different</main>")
     try:
         assert first_rows[-1]["representation_path_digest"] == second_rows[-1]["representation_path_digest"]
         assert first_rows[-1]["representation_path_digest"] != different_rows[-1]["representation_path_digest"]

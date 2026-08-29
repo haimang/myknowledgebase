@@ -31,6 +31,10 @@ def _payload(**extra: object) -> dict[str, object]:
     value: dict[str, object] = {
         "source": {
             "source_kind": "inline_payload",
+            "realm": "documentation",
+            "type": "article",
+            "channel": "general",
+            "source_name": "test-fixture",
             "external_key": "ns1-contract",
             "content": "source text",
         },
@@ -204,7 +208,9 @@ def test_intake_granularity_selects_json_template_and_rejects_mismatch() -> None
         service._resolve_prompt_selection(
             _catalog_rows(),
             SimpleNamespace(
-                payload=IntakeIngestPayload.model_validate(_payload(json_prompt_id="promptB.json.generic", granularity="g1"))
+                payload=IntakeIngestPayload.model_validate(
+                    _payload(json_prompt_id="promptB.json.generic", granularity="g1")
+                )
             ),
         )
     assert error.value.code == "PROMPT_GRANULARITY_MISMATCH"
@@ -272,8 +278,7 @@ def test_current_graph_selects_optional_markdown_and_legacy_graph_is_registered(
     assert [route.route_key for route in skipped["routes"]] == ["accept_snapshot.auto_admitted"]
 
     assert any(
-        definition.workflow_key == BUILTIN_SINGLE_INTAKE_LSRAG_WORKFLOW.workflow_key
-        and definition.revision_number == 3
+        definition.workflow_key == BUILTIN_SINGLE_INTAKE_LSRAG_WORKFLOW.workflow_key and definition.revision_number == 3
         for definition in BUILTIN_EXECUTION_COMPATIBILITY_WORKFLOWS
     )
     assert BUILTIN_NS1_PRE_MARKDOWN_SCATTER_COMPATIBILITY_WORKFLOW.revision_number == 1

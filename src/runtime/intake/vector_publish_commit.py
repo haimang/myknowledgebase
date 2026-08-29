@@ -524,3 +524,64 @@ class IntakeVectorPublishCommitMixin:
             ):
                 raise MkbError("VECTORIZE_FILTER_BINDING", "Authoritative source-kind facet conflicts with the coordinate", 409)
 
+    async def _upsert_vector_semantic_facets_tx(
+            self,
+            tx: UnitOfWork,
+            *,
+            team_uuid: str,
+            vector_record_uuid: str,
+            intake_revision_uuid: object,
+        ) -> None:
+            if not isinstance(intake_revision_uuid, str):
+                raise MkbError("VECTORIZE_FILTER_BINDING", "Authoritative revision semantics are unavailable", 409)
+            rows = await tx.fetchall(
+                "SELECT s.semantic_key,s.definition_version,s.value_kind,s.value_text,s.value_int,d.definition_digest "
+                "FROM mkb_intake_revision_semantics s JOIN mkb_intake_semantic_definitions d "
+                "ON d.semantic_key=s.semantic_key AND d.definition_version=s.definition_version "
+                "WHERE s.team_uuid=? AND s.intake_revision_uuid=? "
+                "AND s.semantic_key IN ('realm','type','channel','source_name','is_active','context_tags')",
+                (team_uuid, intake_revision_uuid),
+            )
+            required = {"realm", "type", "channel", "source_name", "is_active", "context_tags"}
+            by_key = {str(row["semantic_key"]): row for row in rows}
+            if set(by_key) != required:
+                raise MkbError("VECTORIZE_FILTER_BINDING", "Semantic six-tuple cannot be projected", 409)
+            for facet_key in sorted(required):
+                row = by_key[facet_key]
+                if facet_key == "is_active":
+                    value = row["value_int"]
+                    if row["value_kind"] != "int" or value not in {0, 1}:
+                        raise MkbError("VECTORIZE_FILTER_BINDING", "Active facet is invalid", 409)
+                    facet_value = str(value)
+                else:
+                    value = row["value_text"]
+                    if row["value_kind"] != "text" or not isinstance(value, str):
+                        raise MkbError("VECTORIZE_FILTER_BINDING", "Text facet is invalid", 409)
+                    facet_value = value
+                existing = await tx.fetchone(
+                    "SELECT facet_value,definition_version,definition_digest FROM mkb_vector_record_facets "
+                    "WHERE vector_record_uuid=? AND facet_key=?",
+                    (vector_record_uuid, facet_key),
+                )
+                if existing is None:
+                    await tx.execute(
+                        "INSERT INTO mkb_vector_record_facets "
+                        "(facet_uuid,vector_record_uuid,team_uuid,facet_key,facet_value,definition_version,"
+                        "definition_digest,created_at,payload_extra) VALUES (?,?,?,?,?,?,?,?, '{}')",
+                        (
+                            uuid7(),
+                            vector_record_uuid,
+                            team_uuid,
+                            facet_key,
+                            facet_value,
+                            row["definition_version"],
+                            row["definition_digest"],
+                            utc_now(),
+                        ),
+                    )
+                elif (
+                    existing["facet_value"] != facet_value
+                    or existing["definition_version"] != row["definition_version"]
+                    or existing["definition_digest"] != row["definition_digest"]
+                ):
+                    raise MkbError("VECTORIZE_FILTER_BINDING", "Semantic facet conflicts with the vector coordinate", 409)

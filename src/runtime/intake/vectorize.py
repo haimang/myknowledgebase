@@ -322,6 +322,12 @@ class IntakeVectorizeMixin:
                         vector_record_uuid=vector_record_uuid,
                         source_kind=state["source_kind"],
                     )
+                    await self._upsert_vector_semantic_facets_tx(
+                        tx,
+                        team_uuid=command.team_uuid,
+                        vector_record_uuid=vector_record_uuid,
+                        intake_revision_uuid=state["intake_revision_uuid"],
+                    )
                     from src.services.events import DomainEventWriter
 
                     await DomainEventWriter().write(
@@ -560,4 +566,3 @@ class IntakeVectorizeMixin:
                     ),
                 ),
             )
-

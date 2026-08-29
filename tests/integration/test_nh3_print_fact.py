@@ -64,6 +64,10 @@ def _state() -> dict[str, object]:
         "payload": {
             "source": {
                 "source_kind": "http_resource",
+                "realm": "documentation",
+                "type": "article",
+                "channel": "general",
+                "source_name": "test-fixture",
                 "external_key": "print-example",
                 "url": "https://public.example/document",
                 "acquisition_mode": "static",
@@ -74,9 +78,7 @@ def _state() -> dict[str, object]:
 
 @pytest.mark.asyncio
 async def test_print_fact_is_real_pdf_bytes_and_nonconstant_profile(tmp_path: Path) -> None:
-    persistence, _, _, identity, ids = await _seed(
-        tmp_path, "print-fact", graph=BUILTIN_HTTP_RESOURCE_KIND_WORKFLOW
-    )
+    persistence, _, _, identity, ids = await _seed(tmp_path, "print-fact", graph=BUILTIN_HTTP_RESOURCE_KIND_WORKFLOW)
     profile = "chromium.print_pdf:139.0.7258.154"
     pdf = b"%PDF-1.7\n1 0 obj << /Type /Page >> endobj\n%%EOF"
     pipeline = IntakePipeline(
@@ -87,9 +89,7 @@ async def test_print_fact_is_real_pdf_bytes_and_nonconstant_profile(tmp_path: Pa
     )  # type: ignore[arg-type]
     try:
         await _source_definition(persistence)
-        process_uuid = await _running_process(
-            persistence, identity, ids, step_key="acquire_print", suffix="print"
-        )
+        process_uuid = await _running_process(persistence, identity, ids, step_key="acquire_print", suffix="print")
         material, _, callback = await pipeline._acquire(_command(ids, process_uuid), _state())  # noqa: SLF001
         state = material.envelope["state"]
         assert state["raw_text"].encode("latin-1").startswith(b"%PDF-")
@@ -118,15 +118,11 @@ async def test_print_fact_is_real_pdf_bytes_and_nonconstant_profile(tmp_path: Pa
 
 @pytest.mark.asyncio
 async def test_missing_browser_typed_fail_does_not_write_rendered(tmp_path: Path) -> None:
-    persistence, _, _, identity, ids = await _seed(
-        tmp_path, "print-missing", graph=BUILTIN_HTTP_RESOURCE_KIND_WORKFLOW
-    )
+    persistence, _, _, identity, ids = await _seed(tmp_path, "print-missing", graph=BUILTIN_HTTP_RESOURCE_KIND_WORKFLOW)
     pipeline = IntakePipeline(persistence, None, None)  # type: ignore[arg-type]
     try:
         await _source_definition(persistence)
-        process_uuid = await _running_process(
-            persistence, identity, ids, step_key="acquire_print", suffix="missing"
-        )
+        process_uuid = await _running_process(persistence, identity, ids, step_key="acquire_print", suffix="missing")
         with pytest.raises(MkbError) as raised:
             await pipeline._acquire(_command(ids, process_uuid), _state())  # noqa: SLF001
         assert raised.value.code == "ACQUISITION_BROWSER_CAPABILITY_UNAVAILABLE"

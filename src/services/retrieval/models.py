@@ -11,7 +11,19 @@ from src.contracts.vector.models import (
     RetrievalResult,
 )
 
-_FILTER_KEYS = frozenset({"intake_item_uuid", "source_kind", "channel"})
+_FILTER_KEYS = frozenset(
+    {
+        "intake_item_uuid",
+        "source_kind",
+        "realm",
+        "type",
+        "semantic_channel",
+        "vector_channel",
+        "source_name",
+        "is_active",
+        "context_tags",
+    }
+)
 
 _SOURCE_KINDS = frozenset({"inline_payload", "local_object", "http_resource", "registered_api"})
 
@@ -102,6 +114,8 @@ class _SearchInput:
     threshold: float
     filters: dict[str, str]
     include_pack: bool
+    schema_version: str = "mkb.retrieval.v1"
+    legacy_channel_used: bool = False
 
 @dataclass(slots=True)
 class _Candidate:

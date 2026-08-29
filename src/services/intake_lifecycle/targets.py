@@ -209,6 +209,12 @@ class IntakeTargetResolver:
         for semantic_key in sorted(semantics):
             if not isinstance(semantic_key, str) or not semantic_key or len(semantic_key) > 128:
                 raise MkbError("METADATA_SEMANTIC_KEY_INVALID", "Metadata semantic key is invalid", 422)
+            if semantic_key in {"filter_metadata", "context_metadata"}:
+                raise MkbError(
+                    "METADATA_SEMANTIC_SYSTEM_OWNED",
+                    "Metadata blobs are derived from the typed semantic dimensions",
+                    422,
+                )
             definitions = await tx.fetchall(
                 "SELECT semantic_key,definition_version,definition_digest,value_kind,fingerprint_participation "
                 "FROM mkb_intake_semantic_definitions WHERE semantic_key=? ORDER BY definition_version",
@@ -277,6 +283,7 @@ class IntakeTargetResolver:
                             "value": value,
                         }
                     ),
+                    value_provenance="caller",
                 )
             )
         return tuple(values)
@@ -298,6 +305,7 @@ class IntakeTargetResolver:
 
         rows = await tx.fetchall(
             "SELECT s.semantic_key,s.definition_version,s.value_digest,s.value_kind,s.value_bool,s.value_int,s.value_real,"
+            "s.value_provenance,"
             "s.value_text,s.value_artifact_uuid,d.definition_digest,d.value_kind AS definition_value_kind,"
             "d.fingerprint_participation FROM mkb_intake_revision_semantics AS s "
             "JOIN mkb_intake_semantic_definitions AS d ON d.semantic_key=s.semantic_key "
@@ -345,6 +353,7 @@ class IntakeTargetResolver:
                     fingerprint_participation=bool(participation),
                     value=value,
                     value_digest=row["value_digest"],
+                    value_provenance=row["value_provenance"],
                 )
             )
         return tuple(values)

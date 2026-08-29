@@ -83,10 +83,27 @@ class RetrievalRankMixin:
         if "source_kind" in query.filters:
             where.append("source.source_kind=?")
             params.append(query.filters["source_kind"])
-        channel = force_channel or query.filters.get("channel")
+        channel = force_channel or query.filters.get("vector_channel")
         if channel is not None:
             where.append("r.channel=?")
             params.append(channel)
+        facet_keys = {
+            "realm": "realm",
+            "type": "type",
+            "semantic_channel": "channel",
+            "source_name": "source_name",
+            "is_active": "is_active",
+            "context_tags": "context_tags",
+        }
+        for filter_key, facet_key in facet_keys.items():
+            if filter_key not in query.filters:
+                continue
+            where.append(
+                "EXISTS (SELECT 1 FROM mkb_vector_record_facets AS facet "
+                "WHERE facet.team_uuid=r.team_uuid AND facet.vector_record_uuid=r.vector_record_uuid "
+                "AND facet.facet_key=? AND facet.facet_value=?)"
+            )
+            params.extend((facet_key, query.filters[filter_key]))
         if coordinate_pairs:
             pair_terms = []
             for generation_artifact_uuid, unit_id in coordinate_pairs:

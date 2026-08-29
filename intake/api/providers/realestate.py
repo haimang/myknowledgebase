@@ -28,7 +28,7 @@ def _description(value: str | None) -> str | None:
         return None
     if "<" in value and ">" in value:
         text, _evidence = extract_html_text(value)
-        return text or None
+        return " ".join(text.split()) or None
     return clean_plain_text(value) or None
 
 
@@ -99,11 +99,15 @@ def parse_realestate_member(raw: RealestateRawMember) -> MappedProviderMember:
         contact_agents=agents or None,
         is_active=0 if inactive else 1,
     )
+    if parsed.channel is None or not parsed.channel.strip() or parsed.channel.strip().casefold() == "unknown":
+        raise ValueError("REA channel is required")
+    if parsed.agency_name is None or not parsed.agency_name.strip() or parsed.agency_name.strip().casefold() == "unknown":
+        raise ValueError("REA agency name is required")
     filter_meta = FilterMeta(
         realm="realestate",
         type="listing",
-        channel=parsed.channel or "unknown",
-        source_name=parsed.agency_name or "Unknown Agency",
+        channel=parsed.channel,
+        source_name=parsed.agency_name,
         is_active=parsed.is_active,
     )
     tags: list[str] = []

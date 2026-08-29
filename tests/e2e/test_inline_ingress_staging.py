@@ -52,10 +52,14 @@ def test_inline_ingress_is_staged_before_task_audit_and_execution_manifest(tmp_p
             "json_prompt_id": "promptB.json.generic",
             "source": {
                 "source_kind": "inline_payload",
+                "realm": "documentation",
+                "type": "article",
+                "channel": "general",
+                "source_name": "test-fixture",
                 "external_key": "staged-inline-document",
                 "content": raw_content,
                 "media_type": "text/plain",
-            }
+            },
         },
         "audit": {
             "schema_version": "mkb.task-audit.v1",

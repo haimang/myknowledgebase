@@ -207,12 +207,14 @@ normal/low Task 在未显式指定时优先 local-inference，high/urgent 优先
 
 | `source_kind` | 输入 | 当前运行能力 | 重要边界 |
 |---|---|---|---|
-| `inline_payload` | `external_key`、文本、media type、title | `已落地` | 合同上限 8,388,608 字符；默认 HTTP 体上限是 1 MiB（`MKB_MAX_REQUEST_BYTES`），更大 inline 需显式提高 cap |
-| `local_object` | 已存在的 `mkbobj:v1:<team>:<sha256>` handle | `已落地` | 先经受鉴权 `objects:upload` 获得 pending handle，再以独立 `intake.ingest` Task 消费；上传本身不创建 Intake identity |
-| `http_resource` / `static` | HTTPS URL | `已落地` | 不接收 caller headers/cookie/proxy；响应上限默认 8 MiB |
+| `inline_payload` | `external_key`、文本、media type、严格四维语义 | `已落地` | `realm/type/channel/source_name` 必填且不得为 `unknown`；合同上限 8,388,608 字符 |
+| `local_object` | CAS handle + 严格四维语义 | `已落地` | 先经受鉴权 `objects:upload` 获得 pending handle，再以独立 `intake.ingest` Task 消费；上传本身不创建 Intake identity |
+| `http_resource` / `static` | HTTPS URL + 严格四维语义 | `已落地` | 不接收 caller headers/cookie/proxy；响应上限默认 8 MiB |
 | `http_resource` / `pdf` | HTTPS PDF URL | `条件可用` | 只处理有限 PDF text layer；image-only PDF 需要未接线 OCR |
 | `http_resource` / `browser` | URL | `合同已落地 / 未接线` | 默认组合根未注入 browser fetcher，会稳定失败而非静默降级 |
 | `registered_api` | provider/operation/version + `records[]` | `已落地` | records 必须由调用方冻结；MKB 不执行供应商网络请求 |
+
+三个 generic kind（inline/local/http，含 PDF/browser mode）均要求 caller 提交 `realm/type/channel/source_name`，`context_tags` 可选；`is_active` 由系统派生。registered API 的同名维度由版本化 provider mapper 决定，caller 若重复提交只能逐字段相等，不能覆盖 mapper。
 
 registered provider 是闭集：
 
@@ -288,7 +290,7 @@ g1 默认不再让模型默写全书。管道写入恰好一块 `g0.body = clean
 
 ### 8.3 检索请求边界
 
-`POST /v1/teams/{team_uuid}/retrieval:search` 接受版本 `mkb.retrieval.v1`、query、**必填** namespace selector、`return_k`、`recall_k`、threshold、pack 开关和有限 filters（intake item/source kind/channel）。`return_k` 与 `recall_k` 最大 100，query 最大 8192 字符。调用方不能覆盖 vector/model/index/answer 策略。
+`POST /v1/teams/{team_uuid}/retrieval:search` 接受 query、**必填** namespace selector、`return_k`、`recall_k`、threshold、pack 开关和闭集 filters。新请求应使用 `mkb.retrieval.v2`：业务频道写 `semantic_channel`，向量双通道写 `vector_channel`，两者可同请求共存；另可过滤 `realm/type/source_name/is_active/context_tags`。旧 `mkb.retrieval.v1` 的 `filters.channel` 只机械兼容 `original|summary`，其它值 422；v2 出现旧键 `channel` 同样 422。`return_k` 与 `recall_k` 最大 100，query 最大 8192 字符。调用方不能覆盖 vector/model/index/answer 策略。
 
 离线 stub 的 namespace key 为：
 
@@ -443,7 +445,12 @@ curl -fsS -X POST "$MKB_BASE_URL/v1/teams/$TEAM_UUID/tasks" \
         \"source_kind\": \"inline_payload\",
         \"external_key\": \"readme-quickstart\",
         \"content\": \"MKB 把知识摄取为可回溯的分层检索上下文。\",
-        \"media_type\": \"text/plain\"
+        \"media_type\": \"text/plain\",
+        \"realm\": \"documentation\",
+        \"type\": \"article\",
+        \"channel\": \"knowledge-base\",
+        \"source_name\": \"readme-quickstart\",
+        \"context_tags\": [\"product:mkb\"]
       }
     },
     \"audit\": {
@@ -467,10 +474,11 @@ curl -fsS -X POST "$MKB_BASE_URL/v1/teams/$TEAM_UUID/retrieval:search" \
   -H "Authorization: Bearer $MKB_TOKEN" \
   -H 'Content-Type: application/json' \
   -d "{
-    \"schema_version\": \"mkb.retrieval.v1\",
+    \"schema_version\": \"mkb.retrieval.v2\",
     \"team_uuid\": \"$TEAM_UUID\",
     \"namespace_key\": \"$NAMESPACE_KEY\",
     \"query\": \"分层检索上下文\",
+    \"filters\": {\"realm\": \"documentation\", \"vector_channel\": \"summary\"},
     \"return_k\": 3,
     \"recall_k\": 5
   }"

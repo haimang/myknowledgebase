@@ -270,9 +270,13 @@ class IntakeCleanPreflightMixin:
             if not isinstance(mapped, list):
                 raise MkbError("CLEAN_RESULT_INVALID", "Registered API clean did not return members", 500)
             clean_members: list[dict[str, Any]] = []
+            declared_semantics = state.get("source") if isinstance(state.get("source"), Mapping) else {}
             for item in mapped:
                 if not isinstance(item, CleanMember):
                     raise MkbError("CLEAN_RESULT_INVALID", "Registered API clean member is invalid", 500)
+                from intake.api.registry import assert_declared_provider_semantics
+
+                assert_declared_provider_semantics(declared_semantics, item.filter_meta)
                 member = dict(raw_members[item.ordinal])
                 member["member_ordinal"] = item.ordinal
                 member["external_key"] = item.external_key
@@ -819,7 +823,7 @@ class IntakeCleanPreflightMixin:
                 not isinstance(raw, str)
                 or not isinstance(clean_text, str)
                 or evidence.get("clean_text_digest") != stable_digest({"text": raw})
-                or clean_digest != clean_artifact["content_digest"]
+                or _digest_bytes(clean_text.encode("utf-8")) != clean_artifact["content_digest"]
                 or clean_digest != stable_digest({"text": clean_text})
             ):
                 raise MkbError("PREFLIGHT_EVIDENCE_INVALID", "Rebuild clean representation failed its digest fence", 409)

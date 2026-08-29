@@ -31,13 +31,15 @@ def _settings(tmp_path: Path) -> Settings:
 
 
 def _task_body(team_uuid: str, task_uuid: str, *, markdown: bool) -> dict[str, object]:
-    prompt_payload: dict[str, object] = {
-        "json_prompt_id": "promptB.json.legal" if markdown else "promptB.json.generic"
-    }
+    prompt_payload: dict[str, object] = {"json_prompt_id": "promptB.json.legal" if markdown else "promptB.json.generic"}
     if markdown:
         prompt_payload["markdown_prompt_id"] = "promptB.markdown.legal"
     prompt_payload["source"] = {
         "source_kind": "inline_payload",
+        "realm": "documentation",
+        "type": "article",
+        "channel": "general",
+        "source_name": "test-fixture",
         "external_key": "ns1-with-markdown" if markdown else "ns1-generic",
         "content": (
             "First paragraph carries enough distinct source material. "
@@ -65,7 +67,9 @@ def _task_body(team_uuid: str, task_uuid: str, *, markdown: bool) -> dict[str, o
     }
 
 
-def _wait_for_terminal(client: TestClient, team_uuid: str, task_uuid: str, headers: dict[str, str]) -> dict[str, object]:
+def _wait_for_terminal(
+    client: TestClient, team_uuid: str, task_uuid: str, headers: dict[str, str]
+) -> dict[str, object]:
     deadline = time.monotonic() + 8
     task: dict[str, object] = {}
     while time.monotonic() < deadline:
@@ -125,7 +129,9 @@ def test_stub_pipeline_runs_generic_and_markdown_journeys(tmp_path: Path) -> Non
                 (team_uuid, task_uuid),
             ).fetchone()
             assert projection_row is not None
-            projection = json.loads(_object_bytes(settings.resolved_object_root, team_uuid, projection_row["logical_handle"]))
+            projection = json.loads(
+                _object_bytes(settings.resolved_object_root, team_uuid, projection_row["logical_handle"])
+            )
             blocks = projection["blocks"]
             expected = {0, 1} if markdown else {0, 1, 2}
             assert {block["granularity"] for block in blocks} == expected

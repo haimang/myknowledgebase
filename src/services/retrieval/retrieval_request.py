@@ -258,8 +258,11 @@ class RetrievalRequestMixin:
             else self._as_finite_float(raw_threshold, "score_threshold")
         )
 
+        schema_version = self._request_value(request, "schema_version") or "mkb.retrieval.v1"
+        if schema_version not in {"mkb.retrieval.v1", "mkb.retrieval.v2"}:
+            raise MkbError("RETRIEVE_SCHEMA_INVALID", "Retrieval schema version is unsupported", 422)
         raw_filters = self._request_value(request, "filters")
-        filters = self._normalise_filters(raw_filters)
+        filters, legacy_channel_used = self._normalise_filters(raw_filters, schema_version=schema_version)
         namespace_key = self._request_value(request, "namespace_key")
         namespace_uuid = self._request_value(request, "namespace_uuid")
         if namespace_key is None and namespace_uuid is None:
@@ -298,6 +301,8 @@ class RetrievalRequestMixin:
             threshold=threshold,
             filters=filters,
             include_pack=include_pack,
+            schema_version=schema_version,
+            legacy_channel_used=legacy_channel_used,
         )
 
     @staticmethod
@@ -321,16 +326,18 @@ class RetrievalRequestMixin:
             raise MkbError("RETRIEVE_SCHEMA_THRESHOLD_INVALID", f"{field} must be finite", 422)
         return result
 
-    def _normalise_filters(self, raw_filters: Any) -> dict[str, str]:
+    def _normalise_filters(self, raw_filters: Any, *, schema_version: str) -> tuple[dict[str, str], bool]:
         if raw_filters is None:
-            return {}
+            return {}, False
         if hasattr(raw_filters, "model_dump"):
             raw_filters = raw_filters.model_dump(exclude_none=True)
         if not isinstance(raw_filters, Mapping):
             raise MkbError("RETRIEVE_FILTER_INVALID", "filters must be an object", 422)
         if not all(isinstance(key, str) for key in raw_filters):
             raise MkbError("RETRIEVE_FILTER_INVALID", "retrieval filter keys are invalid", 422)
-        unknown = set(raw_filters) - _FILTER_KEYS
+        legacy = schema_version == "mkb.retrieval.v1"
+        allowed = {"intake_item_uuid", "source_kind", "channel"} if legacy else _FILTER_KEYS
+        unknown = set(raw_filters) - allowed
         if unknown:
             raise MkbError(
                 "RETRIEVE_FILTER_INVALID",
@@ -339,9 +346,12 @@ class RetrievalRequestMixin:
                 {"keys": sorted(unknown)},
             )
         filters: dict[str, str] = {}
+        legacy_channel_used = False
         for key, value in raw_filters.items():
             if value is None:
                 continue
+            if key == "is_active" and not isinstance(value, bool) and value in {0, 1}:
+                value = str(value)
             if not isinstance(value, str) or not value:
                 raise MkbError("RETRIEVE_FILTER_INVALID", f"filter {key} must be a non-empty string", 422)
             if key == "intake_item_uuid":
@@ -351,14 +361,16 @@ class RetrievalRequestMixin:
                     raise MkbError("RETRIEVE_FILTER_INVALID", "intake_item_uuid filter is invalid", 422) from exc
             if key == "source_kind" and value not in _SOURCE_KINDS:
                 raise MkbError("RETRIEVE_FILTER_INVALID", "source_kind is not registered", 422)
-            if key == "channel" and value not in {"original", "summary"}:
+            if key in {"channel", "vector_channel"} and value not in {"original", "summary"}:
                 raise MkbError("RETRIEVE_FILTER_INVALID", "channel must be original or summary", 422)
-            filters[str(key)] = value
+            normalized_key = "vector_channel" if key == "channel" else str(key)
+            legacy_channel_used = legacy_channel_used or key == "channel"
+            filters[normalized_key] = value
         try:
             assert_safe_public_data(filters)
         except ValueError as exc:
             raise MkbError("RETRIEVE_FILTER_INVALID", "unsafe retrieval filter", 422) from exc
-        return filters
+        return filters, legacy_channel_used
 
     async def _resolve_namespace(self, tx: UnitOfWork, query: _SearchInput) -> dict[str, Any]:
         if query.namespace_uuid is not None:

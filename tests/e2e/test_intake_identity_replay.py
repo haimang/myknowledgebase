@@ -23,7 +23,9 @@ from src.contracts.common.time import utc_now
 from tests.local_runtime import local_mock_settings
 
 
-def _ingest(client: TestClient, headers: dict[str, str], team_uuid: str, task_uuid: str, content: str) -> dict[str, object]:
+def _ingest(
+    client: TestClient, headers: dict[str, str], team_uuid: str, task_uuid: str, content: str
+) -> dict[str, object]:
     trace_uuid = uuid7()
     created = client.post(
         f"/v1/teams/{team_uuid}/tasks",
@@ -38,6 +40,10 @@ def _ingest(client: TestClient, headers: dict[str, str], team_uuid: str, task_uu
                 "json_prompt_id": "promptB.json.generic",
                 "source": {
                     "source_kind": "inline_payload",
+                    "realm": "documentation",
+                    "type": "article",
+                    "channel": "general",
+                    "source_name": "test-fixture",
                     "external_key": "intake-identity-replay-golden",
                     "content": content,
                     "media_type": "text/plain",
@@ -85,11 +91,14 @@ def test_identity_replay_reuses_revision_and_keeps_pointer_resolved(tmp_path: Pa
     content = "intake identity replay golden document body"
 
     with TestClient(app, raise_server_exceptions=True) as client:
-        assert client.post(
-            "/v1/teams",
-            headers=headers,
-            json={"schema_version": "mkb.team.v1", "team_uuid": team_uuid, "name": "identity-replay"},
-        ).status_code == 201
+        assert (
+            client.post(
+                "/v1/teams",
+                headers=headers,
+                json={"schema_version": "mkb.team.v1", "team_uuid": team_uuid, "name": "identity-replay"},
+            ).status_code
+            == 201
+        )
 
         first = _ingest(client, headers, team_uuid, uuid7(), content)
         assert first["status"] == "succeeded", first
@@ -108,9 +117,7 @@ def test_identity_replay_reuses_revision_and_keeps_pointer_resolved(tmp_path: Pa
             "SELECT COUNT(*) FROM mkb_intake_revisions WHERE intake_revision_uuid=?",
             (item["latest_revision_uuid"],),
         ).fetchone()[0]
-        assert dangling == 1, (
-            "latest_revision_uuid must point at an existing revision row after replay"
-        )
+        assert dangling == 1, "latest_revision_uuid must point at an existing revision row after replay"
         revision_count = connection.execute(
             "SELECT COUNT(*) FROM mkb_intake_revisions WHERE intake_item_uuid IN "
             "(SELECT intake_item_uuid FROM mkb_intake_items WHERE normalized_external_key=?)",

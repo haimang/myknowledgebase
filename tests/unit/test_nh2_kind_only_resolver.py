@@ -46,15 +46,11 @@ async def test_mode_and_media_do_not_change_workflow_key(tmp_path: Path) -> None
     persistence, registry = await _registry(tmp_path)
     try:
         http = {
-            (
-                await registry.resolve_for_source("intake.ingest", "http_resource", profile)
-            ).workflow_key
+            (await registry.resolve_for_source("intake.ingest", "http_resource", profile)).workflow_key
             for profile in ("http_resource.static", "http_resource.browser", "http_resource.pdf")
         }
         local = {
-            (
-                await registry.resolve_for_source("intake.ingest", "local_object", profile)
-            ).workflow_key
+            (await registry.resolve_for_source("intake.ingest", "local_object", profile)).workflow_key
             for profile in ("local_object", "local_object.pdf", "local_object.image")
         }
         assert http == {SOURCE_KIND_WORKFLOW_KEYS["http_resource"]}
@@ -105,7 +101,15 @@ def test_public_task_contract_rejects_workflow_key() -> None:
                 "workflow_key": SOURCE_KIND_WORKFLOW_KEYS["inline_payload"],
                 "payload": {
                     "json_prompt_id": "promptB.json.generic",
-                    "source": {"source_kind": "inline_payload", "external_key": "nh2", "content": "body"},
+                    "source": {
+                        "source_kind": "inline_payload",
+                        "realm": "documentation",
+                        "type": "article",
+                        "channel": "general",
+                        "source_name": "test-fixture",
+                        "external_key": "nh2",
+                        "content": "body",
+                    },
                 },
                 "audit": {
                     "schema_version": "mkb.task-audit.v1",

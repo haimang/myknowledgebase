@@ -10,6 +10,7 @@ from src.contracts.common.errors import MkbError
 from src.contracts.common.ids import canonical_json, stable_digest, uuid7
 from src.contracts.common.time import utc_now
 from src.contracts.intake.representation import RepresentationObservation
+from src.contracts.intake.semantics import generic_semantic_authority
 from src.contracts.runtime.models import ProcessCommand
 from src.contracts.storage.handles import digest_from_handle
 from src.contracts.storage.models import ObjectHandle
@@ -77,6 +78,11 @@ class IntakeAcquisitionIngestMixin:
             if not acquired.is_binary and not acquired.raw_text.strip():
                 raise MkbError("ACQUISITION_EMPTY", "Source acquisition returned no content", 422)
             now = utc_now()
+            generic_semantics = (
+                generic_semantic_authority(descriptor)
+                if source_kind in {"inline_payload", "local_object", "http_resource"}
+                else None
+            )
             next_state = {
                 "request_intent": "intake.ingest",
                 "team_uuid": command.team_uuid,
@@ -110,6 +116,17 @@ class IntakeAcquisitionIngestMixin:
                 "observed_at": now,
                 "payload": payload,
                 "source_stored_object_uuid": acquired.evidence.get("source_stored_object_uuid"),
+                "filter_meta": (
+                    generic_semantics[0].model_dump(mode="json") if generic_semantics is not None else None
+                ),
+                "context_meta": (
+                    generic_semantics[1].model_dump(mode="json") if generic_semantics is not None else None
+                ),
+                "semantic_tuples": (
+                    [item.model_dump(mode="json") for item in generic_semantics[2]]
+                    if generic_semantics is not None
+                    else None
+                ),
             }
             existing = await self._resolve_existing_intake_identity(
                 command.team_uuid, source_kind, next_state["normalized_external_key"]

@@ -52,6 +52,10 @@ def test_generation_mainchain_is_inspected_via_turso_port(tmp_path: Path) -> Non
                     "json_prompt_id": "promptB.json.generic",
                     "source": {
                         "source_kind": "inline_payload",
+                        "realm": "documentation",
+                        "type": "article",
+                        "channel": "general",
+                        "source_name": "test-fixture",
                         "external_key": "ns5-t60",
                         "content": "First evidence sentence. Second evidence sentence.",
                         "media_type": "text/plain",

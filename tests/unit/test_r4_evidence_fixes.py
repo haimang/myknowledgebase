@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from contextlib import asynccontextmanager
 from pathlib import Path
 
 import pytest
@@ -40,6 +41,24 @@ class _Sink:
         del kwargs
 
 
+class _SemanticPersistence:
+    @asynccontextmanager
+    async def transaction(self):
+        class _Tx:
+            async def fetchall(self, sql: str, params=()):
+                del sql, params
+                return [
+                    {"semantic_key": "realm", "value_kind": "text", "value_text": "documentation", "value_int": None},
+                    {"semantic_key": "type", "value_kind": "text", "value_text": "article", "value_int": None},
+                    {"semantic_key": "channel", "value_kind": "text", "value_text": "general", "value_int": None},
+                    {"semantic_key": "source_name", "value_kind": "text", "value_text": "fixture", "value_int": None},
+                    {"semantic_key": "is_active", "value_kind": "int", "value_text": None, "value_int": 1},
+                    {"semantic_key": "context_tags", "value_kind": "text", "value_text": "", "value_int": None},
+                ]
+
+        yield _Tx()
+
+
 def test_success_outcome_sql_clears_process_error_code() -> None:
     source = Path("src/runtime/workflow/runtime_outcome.py").read_text(encoding="utf-8")
     assert "error_code=NULL,error_message=NULL" in source
@@ -70,7 +89,7 @@ def test_cli_receipt_maps_api_inference_to_local_vllm() -> None:
 @pytest.mark.asyncio
 async def test_admit_reject_stashes_failed_invocation_and_nonzero_latency() -> None:
     take_pending_generation_evidence()
-    pipeline = IntakePipeline(None, None, None)  # type: ignore[arg-type]
+    pipeline = IntakePipeline(_SemanticPersistence(), None, None)  # type: ignore[arg-type]
     pipeline._diagnostics = _Sink()
     clean = "hello\n"
     candidate = {
@@ -92,6 +111,7 @@ async def test_admit_reject_stashes_failed_invocation_and_nonzero_latency() -> N
                 "clean_text": clean,
                 "clean_digest": stable_digest({"text": clean}),
                 "clean_artifact_uuid": uuid7(),
+                "intake_revision_uuid": uuid7(),
                 "layered_content_profile": [0, 1],
                 "layered_content_candidate": candidate,
             },

@@ -207,6 +207,7 @@ def _adopt_layered_json(*, clean_text: str, layered_json: Mapping[str, object], 
         root.node_id,
         (root, leaf),
         stable_digest({"tree": "layered-adopt", "coverage": [(0, end)], "order": [root.node_id, leaf_id]}),
+        dict(candidate["context_meta"]),
     )
     blocks: list[RetrievalBlock] = []
     anchor_report: list[dict[str, object]] = []

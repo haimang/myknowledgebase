@@ -47,7 +47,16 @@ async def seeded_intake(tmp_path: Path) -> SeededIntake:
     source_uuid, item_uuid, revision_uuid, snapshot_uuid = uuid7(), uuid7(), uuid7(), uuid7()
     artifact_uuid, generation_uuid, namespace_uuid = uuid7(), uuid7(), uuid7()
     now = utc_now()
-    source_descriptor_digest = stable_digest({"source_kind": "inline_payload", "external_key": "lifecycle"})
+    source_descriptor_digest = stable_digest(
+        {
+            "source_kind": "inline_payload",
+            "realm": "documentation",
+            "type": "article",
+            "channel": "general",
+            "source_name": "test-fixture",
+            "external_key": "lifecycle",
+        }
+    )
     async with persistence.transaction() as tx:
         await tx.execute(
             "INSERT INTO mkb_intake_sources "
@@ -441,12 +450,12 @@ async def test_target_resolver_freezes_rebuild_metadata_and_controlled_index_sco
         IntakeUpdateMetadataPayload(
             intake_item_uuid=seeded_intake.item_uuid,
             expected_intake_revision_uuid=seeded_intake.revision_uuid,
-            semantics={"context_metadata": "priority=42"},
+            semantics={"realm": "priority-42"},
         ),
     )
     assert metadata.target.intake_revision_uuid == seeded_intake.revision_uuid
-    assert metadata.semantics[0].semantic_key == "context_metadata"
-    assert metadata.semantics[0].value == "priority=42"
+    assert metadata.semantics[0].semantic_key == "realm"
+    assert metadata.semantics[0].value == "priority-42"
     with pytest.raises(MkbError, match="not registered"):
         await resolver.resolve_metadata_update(
             seeded_intake.team_uuid,
@@ -455,7 +464,7 @@ async def test_target_resolver_freezes_rebuild_metadata_and_controlled_index_sco
                 semantics={"unregistered": "nope"},
             ),
         )
-    with pytest.raises(MkbError, match="does not match"):
+    with pytest.raises(MkbError, match="derived"):
         await resolver.resolve_metadata_update(
             seeded_intake.team_uuid,
             IntakeUpdateMetadataPayload(

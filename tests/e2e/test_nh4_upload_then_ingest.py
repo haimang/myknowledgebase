@@ -84,6 +84,10 @@ def test_upload_search_empty_then_independent_ingest_namespace_hit(tmp_path: Pat
             team_uuid,
             source={
                 "source_kind": "inline_payload",
+                "realm": "documentation",
+                "type": "article",
+                "channel": "general",
+                "source_name": "test-fixture",
                 "external_key": "nh4-namespace-seed",
                 "content": "namespace seed unrelated baseline",
                 "media_type": "text/plain",
@@ -119,6 +123,10 @@ def test_upload_search_empty_then_independent_ingest_namespace_hit(tmp_path: Pat
             team_uuid,
             source={
                 "source_kind": "local_object",
+                "realm": "documentation",
+                "type": "article",
+                "channel": "general",
+                "source_name": "test-fixture",
                 "external_key": "nh4-uploaded-local-object",
                 "logical_handle": uploaded["handle"],
                 "media_type": "text/plain",

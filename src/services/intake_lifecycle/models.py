@@ -161,6 +161,7 @@ class FrozenMetadataValue:
     fingerprint_participation: bool
     value: bool | int | float | str
     value_digest: str
+    value_provenance: str
 
     def as_manifest(self) -> dict[str, Any]:
         return {
@@ -171,6 +172,7 @@ class FrozenMetadataValue:
             "fingerprint_participation": self.fingerprint_participation,
             "value": self.value,
             "value_digest": self.value_digest,
+            "value_provenance": self.value_provenance,
         }
 
 

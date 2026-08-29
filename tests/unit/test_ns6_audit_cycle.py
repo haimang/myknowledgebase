@@ -30,7 +30,9 @@ def _settings(tmp_path: Path, token: str) -> Settings:
     )
 
 
-def _wait(client: TestClient, team_uuid: str, task_uuid: str, headers: dict[str, str], *, timeout: float = 12) -> dict[str, object]:
+def _wait(
+    client: TestClient, team_uuid: str, task_uuid: str, headers: dict[str, str], *, timeout: float = 12
+) -> dict[str, object]:
     deadline = time.monotonic() + timeout
     task: dict[str, object] = {}
     while time.monotonic() < deadline:
@@ -74,6 +76,10 @@ def _create_team_and_ingest(
                 "json_prompt_id": "promptB.json.generic",
                 "source": {
                     "source_kind": "inline_payload",
+                    "realm": "documentation",
+                    "type": "article",
+                    "channel": "general",
+                    "source_name": "test-fixture",
                     "external_key": external_key,
                     "content": content,
                     "media_type": "text/plain",

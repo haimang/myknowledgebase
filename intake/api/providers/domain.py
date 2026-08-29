@@ -27,6 +27,13 @@ def _media(raw: DomainRawMember, kind: str) -> str | None:
     return next((entry.url for entry in raw.media if entry.type == kind and entry.url), None)
 
 
+def _required_text(value: object, field: str) -> str:
+    normalized = str(value).strip() if value is not None else ""
+    if not normalized or normalized.casefold() == "unknown":
+        raise ValueError(f"Domain {field} is required")
+    return normalized
+
+
 def unpack_domain_envelope(envelope: DomainEnvelope) -> list[DomainRawMember]:
     return list(envelope.root)
 
@@ -47,9 +54,9 @@ def parse_domain_member(raw: DomainRawMember) -> MappedProviderMember:
         description=raw.description,
         property_types=property_types,
         property_type=property_types[0] if property_types else None,
-        status=raw.status or "unknown",
-        sale_mode=raw.saleMode or "unknown",
-        channel=raw.channel or "unknown",
+        status=_required_text(raw.status, "status"),
+        sale_mode=_required_text(raw.saleMode, "saleMode"),
+        channel=_required_text(raw.channel, "channel"),
         display_price=price.displayPrice if price else None,
         sale_method=raw.saleMode or (rental.rentalMethod if rental else None),
         bedrooms=raw.bedrooms,
@@ -69,7 +76,7 @@ def parse_domain_member(raw: DomainRawMember) -> MappedProviderMember:
     )
     agency_id = str(parsed.advertiser_id)
     agency_name = _AGENCY_NAMES.get(agency_id, f"Domain Generic Agency ({agency_id})")
-    channel = parsed.property_type or "Unknown"
+    channel = _required_text(parsed.property_type, "propertyTypes")
     filter_meta = FilterMeta(
         realm="realestate_on_market",
         type=parsed.sale_mode,
@@ -86,8 +93,7 @@ def parse_domain_member(raw: DomainRawMember) -> MappedProviderMember:
     ):
         if value is not None:
             tags.append(f"{value} {suffix}")
-    if channel != "Unknown":
-        tags.append(channel)
+    tags.append(channel)
     context_meta = ContextMeta(
         realm=filter_meta.realm,
         type=filter_meta.type,

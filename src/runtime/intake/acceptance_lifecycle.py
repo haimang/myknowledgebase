@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from collections.abc import Awaitable, Callable, Mapping
 from typing import Any
 
@@ -13,6 +14,7 @@ from src.persistence.ports import UnitOfWork
 from src.runtime.intake.types import (
     _METADATA_REFRESH_REUSE_SUMMARIES,
     _is_sha256_digest,
+    _json,
     _StageMaterial,
 )
 
@@ -377,7 +379,72 @@ class IntakeAcceptanceLifecycleMixin:
                 replacement[key] = dict(entry)
             merged = dict(base)
             merged.update(replacement)
+            merged = await self._cohere_metadata_blobs_tx(tx, merged)
             return merged, self._semantic_fingerprint(list(merged.values()))
+
+
+    async def _cohere_metadata_blobs_tx(
+            self,
+            tx: UnitOfWork,
+            merged: dict[str, dict[str, Any]],
+        ) -> dict[str, dict[str, Any]]:
+            from src.contracts.intake.semantics import ContextMeta, FilterMeta
+
+            try:
+                filter_meta = FilterMeta(
+                    realm=merged["realm"]["value"],
+                    type=merged["type"]["value"],
+                    channel=merged["channel"]["value"],
+                    source_name=merged["source_name"]["value"],
+                    is_active=merged["is_active"]["value"],
+                )
+                tags_value = merged["context_tags"]["value"]
+                if not isinstance(tags_value, str):
+                    raise TypeError("context_tags must be text")
+                prior_context = merged.get("context_metadata", {}).get("value")
+                decoded = json.loads(prior_context) if isinstance(prior_context, str) else {}
+                title = decoded.get("title") if isinstance(decoded, Mapping) else None
+                context_meta = ContextMeta(
+                    realm=filter_meta.realm,
+                    type=filter_meta.type,
+                    channel=filter_meta.channel,
+                    source_name=filter_meta.source_name,
+                    title=title if isinstance(title, str) and title.strip() else filter_meta.source_name,
+                    tags=tags_value.splitlines() if tags_value else [],
+                )
+            except (KeyError, TypeError, ValueError, json.JSONDecodeError) as exc:
+                raise MkbError(
+                    "METADATA_SEMANTICS_INCOMPLETE",
+                    "Metadata refresh requires a complete coherent semantic six-tuple",
+                    422,
+                ) from exc
+            for semantic_key, value in (
+                ("filter_metadata", _json(filter_meta.model_dump(mode="json"))),
+                ("context_metadata", _json(context_meta.model_dump(mode="json"))),
+            ):
+                definition = await tx.fetchone(
+                    "SELECT definition_version,definition_digest,value_kind,fingerprint_participation "
+                    "FROM mkb_intake_semantic_definitions WHERE semantic_key=? AND definition_version='v1'",
+                    (semantic_key,),
+                )
+                if definition is None or definition["value_kind"] != "text":
+                    raise MkbError("REGISTRY_NOT_FOUND", "Metadata blob semantic definition is unavailable", 503)
+                merged[semantic_key] = {
+                    "semantic_key": semantic_key,
+                    "definition_version": definition["definition_version"],
+                    "definition_digest": definition["definition_digest"],
+                    "value_kind": "text",
+                    "fingerprint_participation": bool(definition["fingerprint_participation"]),
+                    "value": value,
+                    "value_digest": self._semantic_value_digest(
+                        semantic_key,
+                        definition["definition_version"],
+                        definition["definition_digest"],
+                        value,
+                    ),
+                    "value_provenance": "system",
+                }
+            return merged
 
 
     @staticmethod
@@ -420,9 +487,12 @@ class IntakeAcceptanceLifecycleMixin:
                 "fingerprint_participation",
                 "value",
                 "value_digest",
+                "value_provenance",
             )
             if any(key not in entry for key in required):
                 raise MkbError("METADATA_SEMANTICS_INVALID", "Frozen metadata semantic value is incomplete", 422)
+            if entry["value_provenance"] not in {"caller", "mapper", "system", "legacy_unverifiable"}:
+                raise MkbError("METADATA_SEMANTICS_INVALID", "Semantic provenance is invalid", 422)
             definition = await tx.fetchone(
                 "SELECT definition_digest,value_kind FROM mkb_intake_semantic_definitions "
                 "WHERE semantic_key=? AND definition_version=?",
@@ -532,4 +602,3 @@ class IntakeAcceptanceLifecycleMixin:
                     now,
                 ),
             )
-

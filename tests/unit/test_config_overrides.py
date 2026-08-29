@@ -48,9 +48,13 @@ def _body(team_uuid: str, task_uuid: str, trace_uuid: str, **extra: object) -> d
             "json_prompt_id": "promptB.json.generic",
             "source": {
                 "source_kind": "inline_payload",
+                "realm": "documentation",
+                "type": "article",
+                "channel": "general",
+                "source_name": "test-fixture",
                 "external_key": "override-doc",
                 "content": "override body",
-            }
+            },
         },
         "audit": {
             "schema_version": "mkb.task-audit.v1",
@@ -171,8 +175,7 @@ def test_ops_only_dry_run_does_not_change_binding_or_snapshot_digest(tmp_path: P
             (ops_task,),
         ).fetchone()
         events = connection.execute(
-            "SELECT payload_json FROM mkb_domain_events "
-            "WHERE event_type='config.override_applied' AND task_uuid=?",
+            "SELECT payload_json FROM mkb_domain_events WHERE event_type='config.override_applied' AND task_uuid=?",
             (ops_task,),
         ).fetchall()
 

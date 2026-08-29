@@ -42,6 +42,10 @@ def _task_body(team_uuid: str, task_uuid: str, *, priority: str, key: str) -> di
             "json_prompt_id": "promptB.json.generic",
             "source": {
                 "source_kind": "inline_payload",
+                "realm": "documentation",
+                "type": "article",
+                "channel": "general",
+                "source_name": "test-fixture",
                 "external_key": key,
                 "content": (
                     "First paragraph carries enough distinct source material. "
@@ -87,7 +91,7 @@ def _wait_for_generate_rows(
             if last and (not expect_admit or any(row["dispatch_admitted"] == 1 for row in last)):
                 return last
         time.sleep(0.05)
-    raise AssertionError(f"generate processes not ready for {task_uuid}: { [dict(row) for row in last] }")
+    raise AssertionError(f"generate processes not ready for {task_uuid}: {[dict(row) for row in last]}")
 
 
 def test_four_priority_lanes_are_visible_on_process_rows(tmp_path: Path) -> None:

@@ -107,7 +107,9 @@ async def test_http_acquirer_returns_redacted_final_representation_evidence() ->
 
 def test_redacted_url_identity_uses_the_canonical_uri_minimum() -> None:
     canonical = "https://example.test/path?scope=public"
-    assert redacted_url_identity("HTTPS://EXAMPLE.TEST:443/path?scope=public#ignored") == redacted_url_identity(canonical)
+    assert redacted_url_identity("HTTPS://EXAMPLE.TEST:443/path?scope=public#ignored") == redacted_url_identity(
+        canonical
+    )
     # Userinfo is not an identity coordinate and never becomes part of a
     # durable witness (the egress policy rejects it before any real request).
     assert redacted_url_identity("https://secret@example.test/path?scope=public") == redacted_url_identity(canonical)
@@ -128,6 +130,10 @@ async def test_local_object_html_uses_structural_clean_and_nfc_lf_decode() -> No
         command,
         {
             "source_kind": "local_object",
+            "realm": "documentation",
+            "type": "article",
+            "channel": "general",
+            "source_name": "test-fixture",
             "external_key": "local-html",
             "logical_handle": handle,
             "media_type": "text/html",
@@ -154,7 +160,7 @@ async def test_local_object_html_uses_structural_clean_and_nfc_lf_decode() -> No
 @pytest.mark.asyncio
 async def test_http_static_browser_and_pdf_profiles_have_distinct_evidence() -> None:
     static_response = HttpAcquisitionResult(
-        body=b'<html><body><h1>static</h1></body></html>',
+        body=b"<html><body><h1>static</h1></body></html>",
         initial_url_identity="a" * 64,
         final_url_identity="b" * 64,
         response_media_type="text/html",
@@ -173,7 +179,16 @@ async def test_http_static_browser_and_pdf_profiles_have_distinct_evidence() -> 
 
     static = await pipeline._acquire_content(
         command,
-        {"source_kind": "http_resource", "external_key": "s", "url": "https://example.test/s", "acquisition_mode": "static"},
+        {
+            "source_kind": "http_resource",
+            "realm": "documentation",
+            "type": "article",
+            "channel": "general",
+            "source_name": "test-fixture",
+            "external_key": "s",
+            "url": "https://example.test/s",
+            "acquisition_mode": "static",
+        },
     )
     assert static.evidence["acquisition_capability"] == "intake.acquire.http_static"
     assert static.evidence["request_url_identity"] == "a" * 64
@@ -183,7 +198,16 @@ async def test_http_static_browser_and_pdf_profiles_have_distinct_evidence() -> 
 
     browser = await pipeline._acquire_content(
         command,
-        {"source_kind": "http_resource", "external_key": "b", "url": "https://example.test/b", "acquisition_mode": "browser"},
+        {
+            "source_kind": "http_resource",
+            "realm": "documentation",
+            "type": "article",
+            "channel": "general",
+            "source_name": "test-fixture",
+            "external_key": "b",
+            "url": "https://example.test/b",
+            "acquisition_mode": "browser",
+        },
     )
     assert browser.evidence["acquisition_capability"] == "intake.acquire.http_browser"
     assert browser.evidence["representation_kind"] == "rendered"
@@ -192,7 +216,16 @@ async def test_http_static_browser_and_pdf_profiles_have_distinct_evidence() -> 
     pipeline._http_fetcher = lambda _: pdf
     acquired_pdf = await pipeline._acquire_content(
         command,
-        {"source_kind": "http_resource", "external_key": "p", "url": "https://example.test/p", "acquisition_mode": "pdf"},
+        {
+            "source_kind": "http_resource",
+            "realm": "documentation",
+            "type": "article",
+            "channel": "general",
+            "source_name": "test-fixture",
+            "external_key": "p",
+            "url": "https://example.test/p",
+            "acquisition_mode": "pdf",
+        },
     )
     assert acquired_pdf.media_type == "application/pdf"
     assert acquired_pdf.evidence["acquisition_capability"] == "intake.acquire.http_static"
@@ -215,7 +248,16 @@ async def test_browser_ocr_and_vision_are_explicit_controlled_capability_failure
     with pytest.raises(MkbError) as browser:
         await pipeline._acquire_content(
             _command(),
-            {"source_kind": "http_resource", "external_key": "b", "url": "https://example.test/b", "acquisition_mode": "browser"},
+            {
+                "source_kind": "http_resource",
+                "realm": "documentation",
+                "type": "article",
+                "channel": "general",
+                "source_name": "test-fixture",
+                "external_key": "b",
+                "url": "https://example.test/b",
+                "acquisition_mode": "browser",
+            },
         )
     assert browser.value.code == "ACQUISITION_BROWSER_CAPABILITY_UNAVAILABLE"
 
@@ -241,6 +283,10 @@ def test_preflight_requires_frozen_capability_and_lineage_evidence() -> None:
     candidate_root_digest = stable_digest({"external_key": "inline", "clean_digest": clean_digest})
     valid = {
         "source_kind": "inline_payload",
+        "realm": "documentation",
+        "type": "article",
+        "channel": "general",
+        "source_name": "test-fixture",
         "source": {"source_kind": "inline_payload"},
         "normalized_external_key": "inline",
         "media_type": "text/plain",
@@ -251,6 +297,10 @@ def test_preflight_requires_frozen_capability_and_lineage_evidence() -> None:
         "acquisition_evidence": {
             "schema_version": "mkb.acquisition-evidence.v1",
             "source_kind": "inline_payload",
+            "realm": "documentation",
+            "type": "article",
+            "channel": "general",
+            "source_name": "test-fixture",
             "acquisition_capability": "intake.acquire.inline",
             "raw_byte_digest": "d" * 64,
             "raw_byte_size": 5,
@@ -350,10 +400,25 @@ async def test_source_kinds_resolve_to_shared_graph_capability_sets(tmp_path: Pa
 @pytest.mark.parametrize(
     ("source", "expected"),
     [
-        ({"source_kind": "inline_payload", "external_key": "inline", "content": "body"}, "inline_payload"),
+        (
+            {
+                "source_kind": "inline_payload",
+                "realm": "documentation",
+                "type": "article",
+                "channel": "general",
+                "source_name": "test-fixture",
+                "external_key": "inline",
+                "content": "body",
+            },
+            "inline_payload",
+        ),
         (
             {
                 "source_kind": "local_object",
+                "realm": "documentation",
+                "type": "article",
+                "channel": "general",
+                "source_name": "test-fixture",
                 "external_key": "local",
                 "logical_handle": "mkbobj:v1:local",
                 "media_type": "text/html",
@@ -363,6 +428,10 @@ async def test_source_kinds_resolve_to_shared_graph_capability_sets(tmp_path: Pa
         (
             {
                 "source_kind": "local_object",
+                "realm": "documentation",
+                "type": "article",
+                "channel": "general",
+                "source_name": "test-fixture",
                 "external_key": "pdf",
                 "logical_handle": "mkbobj:v1:pdf",
                 "media_type": "application/pdf",
@@ -372,6 +441,10 @@ async def test_source_kinds_resolve_to_shared_graph_capability_sets(tmp_path: Pa
         (
             {
                 "source_kind": "local_object",
+                "realm": "documentation",
+                "type": "article",
+                "channel": "general",
+                "source_name": "test-fixture",
                 "external_key": "image",
                 "logical_handle": "mkbobj:v1:image",
                 "media_type": "image/png",
@@ -381,6 +454,10 @@ async def test_source_kinds_resolve_to_shared_graph_capability_sets(tmp_path: Pa
         (
             {
                 "source_kind": "http_resource",
+                "realm": "documentation",
+                "type": "article",
+                "channel": "general",
+                "source_name": "test-fixture",
                 "external_key": "web",
                 "url": "https://public.example/web",
                 "acquisition_mode": "browser",
@@ -390,6 +467,10 @@ async def test_source_kinds_resolve_to_shared_graph_capability_sets(tmp_path: Pa
         (
             {
                 "source_kind": "http_resource",
+                "realm": "documentation",
+                "type": "article",
+                "channel": "general",
+                "source_name": "test-fixture",
                 "external_key": "pdf-web",
                 "url": "https://public.example/document.pdf",
                 "acquisition_mode": "pdf",

@@ -62,6 +62,35 @@ def overlay_system_g0(
     return result
 
 
+def overlay_system_context_meta(
+    *,
+    candidate: Mapping[str, object],
+    revision_semantics: Mapping[str, object],
+) -> dict[str, object]:
+    """Overwrite filter-authority fields from committed S04 semantics."""
+
+    required_text = ("realm", "type", "channel", "source_name")
+    if any(not isinstance(revision_semantics.get(key), str) or not revision_semantics[key] for key in required_text):
+        _fail("STRUCTURE_CONTEXT_SEMANTICS_INCOMPLETE", "S04 context semantics are incomplete")
+    tags = revision_semantics.get("context_tags")
+    if not isinstance(tags, list) or any(not isinstance(tag, str) for tag in tags):
+        _fail("STRUCTURE_CONTEXT_SEMANTICS_INCOMPLETE", "S04 context tags are invalid")
+    result = dict(candidate)
+    existing = result.get("context_meta")
+    context = dict(existing) if isinstance(existing, Mapping) else {}
+    context.update(
+        {
+            "realm": revision_semantics["realm"],
+            "type": revision_semantics["type"],
+            "channel": revision_semantics["channel"],
+            "source_name": revision_semantics["source_name"],
+            "tags": list(tags),
+        }
+    )
+    result["context_meta"] = context
+    return result
+
+
 _IGNORABLE_CHARS = set("#*_`~>|+-=。，,！!？?:：;；()（）[]【】\"'“”'、\t\r\n ")
 
 
@@ -226,6 +255,7 @@ def realign_construct_original(
 
 __all__ = [
     "overlay_system_g0",
+    "overlay_system_context_meta",
     "assemble_from_cuts",
     "realign_construct_original",
 ]

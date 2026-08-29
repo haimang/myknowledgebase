@@ -126,6 +126,10 @@ def test_rebuild_and_metadata_lifecycle_paths_complete_through_public_http(tmp_p
                 payload={
                     "source": {
                         "source_kind": "inline_payload",
+                        "realm": "documentation",
+                        "type": "article",
+                        "channel": "general",
+                        "source_name": "test-fixture",
                         "external_key": "lifecycle-document",
                         "content": "Lifecycle operations retain and serve this document.",
                     }
@@ -133,7 +137,10 @@ def test_rebuild_and_metadata_lifecycle_paths_complete_through_public_http(tmp_p
             ),
         )
         assert response.status_code == 201, response.text
-        assert _wait_for_terminal(client, team_uuid=team_uuid, task_uuid=ingest_task_uuid, headers=headers)["status"] == "succeeded"
+        assert (
+            _wait_for_terminal(client, team_uuid=team_uuid, task_uuid=ingest_task_uuid, headers=headers)["status"]
+            == "succeeded"
+        )
 
         with sqlite3.connect(database_path) as connection:
             item_uuid, original_revision_uuid, serving_revision_uuid, _ = _read_item(connection, team_uuid)
@@ -205,8 +212,7 @@ def test_rebuild_and_metadata_lifecycle_paths_complete_through_public_http(tmp_p
                 (team_uuid, item_uuid),
             ).fetchone() == (2,)
             assert connection.execute(
-                "SELECT action_key FROM mkb_intake_item_transitions "
-                "WHERE team_uuid=? AND causation_task_uuid=?",
+                "SELECT action_key FROM mkb_intake_item_transitions WHERE team_uuid=? AND causation_task_uuid=?",
                 (team_uuid, no_change_task_uuid),
             ).fetchone() == ("no_change",)
 
@@ -250,8 +256,7 @@ def test_rebuild_and_metadata_lifecycle_paths_complete_through_public_http(tmp_p
             (team_uuid, item_uuid),
         ).fetchone() == (2,)
         assert connection.execute(
-            "SELECT active_index_generation FROM mkb_index_active_pointers "
-            "WHERE team_uuid=? AND intake_item_uuid=?",
+            "SELECT active_index_generation FROM mkb_index_active_pointers WHERE team_uuid=? AND intake_item_uuid=?",
             (team_uuid, item_uuid),
         ).fetchone() == (3,)
         assert connection.execute(
@@ -328,14 +333,12 @@ def test_rebuild_and_metadata_lifecycle_paths_complete_through_public_http(tmp_p
             (team_uuid, source_structure[0]),
         ).fetchone()
         assert source_dual is not None
-        source_dual_payload = json.loads(
-            _generation_object_bytes(tmp_path / "objects", team_uuid, source_dual[0])
-        )
+        source_dual_payload = json.loads(_generation_object_bytes(tmp_path / "objects", team_uuid, source_dual[0]))
         assert metadata_construction["structure_generation_artifact_uuid"] == source_structure[1]
         assert metadata_construction["projection_generation_artifact_uuid"] == source_projection[0]
-        assert {
-            unit["unit_id"]: unit["summary"] for unit in metadata_dual["units"]
-        } == {unit["unit_id"]: unit["summary"] for unit in source_dual_payload["units"]}
+        assert {unit["unit_id"]: unit["summary"] for unit in metadata_dual["units"]} == {
+            unit["unit_id"]: unit["summary"] for unit in source_dual_payload["units"]
+        }
 
         source_vector_digests = {
             (row[0], row[1]): row[2]

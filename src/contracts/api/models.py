@@ -6,7 +6,7 @@ import re
 from collections.abc import Mapping
 from typing import Annotated, Any, Literal
 
-from pydantic import Field, ValidationError, field_validator, model_validator
+from pydantic import BaseModel, Field, ValidationError, field_validator, model_validator
 
 from src.contracts.common.errors import MkbError
 from src.contracts.common.ids import validate_external_uuid
@@ -25,6 +25,37 @@ def _uuid(value: str, field: str) -> str:
         return validate_external_uuid(value, field=field)
     except Exception as exc:
         raise ValueError(str(exc)) from exc
+
+
+def _semantic_text(value: str, field: str) -> str:
+    normalized = value.strip()
+    if not normalized or normalized.casefold() == "unknown":
+        raise ValueError(f"{field} must be non-empty and cannot be unknown")
+    return normalized
+
+
+class GenericSemanticSource(PayloadExtraModel):
+    realm: Annotated[str, Field(min_length=1, max_length=256)]
+    type: Annotated[str, Field(min_length=1, max_length=256)]
+    channel: Annotated[str, Field(min_length=1, max_length=256)]
+    source_name: Annotated[str, Field(min_length=1, max_length=512)]
+    context_tags: list[Annotated[str, Field(min_length=1, max_length=512)]] = Field(
+        default_factory=list,
+        max_length=256,
+    )
+
+    @field_validator("realm", "type", "channel", "source_name")
+    @classmethod
+    def validate_semantic_text(cls, value: str, info: Any) -> str:
+        return _semantic_text(value, info.field_name)
+
+    @field_validator("context_tags")
+    @classmethod
+    def normalize_context_tags(cls, value: list[str]) -> list[str]:
+        normalized = [item.strip() for item in value]
+        if any(not item for item in normalized):
+            raise ValueError("context_tags cannot contain blank values")
+        return normalized
 
 
 _UTC_RFC3339 = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|\+00:00)$")
@@ -104,7 +135,7 @@ class TaskAudit(PayloadExtraModel):
             raise ValueError(f"{info.field_name} must be RFC3339") from exc
 
 
-class InlineSourceDescriptor(PayloadExtraModel):
+class InlineSourceDescriptor(GenericSemanticSource):
     source_kind: Literal["inline_payload"]
     external_key: Annotated[str, Field(min_length=1, max_length=1024)]
     content: Annotated[str, Field(min_length=1, max_length=8 * 1024 * 1024)]
@@ -113,7 +144,7 @@ class InlineSourceDescriptor(PayloadExtraModel):
     require_human_review: bool = False
 
 
-class LocalObjectSourceDescriptor(PayloadExtraModel):
+class LocalObjectSourceDescriptor(GenericSemanticSource):
     source_kind: Literal["local_object"]
     external_key: Annotated[str, Field(min_length=1, max_length=1024)]
     logical_handle: Annotated[str, Field(pattern=r"^mkbobj:v1:[a-zA-Z0-9._:-]+$")]
@@ -121,7 +152,7 @@ class LocalObjectSourceDescriptor(PayloadExtraModel):
     require_human_review: bool = False
 
 
-class HttpSourceDescriptor(PayloadExtraModel):
+class HttpSourceDescriptor(GenericSemanticSource):
     source_kind: Literal["http_resource"]
     external_key: Annotated[str, Field(min_length=1, max_length=1024)]
     url: Annotated[str, Field(min_length=8, max_length=4096)]
@@ -141,9 +172,19 @@ class RegisteredApiSourceDescriptor(PayloadExtraModel):
     exhaustion_proof: Literal["caller_frozen_records.v1"] | None = None
     pagination_key: Annotated[str | None, Field(max_length=1024)] = None
     require_human_review: bool = False
+    realm: Annotated[str | None, Field(min_length=1, max_length=256)] = None
+    type: Annotated[str | None, Field(min_length=1, max_length=256)] = None
+    channel: Annotated[str | None, Field(min_length=1, max_length=256)] = None
+    source_name: Annotated[str | None, Field(min_length=1, max_length=512)] = None
+
+    @field_validator("realm", "type", "channel", "source_name")
+    @classmethod
+    def validate_optional_semantic_text(cls, value: str | None, info: Any) -> str | None:
+        return None if value is None else _semantic_text(value, info.field_name)
 
     @model_validator(mode="after")
     def validate_member_keys(self) -> RegisteredApiSourceDescriptor:
+        from intake.api.registry import assert_declared_provider_semantics, parse_registered_api_member
         from src.contracts.intake.providers import ChinaTaxRawMember, DomainRawMember, RealestateRawMember
 
         binding = (self.provider, self.operation, self.definition_version)
@@ -164,6 +205,16 @@ class RegisteredApiSourceDescriptor(PayloadExtraModel):
             except ValidationError as exc:
                 raise ValueError("registered_api record failed its versioned raw member schema") from exc
             dumped = member.model_dump(mode="json", by_alias=True)
+            try:
+                mapped = parse_registered_api_member(
+                    dumped,
+                    provider=self.provider,
+                    operation=self.operation,
+                    definition_version=self.definition_version,
+                )
+                assert_declared_provider_semantics(self.model_dump(exclude={"records"}), mapped)
+            except MkbError as exc:
+                raise ValueError("registered_api semantic duplicate or mapped authority is invalid") from exc
             validated.append(dumped)
             keys.append(str(dumped[identity_field]).strip().casefold())
         self.records = validated
@@ -405,7 +456,7 @@ class GateDecisionRequest(PayloadExtraModel):
         return self
 
 
-class RetrievalFilter(StrictModel):
+class LegacyRetrievalFilter(StrictModel):
     intake_item_uuid: str | None = None
     source_kind: Literal["inline_payload", "local_object", "http_resource", "registered_api"] | None = None
     channel: Literal["original", "summary"] | None = None
@@ -416,8 +467,25 @@ class RetrievalFilter(StrictModel):
         return None if value is None else _uuid(value, "intake_item_uuid")
 
 
+class RetrievalFilter(StrictModel):
+    intake_item_uuid: str | None = None
+    source_kind: Literal["inline_payload", "local_object", "http_resource", "registered_api"] | None = None
+    realm: Annotated[str | None, Field(min_length=1, max_length=256)] = None
+    type: Annotated[str | None, Field(min_length=1, max_length=256)] = None
+    semantic_channel: Annotated[str | None, Field(min_length=1, max_length=256)] = None
+    vector_channel: Literal["original", "summary"] | None = None
+    source_name: Annotated[str | None, Field(min_length=1, max_length=512)] = None
+    is_active: Literal[0, 1] | None = None
+    context_tags: Annotated[str | None, Field(min_length=1, max_length=8192)] = None
+
+    @field_validator("intake_item_uuid")
+    @classmethod
+    def validate_item_uuid(cls, value: str | None) -> str | None:
+        return None if value is None else _uuid(value, "intake_item_uuid")
+
+
 class RetrievalRequest(StrictModel):
-    schema_version: Literal["mkb.retrieval.v1"] = "mkb.retrieval.v1"
+    schema_version: Literal["mkb.retrieval.v1", "mkb.retrieval.v2"] = "mkb.retrieval.v1"
     team_uuid: str
     query: Annotated[str, Field(max_length=8192)]
     namespace_key: Annotated[str | None, Field(min_length=1, max_length=256)] = None
@@ -432,7 +500,7 @@ class RetrievalRequest(StrictModel):
     # A mapping alternative intentionally lets the service emit the required
     # RETRIEVE_FILTER_INVALID code for an unregistered key, rather than letting
     # FastAPI turn it into an untyped validation response before S10 runs.
-    filters: RetrievalFilter | dict[str, str] | None = None
+    filters: RetrievalFilter | LegacyRetrievalFilter | dict[str, Any] | None = None
 
     @field_validator("team_uuid")
     @classmethod
@@ -450,6 +518,14 @@ class RetrievalRequest(StrictModel):
             raise ValueError("only one namespace selector may be supplied")
         if self.return_k is not None and self.top_k is not None:
             raise ValueError("use return_k instead of top_k")
+        if self.filters is not None:
+            values = self.filters.model_dump(exclude_none=True) if isinstance(self.filters, BaseModel) else self.filters
+            keys = set(values)
+            legacy = {"intake_item_uuid", "source_kind", "channel"}
+            current = set(RetrievalFilter.model_fields)
+            allowed = legacy if self.schema_version == "mkb.retrieval.v1" else current
+            if keys - allowed:
+                raise ValueError("retrieval filter key is not available in this schema version")
         return self
 
 
@@ -497,6 +573,18 @@ def parse_retrieval_request(payload: object) -> RetrievalRequest:
     unknown = supplied_keys - set(RetrievalRequest.model_fields)
     if unknown:
         raise MkbError("RETRIEVE_SCHEMA_UNKNOWN_FIELD", "Unknown retrieval request field", 422)
+    schema_version = payload.get("schema_version", "mkb.retrieval.v1")
+    raw_filters = payload.get("filters")
+    if isinstance(raw_filters, Mapping):
+        allowed_filters = (
+            {"intake_item_uuid", "source_kind", "channel"}
+            if schema_version == "mkb.retrieval.v1"
+            else set(RetrievalFilter.model_fields)
+            if schema_version == "mkb.retrieval.v2"
+            else set()
+        )
+        if set(raw_filters) - allowed_filters:
+            raise MkbError("RETRIEVE_FILTER_INVALID", "Retrieval filters are invalid for this schema", 422)
 
     try:
         request = RetrievalRequest.model_validate(payload)

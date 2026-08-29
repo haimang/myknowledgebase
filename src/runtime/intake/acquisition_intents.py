@@ -71,7 +71,7 @@ class IntakeAcquisitionIntentsMixin:
                 "decoded_text": clean_text,
                 "decoded_digest": stable_digest({"text": clean_text, "media_type": "text/plain"}),
                 "clean_text": clean_text,
-                "clean_digest": clean["content_digest"],
+                "clean_digest": stable_digest({"text": clean_text}),
                 "rebuild_input_evidence": rebuild_input_evidence,
                 "rebuild_input_kind": "accepted_clean_artifact",
                 "require_human_review": False,
@@ -264,7 +264,8 @@ class IntakeAcquisitionIntentsMixin:
                     409,
                 )
             source_clean_artifact_uuid = str(clean["intake_artifact_uuid"])
-            source_clean_digest = str(clean["content_digest"])
+            source_clean_text = await self._read_frozen_clean_text(command, target)
+            source_clean_digest = stable_digest({"text": source_clean_text})
             async with self._persistence.transaction() as tx:
                 rows = await tx.fetchall(
                     "SELECT p.execution_uuid AS pointer_execution_uuid,a.execution_uuid,a.task_uuid,a.artifact_type,"
@@ -344,6 +345,7 @@ class IntakeAcquisitionIntentsMixin:
                 "source_intake_revision_uuid": target["intake_revision_uuid"],
                 "source_clean_artifact_uuid": source_clean_artifact_uuid,
                 "source_clean_digest": source_clean_digest,
+                "source_clean_content_digest": clean["content_digest"],
                 "source_construction_generation_artifact_uuid": receipts["construction_document"][
                     "generation_artifact_uuid"
                 ],
@@ -415,4 +417,3 @@ class IntakeAcquisitionIntentsMixin:
                 )
 
             return material, {}, callback
-

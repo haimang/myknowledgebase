@@ -221,6 +221,7 @@ class IntakeGenerationArtifactsMixin:
                 "source_intake_revision_uuid",
                 "source_clean_artifact_uuid",
                 "source_clean_digest",
+                "source_clean_content_digest",
                 "source_construction_generation_artifact_uuid",
             )
             if any(not isinstance(source.get(key), str) or not source[key] for key in required):
@@ -288,10 +289,11 @@ class IntakeGenerationArtifactsMixin:
             source_revision_uuid = source["source_intake_revision_uuid"]
             source_clean_artifact_uuid = source["source_clean_artifact_uuid"]
             source_clean_digest = source["source_clean_digest"]
+            source_clean_content_digest = source["source_clean_content_digest"]
             if (
                 target.get("intake_revision_uuid") != source_revision_uuid
                 or target["clean_artifact"].get("intake_artifact_uuid") != source_clean_artifact_uuid
-                or target["clean_artifact"].get("content_digest") != source_clean_digest
+                or target["clean_artifact"].get("content_digest") != source_clean_content_digest
                 or state.get("intake_item_uuid") != target.get("intake_item_uuid")
                 or state.get("clean_digest") != source_clean_digest
             ):

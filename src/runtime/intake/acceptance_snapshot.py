@@ -8,6 +8,7 @@ from typing import Any
 from src.contracts.common.errors import ConflictError, MkbError
 from src.contracts.common.ids import stable_digest, uuid7
 from src.contracts.common.time import utc_now
+from src.contracts.intake.semantics import ContextMeta, FilterMeta, SemanticTuple
 from src.contracts.runtime.models import ProcessCommand
 from src.contracts.storage.models import PromoteRequest
 from src.persistence.ports import UnitOfWork
@@ -598,7 +599,7 @@ class IntakeAcceptanceSnapshotMixin:
 
 
     async def _initial_semantics_tx(self, tx: UnitOfWork, state: Mapping[str, Any]) -> list[dict[str, Any]]:
-            """Resolve the four S04 bootstrap semantics for an accepted Revision.
+            """Resolve the ten canonical S04 semantics for an accepted Revision.
 
             The source descriptor itself remains an immutable S05 artifact.  The
             Revision keeps only compact, typed canonical values that participate
@@ -612,32 +613,49 @@ class IntakeAcceptanceSnapshotMixin:
                 raise MkbError("INTAKE_SEMANTICS_INPUT_INVALID", "Accepted intake lacks canonical semantic inputs", 422)
             filter_meta = state.get("filter_meta")
             context_meta = state.get("context_meta")
-            values: list[tuple[str, str, bool | int | float | str]] = [
-                ("source_representation", "text", source_kind),
-                ("canonical_content", "text", clean_digest),
-                ("context_metadata", "text", _json(context_meta) if isinstance(context_meta, Mapping) else "{}"),
-                (
-                    "filter_metadata",
-                    "text",
-                    _json(filter_meta) if isinstance(filter_meta, Mapping) else _json({"source_kind": source_kind}),
-                ),
+            semantic_tuples = state.get("semantic_tuples")
+            try:
+                canonical_filter = FilterMeta.model_validate(filter_meta)
+                canonical_context = ContextMeta.model_validate(context_meta)
+                tuples = [SemanticTuple.model_validate(item) for item in semantic_tuples]
+            except Exception as exc:
+                raise MkbError(
+                    "INTAKE_SEMANTICS_INCOMPLETE",
+                    "Accepted intake requires a complete six-tuple semantic authority",
+                    422,
+                ) from exc
+            expected = {
+                "realm": canonical_filter.realm,
+                "type": canonical_filter.type,
+                "channel": canonical_filter.channel,
+                "source_name": canonical_filter.source_name,
+                "is_active": canonical_filter.is_active,
+                "context_tags": "\n".join(canonical_context.tags),
+            }
+            by_key = {item.semantic_key: item for item in tuples}
+            if set(by_key) != set(expected) or len(tuples) != len(by_key):
+                raise MkbError("INTAKE_SEMANTICS_INCOMPLETE", "Semantic six-tuple keys are incomplete", 422)
+            for semantic_key, value in expected.items():
+                if by_key[semantic_key].value != value:
+                    raise MkbError("INTAKE_SEMANTICS_CONFLICT", "Semantic tuple conflicts with metadata blobs", 422)
+            values: list[tuple[str, str, bool | int | float | str, str]] = [
+                ("source_representation", "text", source_kind, "system"),
+                ("canonical_content", "text", clean_digest, "system"),
+                ("context_metadata", "text", _json(canonical_context.model_dump(mode="json")), "system"),
+                ("filter_metadata", "text", _json(canonical_filter.model_dump(mode="json")), "system"),
             ]
-            if isinstance(filter_meta, Mapping):
-                for semantic_key in ("realm", "type", "channel", "source_name"):
-                    value = filter_meta.get(semantic_key)
-                    if not isinstance(value, str) or not value:
-                        raise MkbError("INTAKE_SEMANTICS_INPUT_INVALID", "Provider filter semantics are incomplete", 422)
-                    values.append((semantic_key, "text", value))
-                is_active = filter_meta.get("is_active")
-                if isinstance(is_active, bool) or is_active not in {0, 1}:
-                    raise MkbError("INTAKE_SEMANTICS_INPUT_INVALID", "Provider active semantic is invalid", 422)
-                values.append(("is_active", "int", is_active))
-                tags = context_meta.get("tags") if isinstance(context_meta, Mapping) else None
-                if not isinstance(tags, list) or any(not isinstance(tag, str) for tag in tags):
-                    raise MkbError("INTAKE_SEMANTICS_INPUT_INVALID", "Provider context tags are invalid", 422)
-                values.append(("context_tags", "text", "\n".join(tags)))
+            for semantic_key in ("realm", "type", "channel", "source_name", "is_active", "context_tags"):
+                item = by_key[semantic_key]
+                values.append(
+                    (
+                        semantic_key,
+                        "int" if semantic_key == "is_active" else "text",
+                        expected[semantic_key],
+                        item.provenance,
+                    )
+                )
             entries: list[dict[str, Any]] = []
-            for semantic_key, value_kind, value in values:
+            for semantic_key, value_kind, value, provenance in values:
                 definition = await tx.fetchone(
                     "SELECT definition_version,definition_digest,value_kind,fingerprint_participation "
                     "FROM mkb_intake_semantic_definitions "
@@ -654,6 +672,7 @@ class IntakeAcceptanceSnapshotMixin:
                         "value_kind": value_kind,
                         "fingerprint_participation": bool(definition["fingerprint_participation"]),
                         "value": value,
+                        "value_provenance": provenance,
                         "value_digest": self._semantic_value_digest(
                             semantic_key,
                             definition["definition_version"],
@@ -717,7 +736,8 @@ class IntakeAcceptanceSnapshotMixin:
             await tx.execute(
                 "INSERT INTO mkb_intake_revision_semantics "
                 "(team_uuid,intake_revision_uuid,semantic_key,definition_version,value_digest,value_kind,value_bool,value_int,"
-                "value_real,value_text,value_artifact_uuid,created_at,payload_extra) VALUES (?,?,?,?,?,?,?,?,?,?,?,?, '{}')",
+                "value_real,value_text,value_artifact_uuid,value_provenance,created_at,payload_extra) "
+                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?, '{}')",
                 (
                     team_uuid,
                     revision_uuid,
@@ -730,6 +750,7 @@ class IntakeAcceptanceSnapshotMixin:
                     values["value_real"],
                     values["value_text"],
                     values["value_artifact_uuid"],
+                    entry.get("value_provenance", "legacy_unverifiable"),
                     now,
                 ),
             )

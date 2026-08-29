@@ -73,10 +73,14 @@ def test_single_intake_publishes_grounded_retrieval_context(tmp_path: Path) -> N
                     "json_prompt_id": "promptB.json.generic",
                     "source": {
                         "source_kind": "inline_payload",
+                        "realm": "documentation",
+                        "type": "article",
+                        "channel": "general",
+                        "source_name": "test-fixture",
                         "external_key": "semantic-golden-document",
                         "content": "MKB workflow retrieval semantic golden document",
                         "media_type": "text/plain",
-                    }
+                    },
                 },
                 "audit": {
                     "schema_version": "mkb.task-audit.v1",
@@ -168,9 +172,7 @@ async def _assert_d04_full_chain(persistence: object) -> None:
         facts = await tx.fetchall("SELECT fact_uuid FROM mkb_intake_change_set_facts")
         event_rows = await tx.fetchall("SELECT event_type FROM mkb_domain_events")
         stored = await tx.fetchall("SELECT stored_object_uuid FROM mkb_stored_objects")
-        vectors = await tx.fetchall(
-            "SELECT embedding, dimension FROM mkb_vector_records WHERE deleted_at IS NULL"
-        )
+        vectors = await tx.fetchall("SELECT embedding, dimension FROM mkb_vector_records WHERE deleted_at IS NULL")
     events = {row["event_type"] for row in event_rows}
     assert changesets, "single-item TX-05 must persist a ChangeSet"
     assert facts, "single-item TX-05 must persist ChangeSet facts"
@@ -369,9 +371,13 @@ def test_live_profile_uses_frozen_binding_for_vector_write_and_query(tmp_path: P
                     "compression_channel": "local-inference",
                     "source": {
                         "source_kind": "inline_payload",
+                        "realm": "documentation",
+                        "type": "article",
+                        "channel": "general",
+                        "source_name": "test-fixture",
                         "external_key": "live-vector-document",
                         "content": "Live embedding preserves the frozen binding.",
-                    }
+                    },
                 },
                 "audit": {
                     "schema_version": "mkb.task-audit.v1",
@@ -474,11 +480,7 @@ def test_live_profile_uses_frozen_binding_for_vector_write_and_query(tmp_path: P
     assert all(row["input_digest"] for row in gen_rows)
     # Linked ledgers: every generation row has a matching inference row.
     gen_ids = {row["invocation_uuid"] for row in gen_rows}
-    linked = {
-        row["generation_invocation_uuid"]
-        for row in inv_rows
-        if row["generation_invocation_uuid"] is not None
-    }
+    linked = {row["generation_invocation_uuid"] for row in inv_rows if row["generation_invocation_uuid"] is not None}
     assert gen_ids <= linked
     # No prompt bodies or source text in the durable ledgers.
     rendered = str(inv_rows + gen_rows)

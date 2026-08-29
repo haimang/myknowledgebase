@@ -7,6 +7,7 @@ import json
 import re
 import time
 from collections.abc import Awaitable, Callable, Mapping
+from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
@@ -20,6 +21,7 @@ from src.persistence.ports import UnitOfWork
 from src.runtime.inference.claude_cli import BJSON_MATERIAL_SCHEMA, ClaudeCliRequest
 from src.runtime.intake.generation_assemble import (
     assemble_from_cuts,
+    overlay_system_context_meta,
     overlay_system_g0,
     realign_construct_original,
 )
@@ -347,6 +349,40 @@ class IntakeGenerationConstructMixin:
             return prompt_path.relative_to(self._prompt_root).as_posix()
         except ValueError:
             return prompt_path.name
+
+    async def _revision_context_semantics(
+        self,
+        command: ProcessCommand,
+        state: Mapping[str, Any],
+    ) -> dict[str, object]:
+        revision_uuid = state.get("intake_revision_uuid")
+        if not isinstance(revision_uuid, str):
+            raise MkbError("STRUCTURE_CONTEXT_SEMANTICS_INCOMPLETE", "Intake revision is unavailable", 422)
+        async with self._persistence.transaction() as tx:
+            rows = await tx.fetchall(
+                "SELECT semantic_key,value_kind,value_int,value_text FROM mkb_intake_revision_semantics "
+                "WHERE team_uuid=? AND intake_revision_uuid=? "
+                "AND semantic_key IN ('realm','type','channel','source_name','is_active','context_tags')",
+                (command.team_uuid, revision_uuid),
+            )
+        by_key = {str(row["semantic_key"]): row for row in rows}
+        if set(by_key) != {"realm", "type", "channel", "source_name", "is_active", "context_tags"}:
+            raise MkbError("STRUCTURE_CONTEXT_SEMANTICS_INCOMPLETE", "S04 semantic six-tuple is unavailable", 422)
+        values: dict[str, object] = {}
+        for key in ("realm", "type", "channel", "source_name"):
+            value = by_key[key]["value_text"]
+            if by_key[key]["value_kind"] != "text" or not isinstance(value, str) or not value:
+                raise MkbError("STRUCTURE_CONTEXT_SEMANTICS_INCOMPLETE", "S04 semantic text is invalid", 422)
+            values[key] = value
+        active = by_key["is_active"]["value_int"]
+        if by_key["is_active"]["value_kind"] != "int" or active not in {0, 1}:
+            raise MkbError("STRUCTURE_CONTEXT_SEMANTICS_INCOMPLETE", "S04 active semantic is invalid", 422)
+        tags = by_key["context_tags"]["value_text"]
+        if by_key["context_tags"]["value_kind"] != "text" or not isinstance(tags, str):
+            raise MkbError("STRUCTURE_CONTEXT_SEMANTICS_INCOMPLETE", "S04 context tags are invalid", 422)
+        values["is_active"] = active
+        values["context_tags"] = tags.splitlines() if tags else []
+        return values
 
     def _cli_invocation_from_receipt(
         self,
@@ -994,12 +1030,59 @@ class IntakeGenerationConstructMixin:
 
         if self._construct_mode(state) == "metadata_refresh":
             (
-                compiler,
-                structure,
-                projection,
+                _source_compiler,
+                _source_structure,
+                _source_projection,
                 summaries,
                 metadata_headers,
             ) = await self._reconstruct_metadata_refresh_contract(command, state)
+            structure_data = await self._read_frozen_generation_asset(
+                command,
+                state,
+                artifact_uuid_key="structure_artifact_uuid",
+                logical_handle_key="structure_artifact_ref",
+                content_digest_key="structure_artifact_content_digest",
+                size_bytes_key="structure_artifact_size_bytes",
+                error_code="CONSTRUCT_TO_VECTORIZE_GATE",
+            )
+            projection_data = await self._read_frozen_generation_asset(
+                command,
+                state,
+                artifact_uuid_key="retrieval_block_projection_artifact_uuid",
+                logical_handle_key="retrieval_block_projection_ref",
+                content_digest_key="retrieval_block_projection_content_digest",
+                size_bytes_key="retrieval_block_projection_size_bytes",
+                error_code="CONSTRUCT_TO_VECTORIZE_GATE",
+            )
+            compiler, structure, projection = LsragConstructService().reprove_structure_from_stored_payloads(
+                clean_text=self._generation_clean_text(state, error_code="CONSTRUCT_TO_VECTORIZE_GATE"),
+                structure_data=structure_data,
+                projection_data=projection_data,
+            )
+            validation_data = await self._read_frozen_generation_asset(
+                command,
+                state,
+                artifact_uuid_key="structure_validation_artifact_uuid",
+                logical_handle_key="structure_validation_artifact_ref",
+                content_digest_key="structure_validation_artifact_content_digest",
+                size_bytes_key="structure_validation_artifact_size_bytes",
+                error_code="CONSTRUCT_TO_VECTORIZE_GATE",
+            )
+            expected_validation = canonical_json(
+                self._structure_validation_report_payload(
+                    validation_artifact_uuid=str(state["structure_validation_artifact_uuid"]),
+                    structure=structure,
+                    projection=projection,
+                )
+            )
+            if validation_data != expected_validation:
+                raise MkbError("CONSTRUCT_TO_VECTORIZE_GATE", "Projected structure validation is inconsistent", 409)
+            await self._assert_generation_members(
+                command,
+                state,
+                self._structure_generation_members(),
+                error_code="CONSTRUCT_TO_VECTORIZE_GATE",
+            )
             required_granularities = frozenset(block.granularity for block in projection.blocks)
         else:
             compiler, structure, projection = await self._reconstruct_structure_contract(command, state)
@@ -1109,6 +1192,7 @@ class IntakeGenerationConstructMixin:
         cli_receipt: dict[str, object] | None = None
         layered_candidate: Mapping[str, object] | None = None
         profile = self._layered_profile(state, error_code="STRUCTURE_PROFILE_INVALID")
+        revision_context = await self._revision_context_semantics(command, state)
         structurize_input = self._structurize_input_text(state, clean)
         channel = self._compression_channel(state, command)
         if state.get("layered_content_candidate") is None and channel == "local-inference":
@@ -1216,6 +1300,10 @@ class IntakeGenerationConstructMixin:
                 candidate=layered_candidate,
                 profile=profile,
             )
+        layered_candidate = overlay_system_context_meta(
+            candidate=layered_candidate,
+            revision_semantics=revision_context,
+        )
         try:
             admitted = LsragStructurizeService().admit(
                 bind_structurize(
@@ -1460,6 +1548,7 @@ class IntakeGenerationConstructMixin:
         cli_receipt: dict[str, object] | None = None
         completed_layered_candidate: dict[str, object] | None = None
         accepted_layered_candidate: Mapping[str, object] | None = None
+        metadata_structure_assets: tuple[Any, Any, Any] | None = None
         if construct_mode == "metadata_refresh":
             (
                 compiler,
@@ -1468,6 +1557,25 @@ class IntakeGenerationConstructMixin:
                 summaries,
                 metadata_headers,
             ) = await self._reconstruct_metadata_refresh_contract(command, state)
+            revision_context = await self._revision_context_semantics(command, state)
+            projected_context = {
+                "realm": revision_context["realm"],
+                "type": revision_context["type"],
+                "channel": revision_context["channel"],
+                "source_name": revision_context["source_name"],
+                "tags": revision_context["context_tags"],
+            }
+            structure = replace(
+                structure,
+                generation_artifact_uuid=uuid7(),
+                context_meta=projected_context,
+            )
+            projection = replace(
+                projection,
+                generation_artifact_uuid=uuid7(),
+                structure_generation_artifact_uuid=structure.generation_artifact_uuid,
+                structure_document_digest=structure_document_digest(structure),
+            )
             required_granularities = frozenset(block.granularity for block in projection.blocks)
         else:
             compiler, structure, projection = await self._reconstruct_structure_contract(command, state)
@@ -1533,6 +1641,35 @@ class IntakeGenerationConstructMixin:
                 dual=dual,
             ),
         )
+        if construct_mode == "metadata_refresh":
+            metadata_structure_validation_uuid = uuid7()
+            metadata_structure_asset = await self._promote_generation_member(
+                command,
+                artifact_uuid=structure.generation_artifact_uuid,
+                artifact_type="structure_document",
+                payload=structure_payload(structure),
+            )
+            metadata_projection_asset = await self._promote_generation_member(
+                command,
+                artifact_uuid=projection.generation_artifact_uuid,
+                artifact_type="retrieval_block_projection",
+                payload=retrieval_projection_payload(projection),
+            )
+            metadata_structure_validation_asset = await self._promote_generation_member(
+                command,
+                artifact_uuid=metadata_structure_validation_uuid,
+                artifact_type="structure_validation_report",
+                payload=self._structure_validation_report_payload(
+                    validation_artifact_uuid=metadata_structure_validation_uuid,
+                    structure=structure,
+                    projection=projection,
+                ),
+            )
+            metadata_structure_assets = (
+                metadata_structure_asset,
+                metadata_projection_asset,
+                metadata_structure_validation_asset,
+            )
         next_state = dict(state)
         next_state.update(
             {
@@ -1553,6 +1690,26 @@ class IntakeGenerationConstructMixin:
                 "construction_validation_artifact_size_bytes": validation_asset.stat.size_bytes,
             }
         )
+        if metadata_structure_assets is not None:
+            structure_asset, projection_asset, structure_validation_asset = metadata_structure_assets
+            next_state.update(
+                {
+                    "structure_artifact_uuid": structure_asset.artifact_uuid,
+                    "structure_artifact_ref": structure_asset.stat.handle.value,
+                    "structure_artifact_content_digest": structure_asset.stat.sha256,
+                    "structure_artifact_size_bytes": structure_asset.stat.size_bytes,
+                    "structure_document_digest": structure_document_digest(structure),
+                    "retrieval_block_projection_artifact_uuid": projection_asset.artifact_uuid,
+                    "retrieval_block_projection_ref": projection_asset.stat.handle.value,
+                    "retrieval_block_projection_content_digest": projection_asset.stat.sha256,
+                    "retrieval_block_projection_size_bytes": projection_asset.stat.size_bytes,
+                    "retrieval_block_projection_digest": projection_digest(projection),
+                    "structure_validation_artifact_uuid": structure_validation_asset.artifact_uuid,
+                    "structure_validation_artifact_ref": structure_validation_asset.stat.handle.value,
+                    "structure_validation_artifact_content_digest": structure_validation_asset.stat.sha256,
+                    "structure_validation_artifact_size_bytes": structure_validation_asset.stat.size_bytes,
+                }
+            )
         if completed_layered_candidate is not None:
             next_state.update(
                 {
@@ -1629,6 +1786,14 @@ class IntakeGenerationConstructMixin:
             )
             if schema is None:
                 raise MkbError("REGISTRY_NOT_FOUND", "Construction schema definition is unavailable", 503)
+            structure_schema = None
+            if metadata_structure_assets is not None:
+                structure_schema = await tx.fetchone(
+                    "SELECT schema_digest FROM mkb_structure_schema_definitions "
+                    "WHERE schema_key='lsrag.structure.default' AND schema_version='v1'"
+                )
+                if structure_schema is None:
+                    raise MkbError("REGISTRY_NOT_FOUND", "Structure schema definition is unavailable", 503)
             for item in generation_invocations:
                 await self._record_generation_and_inference_invocations(tx, command, item)
             if cli_receipt is not None:
@@ -1647,6 +1812,41 @@ class IntakeGenerationConstructMixin:
                         ),
                     ),
                 )
+            if metadata_structure_assets is not None:
+                structure_asset, projection_asset, structure_validation_asset = metadata_structure_assets
+                for asset in metadata_structure_assets:
+                    stored_object_uuid = await self._catalog_generation_object(tx, command.team_uuid, asset.stat)
+                    await self._insert_generation_artifact(
+                        tx,
+                        command=command,
+                        artifact_uuid=asset.artifact_uuid,
+                        artifact_type=asset.artifact_type,
+                        stored_object_uuid=stored_object_uuid,
+                        logical_handle=asset.stat.handle.value,
+                        content_digest=asset.stat.sha256,
+                        size_bytes=asset.stat.size_bytes,
+                        intake_item_uuid=state["intake_item_uuid"],
+                        intake_revision_uuid=state["intake_revision_uuid"],
+                        clean_artifact_uuid=state["clean_artifact_uuid"],
+                        clean_artifact_digest=state["clean_digest"],
+                        schema_key="lsrag.structure.default",
+                        schema_version="v1",
+                        schema_digest=structure_schema["schema_digest"],
+                        validation_report_ref=structure_validation_asset.stat.handle.value,
+                        validation_report_digest=structure_validation_asset.stat.sha256,
+                        proof_ref=refs["proof_ref"],
+                        proof_digest=refs["proof_digest"],
+                    )
+                    await self._reference_object(
+                        tx,
+                        team_uuid=command.team_uuid,
+                        stored_object_uuid=stored_object_uuid,
+                        purpose="generation_artifact",
+                        owner_kind="generation_artifact",
+                        owner_uuid=asset.artifact_uuid,
+                        digest=asset.stat.sha256,
+                        size=asset.stat.size_bytes,
+                    )
             for asset in (construction_asset, dual_asset, validation_asset):
                 stored_object_uuid = await self._catalog_generation_object(tx, command.team_uuid, asset.stat)
                 await self._insert_generation_artifact(
@@ -1680,6 +1880,14 @@ class IntakeGenerationConstructMixin:
                     digest=asset.stat.sha256,
                     size=asset.stat.size_bytes,
                 )
+            if metadata_structure_assets is not None:
+                for asset in metadata_structure_assets:
+                    await self._advance_generation_pointer(
+                        tx,
+                        command=command,
+                        artifact_type=asset.artifact_type,
+                        artifact_uuid=asset.artifact_uuid,
+                    )
             for asset in (construction_asset, dual_asset, validation_asset):
                 await self._advance_generation_pointer(
                     tx,

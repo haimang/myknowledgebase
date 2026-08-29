@@ -84,9 +84,16 @@ async def test_metadata_resolver_freezes_exact_definition_participation_and_arti
         value_kind="ref",
         fingerprint_participation=True,
     )
+    await _register_semantic_definition(
+        seeded_intake.persistence,
+        semantic_key="route_hint",
+        definition_version="v1",
+        value_kind="text",
+        fingerprint_participation=False,
+    )
     version_two_digest = await _register_semantic_definition(
         seeded_intake.persistence,
-        semantic_key="context_metadata",
+        semantic_key="route_hint",
         definition_version="v2",
         value_kind="text",
         fingerprint_participation=False,
@@ -100,7 +107,7 @@ async def test_metadata_resolver_freezes_exact_definition_participation_and_arti
             intake_item_uuid=seeded_intake.item_uuid,
             semantics={
                 "asset_reference": clean_artifact_uuid,
-                "context_metadata": {"definition_version": "v2", "value": "routing-only"},
+                "route_hint": {"definition_version": "v2", "value": "routing-only"},
             },
         ),
     )
@@ -110,16 +117,16 @@ async def test_metadata_resolver_freezes_exact_definition_participation_and_arti
     assert values["asset_reference"].value_kind == "ref"
     assert values["asset_reference"].fingerprint_participation is True
     assert values["asset_reference"].value == clean_artifact_uuid
-    assert values["context_metadata"].definition_version == "v2"
-    assert values["context_metadata"].definition_digest == version_two_digest
-    assert values["context_metadata"].fingerprint_participation is False
+    assert values["route_hint"].definition_version == "v2"
+    assert values["route_hint"].definition_digest == version_two_digest
+    assert values["route_hint"].fingerprint_participation is False
 
     with pytest.raises(MkbError, match="requires an explicit version"):
         await resolver.resolve_metadata_update(
             seeded_intake.team_uuid,
             IntakeUpdateMetadataPayload(
                 intake_item_uuid=seeded_intake.item_uuid,
-                semantics={"context_metadata": "would select v1 or v2"},
+                semantics={"route_hint": "would select v1 or v2"},
             ),
         )
     with pytest.raises(MkbError, match="version is not registered"):
@@ -127,7 +134,7 @@ async def test_metadata_resolver_freezes_exact_definition_participation_and_arti
             seeded_intake.team_uuid,
             IntakeUpdateMetadataPayload(
                 intake_item_uuid=seeded_intake.item_uuid,
-                semantics={"context_metadata": {"definition_version": "v3", "value": "not registered"}},
+                semantics={"route_hint": {"definition_version": "v3", "value": "not registered"}},
             ),
         )
     with pytest.raises(MkbError, match="not an available Intake artifact"):
@@ -163,6 +170,7 @@ async def test_metadata_semantic_helpers_map_refs_recheck_them_and_exclude_nonpa
         "fingerprint_participation": True,
         "value": clean_artifact_uuid,
         "value_digest": pipeline._semantic_value_digest("asset_reference", "v1", ref_digest, clean_artifact_uuid),
+        "value_provenance": "caller",
     }
     async with seeded_intake.persistence.transaction() as tx:
         await pipeline._insert_revision_semantic(
@@ -178,27 +186,14 @@ async def test_metadata_semantic_helpers_map_refs_recheck_them_and_exclude_nonpa
             (seeded_intake.team_uuid, seeded_intake.revision_uuid),
         )
         assert stored == {"value_kind": "artifact_ref", "value_artifact_uuid": clean_artifact_uuid}
-        inherited, _fingerprint = await pipeline._merged_metadata_semantics_tx(
-            tx,
-            seeded_intake.team_uuid,
-            seeded_intake.revision_uuid,
-            [],
-            [ref_entry],
-        )
-        assert inherited["asset_reference"] == ref_entry
+        await pipeline._validate_metadata_entry_tx(tx, seeded_intake.team_uuid, ref_entry)
 
         missing_ref = {**ref_entry, "value": uuid7()}
         missing_ref["value_digest"] = pipeline._semantic_value_digest(
             "asset_reference", "v1", ref_digest, missing_ref["value"]
         )
         with pytest.raises(MkbError, match="not an available Intake artifact"):
-            await pipeline._merged_metadata_semantics_tx(
-                tx,
-                seeded_intake.team_uuid,
-                seeded_intake.revision_uuid,
-                [missing_ref],
-                [ref_entry],
-            )
+            await pipeline._validate_metadata_entry_tx(tx, seeded_intake.team_uuid, missing_ref)
 
     participating = {
         "semantic_key": "canonical_content",

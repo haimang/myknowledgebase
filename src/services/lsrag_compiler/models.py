@@ -4,7 +4,8 @@ from __future__ import annotations
 
 import re
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from typing import Any
 
 from src.contracts.common.errors import MkbError
 from src.contracts.common.ids import stable_digest
@@ -77,6 +78,7 @@ class StructureDocument:
     document_root_node_id: str
     nodes: tuple[StructureNode, ...]
     proof_digest: str
+    context_meta: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass(frozen=True, slots=True)

@@ -137,6 +137,10 @@ def test_reactivate_restores_active_lifecycle_but_not_stale_serving_state(tmp_pa
             payload={
                 "source": {
                     "source_kind": "inline_payload",
+                    "realm": "documentation",
+                    "type": "article",
+                    "channel": "general",
+                    "source_name": "test-fixture",
                     "external_key": "reactivation-document",
                     "content": "Reactivation must require fresh publication before retrieval can serve this document.",
                 }
@@ -180,13 +184,11 @@ def test_reactivate_restores_active_lifecycle_but_not_stale_serving_state(tmp_pa
                 (team_uuid, item_uuid),
             ).fetchone()
             pointer = connection.execute(
-                "SELECT lifecycle_state FROM mkb_index_active_pointers "
-                "WHERE team_uuid=? AND intake_item_uuid=?",
+                "SELECT lifecycle_state FROM mkb_index_active_pointers WHERE team_uuid=? AND intake_item_uuid=?",
                 (team_uuid, item_uuid),
             ).fetchone()
             vector = connection.execute(
-                "SELECT publication_state FROM mkb_vector_records "
-                "WHERE team_uuid=? AND intake_item_uuid=?",
+                "SELECT publication_state FROM mkb_vector_records WHERE team_uuid=? AND intake_item_uuid=?",
                 (team_uuid, item_uuid),
             ).fetchone()
             transition = connection.execute(
@@ -221,8 +223,7 @@ def test_reactivate_restores_active_lifecycle_but_not_stale_serving_state(tmp_pa
             (team_uuid, item_uuid),
         ).fetchone()
         pointer = connection.execute(
-            "SELECT lifecycle_state FROM mkb_index_active_pointers "
-            "WHERE team_uuid=? AND intake_item_uuid=?",
+            "SELECT lifecycle_state FROM mkb_index_active_pointers WHERE team_uuid=? AND intake_item_uuid=?",
             (team_uuid, item_uuid),
         ).fetchone()
     assert item == ("active", revision_uuid, revision_uuid)

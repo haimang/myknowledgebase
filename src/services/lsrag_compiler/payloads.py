@@ -19,8 +19,7 @@ from src.services.lsrag_compiler.models import (
 
 
 def structure_document_digest(document: StructureDocument) -> str:
-    return stable_digest(
-        {
+    value = {
             "generation": document.generation_artifact_uuid,
             "clean_artifact": document.clean_artifact_uuid,
             "clean_digest": document.clean_digest,
@@ -42,7 +41,9 @@ def structure_document_digest(document: StructureDocument) -> str:
             ],
             "proof": document.proof_digest,
         }
-    )
+    if document.context_meta:
+        value["context_meta"] = document.context_meta
+    return stable_digest(value)
 
 
 def projection_digest(projection: RetrievalBlockProjection) -> str:
@@ -87,7 +88,7 @@ def construction_document_digest(document: ConstructionDocument) -> str:
 def structure_payload(document: StructureDocument) -> dict[str, object]:
     """Return deterministic JSON-ready bytes shape for a structure artifact."""
 
-    return {
+    payload = {
         "schema_version": "mkb.structure-document.v1",
         "generation_artifact_uuid": document.generation_artifact_uuid,
         "clean_artifact_uuid": document.clean_artifact_uuid,
@@ -112,6 +113,9 @@ def structure_payload(document: StructureDocument) -> dict[str, object]:
         ],
         "proof_digest": document.proof_digest,
     }
+    if document.context_meta:
+        payload["context_meta"] = document.context_meta
+    return payload
 
 
 def retrieval_projection_payload(projection: RetrievalBlockProjection) -> dict[str, object]:
@@ -197,7 +201,9 @@ def parse_structure_payload(payload: Mapping[str, object]) -> StructureDocument:
         "nodes",
         "proof_digest",
     }
-    if set(payload) != expected_keys or payload.get("schema_version") != "mkb.structure-document.v1":
+    if frozenset(payload) not in {frozenset(expected_keys), frozenset({*expected_keys, "context_meta"})} or payload.get(
+        "schema_version"
+    ) != "mkb.structure-document.v1":
         _fail("STRUCTURE_ARTIFACT_INVALID", "Frozen structure payload shape is invalid")
     nodes_raw = payload.get("nodes")
     if not isinstance(nodes_raw, list):
@@ -247,6 +253,7 @@ def parse_structure_payload(payload: Mapping[str, object]) -> StructureDocument:
         str(payload["document_root_node_id"]),
         tuple(nodes),
         str(payload["proof_digest"]),
+        dict(payload.get("context_meta") or {}),
     )
 
 

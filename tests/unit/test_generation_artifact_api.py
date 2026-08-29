@@ -56,9 +56,13 @@ def _task_request(team_uuid: str, task_uuid: str, trace_uuid: str, external_key:
                 "json_prompt_id": "promptB.json.generic",
                 "source": {
                     "source_kind": "inline_payload",
+                    "realm": "documentation",
+                    "type": "article",
+                    "channel": "general",
+                    "source_name": "test-fixture",
                     "external_key": external_key,
                     "content": "safe fixture body",
-                }
+                },
             },
             "audit": {
                 "schema_version": "mkb.task-audit.v1",
@@ -261,7 +265,9 @@ def test_generation_artifact_reads_are_task_scoped_typed_and_non_leaking(tmp_pat
     headers = {"Authorization": "Bearer generation-artifact-contract-token"}
     root = f"/v1/teams/{seed.team_uuid}/tasks/{seed.task_uuid}"
     try:
-        first_page = client.get(f"{root}/generation-artifacts?artifact_type=structure_document&limit=1", headers=headers)
+        first_page = client.get(
+            f"{root}/generation-artifacts?artifact_type=structure_document&limit=1", headers=headers
+        )
         assert first_page.status_code == 200
         first_payload = first_page.json()
         assert [item["generation_artifact_uuid"] for item in first_payload["items"]] == [seed.second_structure_uuid]

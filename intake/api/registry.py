@@ -42,6 +42,7 @@ class ProviderOperationDefinition:
     member_model: type[BaseModel]
     parser: Callable[[Any], MappedProviderMember]
     envelope_unpacker: Callable[[Any], list[Any]]
+    optional_unknown_fields: tuple[str, ...] = ()
 
     @property
     def manifest(self) -> dict[str, Any]:
@@ -50,7 +51,7 @@ class ProviderOperationDefinition:
             "envelope": self.envelope_model.model_json_schema(),
             "member": self.member_model.model_json_schema(),
         }
-        return {
+        manifest = {
             "provider": self.provider,
             "operation": self.operation,
             "definition_version": self.definition_version,
@@ -64,6 +65,9 @@ class ProviderOperationDefinition:
             "normalizer_version": "v1",
             "cardinality": "scatter",
         }
+        if self.optional_unknown_fields:
+            manifest["optional_unknown_fields"] = list(self.optional_unknown_fields)
+        return manifest
 
     @property
     def definition_digest(self) -> str:
@@ -148,6 +152,25 @@ def parse_registered_api_member(
         ) from exc
 
 
+def assert_declared_provider_semantics(
+    declared: Mapping[str, Any],
+    mapped: MappedProviderMember | Mapping[str, Any],
+) -> None:
+    """An optional caller duplicate is an equality fence, never an override."""
+
+    values = mapped.filter_meta if isinstance(mapped, MappedProviderMember) else mapped
+    for key in ("realm", "type", "channel", "source_name"):
+        value = declared.get(key)
+        mapped_value = getattr(values, key) if isinstance(values, BaseModel) else values.get(key)
+        if value is not None and value != mapped_value:
+            raise MkbError(
+                "CLEAN_SEMANTIC_CONFLICT",
+                "Caller semantic duplicate conflicts with the registered provider mapper",
+                422,
+                {"semantic_key": key},
+            )
+
+
 def unpack_registered_api_envelope(
     envelope: object, *, provider: str, operation: str, definition_version: str
 ) -> list[dict[str, Any]]:
@@ -162,6 +185,7 @@ def unpack_registered_api_envelope(
 __all__ = [
     "REGISTERED_PROVIDER_OPERATIONS",
     "ProviderOperationDefinition",
+    "assert_declared_provider_semantics",
     "parse_registered_api_member",
     "registered_provider_manifest_digest",
     "resolve_provider_operation",

@@ -63,8 +63,7 @@ async def test_catalog_and_upload_pending_commit_before_record_is_returned(tmp_p
                 (team_uuid,),
             )
             pending = await tx.fetchone(
-                "SELECT purpose,owner_kind,owner_uuid,released_at FROM mkb_object_references "
-                "WHERE team_uuid=?",
+                "SELECT purpose,owner_kind,owner_uuid,released_at FROM mkb_object_references WHERE team_uuid=?",
                 (team_uuid,),
             )
             counts = {
@@ -249,6 +248,10 @@ async def test_uncatalogued_internal_promote_is_not_a_local_object_ingest_input(
                 command,
                 {
                     "source_kind": "local_object",
+                    "realm": "documentation",
+                    "type": "article",
+                    "channel": "general",
+                    "source_name": "test-fixture",
                     "external_key": "uncatalogued",
                     "logical_handle": stat.handle.value,
                     "media_type": "text/plain",
