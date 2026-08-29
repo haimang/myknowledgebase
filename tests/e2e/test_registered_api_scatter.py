@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import asyncio
 import json
-import sqlite3
 import time
 from pathlib import Path
 from typing import Any
@@ -260,44 +259,55 @@ def test_registered_api_three_raw_provider_operations_map_seal_and_persist_seman
             assert terminal["status"] == "succeeded", (provider, terminal)
             task_ids[(provider, operation)] = task_uuid
 
+        persistence = app.state.container.persistence
+
+        async def inspect() -> dict[tuple[str, str], tuple[str, list[dict[str, Any]]]]:
+            observed: dict[tuple[str, str], tuple[str, list[dict[str, Any]]]] = {}
+            async with persistence.transaction() as tx:
+                for provider_operation, task_uuid in task_ids.items():
+                    process = await tx.fetchone(
+                        "SELECT output_manifest_ref FROM mkb_processes WHERE team_uuid=? AND task_uuid=? "
+                        "AND process_key='clean.map.registered_api' AND status='succeeded'",
+                        (team_uuid, task_uuid),
+                    )
+                    assert process is not None
+                    semantics = await tx.fetchall(
+                        "SELECT s.semantic_key,s.value_text,s.value_int FROM mkb_intake_revision_semantics s "
+                        "JOIN mkb_intake_snapshot_memberships m ON m.team_uuid=s.team_uuid "
+                        "AND m.observed_revision_uuid=s.intake_revision_uuid "
+                        "JOIN mkb_tasks t ON t.team_uuid=m.team_uuid AND t.intake_snapshot_uuid=m.intake_snapshot_uuid "
+                        "WHERE t.team_uuid=? AND t.task_uuid=?",
+                        (team_uuid, task_uuid),
+                    )
+                    observed[provider_operation] = (str(process["output_manifest_ref"]), semantics)
+            return observed
+
+        observations = client.portal.call(inspect)
+
     store = LocalObjectStore(tmp_path / "objects")
-    with sqlite3.connect(tmp_path / "mkb.sqlite3") as connection:
-        connection.row_factory = sqlite3.Row
-        for (provider, operation), task_uuid in task_ids.items():
-            process = connection.execute(
-                "SELECT output_manifest_ref FROM mkb_processes WHERE team_uuid=? AND task_uuid=? "
-                "AND process_key='clean.map.registered_api' AND status='succeeded'",
-                (team_uuid, task_uuid),
-            ).fetchone()
-            assert process is not None
-            output = json.loads(
-                asyncio.run(store.read_verified(team_uuid, ObjectHandle(value=process["output_manifest_ref"]))).decode()
-            )
-            evidence = output["output"]["clean_collection"]["evidence"]
-            assert evidence == {
-                "clean_capability": "clean.map.registered_api",
-                "definition_version": "v1",
-                "member_count": 1,
-                "operation": operation,
-                "provider": provider,
-            }
-            member_evidence = output["state"]["collection_members"][0]["clean_evidence"]
-            assert member_evidence["provider"] == provider
-            assert member_evidence["operation"] == operation
-            semantics = connection.execute(
-                "SELECT s.semantic_key,s.value_text,s.value_int FROM mkb_intake_revision_semantics s "
-                "JOIN mkb_intake_snapshot_memberships m ON m.team_uuid=s.team_uuid "
-                "AND m.observed_revision_uuid=s.intake_revision_uuid "
-                "JOIN mkb_tasks t ON t.team_uuid=m.team_uuid AND t.intake_snapshot_uuid=m.intake_snapshot_uuid "
-                "WHERE t.team_uuid=? AND t.task_uuid=?",
-                (team_uuid, task_uuid),
-            ).fetchall()
-            semantic_map = {row["semantic_key"]: row["value_text"] if row["value_text"] is not None else row["value_int"] for row in semantics}
-            assert {"realm", "type", "channel", "source_name", "is_active", "context_tags"} <= set(semantic_map)
+    for (provider, operation), (manifest_ref, semantics) in observations.items():
+        output = json.loads(
+            asyncio.run(store.read_verified(team_uuid, ObjectHandle(value=manifest_ref))).decode()
+        )
+        evidence = output["output"]["clean_collection"]["evidence"]
+        assert evidence == {
+            "clean_capability": "clean.map.registered_api",
+            "definition_version": "v1",
+            "member_count": 1,
+            "operation": operation,
+            "provider": provider,
+        }
+        member_evidence = output["state"]["collection_members"][0]["clean_evidence"]
+        assert member_evidence["provider"] == provider
+        assert member_evidence["operation"] == operation
+        semantic_map = {
+            row["semantic_key"]: row["value_text"] if row["value_text"] is not None else row["value_int"]
+            for row in semantics
+        }
+        assert {"realm", "type", "channel", "source_name", "is_active", "context_tags"} <= set(semantic_map)
 
 
 def test_registered_api_scatter_auto_zero_and_fanin_recovery(tmp_path: Path) -> None:
-    database_path = tmp_path / "mkb.sqlite3"
     headers = {"Authorization": "Bearer scatter-token"}
     team_uuid = uuid7()
     app = create_app(_settings(tmp_path))
@@ -324,27 +334,32 @@ def test_registered_api_scatter_auto_zero_and_fanin_recovery(tmp_path: Path) -> 
         # terminal state but before the parent completion projection.  Repair
         # must use the accepted Snapshot/ChangeSet denominator, not queue
         # emptiness, to finish the parent exactly once.
-        with sqlite3.connect(database_path, timeout=5) as connection:
-            root = connection.execute(
-                "SELECT execution_uuid FROM mkb_executions WHERE team_uuid=? AND task_uuid=? "
-                "AND parent_execution_uuid IS NULL",
-                (team_uuid, task_uuid),
-            ).fetchone()
-            change_set = connection.execute(
-                "SELECT change_set_uuid FROM mkb_tasks WHERE team_uuid=? AND task_uuid=?", (team_uuid, task_uuid)
-            ).fetchone()
-            assert root is not None and change_set is not None
-            connection.execute(
-                "UPDATE mkb_tasks SET status='running',completed_at=NULL,error_code=NULL,error_message=NULL "
-                "WHERE team_uuid=? AND task_uuid=?",
-                (team_uuid, task_uuid),
-            )
-            connection.execute(
-                "UPDATE mkb_executions SET status='waiting',waiting_reason='scatter_children',waiting_ref=?,"
-                "completed_at=NULL,summary_completed_at=NULL WHERE execution_uuid=?",
-                (change_set[0], root[0]),
-            )
-            connection.commit()
+        persistence = app.state.container.persistence
+
+        async def inject_fanin_crash_window() -> None:
+            async with persistence.transaction() as tx:
+                root = await tx.fetchone(
+                    "SELECT execution_uuid FROM mkb_executions WHERE team_uuid=? AND task_uuid=? "
+                    "AND parent_execution_uuid IS NULL",
+                    (team_uuid, task_uuid),
+                )
+                change_set = await tx.fetchone(
+                    "SELECT change_set_uuid FROM mkb_tasks WHERE team_uuid=? AND task_uuid=?",
+                    (team_uuid, task_uuid),
+                )
+                assert root is not None and change_set is not None
+                await tx.execute(
+                    "UPDATE mkb_tasks SET status='running',completed_at=NULL,error_code=NULL,error_message=NULL "
+                    "WHERE team_uuid=? AND task_uuid=?",
+                    (team_uuid, task_uuid),
+                )
+                await tx.execute(
+                    "UPDATE mkb_executions SET status='waiting',waiting_reason='scatter_children',waiting_ref=?,"
+                    "completed_at=NULL,summary_completed_at=NULL WHERE execution_uuid=?",
+                    (change_set["change_set_uuid"], root["execution_uuid"]),
+                )
+
+        client.portal.call(inject_fanin_crash_window)
         repaired = _wait_for_terminal(client, team_uuid=team_uuid, task_uuid=task_uuid, headers=headers)
         assert repaired["status"] == "succeeded", repaired
         assert repaired["proof_ref"]
@@ -363,18 +378,21 @@ def test_registered_api_scatter_auto_zero_and_fanin_recovery(tmp_path: Path) -> 
         }
         assert _items(client, team_uuid=team_uuid, task_uuid=zero_task_uuid, headers=headers) == []
 
-    with sqlite3.connect(database_path) as connection:
-        membership_count = connection.execute(
-            "SELECT COUNT(*) FROM mkb_intake_snapshot_memberships AS m JOIN mkb_tasks AS t "
-            "ON t.team_uuid=m.team_uuid AND t.intake_snapshot_uuid=m.intake_snapshot_uuid "
-            "WHERE t.team_uuid=? AND t.task_uuid=?",
-            (team_uuid, zero_task_uuid),
-        ).fetchone()[0]
-    assert membership_count == 0
+        async def membership_count() -> int:
+            async with persistence.transaction() as tx:
+                row = await tx.fetchone(
+                    "SELECT COUNT(*) AS count FROM mkb_intake_snapshot_memberships AS m JOIN mkb_tasks AS t "
+                    "ON t.team_uuid=m.team_uuid AND t.intake_snapshot_uuid=m.intake_snapshot_uuid "
+                    "WHERE t.team_uuid=? AND t.task_uuid=?",
+                    (team_uuid, zero_task_uuid),
+                )
+            assert row is not None
+            return int(row["count"])
+
+        assert client.portal.call(membership_count) == 0
 
 
 def test_registered_api_scatter_human_gate_release_reject_and_cancel(tmp_path: Path) -> None:
-    database_path = tmp_path / "mkb.sqlite3"
     headers = {"Authorization": "Bearer scatter-token"}
     team_uuid = uuid7()
     app = create_app(_settings(tmp_path))
@@ -386,25 +404,35 @@ def test_registered_api_scatter_human_gate_release_reject_and_cancel(tmp_path: P
             client, team_uuid=team_uuid, headers=headers, records=_records("approved"), require_human_review=True
         )
         _, gate = _wait_for_gate(client, team_uuid=team_uuid, task_uuid=approved_task_uuid, headers=headers)
-        with sqlite3.connect(database_path, timeout=5) as connection:
-            root = connection.execute(
-                "SELECT status,waiting_reason FROM mkb_executions WHERE team_uuid=? AND task_uuid=? "
-                "AND parent_execution_uuid IS NULL",
-                (team_uuid, approved_task_uuid),
-            ).fetchone()
-            children = connection.execute(
-                "SELECT status,waiting_reason FROM mkb_executions WHERE team_uuid=? AND task_uuid=? "
-                "AND parent_execution_uuid IS NOT NULL ORDER BY execution_uuid",
-                (team_uuid, approved_task_uuid),
-            ).fetchall()
-            child_processes = connection.execute(
-                "SELECT COUNT(*) FROM mkb_processes AS p JOIN mkb_executions AS e "
-                "ON e.execution_uuid=p.execution_uuid WHERE e.team_uuid=? AND e.task_uuid=? "
-                "AND e.parent_execution_uuid IS NOT NULL",
-                (team_uuid, approved_task_uuid),
-            ).fetchone()[0]
-        assert root == ("waiting", "human_review")
-        assert children == [("waiting", "durable_prerequisite"), ("waiting", "durable_prerequisite")]
+        persistence = app.state.container.persistence
+
+        async def inspect_waiting_children() -> tuple[dict[str, Any], list[dict[str, Any]], int]:
+            async with persistence.transaction() as tx:
+                root = await tx.fetchone(
+                    "SELECT status,waiting_reason FROM mkb_executions WHERE team_uuid=? AND task_uuid=? "
+                    "AND parent_execution_uuid IS NULL",
+                    (team_uuid, approved_task_uuid),
+                )
+                children = await tx.fetchall(
+                    "SELECT status,waiting_reason FROM mkb_executions WHERE team_uuid=? AND task_uuid=? "
+                    "AND parent_execution_uuid IS NOT NULL ORDER BY execution_uuid",
+                    (team_uuid, approved_task_uuid),
+                )
+                count = await tx.fetchone(
+                    "SELECT COUNT(*) AS count FROM mkb_processes AS p JOIN mkb_executions AS e "
+                    "ON e.execution_uuid=p.execution_uuid WHERE e.team_uuid=? AND e.task_uuid=? "
+                    "AND e.parent_execution_uuid IS NOT NULL",
+                    (team_uuid, approved_task_uuid),
+                )
+            assert root is not None and count is not None
+            return root, children, int(count["count"])
+
+        root, children, child_processes = client.portal.call(inspect_waiting_children)
+        assert root == {"status": "waiting", "waiting_reason": "human_review"}
+        assert children == [
+            {"status": "waiting", "waiting_reason": "durable_prerequisite"},
+            {"status": "waiting", "waiting_reason": "durable_prerequisite"},
+        ]
         assert child_processes == 0
         _decide(
             client,
@@ -448,23 +476,32 @@ def test_registered_api_scatter_human_gate_release_reject_and_cancel(tmp_path: P
         assert cancelled["counts"]["active"] == 0
         assert cancelled["counts"]["cancelled"] == 2
 
-    with sqlite3.connect(database_path) as connection:
-        rejected_children = connection.execute(
-            "SELECT status FROM mkb_executions WHERE team_uuid=? AND task_uuid=? AND parent_execution_uuid IS NOT NULL",
-            (team_uuid, rejected_task_uuid),
-        ).fetchall()
-        cancelled_children = connection.execute(
-            "SELECT status,waiting_reason,waiting_ref FROM mkb_executions WHERE team_uuid=? AND task_uuid=? "
-            "AND parent_execution_uuid IS NOT NULL",
-            (team_uuid, cancelled_task_uuid),
-        ).fetchall()
-        cancelled_gate = connection.execute(
-            "SELECT status FROM mkb_execution_gates WHERE team_uuid=? AND task_uuid=?",
-            (team_uuid, cancelled_task_uuid),
-        ).fetchone()
-    assert rejected_children == [("cancelled",), ("cancelled",)]
-    assert cancelled_children == [("cancelled", None, None), ("cancelled", None, None)]
-    assert cancelled_gate == ("superseded",)
+        async def inspect_terminal_children() -> tuple[list[dict[str, Any]], list[dict[str, Any]], dict[str, Any]]:
+            async with persistence.transaction() as tx:
+                rejected_children = await tx.fetchall(
+                    "SELECT status FROM mkb_executions WHERE team_uuid=? AND task_uuid=? "
+                    "AND parent_execution_uuid IS NOT NULL",
+                    (team_uuid, rejected_task_uuid),
+                )
+                cancelled_children = await tx.fetchall(
+                    "SELECT status,waiting_reason,waiting_ref FROM mkb_executions WHERE team_uuid=? AND task_uuid=? "
+                    "AND parent_execution_uuid IS NOT NULL",
+                    (team_uuid, cancelled_task_uuid),
+                )
+                cancelled_gate = await tx.fetchone(
+                    "SELECT status FROM mkb_execution_gates WHERE team_uuid=? AND task_uuid=?",
+                    (team_uuid, cancelled_task_uuid),
+                )
+            assert cancelled_gate is not None
+            return rejected_children, cancelled_children, cancelled_gate
+
+        rejected_children, cancelled_children, cancelled_gate = client.portal.call(inspect_terminal_children)
+        assert rejected_children == [{"status": "cancelled"}, {"status": "cancelled"}]
+        assert cancelled_children == [
+            {"status": "cancelled", "waiting_reason": None, "waiting_ref": None},
+            {"status": "cancelled", "waiting_reason": None, "waiting_ref": None},
+        ]
+        assert cancelled_gate == {"status": "superseded"}
 
 
 class _FailOneScatterChild:

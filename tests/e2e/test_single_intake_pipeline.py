@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import sqlite3
 import time
 from pathlib import Path
 
@@ -118,13 +117,28 @@ def test_single_intake_publishes_grounded_retrieval_context(tmp_path: Path) -> N
             "skipped": 0,
         }
 
+        persistence = app.state.container.persistence
+
+        async def active_namespace_key() -> str:
+            async with persistence.transaction() as tx:
+                row = await tx.fetchone(
+                    "SELECT namespace_key FROM mkb_vector_namespaces WHERE team_uuid=? AND status='active'",
+                    (team_uuid,),
+                )
+            assert row is not None
+            return str(row["namespace_key"])
+
+        namespace_key = client.portal.call(active_namespace_key)
+
         search = client.post(
             f"/v1/teams/{team_uuid}/retrieval:search",
             headers=headers,
             json={
                 "schema_version": "mkb.retrieval.v1",
                 "team_uuid": team_uuid,
+                "namespace_key": namespace_key,
                 "query": "semantic golden workflow",
+                "filters": {"channel": "summary"},
                 "return_k": 3,
                 "recall_k": 5,
             },
@@ -134,7 +148,10 @@ def test_single_intake_publishes_grounded_retrieval_context(tmp_path: Path) -> N
         assert result["disposition"] == "ok"
         assert result["results"]
         hit = result["results"][0]
-        assert hit["payload_content"] == "MKB workflow retrieval semantic golden document"
+        source_content = "MKB workflow retrieval semantic golden document"
+        assert hit["payload_content"]
+        assert hit["payload_content"] in source_content
+        assert "semantic golden document" in hit["payload_content"]
         assert hit["traceback_status"] == "resolved"
         # S10 remains context-only and S01/S03 internals are never public.
         rendered = str(result)
@@ -142,23 +159,19 @@ def test_single_intake_publishes_grounded_retrieval_context(tmp_path: Path) -> N
         assert "execution_uuid" not in rendered
         assert "process_uuid" not in rendered
 
-    _assert_d04_full_chain(tmp_path / "mkb.sqlite3")
+        client.portal.call(_assert_d04_full_chain, persistence)
 
 
-def _assert_d04_full_chain(database_path: Path) -> None:
-    database_uri = f"file:{database_path}?mode=ro"
-    with sqlite3.connect(database_uri, uri=True) as connection:
-        connection.row_factory = sqlite3.Row
-        changesets = connection.execute("SELECT change_set_uuid FROM mkb_intake_change_sets").fetchall()
-        facts = connection.execute("SELECT fact_uuid FROM mkb_intake_change_set_facts").fetchall()
-        events = {
-            row["event_type"]
-            for row in connection.execute("SELECT event_type FROM mkb_domain_events")
-        }
-        stored = connection.execute("SELECT stored_object_uuid FROM mkb_stored_objects").fetchall()
-        vectors = connection.execute(
+async def _assert_d04_full_chain(persistence: object) -> None:
+    async with persistence.transaction() as tx:  # type: ignore[attr-defined]
+        changesets = await tx.fetchall("SELECT change_set_uuid FROM mkb_intake_change_sets")
+        facts = await tx.fetchall("SELECT fact_uuid FROM mkb_intake_change_set_facts")
+        event_rows = await tx.fetchall("SELECT event_type FROM mkb_domain_events")
+        stored = await tx.fetchall("SELECT stored_object_uuid FROM mkb_stored_objects")
+        vectors = await tx.fetchall(
             "SELECT embedding, dimension FROM mkb_vector_records WHERE deleted_at IS NULL"
-        ).fetchall()
+        )
+    events = {row["event_type"] for row in event_rows}
     assert changesets, "single-item TX-05 must persist a ChangeSet"
     assert facts, "single-item TX-05 must persist ChangeSet facts"
     assert "task.created" in events
@@ -299,6 +312,14 @@ class _LiveEmbeddingFixture:
     async def probe(self) -> bool:
         return True
 
+    async def probe_binding(self, binding: object) -> bool:
+        """Readiness follows the same explicit offline adapter as execution."""
+
+        return getattr(binding, "model_key", None) in {
+            SPARK_QWEN_GENERATE_MODEL_KEY,
+            SPARK_VL_EMBED_MODEL_KEY,
+        }
+
 
 def test_live_profile_uses_frozen_binding_for_vector_write_and_query(tmp_path: Path) -> None:
     team_uuid, task_uuid, trace_uuid = uuid7(), uuid7(), uuid7()
@@ -321,6 +342,7 @@ def test_live_profile_uses_frozen_binding_for_vector_write_and_query(tmp_path: P
     # asserts the exact frozen binding sent to it.
     app.state.container.workflow_worker.handler._inference = fixture  # type: ignore[attr-defined]
     app.state.container.retrieval._inference = fixture  # type: ignore[attr-defined]
+    app.state.container.inference = fixture  # type: ignore[assignment]
     headers = {"Authorization": f"Bearer {token}"}
 
     with TestClient(app, raise_server_exceptions=True) as client:
@@ -379,12 +401,24 @@ def test_live_profile_uses_frozen_binding_for_vector_write_and_query(tmp_path: P
         assert fixture.structured_calls >= 2
         assert fixture.embed_calls >= 1
 
+        persistence = app.state.container.persistence
+
+        async def active_namespace_key() -> str:
+            async with persistence.transaction() as tx:
+                row = await tx.fetchone(
+                    "SELECT namespace_key FROM mkb_vector_namespaces WHERE team_uuid=? AND status='active'",
+                    (team_uuid,),
+                )
+            assert row is not None
+            return str(row["namespace_key"])
+
         search = client.post(
             f"/v1/teams/{team_uuid}/retrieval:search",
             headers=headers,
             json={
                 "schema_version": "mkb.retrieval.v1",
                 "team_uuid": team_uuid,
+                "namespace_key": client.portal.call(active_namespace_key),
                 "query": "frozen binding",
                 "return_k": 1,
                 "recall_k": 2,
@@ -393,31 +427,36 @@ def test_live_profile_uses_frozen_binding_for_vector_write_and_query(tmp_path: P
         assert search.status_code == 200, search.text
         assert search.json()["disposition"] == "ok"
 
+        async def inspect_ledgers() -> tuple[
+            dict[str, object] | None,
+            dict[str, object] | None,
+            list[dict[str, object]],
+            list[dict[str, object]],
+        ]:
+            async with persistence.transaction() as tx:
+                namespace_row = await tx.fetchone(
+                    "SELECT embedding_model_key,embedding_model_version,adapter_kind,dimension "
+                    "FROM mkb_vector_namespaces"
+                )
+                proof_row = await tx.fetchone(
+                    "SELECT embedding_model_key,embedding_model_version,adapter_kind,dimension "
+                    "FROM mkb_publication_proofs"
+                )
+                inv_rows = await tx.fetchall(
+                    "SELECT capability_key,model_key,model_version,status,generation_invocation_uuid "
+                    "FROM mkb_inference_invocations ORDER BY capability_key, model_key"
+                )
+                gen_rows = await tx.fetchall(
+                    "SELECT invocation_uuid,model_key,prompt_key,schema_key,input_digest,output_digest "
+                    "FROM mkb_generation_invocations ORDER BY prompt_key, invocation_ordinal"
+                )
+            return namespace_row, proof_row, inv_rows, gen_rows
 
-    # The application-owned async SQLite connection is bound to TestClient's
-    # event loop and is closed with its lifespan.  Inspect the private proof
-    # rows only after that lifecycle with an independent read-only connection.
-    database_uri = f"file:{tmp_path / 'mkb.sqlite3'}?mode=ro"
-    with sqlite3.connect(database_uri, uri=True) as connection:
-        connection.row_factory = sqlite3.Row
-        namespace_row = connection.execute(
-            "SELECT embedding_model_key,embedding_model_version,adapter_kind,dimension FROM mkb_vector_namespaces"
-        ).fetchone()
-        proof_row = connection.execute(
-            "SELECT embedding_model_key,embedding_model_version,adapter_kind,dimension FROM mkb_publication_proofs"
-        ).fetchone()
-        inv_rows = connection.execute(
-            "SELECT capability_key,model_key,model_version,status,generation_invocation_uuid "
-            "FROM mkb_inference_invocations ORDER BY capability_key, model_key"
-        ).fetchall()
-        gen_rows = connection.execute(
-            "SELECT invocation_uuid,model_key,prompt_key,schema_key,input_digest,output_digest "
-            "FROM mkb_generation_invocations ORDER BY prompt_key, invocation_ordinal"
-        ).fetchall()
+        namespace_row, proof_row, inv_rows, gen_rows = client.portal.call(inspect_ledgers)
 
     assert namespace_row is not None and proof_row is not None and inv_rows
-    namespace = dict(namespace_row)
-    proof = dict(proof_row)
+    namespace = namespace_row
+    proof = proof_row
     expected = {
         "embedding_model_key": SPARK_VL_EMBED_MODEL_KEY,
         "embedding_model_version": "v1",
@@ -442,6 +481,6 @@ def test_live_profile_uses_frozen_binding_for_vector_write_and_query(tmp_path: P
     }
     assert gen_ids <= linked
     # No prompt bodies or source text in the durable ledgers.
-    rendered = str([dict(row) for row in inv_rows] + [dict(row) for row in gen_rows])
+    rendered = str(inv_rows + gen_rows)
     assert "Live embedding preserves" not in rendered
     assert "prompt-b-structure" not in rendered

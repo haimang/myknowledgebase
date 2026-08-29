@@ -1,0 +1,215 @@
+{
+  "digest": "f7199ee795fabfe332ad1eadd024debe3633fad1d664349763903dc9f8d235c3",
+  "intent_illegal": [
+    {
+      "disposition": "rejected_before_task",
+      "error_code": "task-schema-invalid",
+      "http_status": 422,
+      "illegal_combination": "source_descriptor_on_non_ingest_intent",
+      "request_intent": "intake.rebuild"
+    },
+    {
+      "disposition": "rejected_before_task",
+      "error_code": "task-schema-invalid",
+      "http_status": 422,
+      "illegal_combination": "source_descriptor_on_non_ingest_intent",
+      "request_intent": "intake.update_metadata"
+    },
+    {
+      "disposition": "rejected_before_task",
+      "error_code": "task-schema-invalid",
+      "http_status": 422,
+      "illegal_combination": "source_descriptor_on_non_ingest_intent",
+      "request_intent": "intake.deactivate"
+    },
+    {
+      "disposition": "rejected_before_task",
+      "error_code": "task-schema-invalid",
+      "http_status": 422,
+      "illegal_combination": "source_descriptor_on_non_ingest_intent",
+      "request_intent": "intake.reactivate"
+    },
+    {
+      "disposition": "rejected_before_task",
+      "error_code": "task-schema-invalid",
+      "http_status": 422,
+      "illegal_combination": "source_descriptor_on_non_ingest_intent",
+      "request_intent": "intake.delete"
+    },
+    {
+      "disposition": "rejected_before_task",
+      "error_code": "task-schema-invalid",
+      "http_status": 422,
+      "illegal_combination": "source_descriptor_on_non_ingest_intent",
+      "request_intent": "index.rebuild"
+    }
+  ],
+  "op_cells": [
+    {
+      "definition_digest": "23a0198eef7caa7763c1b243e1d2d1be9666a25b245418d6baadf90ca62f2b8b",
+      "definition_version": "v1",
+      "operation": "get_articles",
+      "provider": "chinatax"
+    },
+    {
+      "definition_digest": "5b3454b05992b89c426875ea509d05c1c208b959ea50df6aa1f7969142143792",
+      "definition_version": "v1",
+      "operation": "get_agency_listings",
+      "provider": "domain"
+    },
+    {
+      "definition_digest": "18cdb6f518866412d8aed98bbde2a269eaef5f2cc46364aa3ff329eeb10dca21",
+      "definition_version": "v1",
+      "operation": "get_listings",
+      "provider": "realestate"
+    }
+  ],
+  "strategy_cells": [
+    {
+      "acquire_capabilities": [
+        "intake.acquire.http_static",
+        "intake.acquire.http_browser"
+      ],
+      "browser_required": false,
+      "channel": "web",
+      "clean_capability": "clean.extract.web",
+      "definition_version": "v1",
+      "llm_required": false,
+      "max_input_bytes": 20971520,
+      "prompt_key": null,
+      "prompt_version": null,
+      "strategy_key": "web.deterministic"
+    },
+    {
+      "acquire_capabilities": [
+        "intake.acquire.http_static",
+        "intake.acquire.http_browser"
+      ],
+      "browser_required": false,
+      "channel": "web",
+      "clean_capability": "clean.extract.web_llm",
+      "definition_version": "v1",
+      "llm_required": true,
+      "max_input_bytes": 20971520,
+      "prompt_key": "promptA.default",
+      "prompt_version": "v1",
+      "strategy_key": "web.llm_rewrite"
+    },
+    {
+      "acquire_capabilities": [
+        "intake.acquire.http_browser"
+      ],
+      "browser_required": true,
+      "channel": "pdf",
+      "clean_capability": "clean.extract.pdf_llm",
+      "definition_version": "v1",
+      "llm_required": true,
+      "max_input_bytes": 20971520,
+      "prompt_key": "promptA.default",
+      "prompt_version": "v1",
+      "strategy_key": "web.browser_print_pdf"
+    },
+    {
+      "acquire_capabilities": [
+        "intake.acquire.local_object",
+        "intake.acquire.http_static"
+      ],
+      "browser_required": false,
+      "channel": "pdf",
+      "clean_capability": "clean.extract.pdf_text",
+      "definition_version": "v1",
+      "llm_required": false,
+      "max_input_bytes": 20971520,
+      "prompt_key": null,
+      "prompt_version": null,
+      "strategy_key": "pdf.text_layer"
+    },
+    {
+      "acquire_capabilities": [
+        "intake.acquire.local_object",
+        "intake.acquire.http_static"
+      ],
+      "browser_required": false,
+      "channel": "pdf",
+      "clean_capability": "clean.extract.pdf_llm",
+      "definition_version": "v1",
+      "llm_required": true,
+      "max_input_bytes": 20971520,
+      "prompt_key": "promptA.default",
+      "prompt_version": "v1",
+      "strategy_key": "pdf.document_understanding"
+    },
+    {
+      "acquire_capabilities": [
+        "intake.acquire.local_object",
+        "intake.acquire.http_static"
+      ],
+      "browser_required": false,
+      "channel": "pdf",
+      "clean_capability": "clean.ocr.local",
+      "definition_version": "v1",
+      "llm_required": true,
+      "max_input_bytes": 20971520,
+      "prompt_key": "promptA.default",
+      "prompt_version": "v1",
+      "strategy_key": "pdf.ocr"
+    },
+    {
+      "acquire_capabilities": [
+        "intake.acquire.inline",
+        "intake.acquire.local_object"
+      ],
+      "browser_required": false,
+      "channel": "doc",
+      "clean_capability": "clean.extract.deterministic",
+      "definition_version": "v1",
+      "llm_required": false,
+      "max_input_bytes": 20971520,
+      "prompt_key": null,
+      "prompt_version": null,
+      "strategy_key": "doc.deterministic"
+    },
+    {
+      "acquire_capabilities": [
+        "intake.acquire.local_object"
+      ],
+      "browser_required": false,
+      "channel": "doc",
+      "clean_capability": "clean.extract.doc_llm",
+      "definition_version": "v1",
+      "llm_required": true,
+      "max_input_bytes": 20971520,
+      "prompt_key": "promptA.default",
+      "prompt_version": "v1",
+      "strategy_key": "doc.document_understanding"
+    },
+    {
+      "acquire_capabilities": [
+        "intake.acquire.local_object"
+      ],
+      "browser_required": false,
+      "channel": "doc",
+      "clean_capability": "clean.ocr.local",
+      "definition_version": "v1",
+      "llm_required": true,
+      "max_input_bytes": 20971520,
+      "prompt_key": "promptA.default",
+      "prompt_version": "v1",
+      "strategy_key": "doc.ocr"
+    },
+    {
+      "acquire_capabilities": [
+        "intake.acquire.local_object"
+      ],
+      "browser_required": false,
+      "channel": "doc",
+      "clean_capability": "clean.extract.vision",
+      "definition_version": "v1",
+      "llm_required": true,
+      "max_input_bytes": 20971520,
+      "prompt_key": "promptA.default",
+      "prompt_version": "v1",
+      "strategy_key": "doc.vision"
+    }
+  ]
+}
