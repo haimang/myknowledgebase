@@ -1,0 +1,25 @@
+{
+  "version": "nh3-s05-actual-seal.v1",
+  "owner_ap": "AP-NH1",
+  "consumers": ["AP-NH3", "AP-NH8", "AP-NH9"],
+  "input": {
+    "policy": "workflow/config/domain already frozen",
+    "state": "unsealed",
+    "actual_binding_digest": "deterministic aggregate of durable history + selected route/clean/preflight",
+    "selected_route_digest": "durable selected route outcome"
+  },
+  "output": {
+    "states": ["legacy_unverifiable", "unsealed", "sealed"],
+    "actual_binding_state": "sealed",
+    "seal_generation": 1,
+    "linearization": "selected-route outcome + actual CAS + clean eligibility in one PersistencePort UoW"
+  },
+  "errors": [
+    {"code": "ACTUAL_S05_SEAL_INVALID", "http": 422, "when": "digest shape invalid"},
+    {"code": "ACTUAL_S05_LEGACY_UNVERIFIABLE", "http": 409, "when": "legacy policy alias is treated as actual"},
+    {"code": "ACTUAL_S05_SEAL_CONFLICT", "http": 409, "when": "second seal differs or loses CAS"}
+  ],
+  "truth_cite": ["T-O-390", "T-O-400", "T-O-401", "Q10", "Q20", "Q21"],
+  "spike_status": "pass",
+  "upgrade_gate": "NH1-T05 PASS; AP-NH3 owns M-NH-01 production migration"
+}

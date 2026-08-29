@@ -1,0 +1,23 @@
+{
+  "version": "nh4-object-surface-cite.v1",
+  "owner_ap": "AP-NH1",
+  "consumers": ["AP-NH4", "AP-NH7", "AP-NH9"],
+  "input": {
+    "public_surface": "authenticated upload + stat/status",
+    "identity": "team + sha256 + size",
+    "success_uow": "catalog + upload_pending live ref/hold before response"
+  },
+  "output": {
+    "fields": ["handle", "digest", "size_bytes", "media_type", "disposition"],
+    "raw_get": false,
+    "creates_item": false,
+    "handoff": "separate intake.ingest + local_object"
+  },
+  "errors": [
+    {"code": "task-schema-invalid", "http": 422, "when": "request shape/integrity invalid"},
+    {"code": "object-team-mismatch", "http": 403, "when": "handle belongs to another team"}
+  ],
+  "truth_cite": ["T-O-385", "T-O-396", "T-O-404", "Q16", "Q24"],
+  "spike_status": "pass",
+  "upgrade_gate": "CITE only; AP-NH4 must implement and prove public UoW"
+}

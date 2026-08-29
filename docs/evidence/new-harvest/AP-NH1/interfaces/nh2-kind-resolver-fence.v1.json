@@ -1,0 +1,24 @@
+{
+  "version": "nh2-kind-resolver-fence.v1",
+  "owner_ap": "AP-NH1",
+  "consumers": ["AP-NH2", "AP-NH7", "AP-NH9"],
+  "input": {
+    "source_kinds": ["inline_payload", "local_object", "http_resource", "registered_api"],
+    "current_profile_denominator": {"single": 13, "public": 7, "unselectable": 6, "scatter": 2},
+    "compatibility_plan_count": 16
+  },
+  "output": {
+    "resolver_key": "source_kind only",
+    "single_root_target": 3,
+    "scatter_target": ["scatter_root", "scatter_child"],
+    "mode_media_role": "graph facts or starting edges, never workflow identity",
+    "old_pin_law": "enabled-unselected reviewed plans remain addressable by compiled digest"
+  },
+  "errors": [
+    {"code": "task-schema-invalid", "http": 422, "when": "unknown/fifth source kind reaches public contract"},
+    {"code": "REGISTRY_NOT_FOUND", "http": 503, "when": "registered kind lacks an exact reviewed graph"}
+  ],
+  "truth_cite": ["T-O-377", "T-O-379", "T-O-387", "T-O-398"],
+  "spike_status": "pass",
+  "upgrade_gate": "NH1-T01 and NH1-T07 PASS"
+}

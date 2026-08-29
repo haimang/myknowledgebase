@@ -1,0 +1,27 @@
+{
+  "migration": "M-NH-07",
+  "compatibility_law": "old snapshot prompt refs remain addressable; NH7 chooses canonical future defaults",
+  "prompts": [
+    {
+      "prompt_id": "promptA.default",
+      "prompt_version": "v1",
+      "relative_path": "prompt-a-clean-v1.md",
+      "content_sha256": "f293d21c6166b3eb06ce161ae4befa36b16ae42e6b0263304512608473485959",
+      "readers": ["src/contracts/intake/strategies.py", "src/services/registry.py"]
+    },
+    {
+      "prompt_id": "promptA.clean",
+      "prompt_version": "v1",
+      "relative_path": "clean/promptA.clean.v1.md",
+      "content_sha256": "ab70f981d23b873be791043b68432a348e64479a4e1574708abdb1db88888bf1",
+      "readers": ["src/services/config_snapshots.py", "src/services/registry.py"]
+    },
+    {
+      "prompt_id": "promptA.documentation.default",
+      "prompt_version": "v1",
+      "relative_path": "clean/promptA.documentation.default.v1.md",
+      "content_sha256": "7276f517045c151114dc8e82f42650d3e20847df3f8f878d6ee9fe4183686d63",
+      "readers": ["src/services/prompt_profiles.py", "src/services/registry.py"]
+    }
+  ]
+}

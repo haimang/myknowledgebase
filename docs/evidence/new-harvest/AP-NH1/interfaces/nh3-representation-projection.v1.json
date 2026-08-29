@@ -1,0 +1,23 @@
+{
+  "version": "nh3-representation-projection.v1",
+  "owner_ap": "AP-NH1",
+  "consumers": ["AP-NH2", "AP-NH3", "AP-NH7"],
+  "input": {
+    "authority": "typed append-only RepresentationFact and AcquireDecodeHistory rows",
+    "outcome_uow": "same UoW as the successful acquire/decode Process Outcome",
+    "minimum_route_fact": "versioned main_text_presence=present|absent|unknown"
+  },
+  "output": {
+    "projection": "registered eq-only route context",
+    "missing_unknown_law": "fail closed",
+    "path_digest": "ordered durable history aggregate",
+    "process_payload": "UUID/digest references only"
+  },
+  "errors": [
+    {"code": "WORKFLOW_SELECTION_FACT_MISSING", "http": 409, "when": "route attempts representation selection without durable fact"},
+    {"code": "representation-step-conflict", "http": 409, "when": "same step records a second successful fact"}
+  ],
+  "truth_cite": ["T-O-392", "T-O-402", "Q12", "Q22"],
+  "spike_status": "pass",
+  "upgrade_gate": "NH1-T04/T05 PASS; AP-NH3 owns M-NH-02 rows"
+}

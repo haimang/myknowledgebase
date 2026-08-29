@@ -19,8 +19,8 @@
 - [x] `NH1-CODE-P1` [代码制作] Phase 1 可信 harness（`NH1-02/03`；`NH1-T02/T03`）。`blocked-by: none`
 - [x] `NH1-CODE-P2` [代码制作] Phase 2 执行分母与矩阵（`NH1-01/07/08`；`NH1-T01/T07`）。`blocked-by: NH1-CODE-P1`
 - [x] `NH1-CODE-P3` [代码制作] Phase 3 chosen-shape spike（`NH1-04/05/06`；`NH1-T04/T05/T06`）。`blocked-by: NH1-CODE-P2`
-- [-] `NH1-CODE-P4` [代码制作] Phase 4 foundation pack 与 NH2–NH6 versioned interfaces（`NH1-09`）。`blocked-by: NH1-CODE-P3`
-- [ ] `NH1-CLOSE` [代码审查，测试与文档回填] `NH1-T01..T07`、GO/STOP、日志、evidence、closure、commit。`blocked-by: NH1-CODE-P4`
+- [x] `NH1-CODE-P4` [代码制作] Phase 4 foundation pack 与 NH2–NH6 versioned interfaces（`NH1-09`）。`blocked-by: NH1-CODE-P3`
+- [x] `NH1-CLOSE` [代码审查，测试与文档回填] `NH1-T01..T07`、GO/STOP、日志、evidence、closure、commit。`blocked-by: NH1-CODE-P4`
 
 ## NH2 — workflow kind family and merge
 

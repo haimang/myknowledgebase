@@ -1,0 +1,16 @@
+{
+  "digest": "f7199ee795fabfe332ad1eadd024debe3633fad1d664349763903dc9f8d235c3",
+  "illegal_combination": "source_descriptor_on_non_ingest_intent",
+  "disposition": "rejected_before_task",
+  "http_status": 422,
+  "error_code": "task-schema-invalid",
+  "request_intents": [
+    "intake.rebuild",
+    "intake.update_metadata",
+    "intake.deactivate",
+    "intake.reactivate",
+    "intake.delete",
+    "index.rebuild"
+  ],
+  "cartesian_7x4_present": false
+}

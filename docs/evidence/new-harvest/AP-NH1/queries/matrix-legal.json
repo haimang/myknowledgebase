@@ -1,0 +1,21 @@
+{
+  "canonical_manifest": "tests/fixtures/new_harvest/closed_set_manifest.v1.json",
+  "digest": "f7199ee795fabfe332ad1eadd024debe3633fad1d664349763903dc9f8d235c3",
+  "strategy_keys": [
+    "web.deterministic",
+    "web.llm_rewrite",
+    "web.browser_print_pdf",
+    "pdf.text_layer",
+    "pdf.document_understanding",
+    "pdf.ocr",
+    "doc.deterministic",
+    "doc.document_understanding",
+    "doc.ocr",
+    "doc.vision"
+  ],
+  "operation_cells": [
+    ["chinatax", "get_articles", "v1", "23a0198eef7caa7763c1b243e1d2d1be9666a25b245418d6baadf90ca62f2b8b"],
+    ["domain", "get_agency_listings", "v1", "5b3454b05992b89c426875ea509d05c1c208b959ea50df6aa1f7969142143792"],
+    ["realestate", "get_listings", "v1", "18cdb6f518866412d8aed98bbde2a269eaef5f2cc46364aa3ff329eeb10dca21"]
+  ]
+}

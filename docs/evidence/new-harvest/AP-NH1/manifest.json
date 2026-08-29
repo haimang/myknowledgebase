@@ -1,0 +1,47 @@
+{
+  "schema_version": "mkb.new-harvest-evidence.v1",
+  "ap": "AP-NH1",
+  "status": "go",
+  "commit": "87eeadf431c44f841536dde6e964450d9aa8f8b8",
+  "implementation_commits": [
+    "1cdc066766a92eb1d8680bbf30689a443231234c",
+    "87eeadf431c44f841536dde6e964450d9aa8f8b8"
+  ],
+  "truth_cite": [
+    "T-O-376",
+    "T-O-378",
+    "T-O-381",
+    "T-O-383",
+    "T-O-390",
+    "T-O-391",
+    "T-O-392",
+    "T-O-393",
+    "T-O-398",
+    "T-O-399",
+    "T-O-400",
+    "T-O-406"
+  ],
+  "work_ids": [
+    "NH1-01",
+    "NH1-02",
+    "NH1-03",
+    "NH1-04",
+    "NH1-05",
+    "NH1-06",
+    "NH1-07",
+    "NH1-08",
+    "NH1-09"
+  ],
+  "test_ids": [
+    "NH1-T01",
+    "NH1-T02",
+    "NH1-T03",
+    "NH1-T04",
+    "NH1-T05",
+    "NH1-T06",
+    "NH1-T07"
+  ],
+  "matrix_digest": "f7199ee795fabfe332ad1eadd024debe3633fad1d664349763903dc9f8d235c3",
+  "observed_at_utc": "2026-08-29T17:12:10Z",
+  "closure_type": "closed-with-explicit-deferrals"
+}

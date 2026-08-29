@@ -1,0 +1,25 @@
+{
+  "version": "nh6-runtime-ports.v1",
+  "owner_ap": "AP-NH1",
+  "consumers": ["AP-NH6", "AP-NH7", "AP-NH9"],
+  "input": {
+    "local_binary_ports": ["pdf.parse_text", "browser.render", "browser.print_pdf", "ocr.deterministic"],
+    "model_bound_request": ["PromptRef", "model identity", "media type", "content digest", "bounded bytes-or-S13 handle"],
+    "text_only_generate_is_multimodal": false
+  },
+  "output": {
+    "pdf": "nonempty text or typed absent/encrypted/invalid",
+    "browser_render": "real DOM + runtime profile",
+    "browser_print": "%PDF bytes + independent profile/budget",
+    "model_bound": "typed response or typed empty/bad/timeout failure"
+  },
+  "errors": [
+    {"code": "NH1_PDF_ENCRYPTED", "http": 422, "when": "feasibility encrypted fixture"},
+    {"code": "NH1_PDF_TEXT_LAYER_ABSENT", "http": 422, "when": "feasibility text layer absent"},
+    {"code": "NH1_BROWSER_RUNTIME_UNAVAILABLE", "http": 503, "when": "feasibility binary cannot start; not a PASS"},
+    {"code": "NH1_RUNTIME_BINARY_MISSING", "http": 503, "when": "feasibility supply absent; not a PASS"}
+  ],
+  "truth_cite": ["T-O-393", "T-O-399", "T-O-403", "Q13", "Q19", "Q23"],
+  "spike_status": "pass",
+  "upgrade_gate": "NH1-T06 PASS x3; AP-NH6 must replace spike with production identities/readiness/SBOM"
+}

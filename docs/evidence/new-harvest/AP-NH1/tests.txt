@@ -1,0 +1,32 @@
+AP-NH1 test evidence
+Observed at: 2026-08-29T17:12:10Z
+Implementation commits: 1cdc066766a92eb1d8680bbf30689a443231234c, 87eeadf431c44f841536dde6e964450d9aa8f8b8
+
+NH1-T01 / NH1-T07 — L1 registry, denominator, prompt and matrix contracts
+Command: uv run pytest tests/unit/test_nh1_denominator_inventory.py tests/unit/test_nh1_legal_matrix.py tests/unit/test_nh1_selected_output_control.py -q --tb=short
+Result: PASS, 11 passed
+Truth: T-R-NH-01/03, Q11, Q17, Q25
+
+NH1-T02 / NH1-T03 / NH1-T04 / NH1-T05 — L2 Port, namespace, CONTROL and S05
+Command: uv run pytest tests/e2e/test_registered_api_scatter.py::test_registered_api_scatter_auto_zero_and_fanin_recovery tests/e2e/test_nh1_fanin_recovery_port.py tests/e2e/test_nh1_retrieval_namespace.py tests/e2e/test_single_intake_pipeline.py tests/integration/test_nh1_merge_control.py tests/integration/test_nh1_s05_seal_cas.py -q --tb=short
+Result: PASS, 17 passed
+Truth: Q10/Q11/Q20/Q26, T-R-NH-16/18
+
+NH1-T06 — L3 real local processes
+Command: for nh1_smoke_run in 1 2 3; do uv run pytest tests/e2e/test_nh1_runtime_smoke.py -q --tb=short || exit 1; done
+Result: PASS x3, each run 5 passed; review-fix rerun PASS 5 passed
+Truth: Q13/Q19/Q23; T-O-378/393/399/403
+Observed supply: Firefox 154.0 + geckodriver 0.37.1 non-root DOM/print; pdftotext 24.02.0 isolated no-network text extraction; encrypted PDF typed 422; text-only GenerateRequest rejects binary media fields.
+
+Existing substrate regression
+Command: uv run pytest tests/unit/test_workflow_registry.py tests/unit/test_workflow_revision_compatibility.py tests/unit/test_intake_provider_registry.py tests/unit/test_intake_clean_dispatch.py tests/intake/test_web_clean.py tests/intake/test_pdf_clean.py tests/intake/test_doc_clean.py -q --tb=short
+Result: PASS, 36 passed
+
+Static review
+Command: uv run ruff check <all NH1 changed Python files>; git diff --check; source scans for sqlite3-on-Turso, builtin registration and 001_initial.sql mutation
+Result: PASS
+
+Full repository diagnostic
+Command: uv run pytest -q --tb=short
+Collected: 602
+Result: 595 passed, 7 failed. All seven are in untouched files and are already owned by successor APs: four namespace omissions (NH8), rebuild PREFLIGHT_EVIDENCE_INVALID (NH8), source capability running timeout (NH6/NH7), realestate newline normalization (NH5/NH7). They do not replace or downgrade NH1-T01..T07.

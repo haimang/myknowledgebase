@@ -1,0 +1,27 @@
+{
+  "version": "nh2-selected-output-control.v1",
+  "owner_ap": "AP-NH1",
+  "consumers": ["AP-NH2", "AP-NH3", "AP-NH9"],
+  "input": {
+    "candidate_ports": "unique explicit optional ports",
+    "selection_authority": "already-committed durable selection proof",
+    "representation_fact_digest": "required 64-hex durable fact reference",
+    "control_semantics": "selected-output.v1"
+  },
+  "output": {
+    "candidate_port": "exactly one selected port",
+    "manifest_ref": "canonical selected candidate ref",
+    "manifest_digest": "canonical selected candidate digest",
+    "selection_digest": "digest-fenced proof",
+    "tail_bindings": 1
+  },
+  "errors": [
+    {"code": "WORKFLOW_SELECTION_FACT_MISSING", "http": 409, "when": "durable fact is absent or invalid"},
+    {"code": "WORKFLOW_SELECTED_OUTPUT_MISSING", "http": 409, "when": "zero committed candidates and no registered fallback"},
+    {"code": "WORKFLOW_SELECTED_OUTPUT_CONFLICT", "http": 409, "when": "more than one candidate is committed"},
+    {"code": "WORKFLOW_SELECTION_PROOF_INVALID", "http": 409, "when": "selection digest fence fails"}
+  ],
+  "truth_cite": ["T-O-391", "T-O-398", "Q11", "Q18"],
+  "spike_status": "pass",
+  "upgrade_gate": "NH1-T04 PASS; AP-NH2 must register production CONTROL without importing spike tables"
+}

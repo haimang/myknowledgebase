@@ -1,0 +1,24 @@
+{
+  "version": "nh5-semantic-channel-cite.v1",
+  "owner_ap": "AP-NH1",
+  "consumers": ["AP-NH5", "AP-NH7", "AP-NH9"],
+  "input": {
+    "generic_required": ["realm", "type", "channel", "source_name"],
+    "generic_unknown_allowed": false,
+    "api_authority": "registered provider operation mapper",
+    "context_tags": "S04 revision semantics"
+  },
+  "output": {
+    "public_filter_names": ["semantic_channel", "vector_channel"],
+    "legacy_channel_adapter": "original|summary only -> vector_channel",
+    "g0": "admitted clean only",
+    "s06_context": "system overlay from S04"
+  },
+  "errors": [
+    {"code": "task-schema-invalid", "http": 422, "when": "generic authority fields missing/unknown"},
+    {"code": "RETRIEVE_FILTER_INVALID", "http": 422, "when": "unknown or ambiguous retrieval filter"}
+  ],
+  "truth_cite": ["T-O-389", "T-O-394", "T-O-395", "Q14", "Q15"],
+  "spike_status": "pass",
+  "upgrade_gate": "CITE only; AP-NH5 owns M-NH-06/M-NH-08"
+}

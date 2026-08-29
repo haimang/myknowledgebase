@@ -1,0 +1,32 @@
+{
+  "counts": {
+    "clean_process_capabilities": 9,
+    "clean_strategies": 10,
+    "compatibility_plans": 16,
+    "public_selector_keys": 7,
+    "registered_api_operations": 3,
+    "scatter_identities": 2,
+    "single_root_identities": 13,
+    "source_kinds": 4,
+    "unselectable_single_identities": 6
+  },
+  "compatibility": [
+    ["intake.ingest.single.inline.lsrag.v1", 1, "7db22a201bbf98a00ba7b5846f2b5e24598b41c1ad46e2be13c017f6b22c5e97"],
+    ["intake.ingest.single.inline.lsrag.v1", 2, "20f62480a7ae5d26e64f2bca1c074a022d12023257194ab9fa0d36b5ce6d09b6"],
+    ["intake.ingest.single.inline.lsrag.v1", 3, "6aa5c68fa690acf495ff4a28bd8a8bf810fabd185fd8754a8abc5413a891b30e"],
+    ["intake.ingest.single.local-object.lsrag.v1", 1, "a21f60bedff18b086c567eb2b6376458fc828a1833b30d3b2578bc825586d83d"],
+    ["intake.ingest.single.local-pdf.lsrag.v1", 3, "f166af52954258248af0efac28b5ac29cd89db9858d7ac24b4ed58fb16acf2fe"],
+    ["intake.ingest.single.http-static.lsrag.v1", 2, "4aabb249495510ce230247d86f36b5d5f149df155b13180fe4f9f243420469e4"],
+    ["intake.ingest.single.http-browser.lsrag.v1", 2, "0d1ddd633ad4942e7da5c0c825312cec355a9a1453aacceceb36581e7ab762f2"],
+    ["intake.ingest.single.http-pdf.lsrag.v1", 3, "7efa79e4225b0ce78ecb670f38a6c825fe05857c0d0012c8c8be5399a32c254e"],
+    ["intake.ingest.single.local-ocr.lsrag.v1", 1, "f26c7f3eeadf1457421adbceb98fd74b385409766c02e8826c2b9d1d26757bb6"],
+    ["intake.ingest.single.vision-rejected.lsrag.v1", 1, "f314db1a1ef8406100c4406ea3a2dffe0a7dc2c9bd3dac05ed5a95445fc084ce"],
+    ["intake.ingest.single.doc-llm.lsrag.v1", 1, "b4d0ed17c66473738bcc3289d9830e107b4db747f12730850177364c49695bf7"],
+    ["intake.ingest.single.http-web-llm.lsrag.v1", 1, "c4af239ba80e6b39ba3157735c591592e755d941f88712afec1721bad9f42d67"],
+    ["intake.ingest.single.http-browser-web-llm.lsrag.v1", 1, "efab0bd6f0aad7aa9a120e0fae9701248ff7613ed545d15ef2d8b91cfbf45ced"],
+    ["intake.ingest.single.local-pdf-understanding.lsrag.v1", 1, "99ac2d99e363e4b79b862dc387bc99788d2716d8219f407fba129da37b821920"],
+    ["intake.ingest.single.http-browser-print-pdf.lsrag.v1", 1, "b331e5c249cc4c405b0e82076300757d7965cd6b16de0e379f97332dabc675ca"],
+    ["intake.ingest.scatter.child.lsrag.v1", 1, "5fdc0e350ece66ca564066696789d64af07dd02a4d17a11cea07d7aa16eda48a"]
+  ],
+  "observed_at_utc": "2026-08-29T17:12:10Z"
+}

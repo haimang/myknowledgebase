@@ -1,0 +1,17 @@
+{
+  "test": "tests/e2e/test_nh1_retrieval_namespace.py::test_namespace_is_required_then_real_layer_a_key_hits",
+  "omitted_namespace": {
+    "http_status": 422,
+    "error_code": "RETRIEVE_SCHEMA_NAMESPACE_REQUIRED"
+  },
+  "active_namespace_source": "SELECT namespace_key FROM mkb_vector_namespaces WHERE team_uuid=? AND status='active' via PersistencePort",
+  "with_namespace": {
+    "http_status": 200,
+    "disposition": "ok",
+    "results_nonempty": true,
+    "payload_is_source_substring": true,
+    "traceback_status": "resolved"
+  },
+  "driver_bypass": false,
+  "observed_at_utc": "2026-08-29T17:12:10Z"
+}

@@ -30,7 +30,7 @@
 > - `docs/eval/new-harvest/reference-anchor/assessment-analysis-09-assurance-replay-concurrency-and-compatibility.md`
 > 关联 reference-anchor:
 > - 上列 RA01 / RA02 / RA05 / RA09（正/反例参考系，**不是**新 Truth）；§7.3 指回真源
-> 文档状态: `draft`
+> 文档状态: `executed`
 > 台账 ID 区间（final §11.A `7.1 AP-NH1`）：`NH1-01..09 / NH1-A01..06 / NH1-T01..07`
 > HEAD: `1221aa1`
 
@@ -671,13 +671,61 @@ docs/evidence/new-harvest/AP-NH1/
 
 ## 11. 执行日志回填（仅 `executed` 状态使用）
 
-> 文档状态为 `draft`，本节省略执行事实。下列为模板占位，执行完成后改用 `respond-execution-log` 厚版回填。residual 交后继 AP，不回填为本阶段完成。
+> 执行者：`Codex`
+> 执行时间：`2026-08-30`（evidence UTC `2026-08-29T17:12:10Z`）
+> 文档状态：`draft → executing → executed`
+> 代码改动统计：实现提交 `1cdc066`（17 files）+ 证据诚实性修复 `87eeadf`（1 file）；生产 migration `0`
 
-- **实际执行摘要**：`{EXECUTION_SUMMARY}`（未执行）
-- **Phase 偏差**（逐条带分类）：`{PHASE_VARIANCE}`
-- **阻塞与处理**：`{BLOCKERS_AND_RESOLUTION}`
-- **测试发现**（含全绿计数 + 新暴露事实）：`{TEST_FINDINGS}`
-- **后续 handoff**：GO → NH2/NH4/NH5 并行；STOP → reopen `T-O` + final，禁止 duplication
+- **实际执行摘要**：
+  - Phase 1：将 scatter 与 single pipeline 的 Turso 检查全部改为应用持有的 `PersistencePort.transaction()`；新增 fan-in crash repair 与 namespace omission/real-hit e2e。
+  - Phase 2：机器冻结 `4/10/9/3/13/7/6/2 + 16 compat`；登记三份 promptA id/hash/readers；预埋 10+3 + intent-illegal canonical manifest。
+  - Phase 3：交付三个 `SPIKE-ONLY` 可证伪切片：selected-output exactly-one、actual-S05 one-UoW sealed-once、真实 parser/browser/multimodal request feasibility。
+  - Phase 4：输出 `docs/evidence/new-harvest/AP-NH1/` 与 NH2–NH6 versioned interfaces；`stop-or-go.md=GO`。
+- **Phase 偏差（计划 vs 实际）**：
+  - `NH1-V01 (substrate-fit)`：本机真实 browser 供给为 Firefox/geckodriver，而非计划示例里的 Chromium。Q13/Q19 不锁库名；测试仍证明 non-root、无 `no-sandbox` 参数、真实 DOM/%PDF。
+  - `NH1-V02 (proof-shape)`：S05 spike 使用测试会话独立关系表而非 ALTER 生产 Execution；保持“生产 DDL 只读”并完整证明三态/CAS/UoW。
+  - `NH1-V03 (review-fix)`：初版版本探针误收 `pdftotext --version` 的错误首行；独立审查后改为只接受 exit 0 并回退 `-v`，提交 `87eeadf`。
+- **阻塞与处理**：无 NH1 hard-gate blocker。系统没有可匿名调用的模型服务，因此 T06 按 AP 只证明 binary multimodal request 形状与 text-only 拒绝；未把 models-list/Protocol stub 当 model success。
+- **测试发现**：
+  - L1 `11 passed`；L2 `17 passed`；L3 `5 passed × 3`；既有 substrate 回归 `36 passed`；ruff/diff/source scans PASS。
+  - 全仓 `602` collected：`595 passed / 7 failed`。七个失败均在本 AP 未改文件，且逐项属于 NH5/NH6/NH7/NH8 已登记红灯；见 evidence `tests.txt` 与 closure carry-over。
+- **后续 handoff**：`GO → AP-NH2`（按用户串行顺序）；NH4/NH5 虽在 frozen DAG 可并行，本执行清单仍阻塞到 NH3/NH4 前序 closure。
+
+### 11.1 逐工作项状态
+
+| 工作项 | 状态 | PR / commit | 实际落点 | 备注 |
+|--------|------|-------------|----------|------|
+| `NH1-01` | `✅ done` | `1cdc066` | `tests/unit/test_nh1_denominator_inventory.py` | 分母 + 16 compat |
+| `NH1-02` | `✅ done` | `1cdc066` | `test_registered_api_scatter.py`; `test_nh1_fanin_recovery_port.py` | 全文件无 sqlite3 driver bypass |
+| `NH1-03` | `✅ done` | `1cdc066` | `test_single_intake_pipeline.py`; `test_nh1_retrieval_namespace.py` | 422 负例 + Layer-A hit |
+| `NH1-04` | `✅ done` | `1cdc066` | `selected_output.py`; T04 L1/L2 | SPIKE-ONLY，不进 builtin |
+| `NH1-05` | `✅ done` | `1cdc066` | `actual_s05_spike.py`; T05 L2 | SPIKE-ONLY，不改 DDL |
+| `NH1-06` | `✅ done` | `1cdc066`, `87eeadf` | `nh1_runtime_spike.py`; T06 L3 | 真实进程；非 NH6 DoD |
+| `NH1-07` | `✅ done` | `1cdc066` | `closed_set_manifest.v1.json`; matrix tests | canonical digest 冻结 |
+| `NH1-08` | `✅ done` | `1cdc066` | evidence `promptA-inventory.json` | 只列迁移输入，不代选 NH7 方案 |
+| `NH1-09` | `✅ done` | `87eeadf` + evidence pack | `docs/evidence/new-harvest/AP-NH1/` | GO + interfaces |
+
+### 11.2 关键指标演进
+
+| 指标 | 执行前 | 本阶段 | Δ |
+|------|--------|--------|---|
+| scatter/single 指定文件 driver bypass | `2 files` | `0` | `-2` |
+| namespaced retrieval proof | `422-on-success` | `omission 422 + real key 200/hit` | `closed` |
+| chosen-shape L1/L2 proof | `0` | `14 spike nodes PASS` | `+14` |
+| runtime real-process smoke | `0` | `5 nodes PASS ×3` | `+15 observations` |
+
+### 11.3 pre-existing / successor-owned failures
+
+| 失败项 | 证据 | 判断 |
+|--------|------|------|
+| index rebuild / reactivate search 缺 namespace（4 nodes） | full-suite failure paths均未出现在 `git show 1cdc066 --name-only` 的修改列表；AP-NH8 明列相同行号与修复 | `C handoff → NH8` |
+| rebuild `PREFLIGHT_EVIDENCE_INVALID` | `test_intake_rebuild_metadata.py` 未修改；AP-NH8 exact-clean 红灯 | `C handoff → NH8` |
+| source capability 8s 后 running | `test_source_capability_paths.py` 未修改；RA09/AP-NH6/NH7 已登记 | `C handoff → NH6/NH7` |
+| realestate description 保留换行 | `test_api_realestate.py` 未修改；不影响 NH1 chosen shape | `C handoff → NH5/NH7` |
+
+### 11.4 文档状态
+
+`draft → executing → executed（2026-08-30）`。Residual 只进入具名 successor，不回填成 NH1 完成。
 
 ---
 
