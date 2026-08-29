@@ -1,0 +1,38 @@
+{
+  "schema_version": "mkb.new-harvest-evidence.v1",
+  "ap": "AP-NH3",
+  "status": "executed",
+  "commit": "b008702211bc460e25beb37e54ddde6652a50724",
+  "truth_cite": [
+    "T-O-378",
+    "T-O-388",
+    "T-O-390",
+    "T-O-392",
+    "T-O-400",
+    "T-O-401",
+    "T-O-402",
+    "T-O-403",
+    "T-O-407"
+  ],
+  "work_ids": [
+    "NH3-01",
+    "NH3-02",
+    "NH3-03",
+    "NH3-04",
+    "NH3-05",
+    "NH3-06",
+    "NH3-07",
+    "NH3-08",
+    "NH3-09",
+    "NH3-10"
+  ],
+  "test_ids": ["NH3-T01", "NH3-T02", "NH3-T03", "NH3-T04", "NH3-T05", "NH3-T06", "NH3-T07", "NH3-T08"],
+  "frozen_test_result": {"passed": 36, "failed": 0, "level": "L1/L2/F"},
+  "repository_diagnostic": {"collected": 678, "passed": 672, "successor_owned_failed": 6},
+  "migration_ids": [
+    "019_nh3_representation_fact_history.sql",
+    "020_nh3_actual_s05_binding.sql"
+  ],
+  "observed_at_utc": "2026-08-29T19:56:38Z",
+  "closure_type": "closed-with-explicit-deferrals"
+}

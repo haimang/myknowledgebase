@@ -1,0 +1,13 @@
+{
+  "schema_version": "mkb.nh3-path-query-evidence.v1",
+  "formula": "H(ordered step_key, capability, raw_byte_digest, representation_kind, observer_version)",
+  "static_path_digest": "11e8b5fe52b75c26a875038d8d70fd4ca32f6f936b9cb26682716f9462f18d51",
+  "static_browser_path_digest": "85ac7f9818414bd1206713265286095b7b07da99f366095340d0664367d242de",
+  "same_path_replay_digest": "85ac7f9818414bd1206713265286095b7b07da99f366095340d0664367d242de",
+  "different_browser_bytes_path_digest": "986d00a8923f1f41a63cf427a8a91327fde6aea39ba16b6cc7cf75c2e0d906d4",
+  "same_path_stable": true,
+  "different_path_distinct": true,
+  "source_test": "tests/integration/test_nh3_declared_reacquire.py",
+  "commit": "b008702211bc460e25beb37e54ddde6652a50724",
+  "observed_at_utc": "2026-08-29T19:56:38Z"
+}

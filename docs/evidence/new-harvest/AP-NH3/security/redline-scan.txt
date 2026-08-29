@@ -1,0 +1,22 @@
+AP-NH3 redline / fault evidence
+Observed UTC: 2026-08-29T19:56:38Z
+Commit: b008702211bc460e25beb37e54ddde6652a50724
+
+1. Legacy physical S05 column actual readers
+Command: rg -n "\[\s*['\"]s05_binding_digest['\"]\s*\]|\.get\(\s*['\"]s05_binding_digest" src/contracts src/runtime src/services --glob '*.py'
+Result: zero matches; PASS. SQL compatibility writes remain explicit and are not actual readers.
+
+2. Representation theft markers
+Command: rg -n "injected-browser-renderer\.v1|CLEAN_OCR_CAPABILITY_UNAVAILABLE" src/runtime/intake/acquisition_ingest.py src/runtime/intake/types.py
+Result: zero matches; PASS.
+
+3. Crash windows and hostile reseal
+Command: uv run pytest tests/e2e/test_nh3_seal_crash_windows.py -q
+Result: PASS. W-SEL and W-SEAL exceptions preserve the earlier committed acquire fact, roll back decode/route/seal, leave actual unsealed, and materialize no clean Process. Different digest reseal returns ConflictError 409.
+
+4. Upgrade surface
+Evidence: tests/unit/test_nh3_lineage_matrix.py::test_upgrade_restart_scope_and_intent_absent
+Result: PASS. restart_scope remains exactly atomic_intake_item|full_task and public intent/restart surfaces contain no upgrade value.
+
+5. Evidence level guard
+BrowserPrintResult is an injected L2 port with real %PDF bytes and measured profile string. AP-NH3 claims no L3 live browser, PDF parser, or OCR supply.

@@ -1,0 +1,28 @@
+AP-NH3 test evidence
+Observed at: 2026-08-29T19:56:38Z
+Implementation commit: b008702211bc460e25beb37e54ddde6652a50724
+Environment: Python 3.12.3; pytest 8.3.5; pydantic 2.11.4; persistence fixture type asserted as TursoPersistence
+
+NH3-T01..T08 frozen suite
+Command: uv run pytest tests/integration/test_nh3_*.py tests/unit/test_nh3_*.py tests/domain/test_nh3_actual_readers_scan.py tests/e2e/test_nh3_seal_crash_windows.py tests/unit/test_ns5_phase4.py::test_pdf_observes_latin1_garbage_as_corrupt tests/unit/test_task_projections.py::test_generation_restart_and_lineage_are_task_scoped_summaries -q
+Result: PASS, 36 passed
+Truth: Q10/Q12/Q20/Q21/Q22/Q23/Q27; T-O-378/388/390/392/400/401/402/403/407
+Level: L1/L2/F. The injected BrowserPrintResult test is L2 and is not represented as default-root live Chromium evidence.
+
+Static review
+Command: uv run ruff check src tests/integration/test_nh3_*.py tests/unit/test_nh3_*.py tests/domain/test_nh3_actual_readers_scan.py tests/e2e/test_nh3_seal_crash_windows.py
+Result: PASS
+Command: git diff --check
+Result: PASS
+Scans: legacy s05 actual readers=0; decode OCR theft code=0; constant injected-browser-renderer.v1=0; upgrade restart/intent entry=0.
+
+Default-root regression diagnostic after implementation commit
+Command: uv run pytest -q --tb=short
+Collected: 678
+Result: 672 passed, 6 failed.
+Successor-owned failures: index/retrieval namespace x3; reactivate/retrieval namespace x1; rebuild exact-clean PREFLIGHT_EVIDENCE_INVALID x1; realestate whitespace normalization x1.
+No NH3 frozen test, representation/history row, actual seal, propagation, or replay invariant failed.
+
+Targeted timing regression
+Command: uv run pytest tests/e2e/test_source_capability_paths.py::test_local_static_browser_and_pdf_sources_produce_distinct_frozen_acquisition_evidence -q
+Result: PASS. The Turso four-pipeline semantic wait fence is 30 seconds after NH3 adds fact/history and actual projection writes; the success assertion is unchanged.

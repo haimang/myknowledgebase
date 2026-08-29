@@ -33,16 +33,16 @@
 
 ## NH3 — representation history and S05 binding
 
-- [ ] `NH3-CODE-P1` [代码制作] Phase 1 durable rows（`NH3-01/02`；`NH3-T01`）。`blocked-by: NH2-CLOSE`
-- [ ] `NH3-CODE-P2` [代码制作] Phase 2 诚实表示（`NH3-03/04/05`；`NH3-T02/T03/T04`）。`blocked-by: NH3-CODE-P1`
-- [ ] `NH3-CODE-P3` [代码制作] Phase 3 声明式再获取（`NH3-06`；`NH3-T05`）。`blocked-by: NH3-CODE-P2`
-- [ ] `NH3-CODE-P4` [代码制作] Phase 4 policy/actual S05 分账与 seal UoW（`NH3-07/08/09`；`NH3-T06/T07`）。`blocked-by: NH3-CODE-P3`
-- [ ] `NH3-CODE-P5` [代码制作] Phase 5 replay 法律（`NH3-10`；`NH3-T08`）。`blocked-by: NH3-CODE-P4`
-- [ ] `NH3-CLOSE` [代码审查，测试与文档回填] `NH3-T01..T08`、日志、evidence、closure、commit。`blocked-by: NH3-CODE-P5`
+- [x] `NH3-CODE-P1` [代码制作] Phase 1 durable rows（`NH3-01/02`；`NH3-T01`）。`blocked-by: NH2-CLOSE`
+- [x] `NH3-CODE-P2` [代码制作] Phase 2 诚实表示（`NH3-03/04/05`；`NH3-T02/T03/T04`）。`blocked-by: NH3-CODE-P1`
+- [x] `NH3-CODE-P3` [代码制作] Phase 3 声明式再获取（`NH3-06`；`NH3-T05`）。`blocked-by: NH3-CODE-P2`
+- [x] `NH3-CODE-P4` [代码制作] Phase 4 policy/actual S05 分账与 seal UoW（`NH3-07/08/09`；`NH3-T06/T07`）。`blocked-by: NH3-CODE-P3`
+- [x] `NH3-CODE-P5` [代码制作] Phase 5 replay 法律（`NH3-10`；`NH3-T08`）。`blocked-by: NH3-CODE-P4`
+- [x] `NH3-CLOSE` [代码审查，测试与文档回填] `NH3-T01..T08`、日志、evidence、closure、commit。`blocked-by: NH3-CODE-P5`
 
 ## NH4 — public upload and object lifecycle
 
-- [ ] `NH4-CODE-P1` [代码制作] Phase 1 bounded write（`NH4-01`；`NH4-T01/T07`）。`blocked-by: NH3-CLOSE`（DAG 仅要求 NH1 GO；本清单按用户要求串行线性化）
+- [-] `NH4-CODE-P1` [代码制作] Phase 1 bounded write（`NH4-01`；`NH4-T01/T07`）。`blocked-by: NH3-CLOSE`（DAG 仅要求 NH1 GO；本清单按用户要求串行线性化）
 - [ ] `NH4-CODE-P2` [代码制作] Phase 2 catalog + upload_pending UoW（`NH4-02`；`NH4-T01`）。`blocked-by: NH4-CODE-P1`
 - [ ] `NH4-CODE-P3` [代码制作] Phase 3 authenticated public API fence（`NH4-03/07`；`NH4-T01/T03`）。`blocked-by: NH4-CODE-P2`
 - [ ] `NH4-CODE-P4` [代码制作] Phase 4 idempotency + local_object ingest handoff（`NH4-04/05`；`NH4-T02/T04`）。`blocked-by: NH4-CODE-P3`

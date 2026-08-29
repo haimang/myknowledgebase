@@ -1,0 +1,23 @@
+{
+  "schema_version": "mkb.nh3-actual-propagation-evidence.v1",
+  "root": {
+    "actual_binding_digest": "bb74d6ed377d312436c0fe6b221c32d5d068e3d16cab8c213140a38deb849e8a",
+    "actual_binding_state": "sealed",
+    "seal_generation": 1,
+    "actual_clean_process_key": "clean.map.registered_api",
+    "actual_clean_strategy": "registered_api.map",
+    "domain_binding_digest": "9ae72d3e29bb84e1ebd59b65b2142d25d4b92c2b868e0889cfaba875e59660fd"
+  },
+  "projections": {
+    "candidate_set": {"rows": 1, "distinct_actual_digests": 1, "state": "sealed"},
+    "snapshot": {"rows": 1, "distinct_actual_digests": 1, "state": "sealed"},
+    "gate": {"rows": 1, "distinct_actual_digests": 1, "state": "sealed"},
+    "scatter_children": {"rows": 2, "distinct_actual_digests": 1, "state": "sealed"}
+  },
+  "all_projection_digests_equal_root": true,
+  "root_actual_differs_from_domain_policy": true,
+  "source_test": "tests/e2e/test_nh3_seal_crash_windows.py::test_sealed_actual_propagates_to_candidate_snapshot_gate_and_scatter_children",
+  "query_port": "TursoPersistence.transaction",
+  "commit": "b008702211bc460e25beb37e54ddde6652a50724",
+  "observed_at_utc": "2026-08-29T19:56:38Z"
+}

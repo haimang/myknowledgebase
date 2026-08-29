@@ -29,7 +29,7 @@
 > - [`docs/eval/new-harvest/reference-anchor/assessment-analysis-02-s05-two-stage-binding-and-recovery.md`](../../eval/new-harvest/reference-anchor/assessment-analysis-02-s05-two-stage-binding-and-recovery.md)
 > - [`docs/eval/new-harvest/reference-anchor/assessment-analysis-03-representation-and-reacquisition.md`](../../eval/new-harvest/reference-anchor/assessment-analysis-03-representation-and-reacquisition.md)
 > - [`docs/eval/new-harvest/reference-anchor/assessment-analysis-08-publication-and-intake-lifecycle.md`](../../eval/new-harvest/reference-anchor/assessment-analysis-08-publication-and-intake-lifecycle.md)（`NH-RA08-B04` 只消费）
-> 文档状态: `draft`
+> 文档状态: `executed`
 
 ---
 
@@ -672,13 +672,7 @@ PASS 证据四元组形态：`commit SHA + pytest node PASS + Truth/Q + UTC`。
 
 ## 11. 执行日志回填（仅 `executed` 状态使用）
 
-文档状态为 `draft`，本节按模板占位；执行完成后改用 `respond-execution-log` 厚版回填。residual（NH6 供给、NH8 guard 旁路、NH9 mega）交后继 AP，**不回填本阶段**。
-
-- **实际执行摘要**：未执行。
-- **Phase 偏差**（逐条带分类）：未执行。
-- **阻塞与处理**：未执行。预期阻塞 = NH1/NH2 未闭合。
-- **测试发现**（含全绿计数 + 新暴露事实）：未执行。
-- **后续 handoff**：未执行。预定交接 NH6/NH8/NH9。
+原 draft 占位已由文末 append-only `§12` 厚版执行日志取代；residual 仍按冻结 DAG 交 NH6/NH8/NH9。
 
 ---
 
@@ -689,3 +683,66 @@ PASS 证据四元组形态：`commit SHA + pytest node PASS + Truth/Q + UTC`。
 | `v0.1` | `2026-08-29` | Grok workflow | 由 final §7 派生 |
 | `v0.2` | `2026-08-29` | Grok fix-fleet | 吸收已核实 review：`NH3-A01` 把 `:660` 标为 `decode_evidence` 覆盖；T06 L2 落到 `tests/integration/` 且 scan node 写入跑法；T08 🔱 钉 `::test_generation_restart_and_lineage_are_task_scoped_summaries`；T02 来源只标 🆕 |
 | `v0.3` | `2026-08-29` | Grok recon-fix | 开工闸改为 `stop-or-go.md=GO` 且消费 `NH2-T01..T07`；台账 D durable facts 评估恢复 `NH3-T01/T02/T03` |
+
+---
+
+## 12. 执行日志回填（append-only）
+
+> 执行者：`Codex`
+> 执行时间：`2026-08-30`（evidence UTC `2026-08-29T19:56:38Z`）
+> 文档状态：`draft → executing → executed`
+> 代码改动统计：实现提交 `b008702`（32 files；production migrations `2`）
+
+- **实际执行摘要**：
+  - Phase 1（`NH3-01/02`）：新增 typed RepresentationFact/AcquireDecodeHistory 行、path digest、tx-scoped reader；acquire/decode/print callback 与 Process Outcome 共用 UoW。
+  - Phase 2（`NH3-03/04/05`）：ZIP/OPC/opaque 分账；PDF `present/absent/encrypted/corrupt` 观察出口；BrowserPrintResult 强制 `%PDF-` 与真实 profile identity。
+  - Phase 3（`NH3-06`）：runtime guard 读 durable projection；static→browser/print 只由 NH2 声明 step 驱动；unknown fail-closed，未声明 absent edge 409。
+  - Phase 4（`NH3-07/08/09`）：新增 actual 三态与 sealed selection；selected clean route、single CAS、clean eligibility 同 Outcome UoW；Command/Candidate/Snapshot/Gate/child 传播 actual。
+  - Phase 5（`NH3-10`）：Process retry 不换 worker；`full_task` exact copy digest/state/generation/route/clean selection；rebuild 不写新 actual；upgrade surface 为零。
+- **Phase 偏差（计划 vs 实际）**：
+  - `NH3-V01 (schema-number)`：计划中的 provisional `018/019` 因 NH2 已占 `018`，顺延为 history=`019`、actual=`020`；迁移顺序仍保持“先 durable facts，再 actual”。
+  - `NH3-V02 (substrate-fit)`：print/reacquire 沿用已声明 `intake.acquire.http_browser` capability，以 `ProcessCommand.step_key` 区分 `acquire_print` / `acquire_browser_reacquire`；未引入重复 capability key。
+  - `NH3-V03 (compatibility)`：旧 `acquisition_evidence/decode_evidence` 留作输出兼容投影，但 route 与 actual seal 只读 durable rows；未把兼容 JSON 宣称为 SSOT。
+  - `NH3-V04 (review-fix)`：独立审查增加 execution actual insert/update triggers，强制 sealed digest/route/worker 完整闭合；scatter child 随之复制完整 selection。
+  - `NH3-V05 (test-harness)`：四条完整 Turso pipeline 增加事实/传播写入后，原 8 秒测试墙钟不稳定；只把等待上限调至 30 秒，terminal-success 语义断言不变。
+- **阻塞与处理**：无 NH3 hard-gate blocker；NH1/NH2 closure 均满足。全仓六个已登记 successor failure 未被改期待值或伪装为通过。
+- **测试发现**：NH3-T01..T08 `36 passed`；ruff/diff/redline scans PASS；全仓 `678 collected / 672 passed / 6 successor-owned failed`。
+- **后续 handoff**：NH6 消费真实 print/PDF/OCR supply 合同；NH7 消费 sealed actual 与 admitted-clean vertical；NH8 落 rebuild/metadata bypass 与旧 alias retire；NH9 复用 W-SEL/W-SEAL 注入点。
+
+### 12.1 逐工作项状态
+
+| 工作项 | 状态 | PR / commit | 实际落点 | 备注 |
+|--------|------|-------------|----------|------|
+| `NH3-01` | `✅ done` | `b008702` | `019_nh3_representation_fact_history.sql`; `representation.py` | typed fact 闭集 |
+| `NH3-02` | `✅ done` | `b008702` | `representation_history.py`; `acquisition_ingest.py` | ordered append / repeat 409 |
+| `NH3-03` | `✅ done` | `b008702` | `types.py`; `acquisition_ingest.py` | ZIP/OPC/opaque |
+| `NH3-04` | `✅ done` | `b008702` | `_extract_pdf_text`; PDF matrix | observation ≠ OCR capability |
+| `NH3-05` | `✅ done` | `b008702` | `BrowserPrintResult`; print fact test | L2，不宣称 live |
+| `NH3-06` | `✅ done` | `b008702` | fact reader; route fence; reacquire test | graph-only finite path |
+| `NH3-07` | `✅ done` | `b008702` | `020_nh3_actual_s05_binding.sql`; command model | no backfill / three states |
+| `NH3-08` | `✅ done` | `b008702` | `actual_s05.py`; `runtime_outcome.py` | same-UoW seal CAS |
+| `NH3-09` | `✅ done` | `b008702` | runtime/intake/scatter propagation | actual-only readers |
+| `NH3-10` | `✅ done` | `b008702` | `task_commands.py`; lineage matrix | full_task exact / no upgrade |
+
+### 12.2 关键指标演进
+
+| 指标 | NH2 baseline | NH3 | Δ |
+|------|--------------|-----|---|
+| durable representation authorities | interface only | fact + ordered history | `+2 tables` |
+| actual S05 states | spike only | legacy/unsealed/sealed production | `productionized` |
+| declared reacquire persisted path | no rows | stable ordered digest | `enabled` |
+| PDF observation states | present or stolen OCR error | four-state closed set | `honest` |
+| actual propagation surfaces | domain alias | Command/Candidate/Snapshot/Gate/child | `5 surfaces closed` |
+| NH3 frozen tests | `0` | `36 passed` | `+36` |
+
+### 12.3 successor-owned failures
+
+| 失败项 | 证据 | 判断 |
+|--------|------|------|
+| index rebuild search namespace（3）+ reactivate search namespace（1） | AP-NH2 closure 已在 NH3 前记录；NH3 post-commit full suite 同码 | `C handoff → NH8` |
+| rebuild exact-clean `PREFLIGHT_EVIDENCE_INVALID`（1） | AP §9 已声明 bypass 实现属 NH8；NH3-T08 仅证明不写新 actual | `C handoff → NH8` |
+| realestate description newline（1） | provider parser 未被 NH3 production code修改；AP-NH2 closure 已记录 | `C handoff → NH5/NH7` |
+
+### 12.4 文档状态
+
+`draft → executing → executed（2026-08-30）`。
