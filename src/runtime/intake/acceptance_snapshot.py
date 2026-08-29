@@ -31,6 +31,8 @@ class IntakeAcceptanceSnapshotMixin:
                 return await self._accept_rebuild(command, state)
             if state.get("operation_mode") == "metadata_update":
                 return await self._accept_metadata_update(command, state)
+            if command.binding_state != "sealed" or command.binding_digest is None:
+                raise MkbError("ACTUAL_S05_UNSEALED", "Snapshot acceptance requires sealed actual S05", 409)
             admission = state.get("admission_result")
             if admission not in {"auto_admitted", "human_review_required"}:
                 raise MkbError("PREFLIGHT_REJECTED", "Preflight did not admit this candidate set", 409)
@@ -137,8 +139,10 @@ class IntakeAcceptanceSnapshotMixin:
                     await tx.execute(
                         "INSERT INTO mkb_intake_snapshots "
                         "(team_uuid,intake_snapshot_uuid,intake_source_uuid,observation_key,observation_fingerprint,candidate_root_digest,"
-                        "completeness,preflight_outcome_ref,preflight_outcome_digest,s05_binding_digest,observed_at,accepted_at,"
-                        "producer_execution_uuid,raw_artifact_uuid,payload_extra) VALUES (?,?,?,?,?,?, 'complete',?,?,?,?,?,?,?,'{}')",
+                        "completeness,preflight_outcome_ref,preflight_outcome_digest,s05_binding_digest,"
+                        "actual_binding_digest,actual_binding_state,observed_at,accepted_at,"
+                        "producer_execution_uuid,raw_artifact_uuid,payload_extra) "
+                        "VALUES (?,?,?,?,?,?,'complete',?,?,?,?,?,?,?,?,?,'{}')",
                         (
                             command.team_uuid,
                             state["intake_snapshot_uuid"],
@@ -148,7 +152,9 @@ class IntakeAcceptanceSnapshotMixin:
                             state["candidate_root_digest"],
                             command.input_manifest_ref,
                             command.input_manifest_digest,
+                            command.policy_binding_digest or command.binding_digest,
                             command.binding_digest,
+                            command.binding_state,
                             state["observed_at"],
                             now,
                             command.execution_uuid,

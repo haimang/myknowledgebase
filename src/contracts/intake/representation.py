@@ -22,6 +22,31 @@ SelectedCleanStrategy = Literal[
     "doc.ocr",
     "doc.vision",
 ]
+RepresentationFactKind = Literal["acquire", "decode", "print"]
+TextLayerObservation = Literal["present", "absent", "encrypted", "corrupt", "not_applicable", "unknown"]
+
+
+class RepresentationObservation(StrictModel):
+    schema_version: Literal["mkb.representation-observation.v1"] = "mkb.representation-observation.v1"
+    team_uuid: str = Field(min_length=1, max_length=128)
+    execution_uuid: str = Field(min_length=1, max_length=128)
+    process_uuid: str = Field(min_length=1, max_length=128)
+    step_key: str = Field(min_length=1, max_length=128)
+    fact_kind: RepresentationFactKind
+    capability: str = Field(min_length=1, max_length=128)
+    representation_kind: str = Field(min_length=1, max_length=128)
+    declared_media_type: str | None = Field(default=None, max_length=255)
+    detected_media_type: str | None = Field(default=None, max_length=255)
+    verified_media_type: str = Field(min_length=1, max_length=255)
+    raw_byte_digest: str = Field(pattern=r"^[0-9a-f]{64}$")
+    raw_byte_size: int = Field(ge=0)
+    text_layer: TextLayerObservation = "not_applicable"
+    main_text_presence: MainTextPresence = "unknown"
+    canonicalizer_key: str = Field(min_length=1, max_length=128)
+    canonicalizer_version: str = Field(min_length=1, max_length=64)
+    observer_key: str = Field(min_length=1, max_length=128)
+    observer_version: str = Field(min_length=1, max_length=64)
+    profile_identity: str | None = Field(default=None, max_length=256)
 
 
 class RepresentationRouteFacts(StrictModel):
@@ -35,13 +60,22 @@ class RepresentationRouteFacts(StrictModel):
 
 @runtime_checkable
 class RepresentationFactReader(Protocol):
-    async def read_route_facts(self, *, team_uuid: str, execution_uuid: str) -> RepresentationRouteFacts | None: ...
+    async def read_route_facts(
+        self,
+        *,
+        tx: object,
+        team_uuid: str,
+        execution_uuid: str,
+    ) -> RepresentationRouteFacts | None: ...
 
 
 __all__ = [
     "MainTextPresence",
     "RepresentationFactReader",
+    "RepresentationFactKind",
     "RepresentationMediaFamily",
+    "RepresentationObservation",
     "RepresentationRouteFacts",
     "SelectedCleanStrategy",
+    "TextLayerObservation",
 ]

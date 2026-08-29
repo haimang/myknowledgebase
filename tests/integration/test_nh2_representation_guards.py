@@ -32,8 +32,10 @@ class _FactReader:
     def __init__(self, value: str | None) -> None:
         self.value = value
 
-    async def read_route_facts(self, *, team_uuid: str, execution_uuid: str) -> RepresentationRouteFacts | None:
-        del team_uuid, execution_uuid
+    async def read_route_facts(
+        self, *, tx: object, team_uuid: str, execution_uuid: str
+    ) -> RepresentationRouteFacts | None:
+        del tx, team_uuid, execution_uuid
         if self.value is None:
             return None
         return RepresentationRouteFacts(

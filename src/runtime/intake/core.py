@@ -57,6 +57,7 @@ class IntakeCoreMixin:
             prompt_root: Path | None = None,
             diagnostics: object | None = None,
             acquisition_max_response_bytes: int = 8 * 1024 * 1024,
+            print_max_response_bytes: int = 16 * 1024 * 1024,
         ) -> None:
             if embedding_dimension < 1:
                 raise ValueError("embedding_dimension must be positive")
@@ -89,6 +90,7 @@ class IntakeCoreMixin:
             self._prompt_root = (prompt_root or Path(__file__).resolve().parents[3] / "data" / "prompts").resolve()
             self._vector_purger = VectorGenerationPurger(persistence)
             self._acquisition_max_response_bytes = max(1, int(acquisition_max_response_bytes))
+            self._print_max_response_bytes = max(1, int(print_max_response_bytes))
 
     def _frozen_prompt_file(
         self,

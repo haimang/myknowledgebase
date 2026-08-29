@@ -19,6 +19,7 @@ from src.contracts.workflow.models import (
     WorkflowStepKind,
 )
 from src.persistence.ports import PersistencePort, UnitOfWork
+from src.runtime.binding.actual_s05 import projected_actual_digest, requires_actual_binding
 from src.runtime.workflow.constants import (
     _ACTIVE_PROCESS_STATUSES,
     _TERMINAL_EXECUTION_STATUSES,
@@ -354,6 +355,7 @@ class WorkflowCoreMixin:
             for _ in range(64):
                 expired = await tx.fetchone(
                     "SELECT p.*, e.trace_uuid, e.status AS execution_status, e.domain_binding_digest,"
+                    "e.actual_binding_digest,e.actual_binding_state,e.seal_generation,"
                     "e.workflow_uuid,e.workflow_revision_uuid,e.compiled_digest "
                     "FROM mkb_processes AS p JOIN mkb_executions AS e "
                     "ON e.execution_uuid=p.execution_uuid AND e.team_uuid=p.team_uuid "
@@ -381,7 +383,9 @@ class WorkflowCoreMixin:
                 if embed_can_run:
                     embed_candidate = await tx.fetchone(
                         "SELECT p.*, e.trace_uuid, e.status AS execution_status, e.domain_binding_digest,"
-                        "e.workflow_uuid,e.workflow_revision_uuid,e.compiled_digest, t.priority AS task_priority "
+                        "e.actual_binding_digest,e.actual_binding_state,e.seal_generation,"
+                        "e.workflow_uuid,e.workflow_revision_uuid,e.compiled_digest, t.priority AS task_priority,"
+                        "t.request_intent AS task_request_intent "
                         "FROM mkb_processes AS p JOIN mkb_executions AS e "
                         "ON e.execution_uuid=p.execution_uuid AND e.team_uuid=p.team_uuid "
                         "JOIN mkb_tasks AS t ON t.team_uuid=p.team_uuid AND t.task_uuid=p.task_uuid "
@@ -394,7 +398,9 @@ class WorkflowCoreMixin:
                     )
                 other_candidate = await tx.fetchone(
                     "SELECT p.*, e.trace_uuid, e.status AS execution_status, e.domain_binding_digest,"
-                    "e.workflow_uuid,e.workflow_revision_uuid,e.compiled_digest, t.priority AS task_priority "
+                    "e.actual_binding_digest,e.actual_binding_state,e.seal_generation,"
+                    "e.workflow_uuid,e.workflow_revision_uuid,e.compiled_digest, t.priority AS task_priority,"
+                    "t.request_intent AS task_request_intent "
                     "FROM mkb_processes AS p JOIN mkb_executions AS e "
                     "ON e.execution_uuid=p.execution_uuid AND e.team_uuid=p.team_uuid "
                     "JOIN mkb_tasks AS t ON t.team_uuid=p.team_uuid AND t.task_uuid=p.task_uuid "
@@ -576,7 +582,8 @@ class WorkflowCoreMixin:
     async def _process_with_execution(self, tx: UnitOfWork, process_uuid: str) -> dict[str, Any]:
         row = await tx.fetchone(
             "SELECT p.*,e.trace_uuid,e.status AS execution_status,e.domain_binding_digest,"
-            "t.priority AS task_priority "
+            "e.actual_binding_digest,e.actual_binding_state,e.seal_generation,"
+            "t.priority AS task_priority,t.request_intent AS task_request_intent "
             "FROM mkb_processes AS p JOIN mkb_executions AS e "
             "ON e.execution_uuid=p.execution_uuid AND e.team_uuid=p.team_uuid "
             "JOIN mkb_tasks AS t ON t.team_uuid=p.team_uuid AND t.task_uuid=p.task_uuid "
@@ -915,6 +922,20 @@ class WorkflowCoreMixin:
         )
         if any(not process.get(key) for key in required):
             raise MkbError("process-command-integrity", "Claimed Process is missing immutable command material", 503)
+        binding_state = str(process.get("actual_binding_state") or "legacy_unverifiable")
+        actual_digest = projected_actual_digest(process)
+        if binding_state == "sealed" and actual_digest is None:
+            raise MkbError("ACTUAL_S05_INTEGRITY", "Sealed actual S05 state lacks a valid digest", 503)
+        if (
+            binding_state == "unsealed"
+            and requires_actual_binding(str(process["process_key"]))
+            and process.get("task_request_intent")
+            not in {"intake.rebuild", "intake.update_metadata", "index.rebuild"}
+        ):
+            raise ConflictError(
+                "ACTUAL_S05_UNSEALED",
+                "The clean boundary cannot be claimed before actual S05 is sealed",
+            )
         return ProcessCommand(
             schema_version="mkb.process-command.v1",
             team_uuid=process["team_uuid"],
@@ -922,6 +943,7 @@ class WorkflowCoreMixin:
             trace_uuid=process["trace_uuid"],
             execution_uuid=process["execution_uuid"],
             process_uuid=process["process_uuid"],
+            step_key=process["step_key"],
             process_key=process["process_key"],
             process_contract_version=process["process_contract_version"],
             fencing_generation=process["fencing_generation"],
@@ -930,7 +952,9 @@ class WorkflowCoreMixin:
             input_manifest_digest=process["input_manifest_digest"],
             config_snapshot_ref=process["config_snapshot_ref"],
             config_snapshot_digest=process["config_snapshot_digest"],
-            binding_digest=process["domain_binding_digest"],
+            binding_digest=actual_digest,
+            binding_state=binding_state,  # type: ignore[arg-type]
+            policy_binding_digest=process["domain_binding_digest"],
             dispatch_pool=process.get("dispatch_pool"),
             task_priority=process.get("task_priority"),
         )

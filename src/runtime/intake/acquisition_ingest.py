@@ -9,11 +9,18 @@ from typing import Any
 from src.contracts.common.errors import MkbError
 from src.contracts.common.ids import canonical_json, stable_digest, uuid7
 from src.contracts.common.time import utc_now
+from src.contracts.intake.representation import RepresentationObservation
 from src.contracts.runtime.models import ProcessCommand
 from src.contracts.storage.models import ObjectHandle
 from src.persistence.ports import UnitOfWork
 from src.runtime.http_acquisition import HttpAcquisitionResult, redacted_url_identity
+from src.runtime.intake.representation_history import (
+    append_representation_tx,
+    observe_main_text,
+    prepare_representation_append,
+)
 from src.runtime.intake.types import (
+    BrowserPrintResult,
     _AcquiredContent,
     _canonical_json_text,
     _canonical_text,
@@ -58,7 +65,11 @@ class IntakeAcquisitionIngestMixin:
                 raise MkbError("SOURCE_EXTERNAL_KEY_INVALID", "Source external_key is required", 422)
             if source_kind == "registered_api":
                 return await self._acquire_registered_api_collection(command, descriptor, payload=payload)
-            expected_capability = self._expected_acquisition_capability(descriptor)
+            expected_capability = (
+                "intake.acquire.http_browser"
+                if command.step_key in {"acquire_browser", "acquire_browser_reacquire", "acquire_print"}
+                else self._expected_acquisition_capability(descriptor)
+            )
             if command.process_key != expected_capability:
                 raise MkbError("ACQUISITION_CAPABILITY_MISMATCH", "Source kind does not match the bound acquisition capability", 409)
             acquired = await self._acquire_content(command, descriptor)
@@ -107,6 +118,34 @@ class IntakeAcquisitionIngestMixin:
                     next_state["intake_item_uuid"] = existing["intake_item_uuid"]
                 if existing.get("intake_snapshot_uuid"):
                     next_state["intake_snapshot_uuid"] = existing["intake_snapshot_uuid"]
+            representation_kind = str(acquired.evidence.get("representation_kind") or "transferred")
+            acquire_fact = prepare_representation_append(
+                RepresentationObservation(
+                    team_uuid=command.team_uuid,
+                    execution_uuid=command.execution_uuid,
+                    process_uuid=command.process_uuid,
+                    step_key=command.step_key or command.process_key,
+                    fact_kind="print" if representation_kind == "print_pdf" else "acquire",
+                    capability=str(acquired.evidence["acquisition_capability"]),
+                    representation_kind=representation_kind,
+                    declared_media_type=acquired.evidence.get("declared_media_type"),
+                    detected_media_type=acquired.evidence.get("detected_media_type"),
+                    verified_media_type=acquired.media_type,
+                    raw_byte_digest=str(acquired.evidence["raw_byte_digest"]),
+                    raw_byte_size=int(acquired.evidence["raw_byte_size"]),
+                    text_layer="unknown" if acquired.media_type == "application/pdf" else "not_applicable",
+                    main_text_presence="unknown",
+                    canonicalizer_key="raw-byte-identity",
+                    canonicalizer_version="v1",
+                    observer_key="media-signature-sniffer",
+                    observer_version="v1",
+                    profile_identity=(
+                        acquired.evidence.get("browser_profile")
+                        or acquired.evidence.get("transport_profile")
+                    ),
+                )
+            )
+            next_state["representation_fact"] = acquire_fact.reference
             material = self._material(
                 command,
                 next_state,
@@ -167,6 +206,7 @@ class IntakeAcquisitionIngestMixin:
                 )
                 if stored is not None:
                     next_state["intake_source_uuid"] = stored["intake_source_uuid"]
+                await append_representation_tx(tx, acquire_fact)
 
             return material, {}, callback
 
@@ -310,6 +350,7 @@ class IntakeAcquisitionIngestMixin:
                 "representation": descriptor.get("representation"),
                 "completeness_evidence": exhaustion_proof,
                 "budget_verdict": "within_registered_api_member_budget",
+                "representation_kind": "transferred",
             }
             next_state = {
                 "request_intent": "intake.ingest",
@@ -327,6 +368,11 @@ class IntakeAcquisitionIngestMixin:
                 "api_definition_version": definition_version,
                 "collection_exhaustion_proof": exhaustion_proof,
                 "raw_digest": raw_digest,
+                "raw_byte_digest": raw_digest,
+                "raw_byte_size": collection_byte_count,
+                "declared_media_type": "application/json",
+                "detected_media_type": "application/json",
+                "media_type": "application/json",
                 "acquisition_capability": "intake.acquire.registered_api",
                 "acquisition_evidence": acquisition_evidence,
                 "require_human_review": bool(descriptor.get("require_human_review", False)),
@@ -338,6 +384,30 @@ class IntakeAcquisitionIngestMixin:
                 "observed_at": now,
                 "payload": dict(payload),
             }
+            acquire_fact = prepare_representation_append(
+                RepresentationObservation(
+                    team_uuid=command.team_uuid,
+                    execution_uuid=command.execution_uuid,
+                    process_uuid=command.process_uuid,
+                    step_key=command.step_key or command.process_key,
+                    fact_kind="acquire",
+                    capability="intake.acquire.registered_api",
+                    representation_kind="transferred",
+                    declared_media_type="application/json",
+                    detected_media_type="application/json",
+                    verified_media_type="application/json",
+                    raw_byte_digest=raw_digest,
+                    raw_byte_size=collection_byte_count,
+                    text_layer="not_applicable",
+                    main_text_presence="unknown",
+                    canonicalizer_key="registered-api-record-set",
+                    canonicalizer_version="v1",
+                    observer_key="registered-api-contract",
+                    observer_version=str(definition_version),
+                    profile_identity=f"{provider}:{operation}:{definition_version}",
+                )
+            )
+            next_state["representation_fact"] = acquire_fact.reference
             material = self._material(
                 command,
                 next_state,
@@ -396,6 +466,7 @@ class IntakeAcquisitionIngestMixin:
                 )
                 if stored is not None:
                     next_state["intake_source_uuid"] = stored["intake_source_uuid"]
+                await append_representation_tx(tx, acquire_fact)
 
             return material, {}, callback
 
@@ -471,10 +542,17 @@ class IntakeAcquisitionIngestMixin:
             url = descriptor.get("url")
             if not isinstance(url, str) or not url.strip():
                 raise MkbError("ACQUISITION_URL_INVALID", "HTTP source URL is required", 422)
-            mode = descriptor.get("acquisition_mode", "static")
-            if mode not in {"static", "browser", "pdf"}:
+            requested_mode = descriptor.get("acquisition_mode", "static")
+            mode = (
+                "print_pdf"
+                if command.step_key == "acquire_print"
+                else "browser"
+                if command.step_key in {"acquire_browser", "acquire_browser_reacquire"}
+                else requested_mode
+            )
+            if requested_mode not in {"static", "browser", "pdf"}:
                 raise MkbError("ACQUISITION_MODE_INVALID", "HTTP acquisition mode is not registered", 422)
-            if mode == "browser":
+            if mode in {"browser", "print_pdf"}:
                 fetcher = self._browser_fetcher
                 capability = "intake.acquire.http_browser"
                 if fetcher is None:
@@ -496,7 +574,33 @@ class IntakeAcquisitionIngestMixin:
             if inspect.isawaitable(result):
                 result = await result
             http_evidence: dict[str, Any]
-            if isinstance(result, HttpAcquisitionResult):
+            if isinstance(result, BrowserPrintResult):
+                if mode != "print_pdf":
+                    raise MkbError(
+                        "ACQUISITION_RESPONSE_INVALID",
+                        "A print result cannot satisfy a browser-render acquisition",
+                        502,
+                    )
+                if not result.profile_identity.strip():
+                    raise MkbError("ACQUISITION_PRINT_PROFILE_INVALID", "Browser print profile is unavailable", 502)
+                data = result.body
+                declared = "application/pdf"
+                http_evidence = {
+                    "request_url_identity": redacted_url_identity(url),
+                    "final_url_identity": redacted_url_identity(url),
+                    "response_media_type": "application/pdf",
+                    "http_status": None,
+                    "redirect_count": None,
+                    "transport_profile": result.profile_identity,
+                    "browser_profile": result.profile_identity,
+                }
+            elif mode == "print_pdf":
+                raise MkbError(
+                    "ACQUISITION_PRINT_RESULT_INVALID",
+                    "Browser print capability must return typed PDF bytes and profile identity",
+                    502,
+                )
+            elif isinstance(result, HttpAcquisitionResult):
                 data = result.body
                 http_evidence = result.evidence()
                 declared = result.response_media_type
@@ -532,8 +636,16 @@ class IntakeAcquisitionIngestMixin:
                 mode=mode,
                 extra_evidence={
                     **http_evidence,
-                    "representation_kind": "rendered" if mode == "browser" else "transferred",
-                    "browser_profile": "injected-browser-renderer.v1" if mode == "browser" else None,
+                    "representation_kind": (
+                        "print_pdf" if mode == "print_pdf" else "rendered" if mode == "browser" else "transferred"
+                    ),
+                    "browser_profile": (
+                        http_evidence.get("browser_profile")
+                        if mode == "print_pdf"
+                        else http_evidence.get("transport_profile")
+                        if mode == "browser"
+                        else None
+                    ),
                 },
             )
 
@@ -553,7 +665,10 @@ class IntakeAcquisitionIngestMixin:
             declared = _normalized_media_type(declared_media_type)
             detected = _sniff_media_type(data)
             verified = _verified_media_type(declared=declared, detected=detected, mode=mode)
-            binary = verified == "application/pdf" or verified.startswith("image/")
+            binary = not (
+                verified.startswith("text/")
+                or verified == "application/json"
+            )
             if binary:
                 raw_text = data.decode("latin-1")
                 encoding = {"label": "binary", "bom": False, "replacement_count": 0}
@@ -567,7 +682,11 @@ class IntakeAcquisitionIngestMixin:
                     "bom": data.startswith(b"\xef\xbb\xbf"),
                     "replacement_count": 0,
                 }
-            limit = int(getattr(self, "_acquisition_max_response_bytes", 8 * 1024 * 1024) or 8 * 1024 * 1024)
+            limit = int(
+                getattr(self, "_print_max_response_bytes", 16 * 1024 * 1024)
+                if mode == "print_pdf"
+                else getattr(self, "_acquisition_max_response_bytes", 8 * 1024 * 1024)
+            )
             observed = len(data)
             if observed > limit:
                 raise MkbError(
@@ -589,6 +708,7 @@ class IntakeAcquisitionIngestMixin:
                 "encoding": encoding,
                 "budget_verdict": "within_configured_acquisition_budget",
                 "budget": {"limit": limit, "observed": observed},
+                "budget_profile": "browser-print-pdf.v1" if mode == "print_pdf" else "acquisition.v1",
                 **dict(extra_evidence or {}),
             }
             return _AcquiredContent(raw_text=raw_text, is_binary=binary, media_type=verified, evidence=evidence)
@@ -658,6 +778,35 @@ class IntakeAcquisitionIngestMixin:
                 }
             )
             next_state["decode_evidence"] = decode_evidence
+            text_layer = str(decode_evidence.get("text_layer") or "not_applicable")
+            decode_fact = prepare_representation_append(
+                RepresentationObservation(
+                    team_uuid=command.team_uuid,
+                    execution_uuid=command.execution_uuid,
+                    process_uuid=command.process_uuid,
+                    step_key=command.step_key or command.process_key,
+                    fact_kind="decode",
+                    capability=str(decode_evidence["decode_capability"]),
+                    representation_kind=str(
+                        decode_evidence.get("representation_kind")
+                        or (state.get("acquisition_evidence") or {}).get("representation_kind")
+                        or "transferred"
+                    ),
+                    declared_media_type=(state.get("declared_media_type") if isinstance(state.get("declared_media_type"), str) else None),
+                    detected_media_type=(state.get("detected_media_type") if isinstance(state.get("detected_media_type"), str) else None),
+                    verified_media_type=media_type,
+                    raw_byte_digest=str(state.get("raw_byte_digest")),
+                    raw_byte_size=int(state.get("raw_byte_size") or 0),
+                    text_layer=text_layer,  # type: ignore[arg-type]
+                    main_text_presence=observe_main_text(decoded, media_type=media_type, text_layer=text_layer),  # type: ignore[arg-type]
+                    canonicalizer_key=str(decode_evidence.get("canonicalizer") or decode_evidence["decode_capability"]),
+                    canonicalizer_version="v1",
+                    observer_key=str(decode_evidence.get("decoder") or "deterministic-text-decoder"),
+                    observer_version="v1",
+                    profile_identity=None,
+                )
+            )
+            next_state["representation_fact"] = decode_fact.reference
             material = self._material(
                 command,
                 next_state,
@@ -671,6 +820,7 @@ class IntakeAcquisitionIngestMixin:
             )
 
             async def callback(tx: UnitOfWork, refs: Mapping[str, str]) -> None:
-                del tx, refs
+                del refs
+                await append_representation_tx(tx, decode_fact)
 
             return material, {}, callback

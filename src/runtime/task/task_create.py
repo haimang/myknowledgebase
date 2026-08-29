@@ -178,6 +178,13 @@ class TaskCreateMixin:
                 compiled_digest=(prepared.workflow.compiled_digest if prepared is not None else None),
                 domain_binding_digest=(prepared.domain_binding_digest if prepared is not None else None),
                 s05_binding_digest=(prepared.domain_binding_digest if prepared is not None else None),
+                actual_binding_digest=None,
+                actual_binding_state="unsealed",
+                seal_generation=0,
+                actual_selected_route_digest=None,
+                actual_clean_step_key=None,
+                actual_clean_process_key=None,
+                actual_clean_strategy=None,
                 manifest_ref=(prepared.input_manifest_ref if prepared is not None else None),
                 manifest_digest=(prepared.input_manifest_digest if prepared is not None else None),
                 execution_role=(
@@ -317,6 +324,13 @@ class TaskCreateMixin:
         compiled_digest: str | None,
         domain_binding_digest: str | None,
         s05_binding_digest: str | None,
+        actual_binding_digest: str | None,
+        actual_binding_state: str,
+        seal_generation: int,
+        actual_selected_route_digest: str | None,
+        actual_clean_step_key: str | None,
+        actual_clean_process_key: str | None,
+        actual_clean_strategy: str | None,
         manifest_ref: str | None,
         manifest_digest: str | None,
         execution_role: str,
@@ -337,7 +351,25 @@ class TaskCreateMixin:
         binding_digest = domain_binding_digest or stable_digest(
             {"config_snapshot": resolved_config_digest, "workflow": resolved_compiled_digest}
         )
-        resolved_s05_digest = s05_binding_digest or binding_digest
+        # The physical v1 column remains a compatibility-only policy alias.
+        # New runtime/domain readers use only the explicit actual columns.
+        legacy_policy_alias_digest = s05_binding_digest or binding_digest
+        if actual_binding_state not in {"legacy_unverifiable", "unsealed", "sealed"}:
+            raise MkbError("ACTUAL_S05_STATE_INVALID", "Execution actual binding state is invalid", 422)
+        if actual_binding_state == "sealed" and actual_binding_digest is None:
+            raise MkbError("ACTUAL_S05_DIGEST_REQUIRED", "A sealed Execution requires its actual digest", 422)
+        if actual_binding_state != "sealed" and actual_binding_digest is not None:
+            raise MkbError("ACTUAL_S05_DIGEST_INVALID", "An unsealed Execution cannot carry an actual digest", 422)
+        selection = (
+            actual_selected_route_digest,
+            actual_clean_step_key,
+            actual_clean_process_key,
+            actual_clean_strategy,
+        )
+        if actual_binding_state == "sealed" and any(value is None for value in selection):
+            raise MkbError("ACTUAL_S05_SELECTION_REQUIRED", "A sealed Execution requires its clean selection", 422)
+        if actual_binding_state != "sealed" and any(value is not None for value in selection):
+            raise MkbError("ACTUAL_S05_SELECTION_INVALID", "An unsealed Execution cannot carry a clean selection", 422)
         resolved_config_ref = config_snapshot_ref or f"mkbworkflow-test-config:v1:{resolved_config_digest}"
         resolved_manifest_digest = manifest_digest or stable_digest(
             {"execution_uuid": execution_uuid, "generation": generation, "kind": "legacy-test-input"}
@@ -347,9 +379,13 @@ class TaskCreateMixin:
             "INSERT INTO mkb_executions "
             "(execution_uuid,team_uuid,task_uuid,trace_uuid,generation,root_execution_uuid,parent_execution_uuid,"
             "retry_of_execution_uuid,execution_role,target_kind,workflow_uuid,workflow_revision_uuid,compiled_digest,"
-            "resolver_decision_digest,domain_binding_digest,s05_binding_digest,config_snapshot_ref,config_snapshot_digest,"
+            "resolver_decision_digest,domain_binding_digest,s05_binding_digest,actual_binding_digest,"
+            "actual_binding_state,seal_generation,actual_selected_route_digest,actual_clean_step_key,"
+            "actual_clean_process_key,actual_clean_strategy,config_snapshot_ref,config_snapshot_digest,"
             "status,row_revision,manifest_ref,manifest_digest,created_at,updated_at,payload_extra) "
-            "VALUES (?,?,?,?,?,?,NULL,?,?,?,?,?,?,?,?,?,?,?,'ready',0,?,?,?,?,'{}')",
+            "VALUES (?,?,?,?,?,?,NULL,"
+            "?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,"
+            "'ready',0,?,?,?,?,'{}')",
             (
                 execution_uuid,
                 team_uuid,
@@ -365,7 +401,14 @@ class TaskCreateMixin:
                 resolved_compiled_digest,
                 stable_digest({"workflow": resolved_compiled_digest}),
                 binding_digest,
-                resolved_s05_digest,
+                legacy_policy_alias_digest,
+                actual_binding_digest,
+                actual_binding_state,
+                seal_generation,
+                actual_selected_route_digest,
+                actual_clean_step_key,
+                actual_clean_process_key,
+                actual_clean_strategy,
                 resolved_config_ref,
                 resolved_config_digest,
                 resolved_manifest_ref,

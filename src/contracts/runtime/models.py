@@ -17,6 +17,11 @@ class ProcessCommand(PayloadExtraModel):
     trace_uuid: str
     execution_uuid: str
     process_uuid: str
+    # Runtime-created commands always carry the declarative workflow step.  The
+    # optional default preserves the v1 wire decoder for older recorded command
+    # fixtures; business writers fall back to process_key only for those legacy
+    # fixtures and never for a freshly claimed Process.
+    step_key: Annotated[str | None, Field(pattern=r"^[a-z][a-z0-9_.-]{0,127}$")] = None
     process_key: Annotated[str, Field(pattern=r"^[a-z][a-z0-9_.-]{0,127}$")]
     process_contract_version: Annotated[str, Field(min_length=1, max_length=128)]
     fencing_generation: Annotated[int, Field(ge=1)]
@@ -25,7 +30,12 @@ class ProcessCommand(PayloadExtraModel):
     input_manifest_digest: Annotated[str, Field(pattern=r"^[0-9a-f]{64}$")]
     config_snapshot_ref: Annotated[str, Field(min_length=1, max_length=1024)]
     config_snapshot_digest: Annotated[str, Field(pattern=r"^[0-9a-f]{64}$")]
-    binding_digest: Annotated[str, Field(pattern=r"^[0-9a-f]{64}$")]
+    # ``binding_digest`` is the sealed actual S05 coordinate.  Acquisition and
+    # decode commands are explicitly unsealed and therefore carry no digest;
+    # the separate policy digest is never accepted as a substitute.
+    binding_digest: Annotated[str | None, Field(pattern=r"^[0-9a-f]{64}$")] = None
+    binding_state: Literal["legacy_unverifiable", "unsealed", "sealed"] = "sealed"
+    policy_binding_digest: Annotated[str | None, Field(pattern=r"^[0-9a-f]{64}$")] = None
     dispatch_pool: Literal["local-inference", "non-interactive", "embed"] | None = None
     task_priority: Literal["low", "normal", "high", "urgent"] | None = None
 

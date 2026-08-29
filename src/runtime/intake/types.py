@@ -33,8 +33,19 @@ _PDF_TEXT = re.compile(rb"\((?:\\.|[^\\()])*\)\s*(?:Tj|')")
 _PDF_ARRAY_TEXT = re.compile(rb"\[(.*?)\]\s*TJ", re.S)
 _PDF_LITERAL = re.compile(rb"\((?:\\.|[^\\()])*\)")
 
+@dataclass(frozen=True, slots=True)
+class BrowserPrintResult:
+    """A browser port's real PDF bytes and measured runtime profile identity."""
+
+    body: bytes
+    profile_identity: str
+
+
 HttpFetcher = Callable[[str], str | bytes | HttpAcquisitionResult | Awaitable[str | bytes | HttpAcquisitionResult]]
-BrowserFetcher = HttpFetcher
+BrowserFetcher = Callable[
+    [str],
+    str | bytes | BrowserPrintResult | Awaitable[str | bytes | BrowserPrintResult],
+]
 
 # S07 has two explicit construction modes.  Metadata refresh is intentionally
 # a closed v1 profile: it may reuse only a frozen, full-valid summary package;
@@ -142,8 +153,22 @@ def _pdf_literal_bytes(value: bytes) -> bytes:
 
 
 def _extract_pdf_text(value: bytes) -> tuple[str, dict[str, Any]]:
-    if not value.startswith(b"%PDF-"):
-        raise MkbError("DECODE_PDF_INVALID", "PDF acquisition did not contain a PDF signature", 422)
+    """Observe the bounded local PDF surface without claiming OCR capability.
+
+    This v1 observer is deliberately narrower than the real parser supplied in
+    NH6.  Its job here is to classify the representation honestly: an empty
+    text layer is a successful ``absent`` observation, not an OCR deployment
+    error.  Encrypted/corrupt inputs likewise remain typed observations that a
+    declared workflow route can consume fail-closed.
+    """
+
+    base = {
+        "decoder": "bounded-pdf-representation-observer.v1",
+        "canonicalizer": "utf8-lf-nfc.v1",
+        "page_count_hint": len(re.findall(rb"/Type\s*/Page\b", value)),
+    }
+    if not re.match(rb"^%PDF-\d\.\d(?:\r?\n|\r|\s)", value):
+        return "", {**base, "text_layer": "corrupt"}
     literals: list[bytes] = []
     for match in _PDF_TEXT.finditer(value):
         literals.append(_pdf_literal_bytes(match.group(0)[1 : match.group(0).rfind(b")")]))
@@ -152,23 +177,22 @@ def _extract_pdf_text(value: bytes) -> tuple[str, dict[str, Any]]:
             literals.append(_pdf_literal_bytes(literal.group(0)[1:-1]))
     joined = b"\n".join(part for part in literals if part)
     if not joined:
-        raise MkbError(
-            "CLEAN_OCR_CAPABILITY_UNAVAILABLE",
-            "PDF has no extractable local text layer; local OCR is not configured",
-            422,
-        )
+        if b"/Encrypt" in value:
+            return "", {**base, "text_layer": "encrypted"}
+        if re.search(rb"\d+\s+\d+\s+obj\b", value) is None and b"%%EOF" not in value:
+            return "", {**base, "text_layer": "corrupt"}
+        return "", {**base, "text_layer": "absent"}
     try:
         if joined.startswith((b"\xfe\xff", b"\xff\xfe")):
             text = joined.decode("utf-16")
         else:
             text = joined.decode("utf-8")
-    except UnicodeDecodeError as exc:
-        raise MkbError("DECODE_PDF_INVALID", "PDF text layer is not valid Unicode", 422) from exc
-    return _canonical_text(text), {
-        "decoder": "local-pdf-literal-text.v1",
-        "page_count_hint": len(re.findall(rb"/Type\s*/Page\b", value)),
-        "text_layer": "present",
-    }
+    except UnicodeDecodeError:
+        return "", {**base, "text_layer": "corrupt"}
+    canonical = _canonical_text(text)
+    if not canonical.strip():
+        return "", {**base, "text_layer": "absent"}
+    return canonical, {**base, "text_layer": "present"}
 
 
 def _sniff_media_type(value: bytes) -> str:
@@ -182,6 +206,8 @@ def _sniff_media_type(value: bytes) -> str:
         return "image/gif"
     if value.startswith(b"RIFF") and value[8:12] == b"WEBP":
         return "image/webp"
+    if value.startswith((b"PK\x03\x04", b"PK\x05\x06", b"PK\x07\x08")):
+        return "application/zip"
     try:
         text = value.decode("utf-8-sig")
     except UnicodeDecodeError:
@@ -215,6 +241,12 @@ def _verified_media_type(*, declared: str | None, detected: str, mode: str | Non
         raise MkbError("ACQUISITION_MEDIA_MISMATCH", "Declared PDF representation did not verify", 422)
     if declared and declared.startswith("image/") and declared != detected:
         raise MkbError("ACQUISITION_MEDIA_MISMATCH", "Declared image representation did not verify", 422)
+    if detected == "application/zip" and declared in {
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+    }:
+        return declared
     if detected != "application/octet-stream":
         return detected
     return declared or detected
@@ -283,5 +315,4 @@ def _json(value: Any) -> str:
 
 def _digest_bytes(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
-
 

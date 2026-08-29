@@ -30,6 +30,7 @@ from src.runtime.inference.claude_cli import DeterministicNs1Stub, SubprocessCla
 from src.runtime.inference.facade import ConcurrencyGate, InferenceFacade
 from src.runtime.inference.supply import SupplyBinding, SupplyFence
 from src.runtime.intake_pipeline import IntakePipeline
+from src.runtime.intake.representation_history import PersistenceRepresentationFactReader
 from src.runtime.metrics import MetricRegistry, default_metrics
 from src.runtime.object_gc import ObjectGcScanner, ObjectGcSchedule
 from src.runtime.security import ActiveTokenSet, EgressPolicy, FixedWindowRateLimiter, SecretResolver, safe_request_id
@@ -317,6 +318,7 @@ def create_container(settings: Settings | None = None) -> Container:
         live_inference=settings.live_inference,
         cleanup_recovery_window_seconds=settings.workflow_cleanup_recovery_window_seconds,
         metrics=metrics,
+        representation_facts=PersistenceRepresentationFactReader(),
     )
     # S09 retirement intent creation is part of a successful pointer cutover,
     # so construct it before the pipeline rather than only for the scanner.

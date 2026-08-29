@@ -17,6 +17,7 @@ from src.contracts.workflow.models import (
     WorkflowStepKind,
 )
 from src.persistence.ports import UnitOfWork
+from src.runtime.binding.actual_s05 import projected_actual_digest, requires_actual_binding
 from src.runtime.workflow.constants import (
     _TASK_PRIORITY_RANK,
     _TERMINAL_EXECUTION_STATUSES,
@@ -61,6 +62,25 @@ class WorkflowMaterializeMixin:
             if route.from_step_key == source_step_key and route.outcome_selector is selector
         ]
         candidates.sort(key=lambda route: route.priority)
+        if (
+            selector is WorkflowOutcomeSelector.SUCCEEDED
+            and plan.workflow_key.startswith("intake.ingest.kind.")
+            and route_context.get("media_family") == "text"
+            and route_context.get("main_text_presence") == "absent"
+        ):
+            guards = {guard.guard_key: guard for guard in plan.guards}
+            has_declared_reacquire = any(
+                route.guard_key is not None
+                and (guard := guards.get(route.guard_key)) is not None
+                and guard.predicate_type == "representation_main_text_presence"
+                and guard.expected_value == "absent"
+                for route in candidates
+            )
+            if not has_declared_reacquire:
+                raise ConflictError(
+                    "workflow-reacquire-edge-undeclared",
+                    "An absent text representation has no declared forward reacquisition edge",
+                )
         selected: list[WorkflowRouteDefinition] = []
         guard_results: dict[str, bool] = {}
         for route in candidates:
@@ -187,6 +207,7 @@ class WorkflowMaterializeMixin:
                 pass
         if self.representation_facts is not None:
             facts = await self.representation_facts.read_route_facts(
+                tx=tx,
                 team_uuid=str(execution["team_uuid"]),
                 execution_uuid=str(execution["execution_uuid"]),
             )
@@ -301,11 +322,23 @@ class WorkflowMaterializeMixin:
         # retaining these values on the public Task projection would be a
         # cosmetic deadline/priority implementation.
         task = await tx.fetchone(
-            "SELECT priority,deadline_at FROM mkb_tasks WHERE team_uuid=? AND task_uuid=?",
+            "SELECT priority,deadline_at,request_intent FROM mkb_tasks WHERE team_uuid=? AND task_uuid=?",
             (execution["team_uuid"], execution["task_uuid"]),
         )
         if task is None:
             raise MkbError("workflow-task-missing", "Execution has no owning Task scheduling contract", 409)
+        if (
+            requires_actual_binding(str(step.process_key))
+            and task["request_intent"] not in {"intake.rebuild", "intake.update_metadata", "index.rebuild"}
+        ):
+            state = str(execution.get("actual_binding_state") or "legacy_unverifiable")
+            if state == "unsealed":
+                raise ConflictError(
+                    "ACTUAL_S05_UNSEALED",
+                    "A clean-or-later Process cannot materialize before actual S05 is sealed",
+                )
+            if state == "sealed" and projected_actual_digest(execution) is None:
+                raise MkbError("ACTUAL_S05_INTEGRITY", "Sealed actual S05 state lacks a valid digest", 503)
         priority_rank = _TASK_PRIORITY_RANK.get(task["priority"])
         if priority_rank is None:
             raise MkbError("workflow-task-priority-invalid", "Task priority is outside the closed scheduling set", 409)
@@ -331,6 +364,8 @@ class WorkflowMaterializeMixin:
                 # with the object it is authorized to read.
                 "input_binding_digest": input_binding_digest,
                 "config_snapshot_digest": execution["config_snapshot_digest"],
+                "actual_binding_state": execution.get("actual_binding_state"),
+                "actual_binding_digest": projected_actual_digest(execution),
                 "route_decision_digest": route_digest,
                 "priority": task["priority"],
                 "deadline_at": task["deadline_at"],
@@ -607,6 +642,15 @@ class WorkflowMaterializeMixin:
         now = utc_now()
         gate_uuid = uuid7()
         expected_execution_revision = current_execution["row_revision"] + 1
+        actual_binding_digest = projected_actual_digest(current_execution)
+        if actual_binding_digest is None:
+            await self._fail_execution_integrity_tx(
+                tx,
+                current_execution,
+                "ACTUAL_S05_UNSEALED",
+                "A human Gate cannot freeze an unsealed actual S05 target",
+            )
+            return False
         review_target = {
             "schema_version": "mkb.execution-gate-target.v1",
             "team_uuid": current_execution["team_uuid"],
@@ -619,7 +663,8 @@ class WorkflowMaterializeMixin:
                 "workflow_revision_uuid": current_execution["workflow_revision_uuid"],
                 "compiled_digest": current_execution["compiled_digest"],
                 "config_snapshot_digest": current_execution["config_snapshot_digest"],
-                "s05_binding_digest": current_execution["s05_binding_digest"],
+                "actual_binding_state": "sealed",
+                "actual_binding_digest": actual_binding_digest,
             },
             "route_decision_digest": route_digest,
             "accept_process": evidence["accept_process"],
@@ -636,7 +681,8 @@ class WorkflowMaterializeMixin:
         await tx.execute(
             "INSERT INTO mkb_execution_gates "
             "(gate_uuid,team_uuid,task_uuid,execution_uuid,generation,gate_kind,status,gate_revision,opened_at,"
-            "workflow_revision_uuid,binding_digest,payload_extra) VALUES (?,?,?,?,?,?,'open',0,?,?,?,'{}')",
+            "workflow_revision_uuid,binding_digest,actual_binding_digest,actual_binding_state,payload_extra) "
+            "VALUES (?,?,?,?,?,?,'open',0,?,?,?,?,?,'{}')",
             (
                 gate_uuid,
                 current_execution["team_uuid"],
@@ -650,9 +696,11 @@ class WorkflowMaterializeMixin:
                     {
                         "route": route_digest,
                         "execution": current_execution["execution_uuid"],
-                        "s05_binding_digest": current_execution["s05_binding_digest"],
+                        "actual_binding_digest": actual_binding_digest,
                     }
                 ),
+                actual_binding_digest,
+                "sealed",
             ),
         )
         await tx.execute(

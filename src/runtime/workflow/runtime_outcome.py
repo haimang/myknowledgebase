@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import inspect
 import json
 from typing import Any
 
@@ -15,6 +16,7 @@ from src.contracts.workflow.models import (
     WorkflowTerminalKind,
 )
 from src.persistence.ports import UnitOfWork
+from src.runtime.binding.actual_s05 import clean_strategy_for_step, seal_actual_binding_tx
 from src.runtime.workflow.constants import (
     _TERMINAL_EXECUTION_STATUSES,
     _TERMINAL_PROCESS_STATUSES,
@@ -426,6 +428,56 @@ class WorkflowOutcomeMixin:
             selector=selector,
             route_context=typed,
         )
+        clean_targets = []
+        steps = {step.step_key: step for step in plan.steps}
+        for route in decision["routes"]:
+            target = steps.get(route.to_step_key)
+            if target is not None and target.process_key is not None and target.process_key.startswith("clean."):
+                clean_targets.append(target)
+        if (
+            clean_targets
+            and execution.get("actual_binding_state") != "legacy_unverifiable"
+            and typed.get("request_intent") not in {"intake.rebuild", "intake.update_metadata", "index.rebuild"}
+        ):
+            if len(clean_targets) != 1:
+                raise ConflictError(
+                    "ACTUAL_S05_CLEAN_ROUTE_AMBIGUOUS",
+                    "One route decision cannot seal multiple clean workers",
+                )
+            hook = getattr(self, "actual_s05_fault_hook", None)
+            if hook is not None:
+                result = hook("W-SEL")
+                if inspect.isawaitable(result):
+                    await result
+            target = clean_targets[0]
+            assert target.process_key is not None
+            selected_strategy = clean_strategy_for_step(target.step_key, target.process_key)
+            if execution.get("actual_binding_state") == "sealed":
+                if (
+                    execution.get("actual_clean_step_key") != target.step_key
+                    or execution.get("actual_clean_process_key") != target.process_key
+                    or execution.get("actual_clean_strategy") != selected_strategy
+                ):
+                    raise ConflictError(
+                        "ACTUAL_S05_SEAL_CONFLICT",
+                        "A sealed execution cannot select a different clean worker",
+                    )
+            else:
+                await seal_actual_binding_tx(
+                    tx,
+                    execution_uuid=str(execution["execution_uuid"]),
+                    selected_route_digest=str(decision["digest"]),
+                    clean_step_key=target.step_key,
+                    clean_process_key=target.process_key,
+                    clean_strategy=selected_strategy,
+                )
+            if hook is not None:
+                result = hook("W-SEAL")
+                if inspect.isawaitable(result):
+                    await result
+            # The Process eligibility check below must see the CAS performed in
+            # this same transaction, not the caller's pre-seal row snapshot.
+            execution = await self._execution(tx, str(execution["execution_uuid"]))
         await self._apply_routes_tx(
             tx,
             plan=plan,

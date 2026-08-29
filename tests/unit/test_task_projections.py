@@ -9,7 +9,7 @@ import pytest
 
 from src.contracts.api.models import GateDecisionRequest, RetryRequest, TaskCreateRequest, TeamCreateRequest
 from src.contracts.common.errors import MkbError
-from src.contracts.common.ids import uuid7
+from src.contracts.common.ids import stable_digest, uuid7
 from src.contracts.common.time import utc_now
 from src.persistence.sqlite_port import SqlitePersistence
 from src.runtime.task_service import TaskService, _decode_task_list_cursor
@@ -155,6 +155,8 @@ async def test_gate_decision_is_idempotent_and_never_leaks_runtime_ids(tmp_path:
 @pytest.mark.asyncio
 async def test_generation_restart_and_lineage_are_task_scoped_summaries(tmp_path: Path) -> None:
     persistence, service, team_uuid, task_uuid, _ = await _service(tmp_path)
+    actual_digest = stable_digest({"actual": "generation-one"})
+    route_digest = stable_digest({"route": "generation-one"})
     try:
         async with persistence.transaction() as tx:
             task = await tx.fetchone(
@@ -168,8 +170,11 @@ async def test_generation_restart_and_lineage_are_task_scoped_summaries(tmp_path
                 (utc_now(), utc_now(), team_uuid, task_uuid),
             )
             await tx.execute(
-                "UPDATE mkb_executions SET status='failed' WHERE execution_uuid=?",
-                (task["current_root_execution_uuid"],),
+                "UPDATE mkb_executions SET status='failed',actual_binding_digest=?,actual_binding_state='sealed',"
+                "seal_generation=1,actual_selected_route_digest=?,actual_clean_step_key='clean_deterministic',"
+                "actual_clean_process_key='clean.extract.deterministic',actual_clean_strategy='doc.deterministic' "
+                "WHERE execution_uuid=?",
+                (actual_digest, route_digest, task["current_root_execution_uuid"]),
             )
 
         # This exercises the full-retry restart insert, including the placeholder
@@ -198,6 +203,21 @@ async def test_generation_restart_and_lineage_are_task_scoped_summaries(tmp_path
             "skipped": 0,
         }
         assert [row["generation"] for row in generations] == [2, 1]
+        async with persistence.transaction() as tx:
+            bindings = await tx.fetchall(
+                "SELECT generation,workflow_revision_uuid,compiled_digest,domain_binding_digest,actual_binding_digest,"
+                "actual_binding_state,seal_generation,actual_selected_route_digest,actual_clean_process_key "
+                "FROM mkb_executions WHERE team_uuid=? AND task_uuid=? ORDER BY generation",
+                (team_uuid, task_uuid),
+            )
+        assert len(bindings) == 2
+        assert bindings[0]["actual_binding_digest"] == bindings[1]["actual_binding_digest"] == actual_digest
+        assert bindings[0]["actual_binding_state"] == bindings[1]["actual_binding_state"] == "sealed"
+        assert bindings[0]["seal_generation"] == bindings[1]["seal_generation"] == 1
+        assert bindings[0]["actual_selected_route_digest"] == bindings[1]["actual_selected_route_digest"] == route_digest
+        assert bindings[0]["actual_clean_process_key"] == bindings[1]["actual_clean_process_key"]
+        for key in ("workflow_revision_uuid", "compiled_digest", "domain_binding_digest"):
+            assert bindings[0][key] == bindings[1][key]
         assert len(restarts) == 1 and restarts[0]["scope"] == "full_task"
         filtered, _ = await service.restarts(
             team_uuid,

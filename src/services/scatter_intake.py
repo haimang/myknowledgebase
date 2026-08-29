@@ -106,6 +106,8 @@ class ScatterAcceptanceWriter:
     ) -> None:
         """Commit the accepted set and every required child intent atomically."""
 
+        if command.binding_state != "sealed" or command.binding_digest is None:
+            raise MkbError("ACTUAL_S05_UNSEALED", "Scatter acceptance requires sealed actual S05", 409)
         if acceptance.admission_result not in {"auto_admitted", "human_review_required"}:
             raise MkbError("PREFLIGHT_REJECTED", "Preflight did not admit this collection", 409)
         if any(member.member_ordinal != ordinal for ordinal, member in enumerate(acceptance.members)):
@@ -118,7 +120,8 @@ class ScatterAcceptanceWriter:
             tx, command.team_uuid, stage_output_digest, stage_output_size
         )
         candidate = await tx.fetchone(
-            "SELECT staging_state,preflight_outcome_ref,preflight_outcome_digest FROM mkb_intake_candidate_sets "
+            "SELECT staging_state,preflight_outcome_ref,preflight_outcome_digest,"
+            "actual_binding_digest,actual_binding_state FROM mkb_intake_candidate_sets "
             "WHERE candidate_set_uuid=? AND team_uuid=?",
             (acceptance.candidate_set_uuid, command.team_uuid),
         )
@@ -127,6 +130,8 @@ class ScatterAcceptanceWriter:
             or candidate["staging_state"] != "sealed"
             or candidate["preflight_outcome_ref"] != command.input_manifest_ref
             or candidate["preflight_outcome_digest"] != command.input_manifest_digest
+            or candidate["actual_binding_state"] != "sealed"
+            or candidate["actual_binding_digest"] != command.binding_digest
         ):
             raise MkbError("CANDIDATE_SET_FENCE", "Candidate set changed before collection acceptance", 409)
         action = await tx.fetchone(
@@ -136,7 +141,9 @@ class ScatterAcceptanceWriter:
         if action is None:
             raise MkbError("REGISTRY_NOT_FOUND", "Intake acceptance action is unavailable", 503)
         root = await tx.fetchone(
-            "SELECT execution_uuid,generation,trace_uuid,intake_snapshot_uuid,status,config_snapshot_ref,config_snapshot_digest "
+            "SELECT execution_uuid,generation,trace_uuid,intake_snapshot_uuid,status,config_snapshot_ref,config_snapshot_digest,"
+            "actual_binding_digest,actual_binding_state,seal_generation,actual_selected_route_digest,actual_clean_step_key,"
+            "actual_clean_process_key,actual_clean_strategy "
             "FROM mkb_executions WHERE execution_uuid=? AND team_uuid=?",
             (command.execution_uuid, command.team_uuid),
         )
@@ -146,6 +153,20 @@ class ScatterAcceptanceWriter:
             raise MkbError("INTAKE_SNAPSHOT_EXECUTION_FENCE", "Root already has an accepted Snapshot", 409)
         if root["config_snapshot_ref"] is None or root["config_snapshot_digest"] is None:
             raise MkbError("SCATTER_CHILD_CONFIG_MISSING", "Scatter root lacks a frozen configuration", 503)
+        if (
+            root["actual_binding_state"] != "sealed"
+            or root["actual_binding_digest"] != command.binding_digest
+            or any(
+                root[key] is None
+                for key in (
+                    "actual_selected_route_digest",
+                    "actual_clean_step_key",
+                    "actual_clean_process_key",
+                    "actual_clean_strategy",
+                )
+            )
+        ):
+            raise MkbError("ACTUAL_S05_PROPAGATION_INVALID", "Scatter root actual S05 binding is inconsistent", 409)
         await self._assert_child_workflow(tx, acceptance.child_workflow)
 
         change_set_digest = self._change_set_digest(acceptance)
@@ -159,8 +180,10 @@ class ScatterAcceptanceWriter:
         await tx.execute(
             "INSERT INTO mkb_intake_snapshots "
             "(team_uuid,intake_snapshot_uuid,intake_source_uuid,observation_key,observation_fingerprint,candidate_root_digest,"
-            "completeness,preflight_outcome_ref,preflight_outcome_digest,s05_binding_digest,observed_at,accepted_at,"
-            "producer_execution_uuid,raw_artifact_uuid,payload_extra) VALUES (?,?,?,?,?,?, 'complete',?,?,?,?,?,?,?,'{}')",
+            "completeness,preflight_outcome_ref,preflight_outcome_digest,s05_binding_digest,"
+            "actual_binding_digest,actual_binding_state,observed_at,accepted_at,"
+            "producer_execution_uuid,raw_artifact_uuid,payload_extra) "
+            "VALUES (?,?,?,?,?,?,'complete',?,?,?,?,?,?,?,?,?,'{}')",
             (
                 command.team_uuid,
                 acceptance.intake_snapshot_uuid,
@@ -170,7 +193,9 @@ class ScatterAcceptanceWriter:
                 acceptance.candidate_root_digest,
                 command.input_manifest_ref,
                 command.input_manifest_digest,
+                command.policy_binding_digest or command.binding_digest,
                 command.binding_digest,
+                command.binding_state,
                 acceptance.observed_at,
                 now,
                 command.execution_uuid,
@@ -579,11 +604,16 @@ class ScatterAcceptanceWriter:
             "(execution_uuid,team_uuid,task_uuid,trace_uuid,generation,root_execution_uuid,parent_execution_uuid,"
             "retry_of_execution_uuid,execution_role,requiredness,target_kind,target_uuid,intake_snapshot_uuid,"
             "intake_snapshot_digest,workflow_uuid,workflow_revision_uuid,compiled_digest,resolver_decision_digest,"
-            "domain_binding_digest,s05_binding_digest,config_snapshot_ref,config_snapshot_digest,status,phase_key,"
+            "domain_binding_digest,s05_binding_digest,actual_binding_digest,actual_binding_state,seal_generation,"
+            "actual_selected_route_digest,actual_clean_step_key,actual_clean_process_key,actual_clean_strategy,"
+            "config_snapshot_ref,config_snapshot_digest,status,phase_key,"
             "waiting_reason,waiting_ref,row_revision,"
             "manifest_ref,manifest_digest,manifest_revision,created_at,updated_at,"
             "scatter_intake_revision_uuid,scatter_member_ordinal,scatter_change_set_uuid,payload_extra) "
-            "VALUES (?,?,?,?,?,?,?,NULL,'scatter_child','required','intake_item',?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,0,?,?,?,?,?,?,?,?,?)",
+            "VALUES (?,?,?,?,?,?,?,NULL,'scatter_child','required','intake_item',"
+            "?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,"
+            "?,?,?,?,?,?,0,"
+            "?,?,?,?,?,?,?,?,?)",
             (
                 member.child_execution_uuid,
                 command.team_uuid,
@@ -600,7 +630,14 @@ class ScatterAcceptanceWriter:
                 acceptance.child_workflow.compiled_digest,
                 resolver_decision_digest,
                 acceptance.child_workflow.domain_binding_digest,
+                acceptance.child_workflow.domain_binding_digest,
                 command.binding_digest,
+                command.binding_state,
+                root["seal_generation"],
+                root["actual_selected_route_digest"],
+                root["actual_clean_step_key"],
+                root["actual_clean_process_key"],
+                root["actual_clean_strategy"],
                 acceptance.child_workflow.config_snapshot.handle.value,
                 acceptance.child_workflow.config_snapshot.sha256,
                 child_status,

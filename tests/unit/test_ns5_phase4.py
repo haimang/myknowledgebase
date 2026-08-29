@@ -17,10 +17,11 @@ def test_html_extract_keeps_paragraph_breaks() -> None:
     assert "\n" in text
 
 
-def test_pdf_rejects_latin1_garbage() -> None:
+def test_pdf_observes_latin1_garbage_as_corrupt() -> None:
     blob = b"%PDF-1.4\n(" + bytes(range(0x80, 0xC0)) + b") Tj\n"
-    with pytest.raises(MkbError, match="DECODE_PDF_INVALID|CLEAN_OCR"):
-        _extract_pdf_text(blob)
+    text, evidence = _extract_pdf_text(blob)
+    assert text == ""
+    assert evidence["text_layer"] == "corrupt"
 
 
 def test_partial_channel_purge_is_rejected() -> None:

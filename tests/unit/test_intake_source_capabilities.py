@@ -162,7 +162,7 @@ async def test_http_static_browser_and_pdf_profiles_have_distinct_evidence() -> 
     )
     assert browser.evidence["acquisition_capability"] == "intake.acquire.http_browser"
     assert browser.evidence["representation_kind"] == "rendered"
-    assert browser.evidence["browser_profile"] == "injected-browser-renderer.v1"
+    assert browser.evidence["browser_profile"] == "injected-fetcher.v1"
 
     pipeline._http_fetcher = lambda _: pdf
     acquired_pdf = await pipeline._acquire_content(

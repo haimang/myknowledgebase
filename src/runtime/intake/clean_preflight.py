@@ -28,6 +28,11 @@ class IntakeCleanPreflightMixin:
     async def _clean(
             self, command: ProcessCommand, state: dict[str, Any]
         ) -> tuple[_StageMaterial, dict[str, Any], Callable[[UnitOfWork, Mapping[str, str]], Awaitable[None]]]:
+            if (
+                command.binding_state == "unsealed"
+                and state.get("operation_mode") not in {"rebuild", "metadata_update"}
+            ):
+                raise MkbError("ACTUAL_S05_UNSEALED", "Clean execution requires sealed actual S05", 409)
             media_type = state.get("media_type")
             if command.process_key == "clean.extract.vision" and (
                 not isinstance(media_type, str) or not media_type.startswith("image/")
@@ -44,13 +49,7 @@ class IntakeCleanPreflightMixin:
             if command.process_key not in {"clean.ocr.local", "clean.extract.vision"} and not isinstance(decoded, str):
                 raise MkbError("PIPELINE_INPUT_INVALID", "Decoded representation is unavailable", 422)
             representation_kind = (state.get("acquisition_evidence") or {}).get("representation_kind")
-            representation = (
-                "print_pdf"
-                if representation_kind == "print_pdf"
-                else "rendered"
-                if representation_kind == "rendered"
-                else "static"
-            )
+            representation = "rendered" if representation_kind == "rendered" else "static"
             strategy = {
                 "clean.extract.deterministic": CleanStrategyKey.DOC_DETERMINISTIC.value,
                 "clean.extract.web": CleanStrategyKey.WEB_DETERMINISTIC.value,
@@ -58,7 +57,7 @@ class IntakeCleanPreflightMixin:
                 "clean.extract.pdf_text": CleanStrategyKey.PDF_TEXT_LAYER.value,
                 "clean.extract.pdf_llm": (
                     CleanStrategyKey.WEB_BROWSER_PRINT_PDF.value
-                    if representation == "print_pdf"
+                    if command.step_key == "clean_print_pdf"
                     else CleanStrategyKey.PDF_DOCUMENT_UNDERSTANDING.value
                 ),
                 "clean.extract.doc_llm": CleanStrategyKey.DOC_DOCUMENT_UNDERSTANDING.value,
@@ -340,6 +339,8 @@ class IntakeCleanPreflightMixin:
     async def _seal(
             self, command: ProcessCommand, state: dict[str, Any]
         ) -> tuple[_StageMaterial, dict[str, Any], Callable[[UnitOfWork, Mapping[str, str]], Awaitable[None]]]:
+            if state.get("operation_mode") not in {"rebuild", "metadata_update"}:
+                self._assert_sealed_actual_command(command)
             if state.get("operation_mode") == "scatter_root":
                 return await self._seal_registered_api_collection(command, state)
             clean = state.get("clean_text")
@@ -374,10 +375,12 @@ class IntakeCleanPreflightMixin:
                     "INSERT OR IGNORE INTO mkb_intake_candidate_sets "
                     "(candidate_set_uuid,team_uuid,intake_source_uuid,producer_execution_uuid,producer_process_uuid,"
                     "producer_fencing_generation,source_kind_definition_digest,acquisition_capability_digest,s05_binding_digest,"
+                    "actual_binding_digest,actual_binding_state,"
                     "observation_key,observation_fingerprint,completeness,expected_member_count,observed_member_count,"
                     "accepted_member_count,rejected_member_count,duplicate_member_count,expected_page_count,observed_page_count,"
                     "expected_bytes,observed_bytes,root_digest,staging_state,seal_at,created_at,updated_at,payload_extra) "
-                    "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?, '{}')",
+                    "VALUES (?,?,?,?,?,?,?,?,?,?,?,"
+                    "?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?, '{}')",
                     (
                         state["candidate_set_uuid"],
                         command.team_uuid,
@@ -392,7 +395,9 @@ class IntakeCleanPreflightMixin:
                                 "evidence": state.get("raw_byte_digest"),
                             }
                         ),
-                        stable_digest({"binding": command.binding_digest}),
+                        command.policy_binding_digest or command.binding_digest,
+                        command.binding_digest,
+                        command.binding_state,
                         state["normalized_external_key"],
                         state["raw_digest"],
                         "complete",
@@ -477,10 +482,12 @@ class IntakeCleanPreflightMixin:
                     "INSERT OR IGNORE INTO mkb_intake_candidate_sets "
                     "(candidate_set_uuid,team_uuid,intake_source_uuid,producer_execution_uuid,producer_process_uuid,"
                     "producer_fencing_generation,source_kind_definition_digest,acquisition_capability_digest,s05_binding_digest,"
+                    "actual_binding_digest,actual_binding_state,"
                     "observation_key,observation_fingerprint,completeness,expected_member_count,observed_member_count,"
                     "accepted_member_count,rejected_member_count,duplicate_member_count,expected_page_count,observed_page_count,"
                     "expected_bytes,observed_bytes,root_digest,staging_state,seal_at,created_at,updated_at,payload_extra) "
-                    "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?, '{}')",
+                    "VALUES (?,?,?,?,?,?,?,?,?,?,?,"
+                    "?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?, '{}')",
                     (
                         state["candidate_set_uuid"],
                         command.team_uuid,
@@ -495,7 +502,9 @@ class IntakeCleanPreflightMixin:
                                 "evidence": state.get("raw_digest"),
                             }
                         ),
-                        stable_digest({"binding": command.binding_digest}),
+                        command.policy_binding_digest or command.binding_digest,
+                        command.binding_digest,
+                        command.binding_state,
                         state["normalized_external_key"],
                         state["raw_digest"],
                         "complete",
@@ -532,6 +541,15 @@ class IntakeCleanPreflightMixin:
 
             return material, {}, callback
 
+    @staticmethod
+    def _assert_sealed_actual_command(command: ProcessCommand) -> None:
+            if command.binding_state != "sealed" or command.binding_digest is None:
+                raise MkbError(
+                    "ACTUAL_S05_UNSEALED",
+                    "Candidate materialization requires a sealed actual S05 binding",
+                    409,
+                )
+
     async def _preflight(
             self, command: ProcessCommand, state: dict[str, Any]
         ) -> tuple[_StageMaterial, dict[str, Any], Callable[[UnitOfWork, Mapping[str, str]], Awaitable[None]]]:
@@ -540,7 +558,11 @@ class IntakeCleanPreflightMixin:
             if state.get("operation_mode") in {"rebuild", "metadata_update"}:
                 checks = self._validate_rebuild_preflight_evidence(state)
             else:
-                checks = self._validate_single_preflight_evidence(state)
+                latest_acquisition = await self._latest_acquisition_fact(command)
+                checks = self._validate_single_preflight_evidence(
+                    state,
+                    actual_acquisition=latest_acquisition,
+                )
             clean = state.get("clean_text")
             if not isinstance(clean, str) or not clean.strip():
                 admission = "rejected"
@@ -583,6 +605,21 @@ class IntakeCleanPreflightMixin:
 
             return material, {}, callback
 
+    async def _latest_acquisition_fact(self, command: ProcessCommand) -> Mapping[str, Any] | None:
+            """Read the last successful acquire/print row, never the source's start mode."""
+
+            if self._persistence is None:
+                return None
+            async with self._persistence.transaction() as tx:
+                return await tx.fetchone(
+                    "SELECT f.capability,f.representation_kind,f.profile_identity,f.raw_byte_digest "
+                    "FROM mkb_acquire_decode_history h JOIN mkb_representation_facts f "
+                    "ON f.representation_fact_uuid=h.representation_fact_uuid "
+                    "WHERE h.team_uuid=? AND h.execution_uuid=? AND f.fact_kind IN ('acquire','print') "
+                    "ORDER BY h.ordinal DESC LIMIT 1",
+                    (command.team_uuid, command.execution_uuid),
+                )
+
     @staticmethod
     async def _seal_open_candidate_set_tx(
         tx: UnitOfWork,
@@ -616,7 +653,11 @@ class IntakeCleanPreflightMixin:
             raise MkbError("CANDIDATE_SET_FENCE", fence_message, 409)
 
     @staticmethod
-    def _validate_single_preflight_evidence(state: Mapping[str, Any]) -> list[dict[str, str]]:
+    def _validate_single_preflight_evidence(
+            state: Mapping[str, Any],
+            *,
+            actual_acquisition: Mapping[str, Any] | None = None,
+        ) -> list[dict[str, str]]:
             """Validate frozen evidence only; this must never acquire or clean."""
 
             source = state.get("source")
@@ -626,13 +667,17 @@ class IntakeCleanPreflightMixin:
             source_kind = state.get("source_kind")
             if not isinstance(source, Mapping) or not isinstance(evidence, Mapping):
                 raise MkbError("PREFLIGHT_EVIDENCE_INVALID", "Acquisition evidence is unavailable", 422)
-            mode = source.get("acquisition_mode", "staged_inline") if source_kind == "http_resource" else None
             allowed_capabilities = {
                 "inline_payload": {"intake.acquire.inline"},
                 "local_object": {"intake.acquire.local_object"},
                 "http_resource": {"intake.acquire.http_static", "intake.acquire.http_browser"},
             }.get(source_kind)
-            if allowed_capabilities is None or evidence.get("acquisition_capability") not in allowed_capabilities:
+            actual_capability = (
+                actual_acquisition.get("capability")
+                if isinstance(actual_acquisition, Mapping)
+                else evidence.get("acquisition_capability")
+            )
+            if allowed_capabilities is None or actual_capability not in allowed_capabilities:
                 raise MkbError(
                     "PREFLIGHT_BINDING_INVALID",
                     "Frozen acquisition capability is not declared for the source kind",
@@ -654,9 +699,19 @@ class IntakeCleanPreflightMixin:
             if source_kind == "http_resource":
                 if not all(isinstance(evidence.get(key), str) and evidence[key] for key in ("request_url_identity", "final_url_identity")):
                     raise MkbError("PREFLIGHT_EVIDENCE_INVALID", "HTTP acquisition identity evidence is incomplete", 422)
-                if mode == "browser" and (
-                    evidence.get("representation_kind") != "rendered"
-                    or not isinstance(evidence.get("browser_profile"), str)
+                if actual_capability == "intake.acquire.http_browser" and (
+                    (
+                        actual_acquisition.get("representation_kind")
+                        if isinstance(actual_acquisition, Mapping)
+                        else evidence.get("representation_kind")
+                    )
+                    not in {"rendered", "print_pdf"}
+                    or not isinstance(
+                        actual_acquisition.get("profile_identity")
+                        if isinstance(actual_acquisition, Mapping)
+                        else evidence.get("browser_profile"),
+                        str,
+                    )
                 ):
                     raise MkbError("PREFLIGHT_EVIDENCE_INVALID", "Browser acquisition lacks rendered evidence", 422)
             expected_decode = "intake.decode.pdf" if state.get("media_type") == "application/pdf" else "intake.decode.text_json_html"

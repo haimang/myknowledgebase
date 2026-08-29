@@ -55,7 +55,11 @@ def _task(team_uuid: str, task_uuid: str, trace_uuid: str, source: dict[str, obj
 
 
 def _await_terminal(client: TestClient, team_uuid: str, task_uuid: str, headers: dict[str, str]) -> dict[str, object]:
-    deadline = time.monotonic() + 8
+    # The Turso-backed embedded worker serializes four full LS-RAG pipelines in
+    # this test.  NH3 adds fact/history and sealed-actual writes to each path;
+    # keep the assertion semantic (eventual terminal state) rather than tying
+    # it to an unrealistically tight local-I/O wall clock.
+    deadline = time.monotonic() + 30
     latest: dict[str, object] = {}
     while time.monotonic() < deadline:
         response = client.get(f"/v1/teams/{team_uuid}/tasks/{task_uuid}", headers=headers)
