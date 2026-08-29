@@ -51,6 +51,7 @@ class ObjectGcCandidate:
     content_digest: str
     size_bytes: int
     created_at: str
+    unowned_at: str
     media_type: str | None
 
     @property
@@ -143,12 +144,17 @@ class ObjectGcService:
         cutoff = self._timestamp(self._now() - self._orphan_grace)
         async with self._persistence.transaction() as tx:
             rows = await tx.fetchall(
-                "SELECT o.team_uuid,o.stored_object_uuid,o.content_digest,o.size_bytes,o.created_at,o.media_type "
+                "SELECT o.team_uuid,o.stored_object_uuid,o.content_digest,o.size_bytes,o.created_at,o.media_type,"
+                "COALESCE((SELECT MAX(h.released_at) FROM mkb_object_references h "
+                "WHERE h.team_uuid=o.team_uuid AND h.stored_object_uuid=o.stored_object_uuid "
+                "AND h.released_at IS NOT NULL),o.created_at) AS unowned_at "
                 "FROM mkb_stored_objects AS o "
                 "WHERE o.tombstoned_at IS NULL "
                 "AND o.digest_algorithm='sha256' "
                 "AND o.storage_backend='local_fs' "
-                "AND o.created_at <= ? "
+                "AND COALESCE((SELECT MAX(h.released_at) FROM mkb_object_references h "
+                "WHERE h.team_uuid=o.team_uuid AND h.stored_object_uuid=o.stored_object_uuid "
+                "AND h.released_at IS NOT NULL),o.created_at) <= ? "
                 "AND NOT EXISTS ("
                 "  SELECT 1 FROM mkb_object_references AS r "
                 "  WHERE r.team_uuid=o.team_uuid "
@@ -196,14 +202,17 @@ class ObjectGcService:
 
         async with self._persistence.transaction() as tx:
             current = await tx.fetchone(
-                "SELECT team_uuid,stored_object_uuid,content_digest,size_bytes,created_at,media_type,"
-                "digest_algorithm,storage_backend,tombstoned_at "
-                "FROM mkb_stored_objects WHERE team_uuid=? AND stored_object_uuid=?",
+                "SELECT o.team_uuid,o.stored_object_uuid,o.content_digest,o.size_bytes,o.created_at,o.media_type,"
+                "o.digest_algorithm,o.storage_backend,o.tombstoned_at,"
+                "COALESCE((SELECT MAX(h.released_at) FROM mkb_object_references h "
+                "WHERE h.team_uuid=o.team_uuid AND h.stored_object_uuid=o.stored_object_uuid "
+                "AND h.released_at IS NOT NULL),o.created_at) AS unowned_at "
+                "FROM mkb_stored_objects o WHERE o.team_uuid=? AND o.stored_object_uuid=?",
                 (candidate.team_uuid, candidate.stored_object_uuid),
             )
             if not self._same_catalogue_row(candidate, current):
                 return ObjectGcCandidateResult(candidate, ObjectGcDisposition.STALE)
-            if not self._is_grace_expired(candidate.created_at):
+            if not self._is_grace_expired(candidate.unowned_at):
                 # ``delete_candidate`` is intentionally public to controlled
                 # maintenance callers, so it repeats the grace check instead
                 # of trusting that the candidate came from collect_candidates.
@@ -223,9 +232,12 @@ class ObjectGcService:
         try:
             async with self._persistence.transaction() as tx:
                 current = await tx.fetchone(
-                    "SELECT team_uuid,stored_object_uuid,content_digest,size_bytes,created_at,media_type,"
-                    "digest_algorithm,storage_backend,tombstoned_at "
-                    "FROM mkb_stored_objects WHERE team_uuid=? AND stored_object_uuid=?",
+                    "SELECT o.team_uuid,o.stored_object_uuid,o.content_digest,o.size_bytes,o.created_at,o.media_type,"
+                    "o.digest_algorithm,o.storage_backend,o.tombstoned_at,"
+                    "COALESCE((SELECT MAX(h.released_at) FROM mkb_object_references h "
+                    "WHERE h.team_uuid=o.team_uuid AND h.stored_object_uuid=o.stored_object_uuid "
+                    "AND h.released_at IS NOT NULL),o.created_at) AS unowned_at "
+                    "FROM mkb_stored_objects o WHERE o.team_uuid=? AND o.stored_object_uuid=?",
                     (candidate.team_uuid, candidate.stored_object_uuid),
                 )
                 if not self._same_catalogue_row(candidate, current):
@@ -394,6 +406,7 @@ class ObjectGcService:
                 "content_digest": candidate.content_digest,
                 "size_bytes": candidate.size_bytes,
                 "catalogued_at": candidate.created_at,
+                "unowned_at": candidate.unowned_at,
                 "live_reference_count": 0,
             }
         )
@@ -406,6 +419,7 @@ class ObjectGcService:
             content_digest=str(row["content_digest"]),
             size_bytes=int(row["size_bytes"]),
             created_at=str(row["created_at"]),
+            unowned_at=str(row["unowned_at"]),
             media_type=None if row["media_type"] is None else str(row["media_type"]),
         )
 
@@ -421,6 +435,7 @@ class ObjectGcService:
             and row["content_digest"] == candidate.content_digest
             and int(row["size_bytes"]) == candidate.size_bytes
             and row["created_at"] == candidate.created_at
+            and row["unowned_at"] == candidate.unowned_at
         )
 
     def _now(self) -> datetime:
@@ -429,9 +444,9 @@ class ObjectGcService:
             raise ValueError("object GC clock must return an aware UTC timestamp")
         return now.astimezone(UTC)
 
-    def _is_grace_expired(self, created_at: str) -> bool:
+    def _is_grace_expired(self, unowned_at: str) -> bool:
         try:
-            parsed = datetime.fromisoformat(created_at.replace("Z", "+00:00"))
+            parsed = datetime.fromisoformat(unowned_at.replace("Z", "+00:00"))
         except ValueError:
             return False
         if parsed.tzinfo is None:

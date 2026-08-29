@@ -191,7 +191,19 @@ async def test_hold_and_explicit_cleanup_fence_block_collection(tmp_path: Path) 
                     seed.clock.isoformat(timespec="microseconds").replace("+00:00", "Z"),
                 ),
             )
-        assert (await service.delete_candidate(candidate)).disposition is ObjectGcDisposition.CLEANUP_FENCE
+        # Releasing the hold moves the unowned-at fence forward, so a stale
+        # pre-release candidate cannot be reused.  After the new grace window,
+        # the explicit cleanup intent remains the independent blocker.
+        assert (await service.delete_candidate(candidate)).disposition is ObjectGcDisposition.STALE
+        future_service = ObjectGcService(
+            seed.persistence,
+            seed.storage,
+            orphan_grace=timedelta(hours=24),
+            scanner_id="test-object-gc-future",
+            clock=lambda: seed.clock + timedelta(days=2),
+        )
+        (future_candidate,) = await future_service.collect_candidates()
+        assert (await future_service.delete_candidate(future_candidate)).disposition is ObjectGcDisposition.CLEANUP_FENCE
         assert await seed.storage.read_verified(seed.team_uuid, seed.stat.handle)
     finally:
         await seed.persistence.close()

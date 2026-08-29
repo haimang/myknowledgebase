@@ -17,9 +17,10 @@ from tests.unit.test_object_gc import _seed_orphan, _service
 class _InterleavePromoteStore:
     """Promote + catalog a live reference after the bytes have been quarantined."""
 
-    def __init__(self, inner: LocalObjectStore, seed: object) -> None:
+    def __init__(self, inner: LocalObjectStore, seed: object, *, purpose: str = "process_io") -> None:
         self._inner = inner
         self._seed = seed
+        self._purpose = purpose
 
     async def promote(self, data: bytes, request: PromoteRequest) -> ObjectStat:
         return await self._inner.promote(data, request)
@@ -42,11 +43,12 @@ class _InterleavePromoteStore:
             await tx.execute(
                 "INSERT INTO mkb_object_references "
                 "(reference_uuid,team_uuid,stored_object_uuid,purpose,owner_kind,owner_uuid,expected_digest,expected_size,"
-                "created_at,payload_extra) VALUES (?,?,?,'process_io','test_owner',?,?,?,?, '{}')",
+                "created_at,payload_extra) VALUES (?,?,?,?,'test_owner',?,?,?,?, '{}')",
                 (
                     uuid7(),
                     seed.team_uuid,  # type: ignore[attr-defined]
                     seed.stored_object_uuid,  # type: ignore[attr-defined]
+                    self._purpose,
                     "interleave",
                     seed.stat.sha256,  # type: ignore[attr-defined]
                     seed.stat.size_bytes,  # type: ignore[attr-defined]
@@ -87,5 +89,55 @@ async def test_gc_restore_when_live_reference_arrives_during_quarantine(tmp_path
             )
         assert catalog == {"tombstoned_at": None}
         assert live_refs == {"count": 1}
+    finally:
+        await seed.persistence.close()
+
+
+@pytest.mark.asyncio
+async def test_collect_candidates_skips_live_upload_pending(tmp_path: Path) -> None:
+    seed = await _seed_orphan(tmp_path)
+    try:
+        async with seed.persistence.transaction() as tx:
+            await tx.execute(
+                "INSERT INTO mkb_object_references "
+                "(reference_uuid,team_uuid,stored_object_uuid,purpose,owner_kind,owner_uuid,expected_digest,expected_size,"
+                "created_at,payload_extra) VALUES (?,?,?,'upload_pending','public_upload',?,?,?,?, '{}')",
+                (
+                    uuid7(),
+                    seed.team_uuid,
+                    seed.stored_object_uuid,
+                    seed.stored_object_uuid,
+                    seed.stat.sha256,
+                    seed.stat.size_bytes,
+                    utc_now(),
+                ),
+            )
+        assert await _service(seed).collect_candidates() == ()
+        assert await seed.storage.read_verified(seed.team_uuid, seed.stat.handle)
+    finally:
+        await seed.persistence.close()
+
+
+@pytest.mark.asyncio
+async def test_gc_restore_when_upload_pending_arrives_during_quarantine(tmp_path: Path) -> None:
+    seed = await _seed_orphan(tmp_path)
+    try:
+        storage = _InterleavePromoteStore(seed.storage, seed, purpose="upload_pending")
+        service = _service(seed, storage)
+        (candidate,) = await service.collect_candidates()
+        result = await service.delete_candidate(candidate)
+        assert result.disposition is ObjectGcDisposition.LIVE_REFERENCE
+        assert await seed.storage.read_verified(seed.team_uuid, seed.stat.handle)
+        async with seed.persistence.transaction() as tx:
+            row = await tx.fetchone(
+                "SELECT purpose,released_at FROM mkb_object_references WHERE stored_object_uuid=?",
+                (seed.stored_object_uuid,),
+            )
+            catalog = await tx.fetchone(
+                "SELECT tombstoned_at FROM mkb_stored_objects WHERE stored_object_uuid=?",
+                (seed.stored_object_uuid,),
+            )
+        assert row == {"purpose": "upload_pending", "released_at": None}
+        assert catalog == {"tombstoned_at": None}
     finally:
         await seed.persistence.close()

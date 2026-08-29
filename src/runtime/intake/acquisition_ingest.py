@@ -11,6 +11,7 @@ from src.contracts.common.ids import canonical_json, stable_digest, uuid7
 from src.contracts.common.time import utc_now
 from src.contracts.intake.representation import RepresentationObservation
 from src.contracts.runtime.models import ProcessCommand
+from src.contracts.storage.handles import digest_from_handle
 from src.contracts.storage.models import ObjectHandle
 from src.persistence.ports import UnitOfWork
 from src.runtime.http_acquisition import HttpAcquisitionResult, redacted_url_identity
@@ -108,6 +109,7 @@ class IntakeAcquisitionIngestMixin:
                 "clean_artifact_uuid": uuid7(),
                 "observed_at": now,
                 "payload": payload,
+                "source_stored_object_uuid": acquired.evidence.get("source_stored_object_uuid"),
             }
             existing = await self._resolve_existing_intake_identity(
                 command.team_uuid, source_kind, next_state["normalized_external_key"]
@@ -515,14 +517,21 @@ class IntakeAcquisitionIngestMixin:
                 handle = descriptor.get("logical_handle")
                 if not isinstance(handle, str):
                     raise MkbError("ACQUISITION_HANDLE_INVALID", "Local object handle is required", 422)
-                data = await self._storage.read_verified(command.team_uuid, ObjectHandle(value=handle))
+                object_handle = ObjectHandle(value=handle)
+                stored = await self._live_local_object(command.team_uuid, object_handle)
+                data = await self._storage.read_verified(command.team_uuid, object_handle)
+                if len(data) != int(stored["size_bytes"]):
+                    raise MkbError("OBJECT_INTEGRITY_DIGEST", "Catalogued object size failed verification", 503)
                 return self._representation_from_bytes(
                     data,
                     declared_media_type=_normalized_media_type(descriptor.get("media_type")),
                     capability="intake.acquire.local_object",
                     source_kind="local_object",
                     mode="logical_object",
-                    extra_evidence={"logical_handle_digest": stable_digest({"handle": handle})},
+                    extra_evidence={
+                        "logical_handle_digest": stable_digest({"handle": handle}),
+                        "source_stored_object_uuid": stored["stored_object_uuid"],
+                    },
                 )
             if source_kind == "registered_api":
                 records = descriptor.get("records")
@@ -648,6 +657,34 @@ class IntakeAcquisitionIngestMixin:
                     ),
                 },
             )
+
+    async def _live_local_object(self, team_uuid: str, handle: ObjectHandle) -> dict[str, Any]:
+            digest = digest_from_handle(team_uuid, handle)
+            async with self._persistence.transaction() as tx:
+                row = await tx.fetchone(
+                    "SELECT stored_object_uuid,size_bytes FROM mkb_stored_objects "
+                    "WHERE team_uuid=? AND content_digest=? AND tombstoned_at IS NULL "
+                    "ORDER BY created_at DESC LIMIT 1",
+                    (team_uuid, digest),
+                )
+                if row is None:
+                    raise MkbError(
+                        "OBJECT_CATALOG_REQUIRED",
+                        "Local object is not present in the live Team catalog",
+                        409,
+                    )
+                reference = await tx.fetchone(
+                    "SELECT reference_uuid FROM mkb_object_references WHERE team_uuid=? AND stored_object_uuid=? "
+                    "AND released_at IS NULL LIMIT 1",
+                    (team_uuid, row["stored_object_uuid"]),
+                )
+                if reference is None:
+                    raise MkbError(
+                        "OBJECT_REFERENCE_REQUIRED",
+                        "Local object has no live upload or business reference",
+                        409,
+                    )
+            return row
 
 
     def _representation_from_bytes(

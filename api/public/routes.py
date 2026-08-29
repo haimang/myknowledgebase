@@ -3,8 +3,11 @@
 from __future__ import annotations
 
 import json
+import re
+from urllib.parse import unquote
 
-from fastapi import APIRouter, Request, Response
+from fastapi import APIRouter, Query, Request, Response
+from pydantic import ValidationError
 
 from api.dependencies import BusinessToken, Ready
 from src.contracts.api.generation import (
@@ -22,8 +25,10 @@ from src.contracts.api.models import (
     TeamPatchRequest,
     parse_retrieval_request,
 )
+from src.contracts.api.objects import ObjectCancelRequest, PublicObjectView
 from src.contracts.common.errors import MkbError
 from src.contracts.common.ids import validate_external_uuid
+from src.contracts.storage.models import ObjectHandle
 from src.services.generation_read import GenerationArtifactReadService
 
 router = APIRouter(prefix="/v1", tags=["tasks"])
@@ -53,6 +58,52 @@ def _generation_artifact_path(generation_artifact_uuid: str) -> str:
     return validate_external_uuid(generation_artifact_uuid, field="generation_artifact_uuid")
 
 
+def _public_object_view(stat, disposition: str) -> PublicObjectView:
+    return PublicObjectView(
+        handle=stat.handle.value,
+        digest=stat.sha256,
+        size_bytes=stat.size_bytes,
+        media_type=stat.media_type,
+        disposition=disposition,
+    )
+
+
+def _object_handle_query(value: str) -> ObjectHandle:
+    try:
+        return ObjectHandle(value=value)
+    except ValidationError as exc:
+        raise MkbError("SEC_PATH_REJECTED", "Object handle is invalid", 422) from exc
+
+
+def _upload_media_type(request: Request) -> str | None:
+    value = request.headers.get("content-type")
+    if value is None:
+        return None
+    media_type = value.split(";", 1)[0].strip().casefold()
+    if not media_type or len(media_type) > 255:
+        raise MkbError("OBJECT_MEDIA_TYPE_INVALID", "Declared object media type is invalid", 422)
+    if media_type == "multipart/form-data":
+        raise MkbError("OBJECT_MEDIA_TYPE_INVALID", "Object upload accepts a raw byte stream", 422)
+    return media_type
+
+
+def _expected_upload_digest(request: Request) -> str | None:
+    value = request.headers.get("x-mkb-expected-sha256")
+    if value is None:
+        return None
+    normalized = value.strip().casefold()
+    if re.fullmatch(r"[0-9a-f]{64}", normalized) is None:
+        raise MkbError("OBJECT_EXPECTED_DIGEST_INVALID", "Expected SHA-256 header is invalid", 422)
+    return normalized
+
+
+def _reject_filename_identity(request: Request) -> None:
+    disposition = request.headers.get("content-disposition")
+    decoded = unquote(disposition) if disposition else None
+    if decoded and any(marker in decoded for marker in ("..", "/", "\\")):
+        raise MkbError("SEC_PATH_REJECTED", "Upload filenames cannot contain path syntax", 422)
+
+
 @router.post("/teams", status_code=201)
 async def create_team(request: Request, body: TeamCreateRequest, token: BusinessToken) -> Response:
     del token
@@ -62,6 +113,60 @@ async def create_team(request: Request, body: TeamCreateRequest, token: Business
         media_type="application/json",
         status_code=200 if replay else 201,
     )
+
+
+@router.post("/teams/{team_uuid}/objects:upload", response_model=PublicObjectView, status_code=201)
+async def upload_object(
+    request: Request,
+    team_uuid: str,
+    token: BusinessToken,
+    ready: Ready,
+) -> Response:
+    del token, ready
+    team_uuid = _team_path(team_uuid)
+    _reject_filename_identity(request)
+    record = await request.app.state.container.object_upload.upload(
+        team_uuid=team_uuid,
+        chunks=request.stream(),
+        media_type=_upload_media_type(request),
+        expected_sha256=_expected_upload_digest(request),
+    )
+    view = _public_object_view(record.stat, "pending")
+    return Response(
+        content=view.model_dump_json(),
+        media_type="application/json",
+        status_code=200 if record.replay else 201,
+    )
+
+
+@router.get("/teams/{team_uuid}/objects:stat", response_model=PublicObjectView)
+async def stat_object(
+    request: Request,
+    team_uuid: str,
+    token: BusinessToken,
+    handle: str = Query(min_length=1, max_length=256),
+) -> PublicObjectView:
+    del token
+    status = await request.app.state.container.object_upload.stat(
+        team_uuid=_team_path(team_uuid),
+        handle=_object_handle_query(handle),
+    )
+    return _public_object_view(status.stat, status.disposition)
+
+
+@router.post("/teams/{team_uuid}/objects:cancel", response_model=PublicObjectView)
+async def cancel_object(
+    request: Request,
+    team_uuid: str,
+    body: ObjectCancelRequest,
+    token: BusinessToken,
+) -> PublicObjectView:
+    del token
+    team_uuid = _team_path(team_uuid)
+    handle = _object_handle_query(body.handle)
+    await request.app.state.container.object_upload_lifecycle.cancel(team_uuid=team_uuid, handle=handle)
+    status = await request.app.state.container.object_upload.stat(team_uuid=team_uuid, handle=handle)
+    return _public_object_view(status.stat, status.disposition)
 
 
 @router.get("/teams")

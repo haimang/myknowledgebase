@@ -307,6 +307,24 @@ class IntakeAcceptanceSnapshotMixin:
                     digest=output_digest,
                     size=output_size,
                 )
+                source_object_uuid = state.get("source_stored_object_uuid")
+                if state.get("source_kind") == "local_object" and isinstance(source_object_uuid, str):
+                    await self._reference_object(
+                        tx,
+                        team_uuid=command.team_uuid,
+                        stored_object_uuid=source_object_uuid,
+                        purpose="intake_snapshot_artifact",
+                        owner_kind="intake_snapshot_source_object",
+                        owner_uuid=state["intake_snapshot_uuid"],
+                        digest=str(state["raw_byte_digest"]),
+                        size=int(state["raw_byte_size"]),
+                    )
+                    await tx.execute(
+                        "UPDATE mkb_object_references SET released_at=COALESCE(released_at,?) "
+                        "WHERE team_uuid=? AND stored_object_uuid=? AND purpose='upload_pending' "
+                        "AND owner_kind='public_upload' AND released_at IS NULL",
+                        (now, command.team_uuid, source_object_uuid),
+                    )
                 await tx.execute(
                     "INSERT OR IGNORE INTO mkb_intake_snapshot_memberships "
                     "(team_uuid,intake_snapshot_uuid,member_ordinal,normalized_external_key,intake_item_uuid,observed_revision_uuid,"

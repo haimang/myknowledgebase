@@ -16,6 +16,8 @@ generate_model = "unsloth/Qwen3.8-27B-NVFP4"
 
 [storage]
 max_object_bytes = 268435456
+upload_pending_ttl_seconds = 86400
+staging_ttl_seconds = 3600
 
 [workflow]
 # A terminal Process stays recoverable briefly before the runtime records an

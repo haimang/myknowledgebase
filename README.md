@@ -208,7 +208,7 @@ normal/low Task 在未显式指定时优先 local-inference，high/urgent 优先
 | `source_kind` | 输入 | 当前运行能力 | 重要边界 |
 |---|---|---|---|
 | `inline_payload` | `external_key`、文本、media type、title | `已落地` | 合同上限 8,388,608 字符；默认 HTTP 体上限是 1 MiB（`MKB_MAX_REQUEST_BYTES`），更大 inline 需显式提高 cap |
-| `local_object` | 已存在的 `mkbobj:v1:<team>:<sha256>` handle | `已落地（前置条件）` | 公共 API 没有对象上传端点，调用方需通过受信任的内部装载流程先创建 handle |
+| `local_object` | 已存在的 `mkbobj:v1:<team>:<sha256>` handle | `已落地` | 先经受鉴权 `objects:upload` 获得 pending handle，再以独立 `intake.ingest` Task 消费；上传本身不创建 Intake identity |
 | `http_resource` / `static` | HTTPS URL | `已落地` | 不接收 caller headers/cookie/proxy；响应上限默认 8 MiB |
 | `http_resource` / `pdf` | HTTPS PDF URL | `条件可用` | 只处理有限 PDF text layer；image-only PDF 需要未接线 OCR |
 | `http_resource` / `browser` | URL | `合同已落地 / 未接线` | 默认组合根未注入 browser fetcher，会稳定失败而非静默降级 |
@@ -553,6 +553,8 @@ curl -fsS -X POST "$MKB_BASE_URL/v1/teams/$TEAM_UUID/retrieval:search" \
 | `MKB_DISPATCH_LOCAL_CHAR_BUDGET` | `16000` | local pool 同时在途字符预算 |
 | `MKB_INFERENCE_MAX_IN_FLIGHT` / `MKB_INFERENCE_MAX_ATTEMPTS` | `12 / 3` | facade 总并发与最大尝试次数 |
 | `MKB_OBJECT_MAX_BYTES` | `268435456` | 单 CAS 对象上限，默认 256 MiB |
+| `MKB_OBJECT_UPLOAD_PENDING_TTL_SECONDS` | `86400` | 未被 ingest/cancel 的 upload pending hold 生存期；到期后才 release 并开始 GC grace |
+| `MKB_OBJECT_STAGING_TTL_SECONDS` | `3600` | 中断上传遗留 staging 文件的回收时限；staging 从不进入 catalog |
 | `MKB_MAX_REQUEST_BYTES` | `1048576` | HTTP 请求体上限，默认 1 MiB；超限 413 |
 | `MKB_HTTP_TRUSTED_HOSTS` | `localhost,127.0.0.1` | TrustedHost allowlist；pytest 会额外允许 `testserver` |
 | `MKB_TRUSTED_PROXY_CIDRS` | 空 | 非空且 peer 命中时才信任 `X-Forwarded-For`；空值永不复制 XFF |
@@ -589,7 +591,7 @@ curl -fsS -X POST "$MKB_BASE_URL/v1/teams/$TEAM_UUID/retrieval:search" \
 
 ### 11.4 网络、CORS 与响应头
 
-应用现在安装 `TrustedHostMiddleware`（默认 `localhost,127.0.0.1`），并在 ASGI 层拒绝超过 `MKB_MAX_REQUEST_BYTES` 的请求体。它仍然没有 CORS middleware、HTTPS redirect middleware，也没有显式 CSP、HSTS、X-Frame-Options 等响应头。既定姿态是只在受控内部网络提供服务，而不是直接暴露到浏览器或公网。生产边缘仍需承担 TLS、Origin 策略、安全头、超时限制、可信代理 CIDR 配置，以及 `/docs`/`/metrics` 网络隔离。
+应用现在安装 `TrustedHostMiddleware`（默认 `localhost,127.0.0.1`），并在 ASGI 层拒绝超过 `MKB_MAX_REQUEST_BYTES` 的普通请求体。唯一例外是受鉴权 `objects:upload`：请求体不被全量缓存，而由 streaming CAS 按 `MKB_OBJECT_MAX_BYTES` 独立计数。它仍然没有 CORS middleware、HTTPS redirect middleware，也没有显式 CSP、HSTS、X-Frame-Options 等响应头。既定姿态是只在受控内部网络提供服务，而不是直接暴露到浏览器或公网。生产边缘仍需承担 TLS、Origin 策略、安全头、超时限制、可信代理 CIDR 配置，以及 `/docs`/`/metrics` 网络隔离。
 
 ## 12. 已知事项与设计取舍
 

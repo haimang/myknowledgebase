@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
 
@@ -30,6 +31,26 @@ class _ObjectFixture:
     async def read_verified(self, team_uuid: str, handle: ObjectHandle) -> bytes:
         del team_uuid
         return self.values[handle.value]
+
+
+class _CatalogFixture:
+    def __init__(self, size_bytes: int) -> None:
+        self.size_bytes = size_bytes
+
+    @asynccontextmanager
+    async def transaction(self):
+        fixture = self
+
+        class _Tx:
+            async def fetchone(self, sql: str, params=()):
+                del params
+                if "FROM mkb_stored_objects" in sql:
+                    return {"stored_object_uuid": uuid7(), "size_bytes": fixture.size_bytes}
+                if "FROM mkb_object_references" in sql:
+                    return {"reference_uuid": uuid7()}
+                raise AssertionError(sql)
+
+        yield _Tx()
 
 
 def _command(process_key: str = "intake.acquire.inline") -> ProcessCommand:
@@ -94,10 +115,14 @@ def test_redacted_url_identity_uses_the_canonical_uri_minimum() -> None:
 
 @pytest.mark.asyncio
 async def test_local_object_html_uses_structural_clean_and_nfc_lf_decode() -> None:
-    handle = "mkbobj:v1:local-html"
     raw = b"<main>Hello\r\nCafe\xcc\x81<script>ignore me</script><p>world</p></main>"
-    pipeline = IntakePipeline(None, _ObjectFixture({handle: raw}), None)  # type: ignore[arg-type]
     command = _command()
+    handle = f"mkbobj:v1:{command.team_uuid}:{hashlib.sha256(raw).hexdigest()}"
+    pipeline = IntakePipeline(
+        _CatalogFixture(len(raw)),
+        _ObjectFixture({handle: raw}),
+        None,
+    )  # type: ignore[arg-type]
 
     acquired = await pipeline._acquire_content(
         command,

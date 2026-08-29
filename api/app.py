@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import re
 import sys
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager, suppress
@@ -29,10 +30,11 @@ from src.runtime.index_retirement import IndexGenerationRetirementScanner, Index
 from src.runtime.inference.claude_cli import DeterministicNs1Stub, SubprocessClaudeCli
 from src.runtime.inference.facade import ConcurrencyGate, InferenceFacade
 from src.runtime.inference.supply import SupplyBinding, SupplyFence
-from src.runtime.intake_pipeline import IntakePipeline
 from src.runtime.intake.representation_history import PersistenceRepresentationFactReader
+from src.runtime.intake_pipeline import IntakePipeline
 from src.runtime.metrics import MetricRegistry, default_metrics
 from src.runtime.object_gc import ObjectGcScanner, ObjectGcSchedule
+from src.runtime.object_upload import ObjectUploadLifecycleScanner, ObjectUploadLifecycleSchedule
 from src.runtime.security import ActiveTokenSet, EgressPolicy, FixedWindowRateLimiter, SecretResolver, safe_request_id
 from src.runtime.task_service import TaskService
 from src.runtime.workflow.dispatch import DispatchCaps
@@ -45,6 +47,8 @@ from src.services.events import DomainEventWriter, SecurityAuditWriter
 from src.services.index_retirement import IndexGenerationRetirementService
 from src.services.intake_lifecycle import IntakeLifecycleService
 from src.services.object_gc import ObjectGcService
+from src.services.object_upload import ObjectUploadService
+from src.services.object_upload_ttl import ObjectUploadLifecycleService
 from src.services.observability import (
     DiagnosticSink,
     ObservabilityReadService,
@@ -94,6 +98,9 @@ class Container:
     workflow_worker: WorkflowWorker
     workflow_supervisor: WorkflowSupervisor
     object_gc: ObjectGcService
+    object_upload: ObjectUploadService
+    object_upload_lifecycle: ObjectUploadLifecycleService
+    object_upload_lifecycle_scanner: ObjectUploadLifecycleScanner
     object_gc_scanner: ObjectGcScanner
     index_retirement: IndexGenerationRetirementService
     index_retirement_scanner: IndexGenerationRetirementScanner
@@ -142,6 +149,7 @@ def _public_request_id(request: Request) -> str:
 
 
 _INFERENCE_VLLM_TOKEN_SLOT = "INFERENCE_VLLM_TOKEN"
+_PUBLIC_UPLOAD_PATH = re.compile(r"^/v1/teams/[0-9a-f-]{36}/objects:upload$")
 
 
 def _model_secret_resolver(settings: Settings) -> tuple[str | None, SecretResolver | None]:
@@ -360,6 +368,20 @@ def create_container(settings: Settings | None = None) -> Container:
         storage,
         orphan_grace=timedelta(seconds=settings.object_gc_grace_seconds),
     )
+    object_upload = ObjectUploadService(persistence, storage)
+    object_upload_lifecycle = ObjectUploadLifecycleService(
+        persistence,
+        storage,
+        pending_ttl=timedelta(seconds=settings.object_upload_pending_ttl_seconds),
+        staging_ttl=timedelta(seconds=settings.object_staging_ttl_seconds),
+    )
+    object_upload_lifecycle_scanner = ObjectUploadLifecycleScanner(
+        object_upload_lifecycle,
+        ObjectUploadLifecycleSchedule(
+            interval=timedelta(seconds=settings.object_gc_interval_seconds),
+            batch_size=settings.object_gc_batch_size,
+        ),
+    )
     object_gc_scanner = ObjectGcScanner(
         object_gc,
         ObjectGcSchedule(
@@ -409,6 +431,9 @@ def create_container(settings: Settings | None = None) -> Container:
         workflow_worker=workflow_worker,
         workflow_supervisor=workflow_supervisor,
         object_gc=object_gc,
+        object_upload=object_upload,
+        object_upload_lifecycle=object_upload_lifecycle,
+        object_upload_lifecycle_scanner=object_upload_lifecycle_scanner,
         object_gc_scanner=object_gc_scanner,
         index_retirement=index_retirement,
         index_retirement_scanner=index_retirement_scanner,
@@ -452,6 +477,14 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         if container.settings.object_gc_enabled
         else None
     )
+    upload_lifecycle_task = (
+        asyncio.create_task(
+            container.object_upload_lifecycle_scanner.run_forever(stop),
+            name="mkb-object-upload-lifecycle",
+        )
+        if container.settings.object_gc_enabled
+        else None
+    )
     index_retirement_task = (
         asyncio.create_task(
             container.index_retirement_scanner.run_forever(stop),
@@ -472,7 +505,13 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         yield
     finally:
         stop.set()
-        for background_task in (worker_task, gc_task, index_retirement_task, retention_task):
+        for background_task in (
+            worker_task,
+            gc_task,
+            upload_lifecycle_task,
+            index_retirement_task,
+            retention_task,
+        ):
             if background_task is not None:
                 with suppress(asyncio.CancelledError):
                     await background_task
@@ -545,6 +584,19 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @app.middleware("http")
     async def reject_oversize_body(request: Request, call_next):  # type: ignore[no-untyped-def]
+        if request.method == "POST" and _PUBLIC_UPLOAD_PATH.fullmatch(request.url.path):
+            object_cap = int(getattr(request.app.state.container.settings, "object_max_bytes", 256 * 1024 * 1024))
+            length = request.headers.get("content-length")
+            if length:
+                try:
+                    if int(length) > object_cap:
+                        error = MkbError("OBJECT_BUDGET_SIZE", "Object exceeds the configured size limit", 413)
+                        return JSONResponse(status_code=413, content=error.as_dict(_public_request_id(request)))
+                except ValueError:
+                    pass
+            # Do not consume or cache this body: the upload handler streams it
+            # directly through the object-specific bounded CAS port.
+            return await call_next(request)
         cap = int(getattr(request.app.state.container.settings, "max_request_bytes", 1_048_576))
         length = request.headers.get("content-length")
         if length:

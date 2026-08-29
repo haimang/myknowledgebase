@@ -22,6 +22,7 @@ class PromoteRequest(PayloadExtraModel):
         "gate_evidence",
         "generation_artifact",
         "process_io",
+        "upload_pending",
         "operator_hold",
         "backup_hold",
     ]

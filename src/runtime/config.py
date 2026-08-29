@@ -70,6 +70,8 @@ class Settings(BaseSettings):
     object_gc_grace_seconds: int = Field(default=24 * 60 * 60, ge=1, le=365 * 24 * 60 * 60)
     object_gc_interval_seconds: int = Field(default=10 * 60, ge=1, le=24 * 60 * 60)
     object_gc_batch_size: int = Field(default=100, ge=1, le=10_000)
+    object_upload_pending_ttl_seconds: int = Field(default=24 * 60 * 60, ge=1, le=365 * 24 * 60 * 60)
+    object_staging_ttl_seconds: int = Field(default=60 * 60, ge=1, le=30 * 24 * 60 * 60)
     # Terminal Process rows are marked eligible only after this recovery
     # window.  The marker is append-only evidence; S12/S15 still own actual
     # archive/delete retention policy.

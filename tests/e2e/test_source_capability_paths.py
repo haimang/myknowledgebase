@@ -12,7 +12,7 @@ from fastapi.testclient import TestClient
 from api.app import create_app
 from src.contracts.common.ids import uuid7
 from src.contracts.common.time import utc_now
-from src.contracts.storage.models import ObjectHandle, PromoteRequest
+from src.contracts.storage.models import ObjectHandle
 from src.runtime.config import Settings
 from src.runtime.http_acquisition import HttpAcquisitionResult, redacted_url_identity
 from src.storage.local_store import LocalObjectStore
@@ -77,12 +77,6 @@ def test_local_static_browser_and_pdf_sources_produce_distinct_frozen_acquisitio
     app = create_app(_settings(tmp_path))
     container = app.state.container
 
-    local = asyncio.run(
-        container.storage.promote(
-            b"<article>local capability text</article>",
-            PromoteRequest(team_uuid=team_uuid, purpose="process_io", media_type="text/html"),
-        )
-    )
     static_url = "https://public.example/static?opaque=not-persisted"
     static_bytes = b"<main>static capability text</main>"
     pdf_bytes = b"%PDF-1.4\n1 0 obj << /Type /Page >>\nstream\nBT (pdf capability text) Tj ET\nendstream\nendobj\n"
@@ -109,7 +103,7 @@ def test_local_static_browser_and_pdf_sources_produce_distinct_frozen_acquisitio
             {
                 "source_kind": "local_object",
                 "external_key": "source-local",
-                "logical_handle": local.handle.value,
+                "logical_handle": "uploaded-after-team-admission",
                 "media_type": "text/html",
             },
             "intake.acquire.local_object",
@@ -159,6 +153,13 @@ def test_local_static_browser_and_pdf_sources_produce_distinct_frozen_acquisitio
             ).status_code
             == 201
         )
+        local_upload = client.post(
+            f"/v1/teams/{team_uuid}/objects:upload",
+            headers={**headers, "content-type": "text/html"},
+            content=b"<article>local capability text</article>",
+        )
+        assert local_upload.status_code == 201, local_upload.text
+        cases[0][1]["logical_handle"] = local_upload.json()["handle"]
         for name, source, _capability in cases:
             task_uuid, trace_uuid = uuid7(), uuid7()
             task_ids[name] = task_uuid
@@ -230,12 +231,6 @@ def test_local_image_reaches_the_exact_ocr_workflow_then_fails_closed_when_uncon
     token = "source-capability-token"
     team_uuid, task_uuid, trace_uuid = uuid7(), uuid7(), uuid7()
     app = create_app(_settings(tmp_path))
-    image = asyncio.run(
-        app.state.container.storage.promote(
-            b"\x89PNG\r\n\x1a\nminimal-image-fixture",
-            PromoteRequest(team_uuid=team_uuid, purpose="process_io", media_type="image/png"),
-        )
-    )
     headers = {"Authorization": f"Bearer {token}"}
 
     with TestClient(app, raise_server_exceptions=True) as client:
@@ -247,6 +242,12 @@ def test_local_image_reaches_the_exact_ocr_workflow_then_fails_closed_when_uncon
             ).status_code
             == 201
         )
+        image = client.post(
+            f"/v1/teams/{team_uuid}/objects:upload",
+            headers={**headers, "content-type": "image/png"},
+            content=b"\x89PNG\r\n\x1a\nminimal-image-fixture",
+        )
+        assert image.status_code == 201, image.text
         created = client.post(
             f"/v1/teams/{team_uuid}/tasks",
             headers=headers,
@@ -257,7 +258,7 @@ def test_local_image_reaches_the_exact_ocr_workflow_then_fails_closed_when_uncon
                 {
                     "source_kind": "local_object",
                     "external_key": "local-image",
-                    "logical_handle": image.handle.value,
+                    "logical_handle": image.json()["handle"],
                     "media_type": "image/png",
                 },
             ),
