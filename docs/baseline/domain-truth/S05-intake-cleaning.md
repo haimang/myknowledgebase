@@ -13,7 +13,7 @@
 >
 > **文档状态**：`accepted / D02-state-calibrated`（S05 域内已接受；全系统 truth layer 尚未 frozen）
 >
-> **Truth 版本**：`S05-v1.1`
+> **Truth 版本**：`S05-v1.2-nh-cal`（v1.1 + new-harvest `T-O-390/400/401/407` append-only calibration）
 >
 > **上游权威输入**：形成QNA时的`D01-v1.2/S01-v1.3/S02-v1.1/S03-v1.1/S04-v1.0`、冻结的`qna-truth/S05.md v1.0`（Q1–Q10 / `T-O-49..76`）；发布后对齐版本为`D01-v1.4/S01-v1.5/S02-v1.3/S03-v1.3/S04-v1.2`
 >
@@ -42,6 +42,8 @@
 > **D08 校准声明（2026-08-13）**：`D08-v0.1` 是 **legacy 四域能力闭集与 `intake/` 树** 的 SSOT。本文件四类 source kind、三轴 binding、preflight/gate **不改**。`S05-T001` 的「不得删减」能力面由 D08 写成可勾选 operation/strategy；`S05-T002` 继续禁止 `action_branch` taxonomy。`S05-A09..A13` 的 provider schema / stable key / 空集合证明以 D08 parser 与双 digest 为证据形态。通道空壳或 duck-type mapper **不满足** 本域 registered_api HARD。
 
 > **D05校准声明（T-O-202/208/210）**：清洗是知识生产主链 **第 1 环节**。凡模型辅助 clean 必须绑定 **`promptA.<variant>.<version>` + content_hash**（`PromptRef`）；正文在 `data/prompts/intake/clean/**`，DB 仅 hash 指针（D03）。Clean **不**做多粒度 structure / summary / 向量。失败 retry/max_retries **仅** 服从 S03/D01（T-O-207）。下游 structurize 消费 exact clean Artifact。
+
+> **new-harvest 两阶段 binding / restart 校准（2026-08-29 · `T-O-390/400/401/407`）**：本声明 append-only 覆盖本文早期“Execution 创建时已锁 actual”的读法。Execution 创建时只锁 Workflow/config/domain **policy**；actual source/acquire/decode/selected-clean/preflight binding 在 durable representation history 与 selected-route 已知后，于 route Outcome 同 UoW sealed-once。旧 `s05_binding_digest` 是 legacy policy alias / actual-unverifiable，禁止 backfill actual；新 actual digest/state 是唯一快速 SSOT。Process retry/recovery/resume 与同 Task `full_task` retry复制 exact sealed actual；rebuild/changed-metadata 以 registered intent guard 旁路 acquire/decode/clean并 replay frozen admitted clean；existing-object 使用新 cleaner/validator **不在 NH v1**，故 §4.6“已有Task升级走 causal restart”句由 `T-O-401` 校准为未来新 owner-gate，不得借 full retry/rebuild 实现。
 ## 1. Domain 介绍
 
 ### 1.1 Domain 价值
@@ -890,3 +892,4 @@ S05 以严格、确定、可复验的source与clean contract把任意外部输�
 | `S05-v1.1-cal-s13` | `2026-08-11` | `MKB owner + Codex` | `accepted / S13-calibrated` | 接收S13-v1.0：staging port/handle/gate evidence 引用保护落地。 |
 | `S05-v1.1-cal-d05` | `2026-08-12` | `MKB owner + Codex` | `accepted / D05-calibrated` | 接收 D05-v1.0 / `T-O-208`：clean 绑定 **promptA**；生产链第 1 环节。 |
 | `S05-v1.1-cal-d08` | `2026-08-13` | `MKB owner + Grok` | `accepted / D08-calibrated` | 四域能力闭集与 intake 树归 D08；kind/gate 不变；A09–A13 以 provider parser 为证据。 |
+| `S05-v1.2-nh-cal` | `2026-08-29` | `MKB owner + GPT` | `accepted / new-harvest-calibrated` | 接收 `T-O-390/400/401/407`：policy/actual 两阶段 binding、Outcome 同 UoW seal、full_task exact 继承、rebuild/metadata exact-clean 旁路；existing-object implementation upgrade 移出 NH v1并校准 §4.6。 |

@@ -8,7 +8,7 @@
 >
 > **文档状态**：`accepted / owner-frozen`（域内已接受并进入真相层；全系统 truth layer 尚未统一 frozen）
 >
-> **Truth 版本 / 日期**：`D04-v1.1 / 2026-08-12`（v1.0 + S11 窄 reopen：model/inference 三表）；**D08-calibrated 2026-08-13**（registry 要求重排 + 3 表 proposed，**55 required 不变**）
+> **Truth 版本 / 日期**：`D04-v1.2-nh-cal / 2026-08-29`（v1.1 + new-harvest binding/upload calibration）；**D08-calibrated 2026-08-13**（registry 要求重排 + 3 表 proposed）
 >
 > **作者 / 规范化**：`Codex`；**裁决**：`MKB owner` 2026-08-11 冻结 v1.0；2026-08-12 批准 S11 增表 reopen
 >
@@ -41,6 +41,8 @@
 > **NS4 窄 reopen（2026-08-16 · `T-O-366`/`T-O-369`）**：generation 模块 +1 required 表 `mkb_generation_stage_reports`；`mkb_generation_invocations` 列晋升 `status`/`stage_key`/`error_code`/`adapter_kind`/`cli_structured_kind`。全域 required **56**。禁止 extra 承载这些证据。
 
 > **S11 校准 / reopen（2026-08-12）**：Owner 接受 catalog 独立三表（`T-O-193`）。新增 `mkb_model_catalog`、`mkb_adapter_bindings`、`mkb_inference_invocations`。embedding 空间严禁跨 model 混用；写/读须带 model/namespace/adapter 围栏（`T-O-192`）。
+
+> **new-harvest schema calibration（2026-08-29 · `T-O-390/392/400/404`）**：§3.3 Execution Binding 中旧 `s05_binding_digest NOT NULL（创建时）` 仅按 legacy policy alias / actual-unverifiable 解释，禁止原地翻义或 backfill。新 schema 必须把 policy 与 nullable `actual_binding_digest`、`actual_binding_state`、`seal_generation` 分列；actual 由 selected-route Outcome 同 UoW CAS sealed-once。RepresentationFact/AcquireDecodeHistory 需要正式 typed append-only rows；public upload success 需要 catalog + `upload_pending` live ref/hold 同 UoW。后两项 exact table/column/index 名与 required table count由 `M-NH-02/M-NH-05` migration 在 planning-final/AP 冻结，**在 migration 落地前不得把现 HEAD 表数或旧列当新 Truth 已实现**。
 
 ---
 
@@ -1799,6 +1801,7 @@ D04 把单库 Turso 的 **表闭集、索引、可观测与模型/推理账、�
 | `D04-v1.1` | `2026-08-12` | `MKB owner + Codex` | **`owner-frozen / S11-reopen`** | +3 表至 55；`T-O-192..194`；embedding 隔离；§3.8。 |
 | `D04-v1.1-cal-s11-r2` | `2026-08-12` | `MKB owner + Codex` | **`owner-frozen / S11-R2-calibrated`** | §3.7.4b 双层 filter：`T-O-197` 空间隔离 + `T-O-198` 业务 filter（team/intake/上游 facet）。 |
 | `D04-v1.1-cal-d08` | `2026-08-13` | `MKB owner + Grok` | **`owner-frozen / D08-calibrated`** | §2.2.3 三表 proposed；§3.3.2b FilterMeta 五维 + provider/strategy 重排。**55 required 不变**。 |
+| `D04-v1.2-nh-cal` | `2026-08-29` | `MKB owner + GPT` | **`owner-frozen / new-harvest-calibrated`** | 接收 `T-O-390/392/400/404`：旧 s05 列降 legacy alias；新增 nullable actual state/digest/seal语义；typed representation history与upload pending ref进入后续单链migration；当前表数不冒充已落地。 |
 
 ---
 

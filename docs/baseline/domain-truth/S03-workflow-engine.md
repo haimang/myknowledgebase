@@ -12,7 +12,7 @@
 >
 > **文档状态**：`accepted / D02-state-calibrated`（S03 域内已接受；全系统 truth layer 尚未 frozen）
 >
-> **Truth 版本**：`S03-v1.3`
+> **Truth 版本**：`S03-v1.4-nh-cal`（v1.3 + new-harvest `T-O-390..392/398/400..402` calibration）
 >
 > **上游权威输入**：`D01-v1.4`、`S01-v1.5`、`S02-v1.3`、`S04-v1.2`、`S05-v1.1`、`S06-v1.0`、冻结的`qna-truth/S03.md v1.0`（Q1–Q9 / `T-O-12..29`）
 >
@@ -44,6 +44,8 @@
 ---
 
 > **S13校准声明**：`S13-v1.0` 冻结 v1 本地 `object_root` + `ObjectStorePort`、`mkbobj:v1` handle、team-scoped CAS、bytes-first、同库 catalog/ref/purpose、verify-on-read、周期 GC 与 identity readiness。本文件业务语义不变；对象 I/O 必须经 S13 Port，禁止 path/R2 key 进入契约。
+
+> **new-harvest Workflow / binding 校准（2026-08-29 · `T-O-390..392/398/400..402`）**：S03 七表/无环/registered guard/compiled pin 继续为 SSOT，并在 NH 内有界扩展 registered selected-output CONTROL、kind-only resolver 与 typed representation projection；禁止通用 JOIN/DSL/自由表达式/graph duplication。RepresentationFact/AcquireDecodeHistory 与各 Process Outcome 同 UoW append，是 route/actual digest 的 durable authority。`S03-T017` 的 Workflow exact binding 仍在 Execution 创建时冻结；`S03-T053` 的 **actual S05 binding** 改为选边后与 route Outcome 同 UoW sealed-once。`S03-T018` full Task retry 继续复制来源 exact Workflow/policy，并在 actual 已封时复制 sealed actual；不得把 new generation 自动解释成 implementation upgrade。Existing-object new-cleaner upgrade 不在 NH v1，未来须新 owner-gate。
 
 ## 1. Domain 介绍
 
@@ -1248,3 +1250,4 @@ S03 将 legacy 已验证的声明式 Workflow 与 Process 解耦原理，重建�
 | `S03-v1.3-cal-s13` | `2026-08-11` | `MKB owner + Codex` | `accepted / S13-calibrated` | 接收S13-v1.0：binding 仅 logical handle；禁 absolute path。 |
 | `S03-v1.3-cal-d05` | `2026-08-12` | `MKB owner + Codex` | `accepted / D05-calibrated` | 接收 D05-v1.0：max-retries 独占；promptA/B/C 入 Command digest；construct 前禁 vectorize（T-O-206/207/208）。 |
 | `S03-v1.3-cal-s08` | `2026-08-12` | `MKB owner + Codex` | `accepted / S08-calibrated` | 接收 S08-v1.0：exact `lsrag.vectorize` 取代 `lsrag.vectorize_index`；phase 与 publication 分账不变；Capability 表与编排示例回填。 |
+| `S03-v1.4-nh-cal` | `2026-08-29` | `MKB owner + GPT` | `accepted / new-harvest-calibrated` | 接收 `T-O-390..392/398/400..402`：有界 selected-output/kind/fact substrate、actual 选后同 UoW seal、full_task exact 继承、existing-object upgrade OOS；不改变八态/无环/pin。 |

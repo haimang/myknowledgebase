@@ -6,9 +6,9 @@
 >
 > **权威输入**：D01–D08、S01–S16
 >
-> **状态**：`active / S14-S16-v1.1 calibrated / D08-calibrated`
+> **状态**：`active / new-harvest T-O-390..407 calibrated`
 >
-> **版本 / 日期**：`v2.9 / 2026-08-13`
+> **版本 / 日期**：`v3.0 / 2026-08-29`
 
 ## 0. 使用规则
 
@@ -206,11 +206,16 @@ Revision 回答“来源业务事实是否改变”；build generation 回答“
 | `ProviderDefinition` | `owner-directed / D08-v0.1` | `registered_api` 下 versioned provider 头（如 `chinatax`/`domain`/`realestate`）；**不是**第五类 source kind，也不是 `action_branch` |
 | `ProviderOperation` | `owner-directed / D08-v0.1` | 某 provider 的精确 operation（request/envelope/member schema + normalizer + cardinality）；坐标 `(provider, operation, definition_version)`；不等于 live URL |
 | `CleanStrategy` | `owner-directed / D08-v0.1` | 与 source kind 正交的清洗策略（`web.deterministic`/`web.llm_rewrite`/`web.browser_print_pdf`/`pdf.text_layer`/`pdf.document_understanding`/`doc.*`）；禁止组合 branch 名当 taxonomy |
-| `FilterMeta` | `owner-directed / D08-v0.1` | registered_api member 的五维筛选面：`realm,type,channel,source_name,is_active`；晋升 SemanticDefinition；不等于 clean_text |
-| `ContextMeta` | `owner-directed / D08-v0.1` | 复用 FilterMeta 五维 + `title` + `tags[]`，供 prompt/检索上下文；不等于 StructureDocument |
+| `FilterMeta` | `frozen / D08 + T-O-389/394/395` | 四通道 Revision 的五维筛选面：`realm,type,channel,source_name,is_active`；S04 SemanticDefinition/RevisionSemantic 为权威，不等于 clean_text；generic 四字段 caller 必填且非 unknown，API 服从 operation mapper |
+| `ContextMeta` | `frozen / T-O-389/394` | 复用 FilterMeta 五维 + `title` + `tags[]` 的 S06 system-owned 投影；权威读 S04 Revision semantics，不等于 StructureDocument、模型自由输出或 g0 正文 |
+| `SemanticChannel` / `semantic_channel` | `frozen / T-O-395` | FilterMeta 的业务 channel 公共查询键；与向量 original/summary 轴分账 |
+| `VectorChannel` / `vector_channel` | `frozen / T-O-395` | 向量 `original\|summary` 公共查询键；旧 schema `channel` 仅机械兼容这两个值，新 schema 禁旧键 |
 | `ContentDigest` / `MetaDigest` | `owner-directed / D08-v0.1` | member 正文维与效力/状态维的双 SHA-256；禁止随机 UUID 替代 ExternalKey |
 | `action_branch` | `legacy-only` | legacy Worker 用组合字符串同时选 provider 与是否上 Gemini；**禁止**进入 MKB source_kind / workflow_key / 对外 descriptor |
 | `AcquisitionEvidence` | `frozen / S05-T008` | 一次acquisition Process在exact Execution fence下形成的typed representation/media/encoding/redirect/page/budget证据；不是IntakeSnapshot或HTTP日志 |
+| `RepresentationFact` | `frozen / T-O-392/402` | acquire/decode Process Outcome 同 UoW append 的typed durable表示观察；guard只读注册projection；不等于handler内存/output JSON或能力未部署错误 |
+| `AcquireDecodeHistory` | `frozen / T-O-392` | 按Execution/step/ordinal有序、append-only的acquire/decode事实链；同step第二次成功拒绝；为actual binding path digest权威明细 |
+| `MainTextPresence` / `main_text_presence` | `frozen / T-O-402` | decode阶段registered deterministic observer产出的`present\|absent\|unknown`三态；仅absent可触发已声明browser edge，unknown fail-closed |
 | `IntakeCandidateMember` | `frozen / S05-T008` | CandidateSet内具有stable ordinal、ExternalKey evidence、canonical semantic tuples、Artifact/clean/validation refs的typed member；不是IntakeItem，需经S04 acceptance解析 |
 | `CleanArtifactCandidate` | `frozen / S05-T008..10` | clean活动产出的staged typed descriptor，携带input/output digest、logical handle、capability/parser/model/prompt、producer fence、loss/quality与lineage；acceptance后才绑定canonical IntakeArtifact owner |
 | `RevisionBasis` | `frozen / S05-T010` | source definition声明哪些确定性事实可参与IntakeRevision判断的versioned类别；v1基线为typed source semantics、deterministic canonical text或opaque representation，AI/OCR输出不能单独作为basis |
@@ -228,7 +233,12 @@ Revision 回答“来源业务事实是否改变”；build generation 回答“
 | `ExecutionGate` | `frozen / S05-T020..24` | clean后/RAG前只有确实等待人工时创建的Execution-owned durable gate，状态为`open→released|rejected|superseded`；Process不持lease等待，Intake不拥有该状态 |
 | `ExecutionReviewTarget` | `frozen / S05-T021` | gate绑定的exact复合审核对象，冻结team/task/Execution generation/fence、Workflow、Intake refs、CleanArtifact digest、PreflightOutcome/check-set与target digest |
 | `ExecutionGateDecision` | `frozen / S05-T023..24` | append-only人工决定，必须校验authority、expected gate/Execution revision、fence与ReviewTarget digest，并与gate/Execution CAS及outbox同事务提交 |
-| `S05Binding` / `s05_binding_digest` | `frozen / S05-T025..26` | Execution创建时锁定本次source/acquisition/clean/preflight exact refs的聚合binding；retry/recovery/human resume不得重新resolve active版本 |
+| `S05PolicyBinding` / `domain_binding_digest` | `frozen / T-O-390` | Execution创建时锁定Workflow/config/domain policy/envelope；不等于实际走过的acquire/decode/selected clean |
+| `ActualS05Binding` / `actual_binding_digest` | `frozen / T-O-390/400/401` | durable representation history与selected route已知后，在Outcome同UoW从unsealed sealed-once的actual acquire/clean/preflight聚合binding；Process/full_task retry复制exact值 |
+| `LegacyS05AliasDigest` | `frozen compatibility / T-O-390` | 旧物理`s05_binding_digest`中由domain digest填充的历史别名；actual-unverifiable，不得backfill/升格或进入新wire/domain contract |
+| `SelectedOutputControl` | `frozen / T-O-391` | registered exactly-one CONTROL：optional candidate ports，只投影durable selection到单canonical output；不重跑guard、不等待未materialize分支、不复用scatter join |
+| `ExhaustedZeroDisposition` / `exhausted_zero` | `frozen / T-O-397` | registered API有immutable exhaustion proof的合法零集合终态；流程完整但非indexed success，不造child/Revision/vector/proof；与metadata no_change分字面 |
+| `UploadPendingHold` / `upload_pending` | `frozen / T-O-404` | public upload成功UoW随catalog创建的S13 live ref/hold；ingest acceptance转换业务ref，取消/TTL后才release→grace→GC；不等于Item |
 | `CanonicalAcceptancePoint` | `frozen / T-O-38/T-O-43` | sealed CandidateSet原子成为Snapshot、Item/Revision decision、Membership、ChangeSet与child intent的唯一事务线性化点 | queue、IntakeArtifact write、Process log或分页staging都不是canonical acceptance |
 | `IntakeChangeSet` | `frozen / T-O-38..39` | S04 从 durable comparison 生成的 immutable typed facts，描述 Item/Revision/semantic-key/no-change/absence 变化，但不指定 Process 名称 |
 | `ActionDefinition` | `frozen / T-O-35/T-O-36/T-O-40` | 内部注册、不可变版本化的 Intake action/reason 定义，必须映射到受约束 core effect、precondition 和 typed route fact |
@@ -656,3 +666,4 @@ Revision 回答“来源业务事实是否改变”；build generation 回答“
 | `v2.7` | `2026-08-12` | 接收 S14–S16 v1.1：登记 ConfigSnapshot/RegistryPort/ProvenanceEnvelope、ObservabilityReadPort/HealthAggregator、InternalToken/EndpointClass/EgressPolicy/SupplyFence/sec_token_loaded 等；权威输入扩至 S01–S16。 |
 | `v2.8` | `2026-08-12` | **S14–S16 战役审计**：扩展 ConfigLayer/binding_digest/OverrideAllowlist/CONFIG_*、EventTypeRegistry/OBS_*/DomainEventLedger、AdmissionDecision/actor_fingerprint/RedactionPolicy/SEC_*；alignment 补 S08–S11；同步 index v0.61。 |
 | `v2.9` | `2026-08-13` | 接收 **D08-v0.1**：登记 ProviderDefinition/ProviderOperation/CleanStrategy/FilterMeta/ContextMeta/双 digest；`action_branch` 标 legacy-only；alignment 补 D07/D08。 |
+| `v3.0` | `2026-08-29` | 接收 new-harvest `T-O-390..407`：S05 policy/actual/legacy alias 两阶段词汇、typed representation history、selected-output CONTROL、semantic/vector channel、exhausted_zero、upload_pending hold 与 main_text_presence；校准 FilterMeta/ContextMeta 为四通道 frozen。 |

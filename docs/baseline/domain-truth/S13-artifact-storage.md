@@ -12,7 +12,7 @@
 >
 > **文档状态**：`accepted`（S13 域内已接受；全系统 truth layer 尚未 frozen）
 >
-> **Truth 版本**：`S13-v1.1`（v1.0 宪法 + **执行台账全面升格**；QNA 细节并入本文）
+> **Truth 版本**：`S13-v1.2-nh-cal`（v1.1 + new-harvest public-upload narrow calibration）
 >
 > **上游权威输入**：`D01–D04`、`S01–S07`、`S12`；`qna-truth/S13.md v1.0`（**证据层 / 中间态 only**，非执行 SSOT）
 >
@@ -27,6 +27,8 @@
 > **Owner 约束**：v1 **权威 backend = 本地 POSIX-like filesystem**；Cloudflare R2 **defer**；HF Xet/Buckets **非 SSOT**。G-11 → local。
 
 > **跨文档**：S13 **不**拥有业务状态机；**不**用对象存在性定义业务成功。S12 拥有 migration/UnitOfWork；S13 拥有 Port/layout/GC 语义。
+
+> **new-harvest public surface / pending ownership 校准（2026-08-29 · `T-O-396/404`）**：窄 reopen S13 v1“无公网 object 面”仅为 authenticated **upload + stat/status**；无 raw byte GET、list、presign或object browser。stat不返回path/filename，跨team handle 403；bytes仅供内部`local_object` ingest。Upload success必须在返回usable handle前同UoW提交catalog + `upload_pending` live ref/hold；ingest acceptance转换业务ref，取消/TTL后才release→grace→GC；未完成流只staging scanner清理，upload不造Item。该窄面不使对象存在等于业务成功。
 
 ---
 
@@ -507,7 +509,7 @@ Restore:
 1. domain-truth only；local Port/CAS/bytes-first；  
 2. catalog+ref+purpose；GC grace+fence；  
 3. verify-on-read；identity readiness；  
-4. backup 协议；无公网 object 面；  
+4. backup 协议；公网仅受鉴权 upload+stat 窄面，无 raw object CRUD/read；
 5. G-11 closed → v1 local；R2 未来只扩 adapter。
 
 ### 8.3 一句话
@@ -523,3 +525,4 @@ S13-v1.1 把对象存储从「宪法」升格为 **可编码执行台账**，并
 | S13-v1.0 | 2026-08-11 | accepted | T-O-111..125；local/CAS/GC；关 G-11 |
 | S13-v1.1 | 2026-08-12 | accepted | **执行 SSOT 强制**；E01–E11；禁止执行依赖 QNA |
 | S13-v1.1-ns6-note | 2026-08-20 | change-request | 物理 GC 删除 = TX1 fence → 将 CAS 字节 **rename** 到 `quarantine/<team_uuid>/` → TX2 proof/tombstone → destroy；TX2 见 live ref 则 restore。缺 quarantine API 必须 fail-closed，禁止回退 `unlink`。 |
+| S13-v1.2-nh-cal | 2026-08-29 | accepted / new-harvest-calibrated | 接收 `T-O-396/404`：public upload+stat窄reopen、无raw GET、catalog+upload_pending hold原子success、ingest ref转换与TTL/GC；upload仍不造Item。 |

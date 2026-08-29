@@ -12,7 +12,7 @@
 >
 > **文档状态**：`accepted`（S16 域内已接受；全系统 truth layer 尚未 frozen）
 >
-> **Truth 版本**：`S16-v1.1`
+> **Truth 版本**：`S16-v1.2-nh-cal`（v1.1 + new-harvest native/browser isolation calibration）
 >
 > **上游权威输入**：`D01–D05`、`S01–S15` accepted；`qna-truth/S16.md v1.0-qna-locked`（**证据层 / progressive 中间态 only**，非执行 SSOT）；冻结 Truth `T-O-312..336`；`spec-index` §3.16 / **OD-01/04/05** / **G-02 closed** / **G-10 closed** / **G-12 deferred** / **G-29 closed（T-O-42）** / G-07 closed / G-31 closed
 >
@@ -49,6 +49,8 @@
 > | **G-02/10/12/29** | 无 webhook 默认；禁 silent model swap；agent authoring deferred；legacy-family reference-only |
 
 > **Legacy 边界（T-O-326 / T-O-42）**：不继承 JWT user+team+role 平台 auth、team API key 当 membership 产品、公开 `/api/proxy` 开放 SSRF、`source_name`/`user_uuid` 假隔离、console ACL 中台、plan/phone membership gate、明文密钥进 log、恒 ok 安全叙事。
+
+> **new-harvest native/browser isolation 校准（2026-08-29 · `T-O-393/399/403`）**：无prompt的PDF parser/确定性OCR属于独立local capability并默认运行于无网isolated subprocess（CPU/memory/time/output cap、受控tmp、kill/restart）；browser render/print共享hardened binary/navigation/egress，但为独立capability，使用non-root隔离且生产默认禁止`--no-sandbox`，所有网络走S16 resolve/redirect/SSRF复核。Model-bound OCR/Vision/DU留S11 local inference。任何native/binary入生产须pinned identity、license/SBOM、CVE baseline、恶意/加密/超大负样本与实弹readiness；“完整SBOM SaaS OOS”不豁免本地依赖清单。偏离只允许owner具名。
 
 > **S14/S15 互指校准（provisional neighbor expectation · 不 reopen 邻域）**：  
 > - S14：L2 secret **值**注入接口已冻；本文钉 SecretResolver 生命周期与 slot fail-closed。  
@@ -1132,7 +1134,7 @@ token 原文、password、API key、Authorization 头值、**X-MKB-Internal-Toke
 5. 邻域分账无吞并 S01 权限口径 / S05 descriptor / S15 retention / D04 DDL；  
 6. OOS 闭包阻止平台回潮。
 
-**Verdict：`accepted / S16-v1.1 / GO for domain implementation`**
+**Verdict：`accepted / S16-v1.2-nh-cal / GO for domain implementation`**
 
 ### 8.2 残差 OOS / 已知残差
 
@@ -1173,6 +1175,7 @@ token 原文、password、API key、Authorization 头值、**X-MKB-Internal-Toke
 | 版本 | 日期 | 状态 | 作者 / 裁决 | 说明 |
 |---|---|---|---|---|
 | `S16-v1.1` | `2026-08-12` | `accepted` | `MKB owner + Grok workflow domain-truth-s14-s16` | 对抗评审：采样扩展 rate-limit/egress；EndpointClass 限流矩阵；action 闭集表；internal_only ops；last-good TTL；X-header redaction；S15 metric/alert 同步；多副本验收 |
+| `S16-v1.2-nh-cal` | `2026-08-29` | `accepted / new-harvest-calibrated` | `MKB owner + GPT` | 接收 `T-O-393/399/403`：local capability与S11分账、PDF/OCR无网subprocess、browser non-root+禁no-sandbox+S16 egress、render/print分capability、native pin/SBOM/CVE/负样本/readiness。 |
 | `S16-v1.0` | `2026-08-12` | `accepted` | `MKB owner + Grok workflow domain-truth-s14-s16` | 正式执行 SSOT：映射 `T-O-312..336` → `S16-T001..T070`；E01–E12；TM-01..10；`SEC_*`；security_audit 写语义；redaction；endpoint 矩阵；egress 宪法；SecretResolver；SupplyFence；OOS 闭包。QNA `v1.0-qna-locked` 降为证据层。second-opinion waived；workflow-frozen RC-adjusted B+Δ1–Δ10。Header 主路径 `Authorization: Bearer`；固定窗口限流；audit 采样默认 10/IP/min。关 G-02/G-10 服从；不 reopen 邻域。 |
 
 ---
@@ -1234,6 +1237,6 @@ on_request(req):
 
 ---
 
-**文件结束 · S16-v1.1 accepted · 执行 SSOT**
+**文件结束 · S16-v1.2-nh-cal accepted · 执行 SSOT**
 
 > **NS6 substrate-fit (2026-08-20)**：空 `trusted_proxy_cidrs` **永不**复制 `X-Forwarded-For`；`request_ip` = ASGI peer。只有 `peer ∈ cidrs` 才信任 XFF。mapped IPv6 递归展开不得重开空 CIDR 信任分支。`/metrics` 内部身份不得被私网 XFF 伪造。
