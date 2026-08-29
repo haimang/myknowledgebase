@@ -1,0 +1,16 @@
+{
+  "schema_version": "mkb.new-harvest-evidence.v1",
+  "ap": "AP-NH4",
+  "status": "executed",
+  "commit": "7359a964e0a8fc72bc6429e59a816de96586cfa4",
+  "truth_cite": ["T-O-377", "T-O-381", "T-O-383", "T-O-385", "T-O-396", "T-O-404", "T-O-406"],
+  "work_ids": ["NH4-01", "NH4-02", "NH4-03", "NH4-04", "NH4-05", "NH4-06", "NH4-07", "NH4-08"],
+  "test_ids": ["NH4-T01", "NH4-T02", "NH4-T03", "NH4-T04", "NH4-T05", "NH4-T06", "NH4-T07"],
+  "frozen_and_regression_result": {"passed": 42, "failed": 0, "level": "L1/L2/L3/L4/F/R"},
+  "repository_diagnostic": {"collected": 711, "passed": 705, "successor_owned_failed": 6},
+  "migration_id": "021_nh4_upload_pending.sql",
+  "public_object_routes": ["POST objects:upload", "GET objects:stat", "POST objects:cancel"],
+  "public_raw_object_routes": 0,
+  "observed_at_utc": "2026-08-29T20:37:37Z",
+  "closure_type": "closed-with-explicit-deferrals"
+}

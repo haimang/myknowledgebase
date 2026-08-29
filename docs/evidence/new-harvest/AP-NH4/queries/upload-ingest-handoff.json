@@ -1,0 +1,14 @@
+{
+  "schema_version": "mkb.nh4-upload-ingest-evidence.v1",
+  "transactions": ["public objects:upload", "independent intake.ingest local_object"],
+  "search_before_ingest_contains_sentinel": false,
+  "search_after_ingest_contains_sentinel": true,
+  "namespace": {"namespace_key": "deterministic-hash-v1|v1|deterministic|64", "status": "active"},
+  "upload_pending": {"owner_kind": "public_upload", "released_at_nonnull": true},
+  "business_reference": {"purpose": "intake_snapshot_artifact", "owner_kind": "intake_snapshot_source_object", "released_at": null},
+  "item_count": 2,
+  "source_test": "tests/e2e/test_nh4_upload_then_ingest.py::test_upload_search_empty_then_independent_ingest_namespace_hit",
+  "query_port": "TursoPersistence.transaction",
+  "commit": "7359a964e0a8fc72bc6429e59a816de96586cfa4",
+  "observed_at_utc": "2026-08-29T20:37:37Z"
+}

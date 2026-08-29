@@ -1,0 +1,22 @@
+AP-NH4 test evidence
+Observed at: 2026-08-29T20:37:37Z
+Implementation commit: 7359a964e0a8fc72bc6429e59a816de96586cfa4
+Environment: Python 3.12.3; pytest 8.3.5; TursoPersistence for NH4 integration/e2e DB assertions
+
+NH4-T01..T07 plus owned GC/source regressions
+Command: uv run pytest tests/unit/test_nh4_*.py tests/integration/test_nh4_*.py tests/e2e/test_nh4_*.py tests/unit/test_object_gc.py tests/unit/test_ns6_gc_toctou.py tests/e2e/test_source_capability_paths.py -q --disable-warnings
+Result: PASS, 42 passed
+Level: L1/L2/L3/L4/F/R. Public upload tests call the HTTP route and never call storage.promote as their success path.
+
+Static review
+Command: uv run ruff check api src tests/unit/test_nh4_*.py tests/integration/test_nh4_*.py tests/e2e/test_nh4_*.py tests/unit/test_ns6_gc_toctou.py tests/unit/test_object_gc.py tests/unit/test_intake_source_capabilities.py tests/e2e/test_source_capability_paths.py
+Result: PASS
+Command: git diff --check
+Result: PASS
+
+Default-root repository diagnostic after implementation commit
+Command: uv run pytest -q --tb=short
+Collected: 711
+Result: 705 passed, 6 failed.
+Successor-owned failures: index/retrieval namespace x3; reactivate/retrieval namespace x1; rebuild exact-clean PREFLIGHT_EVIDENCE_INVALID x1; realestate whitespace normalization x1.
+No NH4 upload/stat/cancel, streaming CAS, catalog/pending, local-object handoff, GC, TTL, race, or security node failed.

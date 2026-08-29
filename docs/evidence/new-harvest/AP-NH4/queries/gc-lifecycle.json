@@ -1,0 +1,13 @@
+{
+  "schema_version": "mkb.nh4-gc-lifecycle-evidence.v1",
+  "pending_before_ttl_is_gc_candidate": false,
+  "pending_release_starts_grace": true,
+  "released_at": "2026-08-29T20:40:49.460285Z",
+  "tombstoned_at": "2026-08-29T20:41:00.460285Z",
+  "delete_proof_count": 1,
+  "quarantine_new_upload_pending_restores_bytes": true,
+  "staging_crash_file_reaped_without_catalog": true,
+  "source_tests": ["tests/unit/test_nh4_upload_ttl_gc.py", "tests/unit/test_ns6_gc_toctou.py"],
+  "commit": "7359a964e0a8fc72bc6429e59a816de96586cfa4",
+  "observed_at_utc": "2026-08-29T20:37:37Z"
+}

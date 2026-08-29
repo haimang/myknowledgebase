@@ -42,16 +42,16 @@
 
 ## NH4 — public upload and object lifecycle
 
-- [-] `NH4-CODE-P1` [代码制作] Phase 1 bounded write（`NH4-01`；`NH4-T01/T07`）。`blocked-by: NH3-CLOSE`（DAG 仅要求 NH1 GO；本清单按用户要求串行线性化）
-- [ ] `NH4-CODE-P2` [代码制作] Phase 2 catalog + upload_pending UoW（`NH4-02`；`NH4-T01`）。`blocked-by: NH4-CODE-P1`
-- [ ] `NH4-CODE-P3` [代码制作] Phase 3 authenticated public API fence（`NH4-03/07`；`NH4-T01/T03`）。`blocked-by: NH4-CODE-P2`
-- [ ] `NH4-CODE-P4` [代码制作] Phase 4 idempotency + local_object ingest handoff（`NH4-04/05`；`NH4-T02/T04`）。`blocked-by: NH4-CODE-P3`
-- [ ] `NH4-CODE-P5` [代码制作] Phase 5 GC + security negatives（`NH4-06/08`；`NH4-T05/T06/T07`）。`blocked-by: NH4-CODE-P4`
-- [ ] `NH4-CLOSE` [代码审查，测试与文档回填] `NH4-T01..T07`、日志、evidence、closure、commit。`blocked-by: NH4-CODE-P5`
+- [x] `NH4-CODE-P1` [代码制作] Phase 1 bounded write（`NH4-01`；`NH4-T01/T07`）。`blocked-by: NH3-CLOSE`（DAG 仅要求 NH1 GO；本清单按用户要求串行线性化）
+- [x] `NH4-CODE-P2` [代码制作] Phase 2 catalog + upload_pending UoW（`NH4-02`；`NH4-T01`）。`blocked-by: NH4-CODE-P1`
+- [x] `NH4-CODE-P3` [代码制作] Phase 3 authenticated public API fence（`NH4-03/07`；`NH4-T01/T03`）。`blocked-by: NH4-CODE-P2`
+- [x] `NH4-CODE-P4` [代码制作] Phase 4 idempotency + local_object ingest handoff（`NH4-04/05`；`NH4-T02/T04`）。`blocked-by: NH4-CODE-P3`
+- [x] `NH4-CODE-P5` [代码制作] Phase 5 GC + security negatives（`NH4-06/08`；`NH4-T05/T06/T07`）。`blocked-by: NH4-CODE-P4`
+- [x] `NH4-CLOSE` [代码审查，测试与文档回填] `NH4-T01..T07`、日志、evidence、closure、commit。`blocked-by: NH4-CODE-P5`
 
 ## NH5 — semantic ledger and retrieval facets
 
-- [ ] `NH5-CODE-P1` [代码制作] Phase 1 strict semantic input（`NH5-01`；`NH5-T01/T02`）。`blocked-by: NH4-CLOSE`（DAG 仅要求 NH1 GO；本清单按用户要求串行线性化）
+- [-] `NH5-CODE-P1` [代码制作] Phase 1 strict semantic input（`NH5-01`；`NH5-T01/T02`）。`blocked-by: NH4-CLOSE`（DAG 仅要求 NH1 GO；本清单按用户要求串行线性化）
 - [ ] `NH5-CODE-P2` [代码制作] Phase 2 acceptance gate + atomicity（`NH5-02/03`；`NH5-T02/T03`）。`blocked-by: NH5-CODE-P1`
 - [ ] `NH5-CODE-P3` [代码制作] Phase 3 S06 overlay（`NH5-04`；`NH5-T04`）。`blocked-by: NH5-CODE-P2`
 - [ ] `NH5-CODE-P4` [代码制作] Phase 4 channel naming + facet projection/query（`NH5-05/06/07`；`NH5-T05/T06/T07`）。`blocked-by: NH5-CODE-P3`

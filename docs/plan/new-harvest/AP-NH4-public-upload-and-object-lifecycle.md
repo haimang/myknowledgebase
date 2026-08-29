@@ -24,7 +24,7 @@
 > 关联 reference-anchor:
 > - [`docs/eval/new-harvest/reference-anchor/assessment-analysis-06-public-upload-and-object-lifecycle.md`](../../eval/new-harvest/reference-anchor/assessment-analysis-06-public-upload-and-object-lifecycle.md)
 > - [`docs/eval/new-harvest/reference-anchor/assessment-analysis-09-assurance-replay-concurrency-and-compatibility.md`](../../eval/new-harvest/reference-anchor/assessment-analysis-09-assurance-replay-concurrency-and-compatibility.md)（只消费 upload/GC 竞态，不改写）
-> 文档状态: `draft`
+> 文档状态: `executed`
 > 台账 ID 区间（final §11.A）: `NH4-01..08 / NH4-A01..06 / NH4-T01..07`
 > migration: `M-NH-05` pending hold（本 AP 规定 forward-only DDL，不在本文伪造已 migrate 的 SHA）
 
@@ -696,13 +696,7 @@ S16 对齐：先 `require_business_token` 再碰 team 资源（`dependencies.py:
 
 ## 11. 执行日志回填（仅 `executed` 状态使用）
 
-> 文档状态为 `draft`，非 `executed`。本节按模板占位；执行完成后改用 `respond-execution-log` 厚回填。residual 交后继 charter，不回填本阶段。
-
-- **实际执行摘要**：尚未执行。
-- **Phase 偏差**（逐条带分类）：尚未执行。
-- **阻塞与处理**：尚未执行。
-- **测试发现**（含全绿计数 + 新暴露事实）：尚未执行。
-- **后续 handoff**：执行后交接 NH7 local_object 格与 NH9 capstone B/I 的 upload/GC 证据。
+原 draft 占位已由文末 append-only `§12` 厚版执行日志取代；residual 仍交 NH5/NH7/NH9。
 
 ---
 
@@ -714,3 +708,64 @@ S16 对齐：先 `require_business_token` 再碰 team 资源（`dependencies.py:
 | `v0.2` | `2026-08-29` | Grok fix-fleet | 吸收已核实 review：删除 T04 L4 `deferred` 缓解；NH1-T03 未 GO 则本 AP 不得收口；`NH4-H04` 补全 `src/persistence/migrations/` 前缀 |
 | `v0.3` | `2026-08-29` | Grok parent | 独立复核：补模板 H1；T01 跑法纳入强制 L2 cap node，去掉「可放」 |
 | `v0.4` | `2026-08-29` | Grok recon-fix | 头部/Phase 1 开工闸改为 `stop-or-go.md=GO`；`NH1-T03` 仅 T04 夹具，不替代 GO |
+
+---
+
+## 12. 执行日志回填（append-only）
+
+> 执行者：`Codex`
+> 执行时间：`2026-08-30`（evidence UTC `2026-08-29T20:37:37Z`）
+> 文档状态：`draft → executing → executed`
+> 代码改动统计：实现提交 `7359a96`（29 files；production migration `1`）
+
+- **实际执行摘要**：
+  - Phase 1（`NH4-01`）：`ObjectStorePort.promote_stream` 以 AsyncIterable chunk 增量计算 SHA/size/cap，staging fsync 后原子 replace；错误/中断清 staging。
+  - Phase 2（`NH4-02`）：`ObjectUploadService` 在 bytes promotion 后以单 UoW 写 live catalog+`upload_pending`；fault rollback 不返回 record；M-NH-05 扩 purpose 闭集。
+  - Phase 3（`NH4-03/07`）：新增 Bearer upload/stat/cancel；upload 绕开普通 1MiB 全缓冲但受 object cap；stat 为五字段闭集；raw/list/presign 路由保持零。
+  - Phase 4（`NH4-04/05`）：并发相同字节收敛一个 handle/catalog；local_object 强制 catalog/live-ref；acceptance 同 UoW 将 pending 转 business ref；两次 HTTP 后才可检索。
+  - Phase 5（`NH4-06/08`）：TTL release、last-released-at grace、staging reaper 与 quarantine restore 接线；path/MIME/cap/digest/auth/multipart 攻击矩阵关闭。
+- **Phase 偏差（计划 vs 实际）**：
+  - `NH4-V01 (schema-number)`：provisional `018_nh4` 因 NH2/NH3 已占 `018..020` 顺延为 `021_nh4_upload_pending.sql`。
+  - `NH4-V02 (substrate-fit)`：Port 采用 `promote_stream(AsyncIterable[bytes])`，未暴露可被调用方误用的长期 writer/token 对象；仍满足 chunk/hash/cap/atomic 语义。
+  - `NH4-V03 (public-surface)`：除 upload/stat 外同时实现 AP §4.3 已指定的 `objects:cancel`，用于 Q24 显式 pending release；未增加 raw read。
+  - `NH4-V04 (GC correctness)`：GC 候选新增 `unowned_at=max(released_at) or created_at`，而非只改 TTL scanner；因此 hold/pending release 后完整重启 grace，旧 candidate 变 STALE。
+  - `NH4-V05 (compatibility)`：既有 `test_source_capability_paths` 的 internal promote 反例改经 public upload；纯 unit local decode 用 catalog fixture，不将其计入 NH4 L3 证据。
+- **阻塞与处理**：无 NH4 hard-gate blocker。NH1 GO/namespace fixture 可用；T04 用 inline seed 建合法 active namespace，未删除 namespace 要求。
+- **测试发现**：NH4-T01..T07 + owned GC/source regressions `42 passed`；全仓 `711 collected / 705 passed / 6 successor-owned failed`；ruff/diff/route scans PASS。
+- **后续 handoff**：NH5 补 facet；NH7 local 格必须消费 public handle；NH9 复放 concurrent upload/GC；raw export 仍需未来 owner reopen。
+
+### 12.1 逐工作项状态
+
+| 工作项 | 状态 | PR / commit | 实际落点 | 备注 |
+|--------|------|-------------|----------|------|
+| `NH4-01` | `✅ done` | `7359a96` | `storage/ports.py`; `local_store.py` | bounded stream + cleanup |
+| `NH4-02` | `✅ done` | `7359a96` | migration 021; `object_upload.py` | catalog+pending UoW |
+| `NH4-03` | `✅ done` | `7359a96` | `contracts/api/objects.py`; public routes | auth upload/stat/cancel |
+| `NH4-04` | `✅ done` | `7359a96` | live unique reuse; race tests | same handle / first media stable |
+| `NH4-05` | `✅ done` | `7359a96` | acquisition catalog fence; acceptance conversion | two-step L4 |
+| `NH4-06` | `✅ done` | `7359a96` | `object_upload_ttl.py`; `object_gc.py` | TTL/grace/quarantine/staging |
+| `NH4-07` | `✅ done` | `7359a96` | route contract scan | zero raw/list |
+| `NH4-08` | `✅ done` | `7359a96` | upload security suite | typed negative matrix |
+
+### 12.2 关键指标演进
+
+| 指标 | NH3 baseline | NH4 | Δ |
+|------|--------------|-----|---|
+| authenticated object routes | `0` | `upload + stat + cancel` | `+3 metadata/write routes` |
+| raw object routes | `0` | `0` | `unchanged` |
+| caller-upload purpose | `0` | `upload_pending` | `+1 closed value` |
+| upload→Intake identity delta | n/a | `0/0/0` | `law proven` |
+| public upload body cap | global 1 MiB buffered | object cap streamed | `separated` |
+| owned/related validation | `0` | `42 passed` | `+42` |
+
+### 12.3 successor-owned failures
+
+| 失败项 | 证据 | 判断 |
+|--------|------|------|
+| index/reactivate retrieval namespace（4） | AP-NH2/NH3 pre-recorded; post-NH4 full suite same error | `C handoff → NH8` |
+| rebuild exact-clean `PREFLIGHT_EVIDENCE_INVALID`（1） | AP-NH8 owns bypass; NH4 path untouched | `C handoff → NH8` |
+| realestate newline normalization（1） | provider parser outside NH4 diff; pre-recorded | `C handoff → NH5/NH7` |
+
+### 12.4 文档状态
+
+`draft → executing → executed（2026-08-30）`。

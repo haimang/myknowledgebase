@@ -1,0 +1,16 @@
+{
+  "schema_version": "mkb.nh4-public-upload-evidence.v1",
+  "http": {"upload_status": 201, "stat_status": 200, "disposition": "pending", "raw_get_registered": false},
+  "catalog": {
+    "content_digest": "582dc3e2ac0da05bce6f57a1f38c5a8a2e05aca874ba451152f5322c529d02c8",
+    "size_bytes": 1731,
+    "media_type": "text/plain",
+    "tombstoned_at": null
+  },
+  "pending": {"purpose": "upload_pending", "owner_kind": "public_upload", "released_at": null},
+  "intake_counts_after_upload": {"sources": 0, "items": 0, "revisions": 0},
+  "query_port": "TursoPersistence.transaction",
+  "source_test": "tests/e2e/test_nh4_public_upload.py::test_auth_upload_returns_handle_catalog_pending_zero_intake",
+  "commit": "7359a964e0a8fc72bc6429e59a816de96586cfa4",
+  "observed_at_utc": "2026-08-29T20:37:37Z"
+}
