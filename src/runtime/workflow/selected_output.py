@@ -1,8 +1,8 @@
-"""SPIKE-ONLY selected-output projection for AP-NH1.
+"""Registered selected-output projection algebra.
 
-This bounded slice proves the owner-chosen algebra before AP-NH2 upgrades it
-into the production Workflow CONTROL registry.  It consumes already-durable
-selection rows; it does not evaluate route guards or wait for absent branches.
+The runtime consumes already-durable Process outcomes; it does not evaluate
+route guards or wait for absent branches.  AP-NH1's pure projection helpers
+remain as regression oracles for the production CONTROL implemented by NH2.
 """
 
 from __future__ import annotations

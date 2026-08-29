@@ -11,6 +11,7 @@ from src.contracts.common.ids import stable_digest
 from src.contracts.runtime.models import ProcessOutcome
 from src.contracts.workflow.models import (
     WorkflowDefinition,
+    canonical_workflow_manifest,
 )
 
 
@@ -37,7 +38,7 @@ def _compiled_workflow_digest(definition: WorkflowDefinition) -> str:
     names happen to overlap.
     """
 
-    canonical = definition.model_dump(mode="json")
+    canonical = canonical_workflow_manifest(definition)
     return stable_digest(
         {
             "compiler": "mkb.workflow-compiler.v1",

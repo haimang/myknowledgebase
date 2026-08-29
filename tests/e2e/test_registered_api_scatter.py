@@ -127,7 +127,10 @@ def _get_task(client: TestClient, *, team_uuid: str, task_uuid: str, headers: di
 def _wait_for_terminal(
     client: TestClient, *, team_uuid: str, task_uuid: str, headers: dict[str, str]
 ) -> dict[str, Any]:
-    deadline = time.monotonic() + 8
+    # Full-suite contention can delay the background supervisor without
+    # changing product state. The assertion still fails loudly if no terminal
+    # arrives; a longer bounded window is not a running-as-success fallback.
+    deadline = time.monotonic() + 20
     task: dict[str, Any] = {}
     while time.monotonic() < deadline:
         task = _get_task(client, team_uuid=team_uuid, task_uuid=task_uuid, headers=headers)

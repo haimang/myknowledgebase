@@ -82,6 +82,7 @@ _METRIC_CATALOG = MappingProxyType(
             "mkb_process_claim_total", "counter", labels=("result",), allowed={"result": _COMMON_RESULTS}
         ),
         "mkb_process_running": _metric("mkb_process_running", "gauge"),
+        "mkb_workflow_legacy_pin_total": _metric("mkb_workflow_legacy_pin_total", "counter"),
         "mkb_outbox_depth": _metric(
             "mkb_outbox_depth", "gauge", labels=("kind",), allowed={"kind": _OUTBOX_KINDS}
         ),

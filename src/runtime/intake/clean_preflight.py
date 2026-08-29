@@ -627,13 +627,17 @@ class IntakeCleanPreflightMixin:
             if not isinstance(source, Mapping) or not isinstance(evidence, Mapping):
                 raise MkbError("PREFLIGHT_EVIDENCE_INVALID", "Acquisition evidence is unavailable", 422)
             mode = source.get("acquisition_mode", "staged_inline") if source_kind == "http_resource" else None
-            expected_capability = {
-                "inline_payload": "intake.acquire.inline",
-                "local_object": "intake.acquire.local_object",
-                "http_resource": "intake.acquire.http_browser" if mode == "browser" else "intake.acquire.http_static",
+            allowed_capabilities = {
+                "inline_payload": {"intake.acquire.inline"},
+                "local_object": {"intake.acquire.local_object"},
+                "http_resource": {"intake.acquire.http_static", "intake.acquire.http_browser"},
             }.get(source_kind)
-            if expected_capability is None or evidence.get("acquisition_capability") != expected_capability:
-                raise MkbError("PREFLIGHT_BINDING_INVALID", "Frozen acquisition capability does not match the source profile", 409)
+            if allowed_capabilities is None or evidence.get("acquisition_capability") not in allowed_capabilities:
+                raise MkbError(
+                    "PREFLIGHT_BINDING_INVALID",
+                    "Frozen acquisition capability is not declared for the source kind",
+                    409,
+                )
             digest = evidence.get("raw_byte_digest")
             size = evidence.get("raw_byte_size")
             if (

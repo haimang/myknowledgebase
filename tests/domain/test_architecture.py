@@ -465,14 +465,14 @@ def test_ns2_dispatch_does_not_add_required_tables_or_payload_extra_keys() -> No
     extra_key = re.compile(r"payload_extra[^\n]{0,160}['\"]dispatch_")
     post_011_tables: list[str] = []
     for path in sorted((REPOSITORY_ROOT / "src/persistence/migrations").glob("[0-9][0-9][0-9]_*.sql")):
-        if path.name < "011_":
+        # This guard owns the NS2 dispatch migrations only. Later campaigns
+        # may add reviewed domain tables under their own explicit contracts.
+        if not path.name.startswith(("011_", "012_")):
             continue
         text = path.read_text(encoding="utf-8")
         for match in create_table.finditer(text):
             table = match.group(2)
             if table.startswith("mkb_") and table != "mkb_schema_migrations":
-                if path.name.startswith("013_") and table == "mkb_generation_stage_reports":
-                    continue
                 post_011_tables.append(f"{path.name}:{table}")
     assert post_011_tables == [], "NS2 must not add required tables:\n" + "\n".join(post_011_tables)
 

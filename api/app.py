@@ -57,6 +57,9 @@ from src.services.workflow_registry import WorkflowRegistryService
 from src.storage.local_store import LocalObjectStore
 from src.workflows.builtin_lsrag import (
     BUILTIN_EXECUTION_COMPATIBILITY_WORKFLOWS,
+    BUILTIN_HTTP_RESOURCE_KIND_WORKFLOW,
+    BUILTIN_INLINE_KIND_WORKFLOW,
+    BUILTIN_LOCAL_OBJECT_KIND_WORKFLOW,
     BUILTIN_SINGLE_INTAKE_LSRAG_WORKFLOW,
     BUILTIN_SOURCE_PROFILE_WORKFLOWS,
 )
@@ -295,11 +298,16 @@ def create_container(settings: Settings | None = None) -> Container:
 
     workflow_runtime = WorkflowRuntime(
         persistence,
-        BUILTIN_SINGLE_INTAKE_LSRAG_WORKFLOW,
+        BUILTIN_INLINE_KIND_WORKFLOW,
         additional_definitions=(
+            BUILTIN_LOCAL_OBJECT_KIND_WORKFLOW,
+            BUILTIN_HTTP_RESOURCE_KIND_WORKFLOW,
+            # Old profile keys stay enabled-but-unselected so an in-flight
+            # Execution can resolve its exact compiled digest.
+            BUILTIN_SINGLE_INTAKE_LSRAG_WORKFLOW,
+            *BUILTIN_SOURCE_PROFILE_WORKFLOWS,
             BUILTIN_REGISTERED_API_SCATTER_ROOT_WORKFLOW,
             BUILTIN_REGISTERED_API_SCATTER_CHILD_WORKFLOW,
-            *BUILTIN_SOURCE_PROFILE_WORKFLOWS,
         ),
         compatibility_definitions=BUILTIN_EXECUTION_COMPATIBILITY_WORKFLOWS,
         readiness=workflow_claim_readiness,

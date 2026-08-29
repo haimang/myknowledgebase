@@ -20,7 +20,7 @@ from src.runtime.intake_pipeline import IntakePipeline
 from src.runtime.security import EgressPolicy
 from src.services.config_snapshots import ConfigSnapshotService
 from src.services.workflow_registry import WorkflowRegistryService
-from src.workflows.builtin_lsrag import SINGLE_SOURCE_PROFILE_WORKFLOW_KEYS
+from src.workflows.builtin_lsrag import SOURCE_KIND_WORKFLOW_KEYS
 
 
 class _ObjectFixture:
@@ -250,7 +250,7 @@ def test_preflight_requires_frozen_capability_and_lineage_evidence() -> None:
 
 
 @pytest.mark.asyncio
-async def test_source_profiles_resolve_to_distinct_executable_workflow_capabilities(tmp_path: Path) -> None:
+async def test_source_kinds_resolve_to_shared_graph_capability_sets(tmp_path: Path) -> None:
     persistence = SqlitePersistence(tmp_path / "source-profile-workflows.sqlite3", Path("src/persistence/migrations"))
     await persistence.migrate()
     registry = WorkflowRegistryService(persistence)
@@ -295,7 +295,7 @@ async def test_source_profiles_resolve_to_distinct_executable_workflow_capabilit
         }
         for profile, (kind, explicit_profile, expected_keys) in cases.items():
             identity = await registry.resolve_for_source("intake.ingest", kind, explicit_profile)
-            expected_key = SINGLE_SOURCE_PROFILE_WORKFLOW_KEYS.get(explicit_profile or kind)
+            expected_key = SOURCE_KIND_WORKFLOW_KEYS.get(kind)
             assert identity.workflow_key == expected_key, profile
             async with persistence.transaction() as tx:
                 rows = await tx.fetchall(
@@ -342,7 +342,7 @@ async def test_source_profiles_resolve_to_distinct_executable_workflow_capabilit
                 "logical_handle": "mkbobj:v1:pdf",
                 "media_type": "application/pdf",
             },
-            "local_object.pdf",
+            "local_object",
         ),
         (
             {
@@ -351,7 +351,7 @@ async def test_source_profiles_resolve_to_distinct_executable_workflow_capabilit
                 "logical_handle": "mkbobj:v1:image",
                 "media_type": "image/png",
             },
-            "local_object.image",
+            "local_object",
         ),
         (
             {
@@ -360,7 +360,7 @@ async def test_source_profiles_resolve_to_distinct_executable_workflow_capabilit
                 "url": "https://public.example/web",
                 "acquisition_mode": "browser",
             },
-            "http_resource.browser",
+            "http_resource",
         ),
         (
             {
@@ -369,11 +369,11 @@ async def test_source_profiles_resolve_to_distinct_executable_workflow_capabilit
                 "url": "https://public.example/document.pdf",
                 "acquisition_mode": "pdf",
             },
-            "http_resource.pdf",
+            "http_resource",
         ),
     ],
 )
-def test_config_snapshot_profile_selector_is_descriptor_bounded(source: dict[str, object], expected: str) -> None:
+def test_config_snapshot_selector_is_source_kind_only(source: dict[str, object], expected: str) -> None:
     team_uuid, task_uuid, trace_uuid = uuid7(), uuid7(), uuid7()
     from src.contracts.api.models import TaskCreateRequest
 

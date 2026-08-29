@@ -12,7 +12,7 @@ from collections import defaultdict
 from enum import StrEnum
 from typing import Annotated, Literal
 
-from pydantic import Field, model_validator
+from pydantic import Field, model_serializer, model_validator
 
 from src.contracts.common.models import StrictModel
 
@@ -131,9 +131,22 @@ class WorkflowStepDefinition(StrictModel):
     phase_key: WorkflowPhaseKey | None = None
     required_proof_kind: WorkflowKey | None = None
     control_key: WorkflowKey | None = None
+    control_version: ContractVersion | None = None
+    control_fallback_port: WorkflowKey | None = None
     input_ports: list[WorkflowPortDefinition] = Field(default_factory=list)
     output_ports: list[WorkflowPortDefinition] = Field(default_factory=list)
     terminal_kind: WorkflowTerminalKind | None = None
+
+    @model_serializer(mode="wrap")
+    def serialize_without_absent_nh2_fields(self, handler):
+        """Keep every pre-NH2 workflow's canonical bytes and digest stable."""
+
+        value = handler(self)
+        if value.get("control_version") is None:
+            value.pop("control_version", None)
+        if value.get("control_fallback_port") is None:
+            value.pop("control_fallback_port", None)
+        return value
 
     @model_validator(mode="after")
     def validate_shape(self) -> WorkflowStepDefinition:
@@ -151,7 +164,12 @@ class WorkflowStepDefinition(StrictModel):
                 raise ValueError("process steps require a registered phase_key")
             if self.required_proof_kind is None:
                 raise ValueError("process steps require a proof kind")
-            if self.control_key is not None or self.terminal_kind is not None:
+            if (
+                self.control_key is not None
+                or self.control_version is not None
+                or self.control_fallback_port is not None
+                or self.terminal_kind is not None
+            ):
                 raise ValueError("process steps cannot define control_key or terminal_kind")
             if not self.output_ports:
                 raise ValueError("process steps require at least one output port")
@@ -167,6 +185,17 @@ class WorkflowStepDefinition(StrictModel):
                 for value in (self.process_key, self.contract_version, self.required_proof_kind, self.terminal_kind)
             ):
                 raise ValueError("control steps cannot declare a process capability, proof, or terminal kind")
+            if self.control_key == "selected_output":
+                if self.control_version is None:
+                    raise ValueError("selected_output controls require a semantics version")
+                if not self.input_ports or any(port.required for port in self.input_ports):
+                    raise ValueError("selected_output candidate ports must be optional")
+                if len(self.output_ports) != 1 or not self.output_ports[0].required:
+                    raise ValueError("selected_output controls require one canonical output")
+                if self.control_fallback_port is not None and self.control_fallback_port not in input_names:
+                    raise ValueError("selected_output fallback must name a candidate input port")
+            elif self.control_version is not None or self.control_fallback_port is not None:
+                raise ValueError("only selected_output controls may declare selection semantics")
             return self
 
         if self.step_kind is WorkflowStepKind.TERMINAL:
@@ -178,7 +207,14 @@ class WorkflowStepDefinition(StrictModel):
                 raise ValueError("terminal steps cannot declare ports or a phase")
             if any(
                 value is not None
-                for value in (self.process_key, self.contract_version, self.required_proof_kind, self.control_key)
+                for value in (
+                    self.process_key,
+                    self.contract_version,
+                    self.required_proof_kind,
+                    self.control_key,
+                    self.control_version,
+                    self.control_fallback_port,
+                )
             ):
                 raise ValueError("terminal steps cannot declare process or control fields")
             return self
@@ -195,6 +231,8 @@ class WorkflowStepDefinition(StrictModel):
                     self.contract_version,
                     self.required_proof_kind,
                     self.control_key,
+                    self.control_version,
+                    self.control_fallback_port,
                     self.terminal_kind,
                 )
             ):
@@ -208,6 +246,8 @@ class WorkflowStepDefinition(StrictModel):
                 self.contract_version,
                 self.required_proof_kind,
                 self.control_key,
+                self.control_version,
+                self.control_fallback_port,
                 self.terminal_kind,
             )
         ):
@@ -252,6 +292,10 @@ class WorkflowGuardDefinition(StrictModel):
         "registered_metadata_disposition",
         "registered_markdown_selection",
         "registered_admission_markdown_selection",
+        "representation_main_text_presence",
+        "registered_acquisition_mode",
+        "representation_media_family",
+        "registered_clean_strategy",
     ]
     operator: Literal["eq"]
     expected_value: Annotated[str, Field(min_length=1, max_length=128)]
@@ -273,6 +317,21 @@ class WorkflowGuardDefinition(StrictModel):
             "registered_metadata_disposition": {"no_change"},
             "registered_markdown_selection": {"present"},
             "registered_admission_markdown_selection": {"auto_admitted"},
+            "representation_main_text_presence": {"present", "absent", "unknown"},
+            "registered_acquisition_mode": {"static", "browser", "pdf"},
+            "representation_media_family": {"text", "pdf", "image", "opaque"},
+            "registered_clean_strategy": {
+                "web.deterministic",
+                "web.llm_rewrite",
+                "web.browser_print_pdf",
+                "pdf.text_layer",
+                "pdf.document_understanding",
+                "pdf.ocr",
+                "doc.deterministic",
+                "doc.document_understanding",
+                "doc.ocr",
+                "doc.vision",
+            },
         }
         if self.expected_value not in allowed[self.predicate_type]:
             raise ValueError("guard expected_value is not registered for its predicate")
@@ -550,6 +609,18 @@ class WorkflowDefinition(StrictModel):
             raise ValueError("binding source and target ports must have identical type, schema_ref, and multiplicity")
 
 
+def canonical_workflow_manifest(definition: WorkflowDefinition) -> dict[str, object]:
+    """Serialize without changing pre-NH2 digests for absent CONTROL fields."""
+
+    canonical = definition.model_dump(mode="json")
+    for step in canonical["steps"]:
+        if step.get("control_version") is None:
+            step.pop("control_version", None)
+        if step.get("control_fallback_port") is None:
+            step.pop("control_fallback_port", None)
+    return canonical
+
+
 __all__ = [
     "ContractVersion",
     "SchemaRef",
@@ -570,4 +641,5 @@ __all__ = [
     "WorkflowStepKind",
     "WorkflowTerminalKind",
     "WorkflowValueType",
+    "canonical_workflow_manifest",
 ]

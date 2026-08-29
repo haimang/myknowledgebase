@@ -104,6 +104,10 @@ class WorkflowMaterializeMixin:
             "registered_metadata_disposition": "metadata_disposition",
             "registered_markdown_selection": "markdown_selection",
             "registered_admission_markdown_selection": "admission_markdown_selection",
+            "representation_main_text_presence": "main_text_presence",
+            "registered_acquisition_mode": "acquisition_mode",
+            "representation_media_family": "media_family",
+            "registered_clean_strategy": "selected_clean_strategy",
         }.get(guard.predicate_type)
         if context_key is None:
             raise MkbError("workflow-guard-unsupported", "Workflow guard is not supported by the bounded runtime", 409)
@@ -149,6 +153,22 @@ class WorkflowMaterializeMixin:
             try:
                 envelope = json.loads(audit["strict_payload_json"])
                 payload = envelope.get("payload") if isinstance(envelope, dict) else None
+                source = payload.get("source") if isinstance(payload, dict) else None
+                if isinstance(source, dict):
+                    acquisition_mode = source.get("acquisition_mode")
+                    if acquisition_mode in {"static", "browser", "pdf"}:
+                        context["acquisition_mode"] = acquisition_mode
+                    media_type = source.get("media_type")
+                    if isinstance(media_type, str):
+                        normalized_media = media_type.split(";", 1)[0].strip().casefold()
+                        if normalized_media == "application/pdf":
+                            context["media_family"] = "pdf"
+                        elif normalized_media.startswith("image/"):
+                            context["media_family"] = "image"
+                        elif normalized_media.startswith("text/") or normalized_media == "application/json":
+                            context["media_family"] = "text"
+                        else:
+                            context["media_family"] = "opaque"
                 selection = payload.get("prompt_selection") if isinstance(payload, dict) else None
                 markdown = selection.get("markdown") if isinstance(selection, dict) else None
                 markdown_id = markdown.get("prompt_id") if isinstance(markdown, dict) else None
@@ -165,6 +185,17 @@ class WorkflowMaterializeMixin:
                 # no-markdown route as the only static fallback; it never
                 # manufactures a markdown Process.
                 pass
+        if self.representation_facts is not None:
+            facts = await self.representation_facts.read_route_facts(
+                team_uuid=str(execution["team_uuid"]),
+                execution_uuid=str(execution["execution_uuid"]),
+            )
+            if facts is not None:
+                context["main_text_presence"] = facts.main_text_presence
+                if facts.media_family is not None:
+                    context["media_family"] = facts.media_family
+                if facts.selected_clean_strategy is not None:
+                    context["selected_clean_strategy"] = facts.selected_clean_strategy
         return context
 
 
@@ -427,11 +458,33 @@ class WorkflowMaterializeMixin:
                 continue
             source: dict[str, Any] = {"kind": binding.source_kind.value}
             if binding.source_kind.value == "prior_output":
-                source_row = await tx.fetchone(
-                    "SELECT output_manifest_ref,output_manifest_digest,status,completed_at FROM mkb_processes "
-                    "WHERE execution_uuid=? AND step_key=? ORDER BY completed_at DESC LIMIT 1",
-                    (execution["execution_uuid"], binding.source_step_key),
+                source_step = next(
+                    (candidate for candidate in plan.steps if candidate.step_key == binding.source_step_key),
+                    None,
                 )
+                if source_step is not None and source_step.control_key == "selected_output":
+                    selection = await tx.fetchone(
+                        "SELECT candidate_port,output_manifest_ref,output_manifest_digest,projected_at "
+                        "FROM mkb_workflow_selected_outputs WHERE execution_uuid=? AND control_step_key=?",
+                        (execution["execution_uuid"], binding.source_step_key),
+                    )
+                    source_row = (
+                        None
+                        if selection is None
+                        else {
+                            "output_manifest_ref": selection["output_manifest_ref"],
+                            "output_manifest_digest": selection["output_manifest_digest"],
+                            "status": ProcessStatus.SUCCEEDED.value,
+                            "completed_at": selection["projected_at"],
+                            "candidate_port": selection["candidate_port"],
+                        }
+                    )
+                else:
+                    source_row = await tx.fetchone(
+                        "SELECT output_manifest_ref,output_manifest_digest,status,completed_at FROM mkb_processes "
+                        "WHERE execution_uuid=? AND step_key=? ORDER BY completed_at DESC LIMIT 1",
+                        (execution["execution_uuid"], binding.source_step_key),
+                    )
                 if source_row is None or source_row["status"] != ProcessStatus.SUCCEEDED.value:
                     target = input_ports.get(binding.target_slot_name)
                     if target is not None and not target.required:
@@ -450,6 +503,8 @@ class WorkflowMaterializeMixin:
                         "digest": source_row["output_manifest_digest"],
                     }
                 )
+                if source_row.get("candidate_port"):
+                    source["selected_candidate_port"] = source_row["candidate_port"]
                 # A stage output is a cumulative immutable envelope.  For a
                 # multi-input node select the *most recently completed*
                 # declared predecessor, rather than the incidental source
@@ -509,6 +564,14 @@ class WorkflowMaterializeMixin:
                 execution=execution,
                 route_digest=route_digest,
                 source_process=source_process,
+            )
+        if step.control_key == "selected_output":
+            return await self._enter_selected_output_tx(
+                tx,
+                plan=plan,
+                execution=execution,
+                step=step,
+                route_digest=route_digest,
             )
         if step.control_key != "human_review_gate":
             raise MkbError("workflow-control-unsupported", "Only the bounded human-review control is supported", 409)
@@ -646,6 +709,167 @@ class WorkflowMaterializeMixin:
             payload={"waiting_reason": "human_review", "waiting_ref": gate_uuid},
         )
         return True
+
+
+    async def _enter_selected_output_tx(
+        self,
+        tx: UnitOfWork,
+        *,
+        plan: WorkflowDefinition,
+        execution: dict[str, Any],
+        step: WorkflowStepDefinition,
+        route_digest: str,
+    ) -> bool:
+        """Persist and route one canonical output without waiting or re-running guards."""
+
+        current = await self._execution(tx, execution["execution_uuid"])
+        if current["status"] in _TERMINAL_EXECUTION_STATUSES | {ExecutionStatus.CANCELLING.value}:
+            return False
+        bindings = [binding for binding in plan.bindings if binding.target_step_key == step.step_key]
+        candidates: list[dict[str, Any]] = []
+        for binding in bindings:
+            if binding.source_kind.value != "prior_output":
+                continue
+            rows = await tx.fetchall(
+                "SELECT process_uuid,step_key,accepted_outcome_digest,output_manifest_ref,output_manifest_digest "
+                "FROM mkb_processes WHERE execution_uuid=? AND step_key=? AND status='succeeded' "
+                "ORDER BY completed_at,process_uuid",
+                (current["execution_uuid"], binding.source_step_key),
+            )
+            for row in rows:
+                if not row.get("output_manifest_ref") or not row.get("output_manifest_digest"):
+                    await self._fail_execution_integrity_tx(
+                        tx,
+                        current,
+                        "workflow-selected-output-proof-invalid",
+                        "Selected-output candidate lacks a durable output manifest",
+                    )
+                    return False
+                candidates.append(
+                    {
+                        "candidate_port": binding.target_slot_name,
+                        "source_process": row,
+                        "output_manifest_ref": row["output_manifest_ref"],
+                        "output_manifest_digest": row["output_manifest_digest"],
+                        "fallback_used": False,
+                    }
+                )
+        if not candidates and step.control_fallback_port is not None:
+            fallback = next(
+                (binding for binding in bindings if binding.target_slot_name == step.control_fallback_port),
+                None,
+            )
+            if fallback is not None and fallback.source_kind.value == "execution_context":
+                if current.get("manifest_ref") and current.get("manifest_digest"):
+                    candidates.append(
+                        {
+                            "candidate_port": fallback.target_slot_name,
+                            "source_process": None,
+                            "output_manifest_ref": current["manifest_ref"],
+                            "output_manifest_digest": current["manifest_digest"],
+                            "fallback_used": True,
+                        }
+                    )
+        if not candidates:
+            await self._fail_execution_integrity_tx(
+                tx,
+                current,
+                "workflow-selected-output-missing",
+                "Selected-output CONTROL has no committed candidate",
+            )
+            return False
+        if len(candidates) != 1:
+            await self._fail_execution_integrity_tx(
+                tx,
+                current,
+                "workflow-selected-output-conflict",
+                "Selected-output CONTROL observed more than one committed candidate",
+            )
+            return False
+
+        selected = candidates[0]
+        version = step.control_version or ""
+        source_process = selected["source_process"]
+        material = {
+            "execution_uuid": current["execution_uuid"],
+            "control_step_key": step.step_key,
+            "control_version": version,
+            "candidate_port": selected["candidate_port"],
+            "selected_source_process_uuid": None if source_process is None else source_process["process_uuid"],
+            "accepted_outcome_digest": None if source_process is None else source_process["accepted_outcome_digest"],
+            "output_manifest_ref": selected["output_manifest_ref"],
+            "output_manifest_digest": selected["output_manifest_digest"],
+            "route_decision_digest": route_digest,
+            "fallback_used": selected["fallback_used"],
+        }
+        selection_digest = stable_digest(material)
+        now = utc_now()
+        inserted = await tx.execute(
+            "INSERT OR IGNORE INTO mkb_workflow_selected_outputs "
+            "(selection_uuid,team_uuid,execution_uuid,control_step_key,control_version,candidate_port,"
+            "selected_source_process_uuid,output_manifest_ref,output_manifest_digest,route_decision_digest,"
+            "selection_digest,fallback_used,projected_at,payload_extra) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,'{}')",
+            (
+                uuid7(),
+                current["team_uuid"],
+                current["execution_uuid"],
+                step.step_key,
+                version,
+                selected["candidate_port"],
+                material["selected_source_process_uuid"],
+                selected["output_manifest_ref"],
+                selected["output_manifest_digest"],
+                route_digest,
+                selection_digest,
+                int(selected["fallback_used"]),
+                now,
+            ),
+        )
+        durable = await tx.fetchone(
+            "SELECT selection_digest FROM mkb_workflow_selected_outputs "
+            "WHERE execution_uuid=? AND control_step_key=?",
+            (current["execution_uuid"], step.step_key),
+        )
+        if durable is None or durable["selection_digest"] != selection_digest:
+            await self._fail_execution_integrity_tx(
+                tx,
+                current,
+                "workflow-selected-output-conflict",
+                "Selected-output CONTROL conflicts with its prior durable projection",
+            )
+            return False
+        if inserted.rowcount:
+            await self._record_event_tx(
+                tx,
+                execution=current,
+                event_type="execution.selection_projected",
+                aggregate="execution",
+                summary="Selected-output CONTROL projected one durable candidate",
+                process_uuid=material["selected_source_process_uuid"],
+                payload={
+                    "control_step_key": step.step_key,
+                    "control_version": version,
+                    "candidate_port": selected["candidate_port"],
+                    "selection_digest": selection_digest,
+                    "fallback_used": selected["fallback_used"],
+                },
+            )
+        decision = self._route_decision(
+            plan=plan,
+            execution=current,
+            source_step_key=step.step_key,
+            selector=WorkflowOutcomeSelector.SUCCEEDED,
+            route_context={},
+        )
+        return await self._apply_routes_tx(
+            tx,
+            plan=plan,
+            execution=current,
+            decision=decision,
+            source_process=source_process,
+            route_context={},
+            terminal_error=None,
+        )
 
 
     def _control_step(self, plan: WorkflowDefinition, control_key: str | None = None) -> WorkflowStepDefinition:

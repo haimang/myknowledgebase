@@ -79,6 +79,7 @@ def selected_output_test_graph() -> WorkflowDefinition:
             step_key="merge",
             step_kind=WorkflowStepKind.CONTROL,
             control_key="selected_output",
+            control_version="selected-output.v1",
             phase_key=WorkflowPhaseKey.CLEANING,
             input_ports=[_port("candidate_a", required=False), _port("candidate_b", required=False)],
             output_ports=[_port("selected")],

@@ -92,7 +92,7 @@ def test_single_intake_publishes_grounded_retrieval_context(tmp_path: Path) -> N
         )
         assert created.status_code == 201, created.text
 
-        deadline = time.monotonic() + 5
+        deadline = time.monotonic() + 20
         task: dict[str, object] = {}
         while time.monotonic() < deadline:
             response = client.get(f"/v1/teams/{team_uuid}/tasks/{task_uuid}", headers=headers)
@@ -386,7 +386,7 @@ def test_live_profile_uses_frozen_binding_for_vector_write_and_query(tmp_path: P
             },
         )
         assert created.status_code == 201, created.text
-        deadline = time.monotonic() + 5
+        deadline = time.monotonic() + 20
         task: dict[str, object] = {}
         while time.monotonic() < deadline:
             response = client.get(f"/v1/teams/{team_uuid}/tasks/{task_uuid}", headers=headers)

@@ -12,6 +12,7 @@ from src.services.workflow_registry import WorkflowRegistryService
 from src.workflows.builtin_lsrag import (
     BUILTIN_SINGLE_INTAKE_LSRAG_WORKFLOW,
     HISTORICAL_SINGLE_INTAKE_LSRAG_WORKFLOW_V1,
+    SOURCE_KIND_WORKFLOW_KEYS,
 )
 
 
@@ -78,5 +79,24 @@ async def test_registry_appends_v2_without_mutating_or_rebinding_v1(tmp_path: Pa
         assert active == {"active_revision_uuid": registered_v2.workflow_revision_uuid}
         assert "index_rebuild" not in [row["step_key"] for row in v1_steps]
         assert "index_rebuild" in [row["step_key"] for row in v2_steps]
+    finally:
+        await persistence.close()
+
+
+@pytest.mark.asyncio
+async def test_resolve_for_source_kind_only_ignores_profile(tmp_path: Path) -> None:
+    persistence = SqlitePersistence(tmp_path / "kind-only-registry.sqlite3", Path("src/persistence/migrations"))
+    await persistence.migrate()
+    registry = WorkflowRegistryService(persistence)
+    try:
+        await registry.bootstrap()
+        identities = [
+            await registry.resolve_for_source("intake.ingest", "http_resource", profile)
+            for profile in ("http_resource.static", "http_resource.browser", "http_resource.pdf")
+        ]
+        assert {identity.workflow_key for identity in identities} == {
+            SOURCE_KIND_WORKFLOW_KEYS["http_resource"]
+        }
+        assert len({identity.compiled_digest for identity in identities}) == 1
     finally:
         await persistence.close()

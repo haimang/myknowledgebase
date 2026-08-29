@@ -11,6 +11,7 @@ from src.contracts.common.errors import ConflictError, MkbError, NotFoundError, 
 from src.contracts.common.ids import stable_digest, uuid7
 from src.contracts.common.models import ExecutionStatus, ProcessStatus
 from src.contracts.common.time import utc_now
+from src.contracts.intake.representation import RepresentationFactReader
 from src.contracts.runtime.models import ProcessCommand, ProcessOutcome
 from src.contracts.workflow.models import (
     WorkflowDefinition,
@@ -62,6 +63,7 @@ class WorkflowCoreMixin:
         retry_delay_seconds: int = 1,
         cleanup_recovery_window_seconds: int = 60,
         metrics: Any | None = None,
+        representation_facts: RepresentationFactReader | None = None,
     ) -> None:
         if default_max_retries < 0 or default_max_recoveries < 0:
             raise ValueError("retry and recovery limits must be non-negative")
@@ -85,6 +87,7 @@ class WorkflowCoreMixin:
         # or deletion stays in the S12/S15 retention owner.
         self.cleanup_recovery_window_seconds = cleanup_recovery_window_seconds
         self.metrics = metrics
+        self.representation_facts = representation_facts
         active_definitions = (definition, *additional_definitions)
         self._active_workflow_keys = {candidate.workflow_key for candidate in active_definitions}
         if len(self._active_workflow_keys) != len(active_definitions):
@@ -124,11 +127,8 @@ class WorkflowCoreMixin:
                 # duplicate root wake replay.
                 return False
             plan = await self._assert_execution_binding(tx, execution)
-            task = await tx.fetchone(
-                "SELECT request_intent FROM mkb_tasks WHERE team_uuid=? AND task_uuid=?",
-                (execution["team_uuid"], execution["task_uuid"]),
-            )
-            if task is None or not isinstance(task.get("request_intent"), str):
+            route_context = await self._typed_route_context_tx(tx, execution)
+            if not isinstance(route_context.get("request_intent"), str):
                 await self._fail_execution_integrity_tx(
                     tx,
                     execution,
@@ -136,7 +136,6 @@ class WorkflowCoreMixin:
                     "Execution has no durable Task intent for static route selection",
                 )
                 return False
-            route_context = {"request_intent": task["request_intent"]}
             start = next(step for step in plan.steps if step.step_kind is WorkflowStepKind.START)
             decision = self._route_decision(
                 plan=plan,
@@ -434,7 +433,8 @@ class WorkflowCoreMixin:
                 # revision has a reviewed interpreter in this deployment.  This
                 # closes the gap where an old Execution could be claimed under a
                 # newer graph and only fail after the handler had already run.
-                await self._assert_execution_binding(tx, candidate)
+                plan = await self._assert_execution_binding(tx, candidate)
+                self._assert_process_declared(plan, candidate)
                 if candidate["deadline_at"] is not None and candidate["deadline_at"] < now:
                     await self._fail_expired_ready_tx(tx, candidate)
                     continue
@@ -623,6 +623,8 @@ class WorkflowCoreMixin:
             raise MkbError(
                 "workflow-binding-mismatch", "Execution digest resolved to a different immutable workflow key", 409
             )
+        if plan.workflow_key.startswith("intake.ingest.single.") and self.metrics is not None:
+            self.metrics.increment("mkb_workflow_legacy_pin_total")
         rows = await tx.fetchall(
             "SELECT workflow_step_uuid,step_key FROM mkb_workflow_steps WHERE workflow_revision_uuid=?",
             (execution["workflow_revision_uuid"],),
@@ -634,6 +636,23 @@ class WorkflowCoreMixin:
                 "workflow-step-registry-mismatch", "Workflow revision steps do not match the loaded declaration", 409
             )
         return plan
+
+    @staticmethod
+    def _assert_process_declared(plan: WorkflowDefinition, process: dict[str, Any]) -> None:
+        """Fence graph-outside process rows before a handler can observe them."""
+
+        step = next((candidate for candidate in plan.steps if candidate.step_key == process.get("step_key")), None)
+        if (
+            step is None
+            or step.step_kind is not WorkflowStepKind.PROCESS
+            or step.process_key != process.get("process_key")
+            or step.contract_version != process.get("process_contract_version")
+        ):
+            raise MkbError(
+                "workflow-process-undeclared",
+                "Process capability is not declared by the immutable Workflow revision",
+                409,
+            )
 
 
     async def _refresh_execution_counts_tx(self, tx: UnitOfWork, execution_uuid: str) -> None:

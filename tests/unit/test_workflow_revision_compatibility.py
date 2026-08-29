@@ -11,9 +11,11 @@ from src.contracts.common.ids import stable_digest, uuid7
 from src.contracts.common.time import utc_now
 from src.contracts.runtime.models import ProcessCommand, ProcessOutcome
 from src.persistence.sqlite_port import SqlitePersistence
+from src.runtime.metrics import default_metrics
 from src.runtime.workflow_engine import WorkflowRuntime, WorkflowWorker, canonical_outcome_digest
 from src.services.workflow_registry import WorkflowIdentity, WorkflowRegistryService
 from src.workflows.builtin_lsrag import (
+    BUILTIN_INLINE_KIND_WORKFLOW,
     BUILTIN_SINGLE_INTAKE_LSRAG_WORKFLOW,
     HISTORICAL_SINGLE_INTAKE_LSRAG_WORKFLOW_V1,
 )
@@ -190,5 +192,84 @@ async def test_unknown_historical_compiled_plan_fails_before_process_materializa
                 "SELECT process_uuid FROM mkb_processes WHERE execution_uuid=?", (execution_uuid,)
             )
         assert processes == []
+    finally:
+        await persistence.close()
+
+
+@pytest.mark.asyncio
+async def test_old_pin_sequence_unchanged_after_kind_family_activation(tmp_path: Path) -> None:
+    persistence = SqlitePersistence(tmp_path / "nh2-old-pin-kind.sqlite3", Path("src/persistence/migrations"))
+    await persistence.migrate()
+    registry = WorkflowRegistryService(persistence)
+    metrics = default_metrics()
+    try:
+        registered_v1 = await registry.register(HISTORICAL_SINGLE_INTAKE_LSRAG_WORKFLOW_V1)
+        team_uuid, task_uuid, execution_uuid = await _seed_v1_execution(persistence, registered_v1)
+        await registry.register(BUILTIN_SINGLE_INTAKE_LSRAG_WORKFLOW)
+        await registry.register(BUILTIN_INLINE_KIND_WORKFLOW)
+
+        runtime = WorkflowRuntime(
+            persistence,
+            BUILTIN_INLINE_KIND_WORKFLOW,
+            additional_definitions=(BUILTIN_SINGLE_INTAKE_LSRAG_WORKFLOW,),
+            compatibility_definitions=(HISTORICAL_SINGLE_INTAKE_LSRAG_WORKFLOW_V1,),
+            retry_delay_seconds=0,
+            metrics=metrics,
+        )
+        assert await runtime.materialize_root(execution_uuid)
+        worker = WorkflowWorker(runtime, _SuccessfulLegacyStage())
+        for _ in range(12):
+            if not await worker.run_once("nh2-old-pin-worker"):
+                break
+
+        async with persistence.transaction() as tx:
+            execution = await tx.fetchone(
+                "SELECT status,workflow_revision_uuid,compiled_digest FROM mkb_executions WHERE execution_uuid=?",
+                (execution_uuid,),
+            )
+            task = await tx.fetchone(
+                "SELECT status FROM mkb_tasks WHERE team_uuid=? AND task_uuid=?",
+                (team_uuid, task_uuid),
+            )
+            rows = await tx.fetchall(
+                "SELECT process_key FROM mkb_processes WHERE execution_uuid=? ORDER BY created_at,process_uuid",
+                (execution_uuid,),
+            )
+        assert execution == {
+            "status": "succeeded",
+            "workflow_revision_uuid": registered_v1.workflow_revision_uuid,
+            "compiled_digest": registered_v1.compiled_digest,
+        }
+        assert task == {"status": "succeeded"}
+        assert [row["process_key"] for row in rows] == [
+            "intake.acquire.inline",
+            "intake.decode.text_json_html",
+            "clean.extract.deterministic",
+            "intake.collection.seal",
+            "intake.preflight_validate",
+            "intake.accept_snapshot",
+            "lsrag.structurize",
+            "lsrag.construct",
+            "lsrag.vectorize",
+            "index.validate_publication",
+        ]
+        metric_line = next(
+            line for line in metrics.render().splitlines() if line.startswith("mkb_workflow_legacy_pin_total ")
+        )
+        assert float(metric_line.rsplit(" ", 1)[1]) > 0
+    finally:
+        await persistence.close()
+
+
+@pytest.mark.asyncio
+async def test_new_task_does_not_resolve_old_selector_key(tmp_path: Path) -> None:
+    persistence = SqlitePersistence(tmp_path / "nh2-new-kind-only.sqlite3", Path("src/persistence/migrations"))
+    await persistence.migrate()
+    registry = WorkflowRegistryService(persistence)
+    try:
+        await registry.bootstrap()
+        identity = await registry.resolve_for_source("intake.ingest", "http_resource", "http_resource.static")
+        assert identity.workflow_key == "intake.ingest.kind.http-resource.lsrag.v1"
+        assert identity.workflow_key != "intake.ingest.single.http-static.lsrag.v1"
     finally:
         await persistence.close()

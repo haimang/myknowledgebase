@@ -19,13 +19,14 @@ from src.contracts.workflow.models import (
     WorkflowBindingSourceKind,
     WorkflowDefinition,
     WorkflowStepKind,
+    canonical_workflow_manifest,
 )
 from src.persistence.ports import PersistencePort, UnitOfWork
 from src.workflows.builtin_lsrag import (
     BUILTIN_WORKFLOWS as BUILTIN_SINGLE_WORKFLOWS,
 )
 from src.workflows.builtin_lsrag import (
-    SINGLE_SOURCE_PROFILE_WORKFLOW_KEYS,
+    SOURCE_KIND_WORKFLOW_KEYS,
 )
 from src.workflows.builtin_scatter import (
     BUILTIN_SCATTER_WORKFLOWS,
@@ -88,20 +89,18 @@ class WorkflowRegistryService:
         workflow key, revision, process, or branch.
         """
 
+        del source_profile
         if purpose_key == "intake.ingest" and source_kind == "registered_api":
             return await self.resolve_by_key(SCATTER_ROOT_WORKFLOW_KEY)
         if purpose_key == "intake.ingest":
-            profile = source_profile or source_kind
-            # Non-ingest Task intents deliberately reuse the canonical inline
-            # skeleton after ConfigSnapshotService freezes their own target
-            # context.  They have no source descriptor to profile-select.
-            workflow_key = SINGLE_SOURCE_PROFILE_WORKFLOW_KEYS.get(
-                profile or "inline_payload"
-            )
+            workflow_key = SOURCE_KIND_WORKFLOW_KEYS.get(source_kind or "inline_payload")
             if workflow_key is None:
-                raise MkbError("REGISTRY_NOT_FOUND", "Source profile has no exact active workflow binding", 503)
+                raise MkbError("SOURCE_KIND_INVALID", "Source kind is not registered", 422)
             return await self.resolve_by_key(workflow_key)
-        return await self.resolve(purpose_key)
+        # Post-ingest intents have no SourceDescriptor.  They share the
+        # canonical inline-kind skeleton while their frozen intent context
+        # selects the registered lifecycle/index edge inside that graph.
+        return await self.resolve_by_key(SOURCE_KIND_WORKFLOW_KEYS["inline_payload"])
 
     async def resolve(self, purpose_key: str) -> WorkflowIdentity:
         """Return exactly one enabled active workflow without floating aliases."""
@@ -153,7 +152,7 @@ class WorkflowRegistryService:
     async def register(self, definition: WorkflowDefinition) -> WorkflowIdentity:
         """Atomically register a graph or verify the immutable prior revision."""
 
-        canonical = definition.model_dump(mode="json")
+        canonical = canonical_workflow_manifest(definition)
         registration_fingerprint = stable_digest(canonical)
         compiled_digest = stable_digest(
             {
@@ -287,7 +286,7 @@ class WorkflowRegistryService:
                 "INSERT INTO mkb_workflow_steps "
                 "(workflow_step_uuid,workflow_revision_uuid,step_key,step_kind,process_key,process_contract_version,"
                 "phase_key,requiredness,terminal_kind,order_hint,display_name,payload_extra) "
-                "VALUES (?,?,?,?,?,?,?,?,?,?,?,'{}')",
+                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
                 (
                     step_uuid,
                     revision_uuid,
@@ -300,6 +299,15 @@ class WorkflowRegistryService:
                     step.terminal_kind.value if step.terminal_kind else None,
                     order_hint,
                     step.step_key,
+                    _json(
+                        {
+                            "control_key": step.control_key,
+                            "control_version": step.control_version,
+                            "control_fallback_port": step.control_fallback_port,
+                        }
+                    )
+                    if step.step_kind is WorkflowStepKind.CONTROL
+                    else "{}",
                 ),
             )
 
@@ -339,6 +347,26 @@ class WorkflowRegistryService:
             "'latest_claim_time','{}')",
             (uuid7(), revision_uuid),
         )
+        for step in definition.steps:
+            if step.step_kind is not WorkflowStepKind.CONTROL:
+                continue
+            await tx.execute(
+                "INSERT INTO mkb_workflow_controls "
+                "(workflow_control_uuid,workflow_revision_uuid,scope_type,workflow_step_uuid,failure_policy,payload_extra) "
+                "VALUES (?,?,'step',?,'fail_fast',?)",
+                (
+                    uuid7(),
+                    revision_uuid,
+                    step_ids[step.step_key],
+                    _json(
+                        {
+                            "control_key": step.control_key,
+                            "control_version": step.control_version,
+                            "control_fallback_port": step.control_fallback_port,
+                        }
+                    ),
+                ),
+            )
         for guard in definition.guards:
             operand_kind, operand_ref = {
                 "registered_admission_result": ("admission_result", "candidate_set.admission_result"),
@@ -349,6 +377,13 @@ class WorkflowRegistryService:
                     "admission_markdown_selection",
                     "candidate_set.admission_result+task.prompt_selection.markdown",
                 ),
+                "representation_main_text_presence": (
+                    "main_text_presence",
+                    "representation_fact.main_text_presence",
+                ),
+                "registered_acquisition_mode": ("acquisition_mode", "task.source.acquisition_mode"),
+                "representation_media_family": ("media_family", "representation_fact.media_family"),
+                "registered_clean_strategy": ("selected_clean_strategy", "selection.selected_clean_strategy"),
             }.get(guard.predicate_type, (None, None))
             if operand_kind is None or operand_ref is None:
                 raise MkbError("workflow-guard-unsupported", "Workflow guard declaration is unsupported", 503)

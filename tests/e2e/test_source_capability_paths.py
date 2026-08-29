@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import asyncio
 import json
-import sqlite3
 import time
 from pathlib import Path
 
@@ -143,6 +142,8 @@ def test_local_static_browser_and_pdf_sources_produce_distinct_frozen_acquisitio
         ),
     ]
     task_ids: dict[str, str] = {}
+    output_refs: dict[str, str] = {}
+    clean_refs: dict[str, tuple[str, str]] = {}
 
     with TestClient(app, raise_server_exceptions=True) as client:
         assert client.get("/ready").status_code == 200
@@ -167,25 +168,29 @@ def test_local_static_browser_and_pdf_sources_produce_distinct_frozen_acquisitio
             terminal = _await_terminal(client, team_uuid, task_uuid, headers)
             assert terminal["status"] == "succeeded", (name, terminal)
 
-    output_refs: dict[str, str] = {}
-    clean_refs: dict[str, tuple[str, str]] = {}
-    with sqlite3.connect(tmp_path / "mkb.sqlite3") as connection:
-        connection.row_factory = sqlite3.Row
-        for name, task_uuid in task_ids.items():
-            row = connection.execute(
-                "SELECT output_manifest_ref FROM mkb_processes "
-                "WHERE team_uuid=? AND task_uuid=? AND step_key='acquire' AND status='succeeded'",
-                (team_uuid, task_uuid),
-            ).fetchone()
-            assert row is not None, name
-            output_refs[name] = row["output_manifest_ref"]
-            clean = connection.execute(
-                "SELECT process_key,output_manifest_ref FROM mkb_processes "
-                "WHERE team_uuid=? AND task_uuid=? AND step_key='clean' AND status='succeeded'",
-                (team_uuid, task_uuid),
-            ).fetchone()
-            assert clean is not None, name
-            clean_refs[name] = (clean["process_key"], clean["output_manifest_ref"])
+        persistence = app.state.container.persistence
+
+        async def inspect_paths() -> None:
+            async with persistence.transaction() as tx:
+                for name, task_uuid in task_ids.items():
+                    row = await tx.fetchone(
+                        "SELECT output_manifest_ref FROM mkb_processes "
+                        "WHERE team_uuid=? AND task_uuid=? AND process_key LIKE 'intake.acquire.%' "
+                        "AND status='succeeded' ORDER BY completed_at DESC LIMIT 1",
+                        (team_uuid, task_uuid),
+                    )
+                    assert row is not None, name
+                    output_refs[name] = str(row["output_manifest_ref"])
+                    clean = await tx.fetchone(
+                        "SELECT process_key,output_manifest_ref FROM mkb_processes "
+                        "WHERE team_uuid=? AND task_uuid=? AND process_key LIKE 'clean.%' "
+                        "AND status='succeeded' ORDER BY completed_at DESC LIMIT 1",
+                        (team_uuid, task_uuid),
+                    )
+                    assert clean is not None, name
+                    clean_refs[name] = (str(clean["process_key"]), str(clean["output_manifest_ref"]))
+
+        client.portal.call(inspect_paths)
 
     store = LocalObjectStore(tmp_path / "objects")
     evidence: dict[str, dict[str, object]] = {}
@@ -256,16 +261,19 @@ def test_local_image_reaches_the_exact_ocr_workflow_then_fails_closed_when_uncon
         assert created.status_code == 201, created.text
         terminal = _await_terminal(client, team_uuid, task_uuid, headers)
         assert terminal["status"] == "failed", terminal
+        persistence = app.state.container.persistence
 
-    with sqlite3.connect(tmp_path / "mkb.sqlite3") as connection:
-        connection.row_factory = sqlite3.Row
-        clean = connection.execute(
-            "SELECT process_key,status,error_code FROM mkb_processes "
-            "WHERE team_uuid=? AND task_uuid=? AND step_key='clean'",
-            (team_uuid, task_uuid),
-        ).fetchone()
+        async def inspect_clean() -> dict[str, object] | None:
+            async with persistence.transaction() as tx:
+                return await tx.fetchone(
+                    "SELECT process_key,status,error_code FROM mkb_processes "
+                    "WHERE team_uuid=? AND task_uuid=? AND process_key='clean.ocr.local'",
+                    (team_uuid, task_uuid),
+                )
+
+        clean = client.portal.call(inspect_clean)
     assert clean is not None
-    assert dict(clean) == {
+    assert clean == {
         "process_key": "clean.ocr.local",
         "status": "failed",
         "error_code": "CLEAN_OCR_CAPABILITY_UNAVAILABLE",

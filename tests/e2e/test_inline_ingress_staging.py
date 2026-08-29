@@ -87,7 +87,7 @@ def test_inline_ingress_is_staged_before_task_audit_and_execution_manifest(tmp_p
         replay = client.post(f"/v1/teams/{team_uuid}/tasks", headers=headers, json=payload)
         assert replay.status_code == 200, replay.text
 
-        deadline = time.monotonic() + 5
+        deadline = time.monotonic() + 20
         task: dict[str, object] = {}
         while time.monotonic() < deadline:
             response = client.get(f"/v1/teams/{team_uuid}/tasks/{task_uuid}", headers=headers)

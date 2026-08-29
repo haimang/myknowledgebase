@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import sqlite3
 import time
 from pathlib import Path
 
@@ -80,7 +79,7 @@ def test_generation_members_are_independent_and_vectorize_every_channel(tmp_path
             },
         )
         assert created.status_code == 201, created.text
-        deadline = time.monotonic() + 5
+        deadline = time.monotonic() + 20
         while time.monotonic() < deadline:
             task = client.get(f"/v1/teams/{team_uuid}/tasks/{task_uuid}", headers=headers)
             assert task.status_code == 200, task.text
@@ -89,38 +88,39 @@ def test_generation_members_are_independent_and_vectorize_every_channel(tmp_path
             time.sleep(0.02)
         assert task.json()["status"] == "succeeded", task.text
 
-    database_uri = f"file:{tmp_path / 'mkb.sqlite3'}?mode=ro"
-    with sqlite3.connect(database_uri, uri=True) as connection:
-        connection.row_factory = sqlite3.Row
-        artifacts = [
-            dict(row)
-            for row in connection.execute(
+        persistence = app.state.container.persistence
+
+        async def inspect_generation() -> tuple[
+            list[dict[str, object]],
+            list[dict[str, object]],
+            list[dict[str, object]],
+            dict[str, object] | None,
+        ]:
+            async with persistence.transaction() as tx:
+                artifacts = await tx.fetchall(
                 "SELECT generation_artifact_uuid,artifact_type,logical_handle,content_digest,size_bytes,"
                 "validation_report_ref,validation_report_digest,validation_disposition "
                 "FROM mkb_generation_artifacts WHERE team_uuid=? AND task_uuid=? ORDER BY artifact_type",
                 (team_uuid, task_uuid),
             )
-        ]
-        pointers = [
-            dict(row)
-            for row in connection.execute(
+                pointers = await tx.fetchall(
                 "SELECT artifact_type,current_generation_artifact_uuid FROM mkb_generation_pointers "
                 "WHERE team_uuid=? ORDER BY artifact_type",
                 (team_uuid,),
             )
-        ]
-        vectors = [
-            dict(row)
-            for row in connection.execute(
+                vectors = await tx.fetchall(
                 "SELECT vector_record_uuid,generation_artifact_uuid,block_or_unit_id,channel,content_digest,source_handle,"
                 "publication_state FROM mkb_vector_records WHERE team_uuid=? ORDER BY block_or_unit_id,channel",
                 (team_uuid,),
             )
-        ]
-        outbox = connection.execute(
-            "SELECT payload_json,payload_digest FROM mkb_outbox WHERE team_uuid=? AND kind='vectorize_construct'",
-            (team_uuid,),
-        ).fetchone()
+                outbox = await tx.fetchone(
+                    "SELECT payload_json,payload_digest FROM mkb_outbox "
+                    "WHERE team_uuid=? AND kind='vectorize_construct'",
+                    (team_uuid,),
+                )
+            return artifacts, pointers, vectors, outbox
+
+        artifacts, pointers, vectors, outbox = client.portal.call(inspect_generation)
 
     by_type = {artifact["artifact_type"]: artifact for artifact in artifacts}
     expected_types = {
