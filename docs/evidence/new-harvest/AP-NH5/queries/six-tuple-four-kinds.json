@@ -1,0 +1,14 @@
+{
+  "schema_version": "mkb.nh5-six-tuple-evidence.v1",
+  "required_keys": ["realm", "type", "channel", "source_name", "is_active", "context_tags"],
+  "source_kinds": {
+    "http_resource": {"distinct_keys": 6},
+    "inline_payload": {"distinct_keys": 6},
+    "local_object": {"distinct_keys": 6},
+    "registered_api": {"distinct_keys": 6}
+  },
+  "source_kind_stub_complete": false,
+  "query_port": "TursoPersistence.transaction",
+  "source_test": "tests/integration/test_nh5_four_kind_semantics.py",
+  "observed_at_utc": "2026-08-29T21:38:33Z"
+}

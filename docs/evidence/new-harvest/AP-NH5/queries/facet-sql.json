@@ -1,0 +1,18 @@
+{
+  "schema_version": "mkb.nh5-facet-sql-evidence.v1",
+  "facet_rows": {
+    "realm": 18,
+    "type": 18,
+    "channel": 18,
+    "source_name": 18,
+    "is_active": 18,
+    "context_tags": 18
+  },
+  "definition_digest_cardinality_per_key": 1,
+  "candidate_sql_uses_exists_before_limit": true,
+  "python_semantic_postfilter": false,
+  "realm_hit_and_exclude": true,
+  "semantic_channel_hit_and_exclude": true,
+  "source_tests": ["tests/e2e/test_nh5_facet_retrieval.py", "tests/unit/test_nh5_facet_sql_not_postfilter.py"],
+  "observed_at_utc": "2026-08-29T21:38:33Z"
+}

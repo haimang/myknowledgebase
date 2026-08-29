@@ -51,16 +51,16 @@
 
 ## NH5 — semantic ledger and retrieval facets
 
-- [-] `NH5-CODE-P1` [代码制作] Phase 1 strict semantic input（`NH5-01`；`NH5-T01/T02`）。`blocked-by: NH4-CLOSE`（DAG 仅要求 NH1 GO；本清单按用户要求串行线性化）
-- [ ] `NH5-CODE-P2` [代码制作] Phase 2 acceptance gate + atomicity（`NH5-02/03`；`NH5-T02/T03`）。`blocked-by: NH5-CODE-P1`
-- [ ] `NH5-CODE-P3` [代码制作] Phase 3 S06 overlay（`NH5-04`；`NH5-T04`）。`blocked-by: NH5-CODE-P2`
-- [ ] `NH5-CODE-P4` [代码制作] Phase 4 channel naming + facet projection/query（`NH5-05/06/07`；`NH5-T05/T06/T07`）。`blocked-by: NH5-CODE-P3`
-- [ ] `NH5-CODE-P5` [代码制作] Phase 5 metadata semantic cutover（`NH5-08`；`NH5-T08-A`；`T08-B` handoff 红灯保留给 NH8）。`blocked-by: NH5-CODE-P4`
-- [ ] `NH5-CLOSE` [代码审查，测试与文档回填] `NH5-T01..T08` 的本 AP 硬闸、日志、evidence、closure、commit。`blocked-by: NH5-CODE-P5`
+- [x] `NH5-CODE-P1` [代码制作] Phase 1 strict semantic input（`NH5-01`；`NH5-T01/T02`）。`blocked-by: NH4-CLOSE`（DAG 仅要求 NH1 GO；本清单按用户要求串行线性化）
+- [x] `NH5-CODE-P2` [代码制作] Phase 2 acceptance gate + atomicity（`NH5-02/03`；`NH5-T02/T03`）。`blocked-by: NH5-CODE-P1`
+- [x] `NH5-CODE-P3` [代码制作] Phase 3 S06 overlay（`NH5-04`；`NH5-T04`）。`blocked-by: NH5-CODE-P2`
+- [x] `NH5-CODE-P4` [代码制作] Phase 4 channel naming + facet projection/query（`NH5-05/06/07`；`NH5-T05/T06/T07`）。`blocked-by: NH5-CODE-P3`
+- [x] `NH5-CODE-P5` [代码制作] Phase 5 metadata semantic cutover（`NH5-08`；`NH5-T08-A`；`T08-B` handoff 红灯保留给 NH8）。`blocked-by: NH5-CODE-P4`
+- [x] `NH5-CLOSE` [代码审查，测试与文档回填] `NH5-T01..T08` 的本 AP 硬闸、日志、evidence、closure、commit。`blocked-by: NH5-CODE-P5`
 
 ## NH6 — local runtime supply and security
 
-- [ ] `NH6-CODE-P1` [代码制作] Phase 1 supply identities（`NH6-01`；`NH6-T09/T10`）。`blocked-by: NH5-CLOSE`（同时满足 NH1 GO + NH3 closure）
+- [-] `NH6-CODE-P1` [代码制作] Phase 1 supply identities（`NH6-01`；`NH6-T09/T10`）。`blocked-by: NH5-CLOSE`（同时满足 NH1 GO + NH3 closure）
 - [ ] `NH6-CODE-P2` [代码制作] Phase 2 isolated PDF parser（`NH6-02`；`NH6-T01/T02`）。`blocked-by: NH6-CODE-P1`
 - [ ] `NH6-CODE-P3` [代码制作] Phase 3 browser render/print 双能力（`NH6-03/04`；`NH6-T03/T04/T05`）。`blocked-by: NH6-CODE-P2`
 - [ ] `NH6-CODE-P4` [代码制作] Phase 4 S11 multimodal + OCR/Vision bindings（`NH6-05/06`；`NH6-T06/T07`）。`blocked-by: NH6-CODE-P3`

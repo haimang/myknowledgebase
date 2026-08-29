@@ -1,0 +1,10 @@
+{
+  "schema_version": "mkb.nh5-overlay-evidence.v1",
+  "context_s04_diff": {},
+  "overwritten_model_realm": true,
+  "structure_payload_context_persisted": true,
+  "g0_body_equals_admitted_clean": true,
+  "filter_meta_serialized_into_g0": false,
+  "source_tests": ["tests/unit/test_nh5_system_context_overlay.py", "tests/integration/test_nh5_s04_overlay.py"],
+  "commit": "76f233b3223d54b723a240dc339483661d2e17f2"
+}

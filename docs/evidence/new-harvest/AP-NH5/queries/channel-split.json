@@ -1,0 +1,11 @@
+{
+  "schema_version": "mkb.nh5-channel-split-evidence.v1",
+  "new_schema": "mkb.retrieval.v2",
+  "new_keys": ["semantic_channel", "vector_channel"],
+  "same_request_supported": true,
+  "legacy_schema": "mkb.retrieval.v1",
+  "legacy_channel_mapping": {"original": "vector_channel", "summary": "vector_channel"},
+  "legacy_business_channel_rejected": true,
+  "v2_legacy_key_rejected": true,
+  "source_tests": ["tests/unit/test_nh5_channel_split_schema.py", "tests/e2e/test_nh5_channel_split.py", "tests/e2e/test_nh5_legacy_channel_compat.py"]
+}

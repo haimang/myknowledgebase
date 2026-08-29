@@ -28,7 +28,7 @@
 > 关联 reference-anchor:
 > - [`assessment-analysis-07-semantic-ledger-and-retrieval-facets.md`](../../eval/new-harvest/reference-anchor/assessment-analysis-07-semantic-ledger-and-retrieval-facets.md)
 > - [`assessment-analysis-08-publication-and-intake-lifecycle.md`](../../eval/new-harvest/reference-anchor/assessment-analysis-08-publication-and-intake-lifecycle.md)（邻面缺口只消费）
-> 文档状态: `draft`
+> 文档状态: `executed`
 
 ---
 
@@ -692,13 +692,7 @@ AP-NH5 semantic ledger + retrieval facets
 
 ## 11. 执行日志回填（仅 `executed` 状态使用）
 
-> 文档状态为 `draft`，本节省略实填。执行完成后改用 append 模板 `respond-execution-log`。residual 交后继 charter，不回填本阶段。
-
-- **实际执行摘要**：待执行后回填。
-- **Phase 偏差**（逐条带分类）：待执行后回填。
-- **阻塞与处理**：待执行后回填。
-- **测试发现**（含全绿计数 + 新暴露事实）：待执行后回填。
-- **后续 handoff**：`AP-NH7`（facet 消费）；`AP-NH8`（T08-B exact-clean guard）；`AP-NH9`（closed-set）。
+原 draft 占位已由文末 append-only `§12` 厚版执行日志取代；T08-B 保持红灯交 NH8。
 
 ---
 
@@ -709,3 +703,65 @@ AP-NH5 semantic ledger + retrieval facets
 | `v0.1` | `2026-08-29` | Grok workflow | 由 final §7 派生 |
 | `v0.2` | `2026-08-29` | Grok fix-fleet | 吸收已核实 review：T04 强制 L2 读已 commit S04；T05 钉死 L3 node 并列入跑法；T07 必须经 ingest→非空 admitted clean→publication 再 search；T08 PASS=T08-A，T08-B 仅 NH8 handoff；HEAD metadata e2e 未清 sqlite3 不得 🔱 |
 | `v0.3` | `2026-08-29` | Grok recon-fix | 开工闸改为 `stop-or-go.md=GO` 且与 NH2 互不等；`NH5-T08-B`→`NH8-T03`；§7.1 补 `NH5-A06`；头部自承 Capstone G=`NH5-T07` |
+
+---
+
+## 12. 执行日志回填（append-only）
+
+> 执行者：`Codex`
+> 执行时间：`2026-08-30`（evidence UTC `2026-08-29T21:38:33Z`）
+> 文档状态：`draft → executing → executed`
+> 代码改动统计：实现提交 `76f233b`（70 files；production migration `1`）
+
+- **实际执行摘要**：
+  - Phase 1（`NH5-01`）：generic descriptor 强制四维 nonunknown + tags；is_active 系统派生；三 provider 删除 unknown fallback；API 重复维度成为 mapper equality fence。
+  - Phase 2（`NH5-02/03`）：acceptance 只接受完整六元组，四 kind 均写 10-entry semantic set；blob/scalar/digest/provenance 同源，stub 无法建 Revision/vector。
+  - Phase 3（`NH5-04`）：structurize 从 committed S04 读六元组并覆盖模型 context；StructureDocument 新产物携 context；g0 正文仍只等于 admitted clean。
+  - Phase 4（`NH5-05/06/07`）：新增 `mkb.retrieval.v2` 双 channel；v1 窄映射；vectorize 写六 facet；retrieval 用 correlated EXISTS 在 LIMIT/rank 前过滤。
+  - Phase 5（`NH5-08`）：metadata 合并重建两个 blob，新 Revision 继承 exact clean object，复制新 context-aware structure family并重投影 facet；新/旧 realm namespaced search 切代。
+- **Phase 偏差（计划 vs 实际）**：
+  - `NH5-V01 (compatibility)`：`ProviderOperationDefinition.optional_unknown_fields` 在空集合时不进入 manifest canonical bytes，保持 NH1 3-op digest；未来非空才显式改变 definition digest。
+  - `NH5-V02 (schema)`：provenance migration 使用 collision-safe `022`；旧行标 `legacy_unverifiable`，禁止猜 caller/mapper。
+  - `NH5-V03 (S06 payload)`：StructureDocument 的 `context_meta` 仅在非空时进入 payload/digest；旧无 context payload 仍可 parse 且旧 digest 不漂移。
+  - `NH5-V04 (metadata substrate-fit)`：metadata refresh 不只改 construction header，而是生成同 execution 的新 structure/projection/validation 三件套，避免 serving revision 指向旧 S06 context。
+  - `NH5-V05 (fixture migration)`：57 个 generic source 测试 fixture 机械加入合法四维；未在 production 添加默认值或 test-only bypass。
+- **阻塞与处理**：NH5 hard gates 无 blocker。T08-B 实测 acquire/decode/clean count=3，按设计保留为 NH8 红灯；未 xfail、未把期望改成 3。
+- **测试发现**：NH5 hard suite `39 passed`；全仓 `753 collected / 748 passed / 5 successor-owned failed`；realestate newline 既有失败随 provider normalization 关闭。
+- **后续 handoff**：NH7 消费 v2 facets；NH8 关闭 T08-B 与四个 namespace/rebuild failure；NH9 复核 semantic replay/closed-set。
+
+### 12.1 逐工作项状态
+
+| 工作项 | 状态 | PR / commit | 实际落点 | 备注 |
+|--------|------|-------------|----------|------|
+| `NH5-01` | `✅ done` | `76f233b` | API models; semantics; provider registry/mappers | strict authority |
+| `NH5-02` | `✅ done` | `76f233b` | `acceptance_snapshot.py`; scatter path | six-tuple gate |
+| `NH5-03` | `✅ done` | `76f233b` | migration 022; semantic insert/merge | atomic/provenance |
+| `NH5-04` | `✅ done` | `76f233b` | generation overlay + compiler payload | S04-owned context |
+| `NH5-05` | `✅ done` | `76f233b` | retrieval v1/v2 contracts | channel split |
+| `NH5-06` | `✅ done` | `76f233b` | vector facet projection | six facet keys |
+| `NH5-07` | `✅ done` | `76f233b` | retrieval candidate SQL | pre-rank filter |
+| `NH5-08` T08-A | `✅ done` | `76f233b` | metadata merge/structure/facet | exact clean cutover |
+| `NH5-08.d` T08-B | `❌ OOS handoff` | `-` | evidence process count=3 | `NH8-T03/NH8-03` |
+
+### 12.2 关键指标演进
+
+| 指标 | NH4 baseline | NH5 | Δ |
+|------|--------------|-----|---|
+| non-API six-tuple kinds | `0` | `3` + API = all 4 | `closed` |
+| FilterMeta facet keys | `0` | `6` | `+6` |
+| retrieval public channel axes | overloaded `channel` | semantic + vector | `split` |
+| StructureDocument context authority | absent/model | S04 system overlay | `closed` |
+| provider realestate newline failure | red | green | `-1 repository failure` |
+| NH5 hard gates | `0` | `39 passed` | `+39` |
+
+### 12.3 红灯 / successor-owned failures
+
+| 项 | 证据 | 判断 |
+|----|------|------|
+| T08-B metadata acquire/decode/clean = 3 | `queries/metadata-lineage.json`; no xfail | `C handoff → NH8-T03` |
+| index/reactivate namespace（4） | post-NH5 full suite same 422 | `C handoff → NH8` |
+| rebuild structure profile（1） | current graph still reclean/structurize | `C handoff → NH8 exact-clean` |
+
+### 12.4 文档状态
+
+`draft → executing → executed（2026-08-30）`。

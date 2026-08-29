@@ -1,0 +1,10 @@
+{
+  "schema_version": "mkb.nh5-generic-contract-evidence.v1",
+  "required_fields": ["realm", "type", "channel", "source_name"],
+  "optional_fields": ["context_tags"],
+  "system_owned_fields": ["is_active"],
+  "rejects": ["missing dimension", "blank", "unknown casefold", "is_active from caller", "payload_extra authority"],
+  "valid_business_channel_example": "summary",
+  "source_test": "tests/unit/test_nh5_semantic_contract.py",
+  "commit": "76f233b3223d54b723a240dc339483661d2e17f2"
+}

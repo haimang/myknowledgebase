@@ -1,0 +1,27 @@
+AP-NH5 test evidence
+Observed at: 2026-08-29T21:38:33Z
+Implementation commit: 76f233b3223d54b723a240dc339483661d2e17f2
+Environment: Python 3.12.3; pytest 8.3.5; TursoPersistence used for semantic UoW/L4 query evidence
+
+NH5-T01..T08 hard-gate suite
+Command: uv run pytest tests/unit/test_nh5_*.py tests/integration/test_nh5_*.py tests/e2e/test_nh5_*.py -q
+Result: PASS, 39 passed
+Levels: L1/L2/L3/L4. T07 performs two real default-root ingests and namespaced HTTP retrieval; no direct vector/facet planting.
+
+Static review
+Command: uv run ruff check src intake tests
+Result: PASS
+Command: git diff --check
+Result: PASS
+
+Default-root repository diagnostic after implementation commit
+Command: uv run pytest -q --tb=short
+Collected: 753
+Result: 748 passed, 5 failed.
+Successor-owned failures: index/retrieval namespace x3; reactivate/retrieval namespace x1; rebuild exact-clean STRUCTURE_PROFILE_INVALID x1.
+The prior realestate whitespace failure is closed by the NH5 provider mapper normalization.
+
+T08-B red handoff (not an NH5 hard-gate PASS)
+Query: metadata Task Process keys matching intake.acquire*, intake.decode*, clean.*
+Observed: 3 (intake.acquire.inline, intake.decode.text_json_html, clean.extract.deterministic), all succeeded.
+Target: NH8-T03/NH8-03. No xfail and no altered zero expectation are claimed in NH5.

@@ -1,0 +1,16 @@
+{
+  "schema_version": "mkb.nh5-metadata-lineage-evidence.v1",
+  "revision_ordinals": [1, 2],
+  "clean_content_digest_exact_copy": true,
+  "clean_stored_object_uuid_exact_copy": true,
+  "new_realm": "realm-after",
+  "new_context_tags": "tag:after",
+  "filter_and_context_blobs_rebuilt": true,
+  "new_structure_context_projected": true,
+  "new_facets_projected": true,
+  "new_realm_search_hit": true,
+  "old_realm_search_results": 0,
+  "t08_b_forbidden_process_count": 3,
+  "t08_b_handoff": "NH8-T03/NH8-03",
+  "source_test": "tests/e2e/test_nh5_metadata_semantic_refresh.py::test_metadata_refresh_inherits_clean_and_projects_facets"
+}

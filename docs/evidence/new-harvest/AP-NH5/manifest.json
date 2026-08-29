@@ -1,0 +1,15 @@
+{
+  "schema_version": "mkb.new-harvest-evidence.v1",
+  "ap": "AP-NH5",
+  "status": "executed",
+  "commit": "76f233b3223d54b723a240dc339483661d2e17f2",
+  "truth_cite": ["T-O-386", "T-O-389", "T-O-394", "T-O-395", "T-O-406", "T-O-407"],
+  "work_ids": ["NH5-01", "NH5-02", "NH5-03", "NH5-04", "NH5-05", "NH5-06", "NH5-07", "NH5-08"],
+  "test_ids": ["NH5-T01", "NH5-T02", "NH5-T03", "NH5-T04", "NH5-T05", "NH5-T06", "NH5-T07", "NH5-T08"],
+  "hard_gate_result": {"passed": 39, "failed": 0, "level": "L1/L2/L3/L4"},
+  "t08_b_handoff": {"forbidden_process_count": 3, "target": "NH8-T03/NH8-03", "status": "red-handoff"},
+  "repository_diagnostic": {"collected": 753, "passed": 748, "successor_owned_failed": 5},
+  "migration_id": "022_nh5_semantic_provenance.sql",
+  "observed_at_utc": "2026-08-29T21:38:33Z",
+  "closure_type": "closed-with-explicit-deferrals"
+}
