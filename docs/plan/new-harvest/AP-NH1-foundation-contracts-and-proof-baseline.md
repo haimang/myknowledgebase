@@ -495,8 +495,8 @@ AP-NH1 chosen-shape validation + proof baseline
 | 测试位置 | 🆕 `tests/unit/test_nh1_legal_matrix.py::test_registry_emits_10_strategy_and_3_ops`；`::test_seven_intent_illegal_cells_have_disposition`；`::test_forbids_7x4_cartesian` |
 | 用途 | 证明 `NH1-07`；`T-O-397/405` CITE；`T-R-NH-07/21`；`FG-NH-15` |
 | 前置 | 纯 registry import |
-| 步骤 | a) 从定义生成 strategy 10 格 + operation 3 格。b) 生成七意图 applicability。c) 断言不存在 28 格全合法表。d) 稳定 digest。e) 把 10+3 合法格与七意图非法格 digest **预埋/写入** `tests/fixtures/new_harvest/closed_set_manifest.v1.json`（final §9.1 固定路径；闭集生成仍属 NH9）。 |
-| 断言细节 | `len(strategy_cells)==10`；`len(op_cells)==3`；非法格每格有 `disposition` 与 error code 槽；`intake.ingest` 才按 kind 分叉；manifest 文件存在且 digest 可复现 |
+| 步骤 | a) 从定义生成 strategy 10 格 + operation 3 格。b) 生成七意图 applicability。c) 断言不存在 28 格全合法表。d) 稳定 digest。e) 把 10+3 合法格与七意图非法格 **预埋/写入** `tests/fixtures/new_harvest/closed_set_manifest.v1.json`（final §9.1 固定路径；闭集生成仍属 NH9）。字段名锁死：`strategy_cells`（10）/ `op_cells`（3）/ `intent_illegal` + canonical `digest`。 |
+| 断言细节 | `len(strategy_cells)==10`；`len(op_cells)==3`；非法格每格有 `disposition` 与 error code 槽；`intake.ingest` 才按 kind 分叉；manifest 文件存在且上述四字段 digest 可复现。NH9 生成器只 append 82 work ID / windows / FG，**禁止**改这四个字段的 canonical 字节。 |
 | 负例 | 手抄 7×4=28 全绿表；把 exhausted_zero 写成 succeeded； silently 丢掉 §9.1 路径 |
 | 跑法 | `uv run pytest tests/unit/test_nh1_legal_matrix.py -q` |
 | 层与来源 | L1 契约；`🆕` |
@@ -687,3 +687,4 @@ docs/evidence/new-harvest/AP-NH1/
 |------|------|------|------|
 | `v0.1` | `2026-08-29` | Grok workflow | 由 final §7 派生 |
 | `v0.2` | `2026-08-29` | Grok fix-fleet | 吸收已核实 review：T06 PASS 与证伪 STOP 拆开；T02 整文件 Port 化并列入跑法；T03 删 sqlite3+补 namespace 并列入跑法；T07 预埋 `closed_set_manifest.v1.json`；点名 `FG-NH-06`；namespace 422 锚改为 `retrieval_request.py:265-270` |
+| `v0.3` | `2026-08-29` | Grok recon-fix | T07 锁死 manifest 字段 `strategy_cells`/`op_cells`/`intent_illegal`/`digest`；NH9 生成器不得改 10+3 canonical 字节 |

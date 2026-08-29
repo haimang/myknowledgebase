@@ -7,7 +7,7 @@
 > 时间: `2026-08-29`
 > 文件位置: `docs/plan/new-harvest/AP-NH4-public-upload-and-object-lifecycle.md`
 > 上游前序 / closure:
-> - `AP-NH1` chosen-shape validation 与 proof baseline 通过（DAG：NH1 后并行窗；fail → STOP/reopen，禁止静默换方案）
+> - `AP-NH1` `stop-or-go.md=GO`（`NH1-T01..T07` 全 PASS）后进入并行窗（fail → STOP/reopen，禁止静默换方案、禁止部分绿）。`NH1-T03` 仅作 T04 namespaced search 夹具依赖，不替代 GO
 > 下游交接:
 > - `AP-NH7` local_object 格依赖本 AP 的 public handle 入口（join 在 NH7 local lane 前）
 > - `AP-NH9` 消费本 AP 的 upload replay / GC TOCTOU / security 证据，不在 NH9 第一次发现功能缺口
@@ -63,7 +63,7 @@ new-harvest 四通道 completeness（`T-O-376`/`T-O-381`）要求**公共对象�
 
 | Phase | 名称 | 规模 | 目标摘要 | 依赖前序 |
 |------|------|------|----------|----------|
-| Phase 1 | Bounded write | `L` | chunk 流 + 增量 sha/size + cap/expected 校验 + atomic promote/staging cleanup | NH1 通过；不依赖 NH2/NH3/NH5 |
+| Phase 1 | Bounded write | `L` | chunk 流 + 增量 sha/size + cap/expected 校验 + atomic promote/staging cleanup | `stop-or-go.md=GO`；不依赖 NH2/NH3/NH5 |
 | Phase 2 | Catalog+pending UoW | `L` | promote 成功后同 UoW catalog+`upload_pending` 才返回 handle；`M-NH-05` | Phase 1 |
 | Phase 3 | Public API fence | `M` | auth upload+stat；字段闭集；零 raw/list/presign | Phase 2 |
 | Phase 4 | 幂等与 ingest 交接 | `M` | team+digest+size replay；upload UoW ≠ Task UoW；acceptance 转业务 ref | Phase 3；T04 的 L4 消费 NH1-T03 namespace fixture |
@@ -591,7 +591,7 @@ S16 对齐：先 `require_business_token` 再碰 team 资源（`dependencies.py:
 | ASGI 全缓冲 vs 对象帽 | `app.py:536-556` 会在 Port 之前 OOM/413 | `high` | Phase 1 强制分路径流式；T01/T07 |
 | `M-NH-05` CHECK 重建 | SQLite 重建 `mkb_object_references` 丢数据/索引 | `high` | forward-only；evidence `migrations/` before/after；失败 STOP |
 | 候选 SQL 改 created_at | 误删真 orphan 或误收 pending | `high` | 双时钟谓词；全量 `test_object_gc.py` 回归 |
-| NH1 未通过 | 并行窗本应在 NH1 后 | `medium` | DAG：NH1 fail → STOP；不静默继续标 NH4 executed |
+| NH1 未 GO | 并行窗本应在 `stop-or-go.md=GO` 后 | `medium` | DAG：NH1 fail → STOP；不静默继续标 NH4 executed；T03 不替代 GO |
 | NH1-T03 / 检索 namespace | T04 L4 依赖 | `medium` | NH1-T03 未 GO ⇒ 本 AP 不得收口；禁止删 namespace；禁止 T04 L4 deferred |
 | NH6 供给 | PDF 真文件非本 AP | `low` | T04 用文本；local PDF 格交 NH7 |
 | handle digest vs S13 uuid | `NH-RA06-B07` | `low`（本 AP OOS） | 沿用 HEAD digest handle 以满足 `T-O-385` replay |
@@ -601,7 +601,7 @@ S16 对齐：先 `require_business_token` 再碰 team 资源（`dependencies.py:
 
 - **技术前提**：HEAD `1221aa1` S13 CAS/GC 内核保持；`BusinessToken` 现网；Turso/sqlite PersistencePort；purpose 闭集扩展须 DDL+Literal 同步。
 - **运行时前提**：`object_max_bytes` 默认 256MiB；`object_gc_grace_seconds` 默认 86400 且 ge=1；新增 `object_upload_pending_ttl_seconds`（建议默认 86400，ge=1）、`object_staging_ttl_seconds`（建议默认 3600，ge=1）。
-- **组织协作前提**：NH1 证明门通过后开工本并行窗；不重开 Q16/Q24。
+- **组织协作前提**：`stop-or-go.md=GO` 后开工本并行窗；不重开 Q16/Q24。`NH1-T03` 不替代 GO。
 - **上线 / 合并前提**：`M-NH-05` 先于或同 PR 于 public 路由；T01–T07 规定最低层 PASS；无 raw GET。
 
 ### 9.3 文档同步要求
@@ -713,3 +713,4 @@ S16 对齐：先 `require_business_token` 再碰 team 资源（`dependencies.py:
 | `v0.1` | `2026-08-29` | Grok workflow | 由 final §7 派生 |
 | `v0.2` | `2026-08-29` | Grok fix-fleet | 吸收已核实 review：删除 T04 L4 `deferred` 缓解；NH1-T03 未 GO 则本 AP 不得收口；`NH4-H04` 补全 `src/persistence/migrations/` 前缀 |
 | `v0.3` | `2026-08-29` | Grok parent | 独立复核：补模板 H1；T01 跑法纳入强制 L2 cap node，去掉「可放」 |
+| `v0.4` | `2026-08-29` | Grok recon-fix | 头部/Phase 1 开工闸改为 `stop-or-go.md=GO`；`NH1-T03` 仅 T04 夹具，不替代 GO |

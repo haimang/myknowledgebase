@@ -7,11 +7,12 @@
 > 时间: `2026-08-29`
 > 文件位置: `docs/plan/new-harvest/AP-NH5-semantic-ledger-and-retrieval-facets.md`
 > 上游前序 / closure:
-> - `AP-NH1` chosen-shape validation 与 proof baseline（DAG：NH1 后并行窗）
+> - `AP-NH1` `stop-or-go.md=GO`（`NH1-T01..T07` 全 PASS）后进入并行窗；证伪 STOP，禁止部分绿。与 `AP-NH2` / `AP-NH4` **互不等**（L3/L4 可用 HEAD 图证语义闸，不把 NH2 kind 图当本 AP 开工闸）
 > - 冻结 QNA：`docs/eval/new-harvest/pre-charter-qna.md` v1.0 Q14/Q15 → `T-O-394`/`T-O-395`；`docs/eval/new-harvest/pre-initial-planning-qna.md` v0.5 `T-O-389`/`T-O-386`
 > 下游交接:
 > - `AP-NH7` 10+3 vertical activation（NH7 前 join；facet/query 面必须可滤）
-> - `AP-NH8` exact-clean / metadata intent guard（`NH5-08` 不落地 reclean 旁路；`T-O-407`）
+> - `AP-NH8` exact-clean / metadata intent guard：`NH5-T08-B` process-absence 红灯 → `NH8-T03`（`NH8-03`）转绿；本 AP `NH5-08` 不落地 reclean 旁路（`T-O-407`）
+> - Capstone **G**（五维/S06/facet）：本 AP 主责 `NH5-T07`（NH9 只交叉）
 > - `M-NH-06` facets；`M-NH-08` retrieval naming/namespace
 > 关联设计 / 调研文档:
 > - `docs/eval/new-harvest/final-execution-plan.md` v1.0 `frozen` §7.5（本 AP 唯一执行基线）
@@ -79,7 +80,7 @@ HEAD `1221aa1` 已为 **registered_api** 交付 FilterMeta 五维 + 六元组 + 
 
 | Phase | 名称 | 规模 | 目标摘要 | 依赖前序 |
 |------|------|------|----------|----------|
-| Phase 1 | 输入合同 | L | generic 四字段 required nonunknown；`is_active` 派生；API mapper SSOT + 冲突 422 | NH1 后并行；不改图/cuts |
+| Phase 1 | 输入合同 | L | generic 四字段 required nonunknown；`is_active` 派生；API mapper SSOT + 冲突 422 | `stop-or-go.md=GO` 后并行；不等 NH2；不改图/cuts |
 | Phase 2 | acceptance 闸 + 原子性 | L | 拒 stub；四 kind 写 6 rows；缺义不得 Revision/vector；definition/value/digest/blob 同源 | Phase 1 合同 |
 | Phase 3 | S06 overlay | M | 读 S04 覆盖五维/tags；模型值非权威；g0 digest = clean | Phase 2 权威行已存在 |
 | Phase 4 | 命名与投影 | L | 双键 + 旧 schema 窄适配；facet 行；typed SQL filters；unknown key 422 | Phase 2/3；`M-NH-06/08` |
@@ -111,7 +112,7 @@ HEAD `1221aa1` 已为 **registered_api** 交付 FilterMeta 五维 + 六元组 + 
 - **风险控制原则**：`R-F08` unknown 回流用 schema nonunknown + mapper 源扫描；`R-F09` channel 双义用 versioned adapter 而非 value-guess；facet 禁止 topK 后 Python 过滤（pgvector/Supabase 后过滤失败法，RA07 WEB 🔶）。
 - **测试推进原则**：L1 合同矩阵（T01/T02/T05）→ L2 UoW 六元组与 overlay（T03/T04）→ L3 默认根双键（T05/T06）→ L4 facet mega（T07 硬闸）→ T08 digest + process-absence 交接。层不可互换（`T-O-406`）。
 - **文档同步原则**：公开 ingest/retrieval 字段表、三名分账、旧 schema 弃用信号写入 API 说明；evidence pack 目录预登记，不伪造 SHA。
-- **回滚 / 降级原则**：公开合同加键可向前兼容；新 schema 禁旧键不可静默回退到猜轴。若 NH1 未关闭，本 AP 不得宣称 default-root L3/L4 已绿。metadata 旁路 clean 失败必须红灯交 NH8，禁止改期待值（`FG-NH-17`）。
+- **回滚 / 降级原则**：公开合同加键可向前兼容；新 schema 禁旧键不可静默回退到猜轴。若 `stop-or-go.md≠GO`，本 AP **不得**进入执行、**不得**合并生产语义，也不得宣称 default-root L3/L4 已绿。metadata 旁路 clean 失败必须红灯交 `NH8-T03`，禁止改期待值（`FG-NH-17`）。
 
 ### 1.5 本次 action-plan 影响结构图
 
@@ -348,11 +349,12 @@ AP-NH5 semantic ledger + retrieval facets
 
 ### 7.1 锚表（本计划工作要落在哪些既有代码 / 新建点上）
 
-> `处置`：`✅ 复用` / `♻️ 重 substrate` / `🆕 净新`。⛔ 反例只在 §7.2。台账 B 正例入本表；反例见 §7.2；`NH5-A06` 外部机制见 §7.3。
+> `处置`：`✅ 复用` / `♻️ 重 substrate` / `🆕 净新`。⛔ 反例只在 §7.2。台账 B 正例入本表；反例见 §7.2。`NH5-A06` 机制真源仍见 §7.3。
 
 | 锚 ID | `path:line` | 落点（这是什么）| 本 AP 用途（对应工作项）| 处置 | 备注 |
 |-------|-------------|------------------|--------------------------|------|------|
 | `NH5-A01` | `src/contracts/intake/semantics.py:12-63` | FilterMeta 五维 + `semantic_tuples()` 恰好 6；`MappedProviderMember.semantic_tuples` min 6 | `NH5-01` 扩到四通道；generic 复用字段名与 min_length | `✅ 复用` | API 样板；不把「仅三 provider」当范围。HEAD 行号与 ledger 一致 |
+| `NH5-A06` | RA07 WEB payload/index/filter | facet/query 机制：过滤字段显式索引、过滤推进 SQL、未索引 fail-fast、系统/业务字段分名 | `NH5-06/07` 落地 = 已有 `mkb_vector_record_facets` sidecar + parameterized SQL JOIN | `🔶参考` | **不借** Qdrant/pgvector/OpenSearch/ES/CF Vectorize / 自由 JSON payload / JSONB `@>`；真源 §7.3 |
 | `NH5-A03` | `src/runtime/intake/generation_assemble.py:17-62` | `overlay_system_g0` 丢模型 g0，`body=clean`；`:59-60` 仍把缺 meta 写成 `{}` | `NH5-04` 保持 g0；平行 context overlay | `♻️ 重 substrate` | 不改 cuts。实测函数 `:17-62` 与 ledger 一致 |
 | `NH5-A03b` | `src/runtime/intake/generation_construct.py:1214-1218` | 非 cuts 路径调用 `overlay_system_g0` | `NH5-04` overlay 调用点 | `✅ 复用` | 已建好，别重写切法 |
 | `NH5-A07` | `src/services/retrieval/retrieval_request.py:265-270` | namespace 必填 422 `RETRIEVE_SCHEMA_NAMESPACE_REQUIRED` | `NH5-07` 围栏；L4 不得省略 | `✅ 复用` | 正例。PROMPT 写 265-269；实测 raise 块 `:265-270` |
@@ -515,10 +517,10 @@ AP-NH5 semantic ledger + retrieval facets
 | 字段 | 要求 |
 |---|---|
 | 测试位置 | **T08-A PASS** 🆕 `tests/e2e/test_nh5_metadata_semantic_refresh.py::test_metadata_refresh_inherits_clean_and_projects_facets`。🔱 `tests/e2e/test_intake_rebuild_metadata.py::test_rebuild_and_metadata_lifecycle_paths_complete_through_public_http` **仅当**已删除 `import sqlite3`/`sqlite3.connect`、search 必带 namespace（省略 → 422）、命中以 search body 为准（不以 Task `succeeded` 为 PASS），并列入跑法；否则从 T08 PASS 位置去掉该 HEAD 节点，§8.2 标 ⛔。T08-B 补充 node：`::test_metadata_refresh_process_absence_handoff_to_nh8`（handoff 红灯，不是 executed 硬闸） |
-| 用途 | `NH5-08`；T08-A = NH5 语义切代（final PASS = digest/facet）；T08-B = `NH5-08.d` → NH8 exact-clean **handoff 红灯**；`FG-NH-03/05/12/17` |
+| 用途 | `NH5-08`；T08-A = NH5 语义切代（final PASS = digest/facet）；T08-B = `NH5-08.d` → **`NH8-T03`/`NH8-03`** exact-clean **handoff 红灯**；`FG-NH-03/05/12/17` |
 | 前置 | 先合法 ingest 带六元组；经 Port 读 clean digest/object；metadata 改 `realm`；search **带 namespace**。T08-A 只经 Port 证明 digest/object 不变。禁止 sqlite3 直读 |
 | 步骤 | a) ingest。b) `intake.update_metadata` 改 realm。c) Port 读新旧 revision、clean artifact、semantics、facets。d) namespaced search 按新 realm 命中、旧 realm 排除。e) T08-B：计该 Task `mkb_processes.process_key` 中 acquire/decode/clean 出现次数（HEAD 预期 ≠0，记 handoff，禁止 xfail）。 |
-| 断言细节 | **T08-A**（本 AP PASS）：新 `intake_revision_uuid`；`clean content_digest` 与 `stored_object_uuid` 不变；六键+blob 同源；S06 context 与 facet = 新 S04。**T08-B**：acquire/decode/clean process 计数 = 0 才算旁路落地；HEAD 现状必须红 → 交接 NH8，**不得**作为 NH5 executed 硬闸。 |
+| 断言细节 | **T08-A**（本 AP PASS）：新 `intake_revision_uuid`；`clean content_digest` 与 `stored_object_uuid` 不变；六键+blob 同源；S06 context 与 facet = 新 S04。**T08-B**：acquire/decode/clean process 计数 = 0 才算旁路落地；HEAD 现状必须红 → 交接 **`NH8-T03`/`NH8-03`**，**不得**作为 NH5 executed 硬闸。 |
 | 负例 | 用 sqlite3 直读当 L2 证明；把 T08-B 改成 xfail 或删断言使全绿；search 无 namespace 200；以 Task `succeeded` 当检索证明；「避开」同时 🔱 未改造 HEAD 节点 |
 | 跑法 | T08-A PASS：`uv run pytest tests/e2e/test_nh5_metadata_semantic_refresh.py::test_metadata_refresh_inherits_clean_and_projects_facets -q`。T08-B handoff **另跑** `::test_metadata_refresh_process_absence_handoff_to_nh8`（HEAD 预期红，记 evidence，**不**并入 T08 PASS 命令）。若选择改造 HEAD 节点则追加 `tests/e2e/test_intake_rebuild_metadata.py::test_rebuild_and_metadata_lifecycle_paths_complete_through_public_http` |
 | 层与来源 | L2/L4；T08-A `🆕`；HEAD 文件未清 sqlite3 则 ⛔ 不得 🔱。**xfail 禁止** |
@@ -552,7 +554,7 @@ AP-NH5 semantic ledger + retrieval facets
 ### 8.4 测试缺口（本 AP 明确不覆盖什么 + 交给谁）
 
 - 不覆盖 10 strategy + 3 operation live-to-vector 全矩阵（理由：`S-NH-F7` / NH7）→ `AP-NH7`。
-- 不覆盖七意图非法格与 rebuild intent guard 旁路（理由：`T-O-405/407`）→ `AP-NH8`；T08-B 是交接信号不是 NH5 假绿。
+- 不覆盖七意图非法格与 rebuild intent guard 旁路（理由：`T-O-405/407`）→ `AP-NH8`。`NH5-T08-B` process-absence 红灯交 `NH8-T03`/`NH8-03` 转绿，不是 NH5 假绿。
 - 不覆盖 closed-set / crash / campaign mega（理由：`S-NH-F9`）→ `AP-NH9`。
 - 不覆盖 browser/OCR 真实供给（理由：`S-NH-F6`）→ `AP-NH6`；本 AP http/local 可用最小 fixture 证语义闸，不宣称 capability live。
 - 不覆盖 raw GET / upload（理由：`S-NH-F4`）→ `AP-NH4`。
@@ -581,7 +583,7 @@ AP-NH5 semantic ledger + retrieval facets
 
 | 风险 / 依赖 | 描述 | 当前判断 | 应对方式 |
 |-------------|------|----------|----------|
-| DAG：NH1 | NH1 spike 失败则并行窗无效 | high（外部） | STOP/reopen；本 AP 不得静默换 duplication |
+| DAG：NH1 GO | `stop-or-go.md≠GO` 则并行窗不得开工 | high（外部） | STOP/reopen；禁止部分绿；不得静默换 duplication |
 | `R-F08` unknown 回流 | mapper/caller 再填 unknown | high | T01/T02 源扫描 + schema |
 | `R-F09` channel 双义 | 同 schema 按 value 猜 | high | versioned adapter；T05/T06 |
 | `R-F11` 偷 reclean | metadata 再跑 deterministic clean | high | T08-B 红灯交 NH8；禁 no-op worker |
@@ -594,7 +596,7 @@ AP-NH5 semantic ledger + retrieval facets
 
 - **技术前提**：HEAD `1221aa1` S04 表、system g0、unknown filter fail-closed、facet 表、metadata inherit clean 骨架均在；NH1 证明 chosen substrate 可用。
 - **运行时前提**：L3/L4 使用 `create_app()` 默认根；namespace 必填；不把 503 当 DoD。
-- **组织协作前提**：不重开 Q14/Q15；不新增 owner-gate；NH8 接收 T08-B。
+- **组织协作前提**：不重开 Q14/Q15；不新增 owner-gate；NH8 以 `NH8-T03` 接收 T08-B。
 - **上线 / 合并前提**：`NH5-T01..T08` 全 PASS（T08 = T08-A digest/facet）。T08-B 红灯交接 NH8，**不得**作为本 AP executed 硬闸。禁止 xfail / 禁止改期待值。
 
 ### 9.3 文档同步要求
@@ -706,3 +708,4 @@ AP-NH5 semantic ledger + retrieval facets
 |------|------|------|----------|
 | `v0.1` | `2026-08-29` | Grok workflow | 由 final §7 派生 |
 | `v0.2` | `2026-08-29` | Grok fix-fleet | 吸收已核实 review：T04 强制 L2 读已 commit S04；T05 钉死 L3 node 并列入跑法；T07 必须经 ingest→非空 admitted clean→publication 再 search；T08 PASS=T08-A，T08-B 仅 NH8 handoff；HEAD metadata e2e 未清 sqlite3 不得 🔱 |
+| `v0.3` | `2026-08-29` | Grok recon-fix | 开工闸改为 `stop-or-go.md=GO` 且与 NH2 互不等；`NH5-T08-B`→`NH8-T03`；§7.1 补 `NH5-A06`；头部自承 Capstone G=`NH5-T07` |

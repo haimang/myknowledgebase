@@ -8,7 +8,7 @@
 > 文件位置: `docs/plan/new-harvest/AP-NH3-representation-history-and-s05-binding.md`
 > 上游前序 / closure:
 > - `docs/eval/new-harvest/final-execution-plan.md` v1.0 `frozen` §7.3（唯一执行基线；台账 A/B/C/D）
-> - DAG：`AP-NH1` chosen-shape 必须 PASS（fail → STOP/reopen，`T-O-398`）；`AP-NH2` kind graph / merge / representation predicates 已声明边
+> - DAG：`AP-NH1` `stop-or-go.md=GO`（`NH1-T01..T07` 全 PASS；fail → STOP/reopen，`T-O-398`；禁止部分绿）；`AP-NH2` `NH2-T01..T07` kind graph / merge / representation predicates 已声明边
 > 下游交接:
 > - `AP-NH6` local runtime supply（print/browser/OCR 真实供给；本 AP 只冻结诚实表示与 typed fail）
 > - `AP-NH7` 10+3 vertical 消费 fact/history/actual
@@ -67,7 +67,7 @@ HEAD `1221aa1` 把 `domain_binding_digest` 写入名为 `s05_binding_digest` 的
 
 | Phase | 名称 | 规模 | 目标摘要 | 依赖前序 |
 |------|------|------|----------|----------|
-| Phase 1 | durable rows | `L` | RepresentationFact + AcquireDecodeHistory；同 UoW append；同 step 二次成功拒绝 | NH1 PASS；NH2 图边/谓词已声明 |
+| Phase 1 | durable rows | `L` | RepresentationFact + AcquireDecodeHistory；同 UoW append；同 step 二次成功拒绝 | `stop-or-go.md=GO`；NH2 图边/谓词已声明 |
 | Phase 2 | 诚实表示 | `L` | MIME/OPC/opaque 分账；PDF 观察/能力分码；honest print fact | Phase 1 |
 | Phase 3 | 声明式再获取 | `L` | 读 fact、走 NH2 已声明边、append history；无边/重复/try-all 失败 | Phase 1+2；NH2 正向边 |
 | Phase 4 | S05 分账 | `XL` | 隔离旧列；nullable actual+state+seal；CAS 同 UoW；传播只读 actual | Phase 1–3；NH1 S05 spike |
@@ -567,7 +567,7 @@ AP-NH3 representation-history-and-s05-binding
 
 | 风险 / 依赖 | 描述 | 当前判断 | 应对方式 |
 |-------------|------|----------|----------|
-| NH1 STOP | chosen-shape / S05 spike 失败 | `high`（DAG 硬门） | 本 AP 不得开工替代方案；reopen `T-O-398` |
+| NH1 STOP | `stop-or-go.md≠GO` / chosen-shape / S05 spike 失败 | `high`（DAG 硬门） | 本 AP 不得开工替代方案；reopen `T-O-398`；禁止部分绿 |
 | NH2 边未交付 | 无声明正向边则 T05 无法诚实 | `high` | Phase 3 阻塞；禁止复制 13 profile（`FG-NH-09`） |
 | `R-F02` 旧 s05 backfill | migration 按 64-hex 判断 | `high` | 显式 state + T06 禁 copy |
 | `R-F03` 双 SSOT | output JSON 与 row 并存 | `high` | 引用-only 架构测试挂 T01 |
@@ -579,7 +579,7 @@ AP-NH3 representation-history-and-s05-binding
 
 ### 9.2 约束与前提
 
-- **技术前提**：NH1 proof baseline PASS；NH2 kind-only resolver 与 representation predicates 已注册；Turso schema 可 forward-only migrate。
+- **技术前提**：`AP-NH1` `stop-or-go.md=GO`；NH2 kind-only resolver 与 representation predicates 已注册；Turso schema 可 forward-only migrate。
 - **运行时前提**：L2 测试用 PersistencePort；不要求 default-root browser。
 - **组织协作前提**：不重开 Q10–Q27；物理 rename 另兼容证明；S05 §4.6 erratum 由 calibration 文档 append（本 AP 不改 QNA）。
 - **上线 / 合并前提**：`NH3-T01..T08` 全 PASS + `rg` 读者扫描 + evidence pack 目录齐；文档状态仍 `draft` 直至独立执行回填（本轮禁止标 executed）。
@@ -606,7 +606,7 @@ AP-NH3 representation-history-and-s05-binding
 
 所有台账 C 项必须 **PASS 且四元组证据齐全**。本 AP 无 L3/L4 退出项；L2/F 的 T07 视为退出硬闸。
 
-1. **durable facts**：每成功 acquire/decode 一步恰好一行 fact 且与对应 Process Outcome 同一 commit；rollback 后 `RepresentationFact` 与 `AcquireDecodeHistory` 行数为 0；同 step 第二次成功被拒绝且原行不变（由 `NH3-T01` 证明；观察夹具由 `NH3-T02/T03` 支撑）。
+1. **durable facts**：每成功 acquire/decode 一步恰好一行 fact 且与对应 Process Outcome 同一 commit；rollback 后 `RepresentationFact` 与 `AcquireDecodeHistory` 行数为 0；同 step 第二次成功被拒绝且原行不变（由 `NH3-T01/T02/T03` 证明；T02=表示身份/sniff/OPC，不得退出 DoD 映射）。
 2. **finite path**：对已声明的两条不同正向路径，`representation_path_digest` 不同；同一路径重放 digest 稳定；重复 step 拒绝；未声明边 409 且不调用下一 acquire port（由 `NH3-T05` 证明）。
 3. **actual truth**：SQL 可区分 legacy_unverifiable / unsealed / sealed；seal 与 selected-route Outcome 同 UoW 且仅一次 CAS；异 digest `ConflictError` 409；中途 crash 无半封（由 `NH3-T06` + `NH3-T07` 证明）。
 4. **propagation**：对 sealed Execution，ProcessCommand / CandidateSet / Snapshot / Gate / scatter child 的 binding 字段等于 `actual_binding_digest` 或显式 unsealed 标记，**不等于** `domain_binding_digest`；unsealed 拒 clean（由 `NH3-T07` 传播节点证明）。
@@ -618,7 +618,7 @@ AP-NH3 representation-history-and-s05-binding
 
 | 收口目标 | 工作项 | Test-ID | PASS 证据（四元组）| 状态 |
 |----------|--------|---------|---------------------|------|
-| 每成功 step 一行 fact 且 rollback 无残行 | `NH3-01/02` | `NH3-T01`（T02/T03 支撑夹具） | `commit SHA + pytest node PASS + Q12 + UTC` | `未观察` |
+| 每成功 step 一行 fact 且 rollback 无残行 | `NH3-01/02/03` | `NH3-T01/T02/T03` | `commit SHA + pytest node PASS + Q12 + UTC` | `未观察` |
 | 两路径 digest 不同，同路径稳定，重复 step 拒绝，未声明边 409 | `NH3-06` | `NH3-T05` | `commit SHA + history rows/hash PASS + Q8/Q22 + UTC` | `未观察` |
 | 旧/unsealed/sealed 可分；旧值不得写入新 actual | `NH3-07` | `NH3-T06` | `commit SHA + migration query PASS + Q10 + UTC` | `未观察` |
 | seal 同 UoW 且 single-CAS；crash 无半封 | `NH3-08` | `NH3-T07` | `commit SHA + W-SEL/SEAL PASS + Q20 + UTC` | `未观察` |
@@ -688,3 +688,4 @@ PASS 证据四元组形态：`commit SHA + pytest node PASS + Truth/Q + UTC`。
 |------|------|------|----------|
 | `v0.1` | `2026-08-29` | Grok workflow | 由 final §7 派生 |
 | `v0.2` | `2026-08-29` | Grok fix-fleet | 吸收已核实 review：`NH3-A01` 把 `:660` 标为 `decode_evidence` 覆盖；T06 L2 落到 `tests/integration/` 且 scan node 写入跑法；T08 🔱 钉 `::test_generation_restart_and_lineage_are_task_scoped_summaries`；T02 来源只标 🆕 |
+| `v0.3` | `2026-08-29` | Grok recon-fix | 开工闸改为 `stop-or-go.md=GO` 且消费 `NH2-T01..T07`；台账 D durable facts 评估恢复 `NH3-T01/T02/T03` |

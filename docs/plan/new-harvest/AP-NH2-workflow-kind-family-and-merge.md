@@ -7,11 +7,12 @@
 > 时间: `2026-08-29`
 > 文件位置: `src/contracts/workflow/models.py`；`src/runtime/workflow/runtime_materialize.py`；`src/runtime/workflow/runtime_core.py`；`src/runtime/workflow/runtime_scatter.py`；`src/runtime/workflow/helpers.py`；`src/workflows/lsrag_definition.py`；`src/workflows/builtin_lsrag.py`；`src/workflows/builtin_scatter.py`；`src/services/workflow_registry.py`；`src/services/config_snapshots.py`；`src/runtime/intake/core.py`；`api/app.py`；`src/contracts/api/models.py`；`tests/unit/test_nh2_kind_only_resolver.py`；`tests/unit/test_nh2_representation_guards.py`；`tests/unit/test_nh2_workflow_compiler.py`；`tests/unit/test_workflow_registry.py`；`tests/unit/test_workflow_revision_compatibility.py`；`tests/integration/test_nh2_selected_output_control.py`；`tests/integration/test_nh2_legal_edges_reachable.py`；`tests/domain/test_nh2_architecture_scan.py`
 > 上游前序 / closure:
-> - `docs/plan/new-harvest/AP-NH1-foundation-contracts-and-proof-baseline.md`（`NH1-T04` selected-output CONTROL 切片 PASS；任一承重 spike 失败则 STOP/reopen，本 AP 不得开工）
+> - `docs/plan/new-harvest/AP-NH1-foundation-contracts-and-proof-baseline.md`：`docs/evidence/new-harvest/AP-NH1/stop-or-go.md=GO`（`NH1-T01..T07` 全 PASS）才开工；证伪 STOP，禁止部分绿。`NH1-T04` 仅作 selected-output CONTROL **切片升级条件**，不得替代 GO
 > 下游交接:
 > - `docs/plan/new-harvest/AP-NH3-representation-history-and-s05-binding.md`（消费本 AP 已登记谓词与 kind 图；生产 history 行与 actual S05 seal）
 > - 并行窗：`AP-NH4` / `AP-NH5`（本 AP 不等它们；它们也不等本 AP）
 > - 后继 join：`AP-NH7` 激活 10+3 前须本 AP kind-only + 合法边可达
+> - Capstone **A**（old pin / kind-only）：本 AP 主责 `NH2-T06`（legacy alias 不当 actual 辅 `NH3-T06`；NH9 只交叉）
 > 关联设计 / 调研文档:
 > - `docs/eval/new-harvest/final-execution-plan.md` v1.0 `frozen` §7.2（唯一执行基线）
 > - `docs/eval/new-harvest/reference-anchor/assessment-analysis-01-workflow-graph-and-kind-family.md`
@@ -544,7 +545,8 @@ AP-NH2 kind-family + selected-output CONTROL
 
 | 风险 / 依赖 | 描述 | 当前判断 | 应对方式 |
 |-------------|------|----------|----------|
-| NH1-T04 / `R-F01` | CONTROL 切片不可行 | `high`（硬依赖） | 本 AP **不得开工**；STOP/reopen Q11；禁止 duplication |
+| DAG：NH1 GO | `stop-or-go.md≠GO` 或 `NH1-T01..T07` 未全 PASS | `high`（硬依赖） | 本 AP **不得开工**；证伪 STOP/reopen；禁止部分绿 |
+| NH1-T04 / `R-F01` | CONTROL 切片不可行 | `high`（硬依赖） | 不得升级 CONTROL 生产合同；STOP/reopen Q11；禁止 duplication。T04 **不替代** GO |
 | `R-F04` old pin 绞杀 | 退役旧 key 或 active 检查失败 → in-flight 409 | `high` | enabled-unselected；T06；telemetry；退役交 NH8 |
 | `R-F10` tail 复制 | vertical 按策略拷贝 publication | `high` | 单一 tail 源 + T07 哈希 |
 | `NH-RA01-B08` | compat 要求 active key，kind 塌缩冲突 | `high` | 不塌缩删除旧 key |
@@ -646,3 +648,4 @@ PASS 证据四元组形态（执行期填写，本 AP 不伪造 SHA）：`commit
 |------|------|------|------|
 | v0.1 | 2026-08-29 | Grok workflow | 由 final §7 派生 |
 | v0.2 | 2026-08-29 | Grok fix-fleet | 吸收已核实 review：T02 跑法去掉不可 collect 的「NH1-T04 生产 node」；T03 删除「抽出纯函数」并强制 L2 UoW 零 browser Process 行；7-profile 期待值仅 kind 激活后改写并点名 `FG-NH-17`；⛔6 CONTROL 只钉 `runtime_materialize.py:513-534` |
+| v0.3 | 2026-08-29 | Grok recon-fix | 开工闸改为 `stop-or-go.md=GO`（T04 只作 CONTROL 切片条件）；头部自承 Capstone A=`NH2-T06` |
