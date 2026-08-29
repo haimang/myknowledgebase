@@ -1,0 +1,20 @@
+AP-NH2 test evidence
+Observed at: 2026-08-29T18:53:27Z
+Implementation commit: 81f1271c149d63379fa73a2cf6ef03ae433af15b
+
+NH2-T01..T07 frozen suite
+Command: uv run pytest tests/unit/test_nh2_kind_only_resolver.py tests/integration/test_nh2_selected_output_control.py tests/unit/test_nh2_representation_guards.py tests/integration/test_nh2_representation_guards.py tests/unit/test_nh2_workflow_compiler.py tests/integration/test_nh2_legal_edges_reachable.py tests/domain/test_nh2_architecture_scan.py tests/unit/test_workflow_registry.py tests/unit/test_workflow_revision_compatibility.py tests/unit/test_intake_source_capabilities.py -q --tb=short
+Result: PASS, 52 passed
+Truth: Q11/Q12/Q18/Q22; T-O-377/379/384/387/388/391/392/398/402
+
+Default-root and prior-path regression
+Command set: test_single_intake_pipeline.py; test_registered_api_scatter.py; test_intake_identity_replay.py; test_inline_ingress_staging.py; local-image typed-failure node; test_generation_pipeline_contracts.py
+Result: PASS, 10 named e2e nodes. These are regression support and do not reclassify NH2 as an L3/L4 AP.
+
+Static / migration / compatibility review
+Result: ruff PASS; git diff --check PASS; action_branch scan 0; public workflow_key parameter scan 0; shared tail digest cardinality 1; compatibility digest diff 0/16; selected-output implementation does not call scatter join wait.
+
+Full repository diagnostic
+Command: uv run pytest -q --tb=short
+Collected: 641
+Result: 635 passed, 6 failed. Failures are unchanged successor-owned items: index namespace x3, reactivate namespace x1, rebuild exact-clean x1, realestate whitespace normalization x1. No NH2 test or changed runtime invariant failed.

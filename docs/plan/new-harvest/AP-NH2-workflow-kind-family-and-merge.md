@@ -25,7 +25,7 @@
 > 关联 reference-anchor:
 > - [`assessment-analysis-01-workflow-graph-and-kind-family.md`](../../eval/new-harvest/reference-anchor/assessment-analysis-01-workflow-graph-and-kind-family.md)（主面）
 > - [`assessment-analysis-03-representation-and-reacquisition.md`](../../eval/new-harvest/reference-anchor/assessment-analysis-03-representation-and-reacquisition.md)（邻面：fact 权威；本 AP 只消费形状）
-> 文档状态: `draft`
+> 文档状态: `executed`
 
 **台账 ID 区间（final §11.A / §7.2）**：`NH2-01..08` / `NH2-A01..06` / `NH2-T01..07`。禁止重编号、合并或删除这些 ID。
 
@@ -632,13 +632,61 @@ PASS 证据四元组形态（执行期填写，本 AP 不伪造 SHA）：`commit
 
 ## 11. 执行日志回填（仅 `executed` 状态使用）
 
-> 文档状态为 `draft`，本节省略实填。执行完成后改用 `respond-execution-log` 厚版回填。
+> 执行者：`Codex`
+> 执行时间：`2026-08-30`（evidence UTC `2026-08-29T18:53:27Z`）
+> 文档状态：`draft → executing → executed`
+> 代码改动统计：实现提交 `81f1271`（35 files；production migration `1`）
 
-- **实际执行摘要**：`{待执行}`
-- **Phase 偏差**（逐条带分类）：`{待执行}`
-- **阻塞与处理**：`{待执行}`
-- **测试发现**（含全绿计数 + 新暴露事实）：`{待执行}`
-- **后续 handoff**：`{待执行}` → NH3 fact/history/S05；NH7 10+3 live
+- **实际执行摘要**：
+  - Phase 1：将 NH1 oracle 升级为 production `selected_output` CONTROL；新增 durable projection 表、version/fallback canonical fields、exactly-one runtime 与 canonical downstream binding。
+  - Phase 2：登记 main-text/media/mode/strategy 闭集 guard；runtime 只经 `RepresentationFactReader` 投影，缺失/unknown/output JSON 均 fail-closed。
+  - Phase 3：新增 inline/local/http 三张 kind graph；static→browser 为不同 step 的正向边；6 个旧 hidden capability 并入 kind definitions；tail 由 `lsrag_shared_tail.py` 单源提供。
+  - Phase 4：public resolver 改为 kind-only；mode/media 仅作图内 facts；claim 前校验 pinned step/process/contract，图外 worker 409。
+  - Phase 5：旧 13 current key enabled-unselected，16 historical plans digest 0 drift；增加 legacy pin metric 与 architecture scans。
+- **Phase 偏差（计划 vs 实际）**：
+  - `NH2-V01 (schema)`：M-NH-03 使用独立 selected-output projection 表，而非扩 `mkb_workflow_controls` 为 runtime state；声明元数据仍写 step-scoped controls，runtime projection保持 append/unique 分账。
+  - `NH2-V02 (tail contract)`：共享 preflight 不再声明旧单一 `acquisition_evidence` port；canonical clean + candidate seal 继续进入 preflight，未来 actual ordered history 由 NH3 提供，避免把某个起点 acquire 冒充最终路径。
+  - `NH2-V03 (compat)`：旧 current profile definitions 仍作为 active runtime plans 注入，但 resolver 永不选择；这是现 `_active_workflow_keys` 的必要 compatibility fence，不是 13 profile 产品回流。
+  - `NH2-V04 (review-fix)`：新增 step fields 初版使手写 `model_dump()` digest 漂移；通过 model serializer 对 absent fields 保持旧 canonical bytes，16/16 digest diff 回到 0。
+- **阻塞与处理**：无 NH2 hard-gate blocker。全仓回归中的 namespace/rebuild/realestate 六个失败属于后继 AP，未改期待值掩盖。
+- **测试发现**：NH2-T01..T07 `52 passed`；default-root/既有路径 `10 passed`；全仓 `641 collected / 635 passed / 6 successor-owned failed`；ruff/diff/redline scans PASS。
+- **后续 handoff**：`AP-NH3` 消费 `RepresentationFactReader`、kind graph 与 selected-output row，落 typed history + actual S05；NH7 负责 L3/L4 10+3；NH8 负责旧 key 有界退役。
+
+### 11.1 逐工作项状态
+
+| 工作项 | 状态 | PR / commit | 实际落点 | 备注 |
+|--------|------|-------------|----------|------|
+| `NH2-01` | `✅ done` | `81f1271` | `018_nh2_selected_output_control.sql`; `runtime_materialize.py` | exactly-one，非 scatter wait |
+| `NH2-02` | `✅ done` | `81f1271` | `representation.py`; guard contract/runtime | fact-read only |
+| `NH2-03` | `✅ done` | `81f1271` | `kind_family.py`; `lsrag_shared_tail.py` | 3 single + scatter unchanged |
+| `NH2-04` | `✅ done` | `81f1271` | kind edges + compiler tests | distinct forward steps / no cycle |
+| `NH2-05` | `✅ done` | `81f1271` | `workflow_registry.py`; `config_snapshots.py` | kind-only |
+| `NH2-06` | `✅ done` | `81f1271` | claim fence + preflight source-kind law | undeclared 409 |
+| `NH2-07` | `✅ done` | `81f1271` | old plans + legacy metric + compat tests | digest diff 0/16 |
+| `NH2-08` | `✅ done` | `81f1271` | `test_nh2_architecture_scan.py` | five redline nodes PASS |
+
+### 11.2 关键指标演进
+
+| 指标 | NH1 baseline | NH2 | Δ |
+|------|--------------|-----|---|
+| public single graph identities | `7 selector / 13 profile` | `3 kind` | `-10 identity debt` |
+| unselectable capability graphs | `6` | `0`（process keys in kind graphs） | `-6` |
+| runtime CONTROL kinds | `2` | `3` | `+selected_output` |
+| representation-aware predicates | `0` | `main-text + bounded media/mode/strategy` | `enabled` |
+| shared tail digest cardinality | unproven | `1` | `closed` |
+| old compatibility digest drift | n/a | `0 / 16` | `preserved` |
+
+### 11.3 pre-existing / successor-owned failures
+
+| 失败项 | 证据 | 判断 |
+|--------|------|------|
+| index rebuild search 缺 namespace（3）+ reactivate search 缺 namespace（1） | full suite；AP-NH8 明列同文件/行号 | `C handoff → NH8` |
+| rebuild `PREFLIGHT_EVIDENCE_INVALID`（1） | AP-NH8 exact-clean hard gate | `C handoff → NH8` |
+| realestate description newline（1） | provider file/test 未被 NH2 semantic graph修改 | `C handoff → NH5/NH7` |
+
+### 11.4 文档状态
+
+`draft → executing → executed（2026-08-30）`。
 
 ---
 

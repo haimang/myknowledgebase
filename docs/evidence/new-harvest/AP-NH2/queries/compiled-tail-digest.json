@@ -1,0 +1,29 @@
+{
+  "shared_tail_digest": "e36b5bac5a82994e0a4743c9c43394dcff89e5ae4297a1d2eb5f58ab80e0af13",
+  "tail_source": "src/workflows/lsrag_shared_tail.py::shared_tail_components",
+  "graphs": [
+    {
+      "workflow_key": "intake.ingest.kind.inline-payload.lsrag.v1",
+      "compiled_digest": "63b34ae19f156e61cdfa8d394b5258db48d558f5b794722ffba2049bf870b7c8",
+      "steps": 18,
+      "routes": 53,
+      "bindings": 20
+    },
+    {
+      "workflow_key": "intake.ingest.kind.local-object.lsrag.v1",
+      "compiled_digest": "de435c1abe40c1743c6b69342ed67de23f5d33113be60a7828407cefaa6fce66",
+      "steps": 25,
+      "routes": 75,
+      "bindings": 33
+    },
+    {
+      "workflow_key": "intake.ingest.kind.http-resource.lsrag.v1",
+      "compiled_digest": "1acf5bd8a34d7ed2809ef08064bfc3695b6db5fdd8a49c0edd0fb7fec17fc207",
+      "steps": 33,
+      "routes": 104,
+      "bindings": 44
+    }
+  ],
+  "tail_digest_cardinality": 1,
+  "join_steps": 0
+}

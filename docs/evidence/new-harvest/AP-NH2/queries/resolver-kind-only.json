@@ -1,0 +1,19 @@
+{
+  "source_kind_workflow_keys": {
+    "inline_payload": "intake.ingest.kind.inline-payload.lsrag.v1",
+    "local_object": "intake.ingest.kind.local-object.lsrag.v1",
+    "http_resource": "intake.ingest.kind.http-resource.lsrag.v1",
+    "registered_api": "intake.ingest.scatter.root.lsrag.v1"
+  },
+  "mode_media_change_workflow_key": false,
+  "old_selector_examples_ignored": [
+    "local_object.pdf",
+    "local_object.image",
+    "http_resource.static",
+    "http_resource.browser",
+    "http_resource.pdf"
+  ],
+  "unknown_kind": {"code": "SOURCE_KIND_INVALID", "http": 422},
+  "missing_enabled_kind_graph": {"code": "REGISTRY_NOT_FOUND", "http": 503},
+  "public_workflow_key_parameter": false
+}

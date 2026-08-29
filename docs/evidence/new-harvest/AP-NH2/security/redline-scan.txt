@@ -1,0 +1,15 @@
+AP-NH2 redline scan
+Observed UTC: 2026-08-29T18:53:27Z
+Commit: 81f1271c149d63379fa73a2cf6ef03ae433af15b
+
+PASS public API/model workflow_key parameters: 0
+PASS production action_branch identifiers: 0
+PASS WorkflowGuardDefinition operator values: eq only
+PASS free-expression predicates JSONata/JavaScript/SQL/FEEL/when: rejected
+PASS kind-family WorkflowStepKind.JOIN: 0
+PASS shared tail digest cardinality: 1
+PASS selected-output call to scatter wait: 0
+PASS old compatibility digest drift: 0 of 16
+PASS same target input with two bindings: rejected
+PASS self-edge/cycle/duplicate step key: rejected
+PASS graph-outside Process claim: workflow-process-undeclared 409 before lease/handler

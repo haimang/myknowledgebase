@@ -29,7 +29,7 @@
 - [x] `NH2-CODE-P3` [代码制作] Phase 3 kind family 定义与多边（`NH2-03/04`；`NH2-T04/T05/T07`）。`blocked-by: NH2-CODE-P2`
 - [x] `NH2-CODE-P4` [代码制作] Phase 4 kind-only resolver + 停暗 dispatch（`NH2-05/06`；`NH2-T01/T05/T07`）。`blocked-by: NH2-CODE-P3`
 - [x] `NH2-CODE-P5` [代码制作] Phase 5 compat + 红线扫描（`NH2-07/08`；`NH2-T06/T07`）。`blocked-by: NH2-CODE-P4`
-- [-] `NH2-CLOSE` [代码审查，测试与文档回填] `NH2-T01..T07`、日志、evidence、closure、commit。`blocked-by: NH2-CODE-P5`
+- [x] `NH2-CLOSE` [代码审查，测试与文档回填] `NH2-T01..T07`、日志、evidence、closure、commit。`blocked-by: NH2-CODE-P5`
 
 ## NH3 — representation history and S05 binding
 

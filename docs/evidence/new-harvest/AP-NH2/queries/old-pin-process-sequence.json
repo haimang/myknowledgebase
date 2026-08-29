@@ -1,0 +1,21 @@
+{
+  "test": "tests/unit/test_workflow_revision_compatibility.py::test_old_pin_sequence_unchanged_after_kind_family_activation",
+  "old_workflow_key": "intake.ingest.single.inline.lsrag.v1",
+  "sequence": [
+    "intake.acquire.inline",
+    "intake.decode.text_json_html",
+    "clean.extract.deterministic",
+    "intake.collection.seal",
+    "intake.preflight_validate",
+    "intake.accept_snapshot",
+    "lsrag.structurize",
+    "lsrag.construct",
+    "lsrag.vectorize",
+    "index.validate_publication"
+  ],
+  "compiled_digest_changed": false,
+  "workflow_revision_changed": false,
+  "terminal_status": "succeeded",
+  "legacy_pin_metric": "mkb_workflow_legacy_pin_total",
+  "unknown_digest_materializes_process": false
+}
