@@ -77,6 +77,7 @@ class TaskViewsMixin:
             "completed_at": row["completed_at"],
             "result_ref": row["result_ref"],
             "proof_ref": row["proof_ref"],
+            "result_disposition": row.get("result_disposition") if hasattr(row, "get") else None,
             "error": error,
             "action_required": action_required,
             "deleted_at": row["deleted_at"] if deleted else None,

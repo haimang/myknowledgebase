@@ -119,6 +119,12 @@ _METRIC_CATALOG = MappingProxyType(
         "mkb_vector_upsert_total": _metric(
             "mkb_vector_upsert_total", "counter", labels=("result",), allowed={"result": _COMMON_RESULTS}
         ),
+        "mkb_task_result_disposition_total": _metric(
+            "mkb_task_result_disposition_total",
+            "counter",
+            labels=("disposition",),
+            allowed={"disposition": frozenset({"indexed_success", "exhausted_zero", "failed", "cancelled"})},
+        ),
         "mkb_index_generation_active": _metric(
             "mkb_index_generation_active",
             "gauge",

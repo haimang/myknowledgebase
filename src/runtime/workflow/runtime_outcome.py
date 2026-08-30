@@ -233,7 +233,6 @@ class WorkflowOutcomeMixin:
             await self._refresh_execution_counts_tx(tx, execution["execution_uuid"])
             return True
 
-
     async def promote_due_retries(self, *, limit: int = 128) -> int:
         """Move durable due retries back to ``ready`` without consuming a claim."""
 
@@ -284,7 +283,6 @@ class WorkflowOutcomeMixin:
                     payload={"retry_count": process["retry_count"]},
                 )
         return promoted
-
 
     async def recover_expired_leases(self, *, limit: int = 128) -> int:
         """Fence expired claims and either safely replay or fail loud.
@@ -394,7 +392,6 @@ class WorkflowOutcomeMixin:
                 await self._refresh_execution_counts_tx(tx, execution_uuid)
         return recovered
 
-
     async def request_cancellation(self, execution_uuid: str) -> bool:
         """Propagate an accepted Execution cancellation without inventing success."""
 
@@ -406,7 +403,6 @@ class WorkflowOutcomeMixin:
             await self._cancel_execution_tree_tx(tx, root, include_root=True)
             await self._refresh_execution_counts_tx(tx, root["execution_uuid"])
             return True
-
 
     async def _route_after_terminal_process_tx(
         self,
@@ -488,7 +484,6 @@ class WorkflowOutcomeMixin:
             terminal_error=terminal_error,
         )
 
-
     async def _fail_process_tx(
         self,
         tx: UnitOfWork,
@@ -541,7 +536,6 @@ class WorkflowOutcomeMixin:
                 payload=event_payload,
             )
 
-
     async def _terminalize_execution_tx(
         self,
         tx: UnitOfWork,
@@ -551,6 +545,7 @@ class WorkflowOutcomeMixin:
         source_process: dict[str, Any] | None,
         route_digest: str,
         error_code: str | None,
+        result_disposition: str | None = None,
     ) -> None:
         if terminal_kind is None:
             raise MkbError("workflow-terminal-invalid", "Terminal workflow step is missing its terminal kind", 500)
@@ -572,6 +567,7 @@ class WorkflowOutcomeMixin:
             # are still durable-but-unstarted.  Fence only unfinished work;
             # proof-valid siblings stay untouched (forward-stop/no rollback).
             await self._cancel_execution_tree_tx(tx, current, include_root=False)
+        exhausted_zero = result_disposition == "exhausted_zero"
         if status == ExecutionStatus.SUCCEEDED.value and source_process is None:
             await self._fail_execution_integrity_tx(
                 tx,
@@ -580,12 +576,20 @@ class WorkflowOutcomeMixin:
                 "Workflow success lacks a source Process completion proof",
             )
             return
-        if status == ExecutionStatus.SUCCEEDED.value and not source_process.get("proof_ref"):
+        if status == ExecutionStatus.SUCCEEDED.value and not exhausted_zero and not source_process.get("proof_ref"):
             await self._fail_execution_integrity_tx(
                 tx,
                 current,
                 "workflow-success-proof-missing",
                 "Workflow success lacks a publication proof",
+            )
+            return
+        if exhausted_zero and terminal_kind == WorkflowTerminalKind.NOOP:
+            await self._fail_execution_integrity_tx(
+                tx,
+                current,
+                "TASK_DISPOSITION_UNSUPPORTED",
+                "NOOP cannot materialize exhausted_zero",
             )
             return
         await self._refresh_execution_counts_tx(tx, current["execution_uuid"])
@@ -606,6 +610,8 @@ class WorkflowOutcomeMixin:
         }
         final_error = error_code or (None if status == ExecutionStatus.SUCCEEDED.value else "workflow-terminal-failure")
         final_message = None if final_error is None else "Workflow reached a terminal failure route"
+        publication_proof = None if exhausted_zero or source_process is None else source_process.get("proof_ref")
+        result_ref = None if source_process is None else source_process.get("output_manifest_ref")
         updated = await tx.execute(
             "UPDATE mkb_executions SET status=?,waiting_reason=NULL,waiting_ref=NULL,next_wake_at=NULL,current_process_uuid=NULL,"
             "result_ref=?,publication_proof_ref=?,final_error_code=?,final_error_message=?,terminal_summary_digest=?,"
@@ -613,8 +619,8 @@ class WorkflowOutcomeMixin:
             "WHERE execution_uuid=? AND status NOT IN ('succeeded','failed','cancelled')",
             (
                 status,
-                None if source_process is None else source_process.get("output_manifest_ref"),
-                None if source_process is None else source_process.get("proof_ref"),
+                result_ref,
+                publication_proof,
                 final_error,
                 final_message,
                 stable_digest(summary),
@@ -626,7 +632,15 @@ class WorkflowOutcomeMixin:
         )
         if updated.rowcount != 1:
             return
-        await self._project_root_task_tx(tx, current, status, source_process, final_error, final_message)
+        await self._project_root_task_tx(
+            tx,
+            current,
+            status,
+            source_process,
+            final_error,
+            final_message,
+            result_disposition=result_disposition,
+        )
         await self._record_event_tx(
             tx,
             execution=current,
@@ -641,7 +655,6 @@ class WorkflowOutcomeMixin:
         )
         await self._notify_scatter_parent_terminal_tx(tx, current)
 
-
     async def _project_root_task_tx(
         self,
         tx: UnitOfWork,
@@ -650,6 +663,7 @@ class WorkflowOutcomeMixin:
         source_process: dict[str, Any] | None,
         error_code: str | None,
         error_message: str | None,
+        result_disposition: str | None = None,
     ) -> None:
         """Project Task terminal status through the single owned helper (R2)."""
 
@@ -664,7 +678,9 @@ class WorkflowOutcomeMixin:
             ExecutionStatus.FAILED.value: TaskStatus.FAILED,
             ExecutionStatus.CANCELLED.value: TaskStatus.CANCELLED,
         }[status]
-        await project_task_status_tx(
+        exhausted_zero = result_disposition == "exhausted_zero"
+        proof_ref = None if exhausted_zero or source_process is None else source_process.get("proof_ref")
+        projected = await project_task_status_tx(
             tx,
             team_uuid=execution["team_uuid"],
             task_uuid=execution["task_uuid"],
@@ -673,11 +689,22 @@ class WorkflowOutcomeMixin:
             trace_uuid=execution.get("trace_uuid"),
             current_root_execution_uuid=execution["execution_uuid"],
             result_ref=None if source_process is None else source_process.get("output_manifest_ref"),
-            proof_ref=None if source_process is None else source_process.get("proof_ref"),
+            proof_ref=proof_ref,
+            result_disposition=result_disposition,
             error_code=error_code,
             error_message=error_message,
         )
-
+        metrics = getattr(self, "metrics", None)
+        if projected and metrics is not None:
+            if exhausted_zero:
+                disposition = "exhausted_zero"
+            elif task_status == TaskStatus.SUCCEEDED:
+                disposition = "indexed_success"
+            elif task_status == TaskStatus.FAILED:
+                disposition = "failed"
+            else:
+                disposition = "cancelled"
+            metrics.increment("mkb_task_result_disposition_total", disposition=disposition)
 
     async def _fail_execution_integrity_tx(
         self, tx: UnitOfWork, execution: dict[str, Any], error_code: str, message: str
@@ -718,7 +745,6 @@ class WorkflowOutcomeMixin:
                 payload={"error_code": error_code},
             )
             await self._notify_scatter_parent_terminal_tx(tx, current)
-
 
     async def _cancel_execution_tree_tx(
         self,
@@ -787,7 +813,6 @@ class WorkflowOutcomeMixin:
             current = await self._execution(tx, row["execution_uuid"])
             await self._converge_cancellation_tx(tx, current)
         return changed
-
 
     async def _converge_cancellation_tx(self, tx: UnitOfWork, execution: dict[str, Any]) -> bool:
         current = await self._execution(tx, execution["execution_uuid"])

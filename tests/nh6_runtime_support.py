@@ -148,21 +148,24 @@ class _MultimodalHandler(BaseHTTPRequestHandler):
             payload = json.loads(self.rfile.read(length))
             messages = payload["messages"]
             parts = messages[-1]["content"]
-            if not isinstance(parts, list):
-                raise ValueError("content is not parts")
-            media_url = next(part["image_url"]["url"] for part in parts if part.get("type") == "image_url")
-            header, encoded = media_url.split(",", 1)
-            media = base64.b64decode(encoded, validate=True)
-            if header.startswith("data:image/png;base64"):
-                try:
-                    text = recognize_png(media)
-                except GlyphOcrError:
-                    text = "VISUAL INPUT OBSERVED"
-                text = text or "VISUAL INPUT OBSERVED"
-            elif header.startswith("data:application/pdf;base64") and media.startswith(b"%PDF-"):
-                text = "PDF INPUT OBSERVED"
+            if isinstance(parts, str):
+                text = f"DOC LLM OBSERVED {parts.strip()}".strip()
+            elif isinstance(parts, list):
+                media_url = next(part["image_url"]["url"] for part in parts if part.get("type") == "image_url")
+                header, encoded = media_url.split(",", 1)
+                media = base64.b64decode(encoded, validate=True)
+                if header.startswith("data:image/png;base64"):
+                    try:
+                        text = recognize_png(media)
+                    except GlyphOcrError:
+                        text = "VISUAL INPUT OBSERVED"
+                    text = text or "VISUAL INPUT OBSERVED"
+                elif header.startswith("data:application/pdf;base64") and media.startswith(b"%PDF-"):
+                    text = "PDF INPUT OBSERVED"
+                else:
+                    raise ValueError("unsupported media")
             else:
-                raise ValueError("unsupported media")
+                raise ValueError("content is not parts")
             with self.payload_lock:
                 self.payloads.append(payload)
             self._json(

@@ -26,6 +26,7 @@ async def project_task_status_tx(
     current_root_execution_uuid: str | None = None,
     result_ref: str | None = None,
     proof_ref: str | None = None,
+    result_disposition: str | None = None,
     error_code: str | None = None,
     error_message: str | None = None,
 ) -> bool:
@@ -47,7 +48,9 @@ async def project_task_status_tx(
     if current_root_execution_uuid is not None and row["current_root_execution_uuid"] != current_root_execution_uuid:
         return False
 
-    if target == TaskStatus.SUCCEEDED and not proof_ref:
+    if result_disposition is not None and result_disposition != "exhausted_zero":
+        raise MkbError("TASK_DISPOSITION_UNSUPPORTED", "Task result disposition is not registered", 409)
+    if target == TaskStatus.SUCCEEDED and not proof_ref and result_disposition != "exhausted_zero":
         raise MkbError("task-proof-missing", "Task cannot succeed without a durable publication proof", 409)
 
     status = row["status"]
@@ -73,6 +76,7 @@ async def project_task_status_tx(
     started = now if target == TaskStatus.RUNNING else None
     updated = await tx.execute(
         "UPDATE mkb_tasks SET status=?,result_ref=COALESCE(?,result_ref),proof_ref=COALESCE(?,proof_ref),"
+        "result_disposition=COALESCE(?,result_disposition),"
         "error_code=?,error_message=?,started_at=COALESCE(started_at,?),"
         "completed_at=?,row_revision=row_revision+1,updated_at=? "
         "WHERE team_uuid=? AND task_uuid=? AND status=? AND row_revision=?",
@@ -80,6 +84,7 @@ async def project_task_status_tx(
             target.value,
             result_ref,
             proof_ref,
+            result_disposition,
             error_code,
             error_message,
             started,

@@ -114,6 +114,10 @@ async def clean_document(
     if llm is not None and (text or blob):
         if prompt is None or prompt.key != definition.prompt_key or prompt.version != definition.prompt_version:
             raise MkbError("PROMPT_HASH_MISMATCH", "Document understanding lacks its frozen prompt pointer", 503)
+        multimodal_media = isinstance(media_type, str) and (
+            media_type == "application/pdf" or media_type.startswith("image/")
+        )
+        bound_blob = blob if multimodal_media else None
         complete_bound = getattr(llm, "complete_bound", None)
         if callable(complete_bound):
             cleaned = (
@@ -121,14 +125,21 @@ async def clean_document(
                     team_uuid=team_uuid or "mkb-intake-clean",
                     prompt=prompt,
                     text=text,
-                    blob=blob,
-                    media_type=media_type,
+                    blob=bound_blob,
+                    media_type=media_type if bound_blob is not None else None,
                     purpose="document_understanding",
                 )
             ).strip()
-            producer = "s11.multimodal" if blob else "s11.text_generate"
+            producer = "s11.multimodal" if bound_blob is not None else "s11.text_generate"
         else:
-            cleaned = (await llm.complete(prompt=prompt.text, text=text, blob=blob, media_type=media_type)).strip()
+            cleaned = (
+                await llm.complete(
+                    prompt=prompt.text,
+                    text=text,
+                    blob=bound_blob,
+                    media_type=media_type if bound_blob is not None else None,
+                )
+            ).strip()
             producer = "injected-llm"
         if not cleaned:
             raise MkbError("CLEAN_EMPTY", "Document LLM cleaning produced no admissible text", 422)

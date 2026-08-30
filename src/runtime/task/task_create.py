@@ -85,6 +85,18 @@ class TaskCreateMixin:
                 return self._view(existing, await self._open_gate(tx, request.team_uuid, request.task_uuid)), True
         now = utc_now()
         self._assert_future_deadline(request.deadline_at, received_at=now)
+        source = getattr(request.payload, "source", None)
+        if (
+            source is not None
+            and getattr(source, "source_kind", None) == "registered_api"
+            and not list(getattr(source, "records", []) or [])
+            and getattr(source, "exhaustion_proof", None) != "caller_frozen_records.v1"
+        ):
+            raise MkbError(
+                "SCATTER_EXHAUSTION_PROOF_REQUIRED",
+                "Registered API collection cannot complete without exhaustion proof",
+                422,
+            )
         prepared = await self.config_snapshots.prepare(request) if self.config_snapshots is not None else None
         async with self.persistence.transaction() as tx:
             # Recheck immediately before the business UoW.  A concurrent

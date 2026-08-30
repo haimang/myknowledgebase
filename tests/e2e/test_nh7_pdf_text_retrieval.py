@@ -11,6 +11,7 @@ from api.app import create_app
 from src.contracts.common.ids import uuid7
 from src.contracts.common.time import utc_now
 from src.runtime.supply.pdf_parser import IsolatedPdfParser, build_compressed_pdf_fixture
+from tests.e2e.nh7_publication import assert_first_publication_closure
 from tests.e2e.test_source_capability_paths import _settings
 from tests.nh6_runtime_support import local_spa_server
 
@@ -111,6 +112,7 @@ def test_http_pdf_text_layer_namespace_hit(tmp_path: Path) -> None:
         )
         assert found.status_code == 200, found.text
         assert found.json()["results"]
+        assert_first_publication_closure(app, client, team_uuid, task_uuid)
         del marker
 
 
@@ -197,6 +199,7 @@ def test_local_upload_pdf_text_layer_namespace_hit(tmp_path: Path) -> None:
         )
         assert found.status_code == 200, found.text
         assert found.json()["results"]
+        assert_first_publication_closure(app, client, team_uuid, task_uuid)
 
 
 def test_absent_text_layer_zero_vector(tmp_path: Path) -> None:

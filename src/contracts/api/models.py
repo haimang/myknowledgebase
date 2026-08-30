@@ -656,6 +656,7 @@ class TaskView(StrictModel):
     completed_at: str | None = None
     result_ref: str | None = None
     proof_ref: str | None = None
+    result_disposition: str | None = None
     error: dict[str, str] | None = None
     action_required: dict[str, Any] | None = None
     links: dict[str, str]

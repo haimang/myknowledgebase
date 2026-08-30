@@ -95,6 +95,7 @@ class WorkflowScatterMixin:
                 source_process=terminal_proof,
                 route_digest=route_digest,
                 error_code=None,
+                result_disposition="exhausted_zero",
             )
             return True
         await self._release_scatter_children_tx(
@@ -342,6 +343,7 @@ class WorkflowScatterMixin:
                     }
                 ),
                 error_code=None,
+                result_disposition="exhausted_zero",
             )
             return True
 
