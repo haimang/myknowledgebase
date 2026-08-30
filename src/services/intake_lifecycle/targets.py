@@ -48,6 +48,7 @@ class IntakeTargetResolver:
         self, team_uuid: str, payload: IntakeUpdateMetadataPayload
     ) -> FrozenMetadataUpdate:
         async with self._persistence.transaction() as tx:
+            semantics = await self._metadata_values_tx(tx, team_uuid, payload.semantics)
             target = await self._target_tx(
                 tx,
                 team_uuid=team_uuid,
@@ -60,7 +61,6 @@ class IntakeTargetResolver:
                 team_uuid=team_uuid,
                 intake_revision_uuid=target.intake_revision_uuid,
             )
-            semantics = await self._metadata_values_tx(tx, team_uuid, payload.semantics)
         return FrozenMetadataUpdate(target=target, base_semantics=base_semantics, semantics=semantics)
 
     async def resolve_lifecycle_target(self, team_uuid: str, payload: IntakeLifecyclePayload) -> FrozenIntakeTarget:
@@ -222,7 +222,7 @@ class IntakeTargetResolver:
             )
             if not definitions:
                 raise MkbError(
-                    "METADATA_SEMANTIC_UNREGISTERED",
+                    "INTAKE_SEMANTIC_KEY_UNREGISTERED",
                     "Metadata semantic key is not registered",
                     422,
                     {"semantic_key": semantic_key},
