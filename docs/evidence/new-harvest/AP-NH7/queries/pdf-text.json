@@ -1,0 +1,10 @@
+{
+  "commit": "6256a97bb4265e72a46f776f6951eb2a71abaa44",
+  "observed_at_utc": "2026-08-30T02:28:40Z",
+  "tests": [
+    "tests/e2e/test_nh7_pdf_text_retrieval.py::test_http_pdf_text_layer_namespace_hit",
+    "tests/e2e/test_nh7_pdf_text_retrieval.py::test_local_upload_pdf_text_layer_namespace_hit",
+    "tests/e2e/test_nh7_pdf_text_retrieval.py::test_absent_text_layer_zero_vector"
+  ],
+  "result": "HTTP PDF and NH4 upload local PDF text-layer query hit; absent layer zero vectors"
+}

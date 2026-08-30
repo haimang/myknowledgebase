@@ -1,0 +1,10 @@
+{
+  "commit": "6256a97bb4265e72a46f776f6951eb2a71abaa44",
+  "observed_at_utc": "2026-08-30T02:28:40Z",
+  "tests": [
+    "tests/e2e/test_nh7_browser_dom_retrieval.py::test_absent_main_text_declared_browser_dom_query",
+    "tests/e2e/test_nh7_browser_dom_retrieval.py::test_web_llm_rewrite_namespace_hit",
+    "tests/e2e/test_nh7_browser_dom_retrieval.py::test_present_or_unknown_does_not_materialize_browser"
+  ],
+  "result": "empty-spa absent main_text materializes http_browser; rendered profile != injected-browser-renderer.v1; web.llm_rewrite PromptRef + CLI clean >=1; present HTML zero browser processes; realm facet hit/exclude"
+}

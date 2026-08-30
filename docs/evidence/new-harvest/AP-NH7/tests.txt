@@ -1,0 +1,19 @@
+AP-NH7 test evidence
+Observed at: 2026-08-30T02:28:40Z
+Implementation commit: 6256a97bb4265e72a46f776f6951eb2a71abaa44
+Environment: Python 3.12; pytest 8.3.5; isolated pdftotext/OCR; Firefox + geckodriver; local multimodal fixture; ns1 CLI stub for structurize; no success-path fetcher/LLM assignment
+
+NH7-T01..T10 hard-gate suite
+Command: uv run pytest tests/unit/test_nh7_activation_manifest.py tests/unit/test_nh7_llm_invocation_count.py tests/unit/test_nh7_clean_empty.py tests/unit/test_prompt_hash_mismatch.py tests/domain/test_nh7_no_fetcher_patch.py tests/e2e/test_nh7_empty_clean_zero_vector.py tests/e2e/test_nh7_inline_static_retrieval.py tests/e2e/test_nh7_pdf_text_retrieval.py tests/e2e/test_nh7_browser_dom_retrieval.py tests/e2e/test_nh7_print_pdf_retrieval.py tests/e2e/test_nh7_multimodal_lanes.py tests/e2e/test_nh7_registered_api_retrieval.py tests/e2e/test_nh7_exhausted_zero.py tests/e2e/test_nh7_failure_zero_vector.py -q --tb=line
+Result: PASS, 40 passed, duration ~345s
+Levels: T01 L1; T02 L1/L2; T03-T08 L3/L4 namespaced+facet search; T09 L2/L4; T10 L1/L3/L4.
+
+Static review
+Command: uv run ruff check <changed Python>
+Result: PASS
+Command: git diff --check
+Result: PASS
+
+Repository diagnostic
+Command: uv run pytest -q --tb=line
+Run on `6256a97`: 6 failed. Five are unchanged NH8 successor reds (index namespace ×3, reactivate namespace ×1, rebuild STRUCTURE_PROFILE_INVALID ×1). The sixth was `test_nh1_denominator_inventory.py::test_prompt_a_inventory_has_three_distinct_ids_hashes_and_readers` after canonical `promptA.default`; readers were realigned (three files/hashes unchanged). Remaining expected reds: the same five NH8 items.

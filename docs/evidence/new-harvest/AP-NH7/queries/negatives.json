@@ -1,0 +1,12 @@
+{
+  "commit": "6256a97bb4265e72a46f776f6951eb2a71abaa44",
+  "observed_at_utc": "2026-08-30T02:28:40Z",
+  "tests": [
+    "tests/unit/test_nh7_clean_empty.py::test_web_doc_pdf_llm_raise_clean_empty",
+    "tests/e2e/test_nh7_failure_zero_vector.py::test_clean_empty_zero_vector_query",
+    "tests/e2e/test_nh7_failure_zero_vector.py::test_empty_member_batch_fail_zero_vector",
+    "tests/e2e/test_nh7_failure_zero_vector.py::test_bad_member_schema_zero_vector",
+    "tests/e2e/test_nh7_failure_zero_vector.py::test_worker_failure_after_bind_zero_vector"
+  ],
+  "result": "CLEAN_EMPTY literal; failed ingest search empty; empty/bad member admission 422 and zero indexed rows; empty-glyph OCR fails after bind with zero vectors"
+}

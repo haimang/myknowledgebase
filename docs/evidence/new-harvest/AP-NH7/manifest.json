@@ -1,0 +1,56 @@
+{
+  "schema_version": "mkb.new-harvest-evidence.v1",
+  "ap": "AP-NH7",
+  "status": "executed",
+  "commit": "6256a97bb4265e72a46f776f6951eb2a71abaa44",
+  "prior_activation_commits": [
+    "1c74afe",
+    "be74417"
+  ],
+  "truth_cite": [
+    "T-O-376",
+    "T-O-378",
+    "T-O-381",
+    "T-O-383",
+    "T-O-386",
+    "T-O-388",
+    "T-O-389",
+    "T-O-397",
+    "T-O-402",
+    "T-O-403",
+    "T-O-405",
+    "T-O-406"
+  ],
+  "work_ids": [
+    "NH7-01",
+    "NH7-02",
+    "NH7-03",
+    "NH7-04",
+    "NH7-05",
+    "NH7-06",
+    "NH7-07",
+    "NH7-08",
+    "NH7-09",
+    "NH7-10"
+  ],
+  "test_ids": [
+    "NH7-T01",
+    "NH7-T02",
+    "NH7-T03",
+    "NH7-T04",
+    "NH7-T05",
+    "NH7-T06",
+    "NH7-T07",
+    "NH7-T08",
+    "NH7-T09",
+    "NH7-T10"
+  ],
+  "hard_gate_result": {
+    "passed": 40,
+    "failed": 0,
+    "level": "L1/L2/L3/L4"
+  },
+  "migration_id": "023_nh7_result_disposition",
+  "observed_at_utc": "2026-08-30T02:28:40Z",
+  "closure_type": "closed-with-explicit-deferrals"
+}

@@ -1,0 +1,6 @@
+{
+  "commit": "6256a97bb4265e72a46f776f6951eb2a71abaa44",
+  "observed_at_utc": "2026-08-30T02:28:40Z",
+  "test": "tests/unit/test_nh7_activation_manifest.py",
+  "predicate": "CLEAN_STRATEGY_DEFINITIONS generates 10 strategy cells plus 3 registered operations; illegal combinations fail-loud; no 10x4 cartesian."
+}

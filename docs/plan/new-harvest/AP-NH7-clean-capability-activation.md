@@ -31,7 +31,7 @@
 > - [`assessment-analysis-04-clean-capability-and-admitted-clean.md`](../../eval/new-harvest/reference-anchor/assessment-analysis-04-clean-capability-and-admitted-clean.md)（主面）
 > - [`assessment-analysis-08-publication-and-intake-lifecycle.md`](../../eval/new-harvest/reference-anchor/assessment-analysis-08-publication-and-intake-lifecycle.md)（publication/query 终验）
 > - [`assessment-analysis-05-runtime-adapters-readiness-and-security.md`](../../eval/new-harvest/reference-anchor/assessment-analysis-05-runtime-adapters-readiness-and-security.md)（只消费 default-root 已接线；不在本 AP 选库/补隔离）
-> 文档状态: `draft`
+> 文档状态: `executed`
 > 台账 ID 区间（final §11.A `7.7 AP-NH7`）：`NH7-01..10` / `NH7-A01..07` / `NH7-T01..10`
 > HEAD: `1221aa1`
 > Capstone：C/D/E/F 的 **query 终态** 在本 AP；供给在 NH6，upload 在 NH4，facet 键在 NH5
@@ -700,12 +700,12 @@ AP-NH7 10+3 vertical activation
 
 | 收口目标 | 工作项 | Test-ID | PASS 证据（四元组）| 状态 |
 |----------|--------|---------|---------------------|------|
-| 10+3 合法矩阵；非法格 fail | `NH7-01` | `NH7-T01`..`NH7-T09` | `commit SHA + manifest/test map PASS + T-O-381 + UTC` | `未观察` |
-| clean 非空；evidence/digest/PromptRef；失败零向量 | `NH7-02` `NH7-03` | `NH7-T02` `NH7-T10` | `commit SHA + clean artifacts PASS + T-O-386 + UTC` | `未观察` |
-| source lanes：default-root 无 patch，真实 input 到 query | `NH7-04`..`NH7-08` | `NH7-T03`..`NH7-T07` | `commit SHA + Task/Process/query trace PASS + T-O-376 + UTC` | `未观察` |
-| API lanes：每 operation member 命中；zero 独立且零产物 | `NH7-09` | `NH7-T08` `NH7-T09` | `commit SHA + child proof+result PASS + Q17 + UTC` | `未观察` |
-| semantic/publication：actual/S04/g0/S06/proof/pointer/facet 可回溯 | `NH7-10` | `NH7-T03`..`NH7-T08`；负例 `NH7-T10` + cross-query | `commit SHA + evidence chain PASS + T-O-389/406 + UTC` | `未观察` |
-| fake-green：无 503/patch/empty/publication flag 顶替 | 全项 | scan + L3/L4 | `commit SHA + FG report PASS + T-O-406 + UTC` | `未观察` |
+| 10+3 合法矩阵；非法格 fail | `NH7-01` | `NH7-T01`..`NH7-T09` | `6256a97 + T01 PASS + T-O-381 + 2026-08-30T02:28:40Z` | `PASS` |
+| clean 非空；evidence/digest/PromptRef；失败零向量 | `NH7-02` `NH7-03` | `NH7-T02` `NH7-T10` | `6256a97 + T02/T10 PASS + T-O-386 + UTC` | `PASS` |
+| source lanes：default-root 无 patch，真实 input 到 query | `NH7-04`..`NH7-08` | `NH7-T03`..`NH7-T07` | `6256a97 + T03-T07 query PASS + T-O-376 + UTC` | `PASS` |
+| API lanes：每 operation member 命中；zero 独立且零产物 | `NH7-09` | `NH7-T08` `NH7-T09` | `6256a97 + T08/T09 PASS + Q17 + UTC` | `PASS` |
+| semantic/publication：actual/S04/g0/S06/proof/pointer/facet 可回溯 | `NH7-10` | `NH7-T03`..`NH7-T08`；负例 `NH7-T10` + cross-query | `6256a97 + evidence-chain helper PASS + T-O-389/406 + UTC` | `PASS` |
+| fake-green：无 503/patch/empty/publication flag 顶替 | 全项 | scan + L3/L4 | `6256a97 + FG report PASS + T-O-406 + UTC` | `PASS` |
 
 **谓词形态（判定句，禁止「测试通过」空话）**：
 
@@ -764,13 +764,53 @@ AP-NH7 10+3 vertical activation
 
 ## 11. 执行日志回填（仅 `executed` 状态使用）
 
-> 文档状态为 `draft`，本节省略实填。执行完成后改用 append 模板 `respond-execution-log`。residual 交后继 charter，不回填本阶段。
+> 执行者：`Grok`
+> 执行时间：`2026-08-30`（evidence UTC `2026-08-30T02:28:40Z`）
+> 文档状态：`draft → executing → executed`
+> 代码改动统计：激活提交 `1c74afe` / `be74417` / `6256a97`；migration `023_nh7_result_disposition`
 
-- **实际执行摘要**：待执行后回填。
-- **Phase 偏差**（逐条带分类）：待执行后回填。
-- **阻塞与处理**：待执行后回填。NH6 未 GO 必须记 `未观察`，禁止 patch 后改记 PASS。
-- **测试发现**（含全绿计数 + 新暴露事实）：待执行后回填。
-- **后续 handoff**：`AP-NH8`（七意图 / exact-clean；假定 live clean 已存在）；`AP-NH9`（closed-set 回归 Capstone C–F，不补功能）。
+- **实际执行摘要**：
+  - Phase 1（`NH7-01/02`）：10+3 activation manifest；admitted-clean 非空；空 inline 零向量。
+  - Phase 2（`NH7-03`）：canonical `promptA.default`；历史 id exact replay；确定性零模型调用。
+  - Phase 3（`NH7-04/05`）：inline/static 与真 PDF text-layer default-root query。
+  - Phase 4（`NH7-06/07`）：absent SPA → 真 DOM；`web.llm_rewrite` PromptRef；print `%PDF-` 走 PDF DU、零 HTML sanitizer；render 不得顶 print。
+  - Phase 5（`NH7-08/09`）：五 multimodal 经 NH4 upload；三 API member namespaced hit；`result_disposition=exhausted_zero`。
+  - Phase 6（`NH7-10`）：T03–T08 加 sealed actual / S04 六键 / g0=clean / proof+pointer。
+- **Phase 偏差（计划 vs 实际）**：
+  - `NH7-V01 (substrate-fit)`：`web.llm_rewrite` 使用 default-root `DeterministicNs1Stub`（非 `_clean_llm =` patch）；print/DU/vision 使用 S11 local fixture。
+  - `NH7-V02 (media contract)`：`doc.document_understanding` 对非 image/pdf 不把 blob 送进 `MultimodalGenerateRequest`（media_type 仅 pdf/image），改走 text_generate。
+  - `NH7-V03 (T08 PASS 主文件)`：未 🔱 仍含 sqlite3 的 HEAD scatter；🆕 `test_nh7_registered_api_retrieval.py` 为 T08 PASS。
+- **阻塞与处理**：无 NH7 hard-gate blocker。NH8 五红保持 successor-owned。
+- **测试发现**：NH7 hard suite `40 passed`；T05/T06 含真实 Firefox。全仓诊断在 `6256a97` 见 6 红：5 个 NH8 successor + 1 个 NH1 promptA reader 清单（随后 realign）。
+- **后续 handoff**：`AP-NH8` 七意图 / exact-clean / namespace 红债；`AP-NH9` 回归 Capstone C–F，不补 10+3 功能。
+
+### 11.1 逐工作项状态
+
+| 工作项 | 状态 | PR / commit | 实际落点 | 备注 |
+|--------|------|-------------|----------|------|
+| `NH7-01` | `✅ done` | `1c74afe` | `strategies.py`; activation tests | 10+3 |
+| `NH7-02` | `✅ done` | `1c74afe` | admitted-clean; T10 empty | nonempty |
+| `NH7-03` | `✅ done` | `be74417` | `CANONICAL_CLEAN_PROMPT_KEY` | M-NH-07 |
+| `NH7-04` | `✅ done` | `1c74afe` | `test_nh7_inline_static_retrieval.py` | L3+L4 |
+| `NH7-05` | `✅ done` | `1c74afe` | `test_nh7_pdf_text_retrieval.py` | NH4 upload |
+| `NH7-06` | `✅ done` | `be74417`/`6256a97` | `test_nh7_browser_dom_retrieval.py` | llm_rewrite |
+| `NH7-07` | `✅ done` | `be74417`/`6256a97` | `test_nh7_print_pdf_retrieval.py` | no sanitizer |
+| `NH7-08` | `✅ done` | `6256a97` | `test_nh7_multimodal_lanes.py` | 5 lanes |
+| `NH7-09` | `✅ done` | `6256a97` | API retrieval + `exhausted_zero` | T-O-397 |
+| `NH7-10` | `✅ done` | `6256a97` | `tests/e2e/nh7_publication.py` | evidence chain |
+
+### 11.2 红灯 / successor-owned failures
+
+| 项 | 证据 | 判断 |
+|----|------|------|
+| index namespace ×3 | 422 `RETRIEVE_SCHEMA_NAMESPACE_REQUIRED` | `C handoff → NH8` |
+| reactivate namespace ×1 | same 422 | `C handoff → NH8` |
+| rebuild STRUCTURE_PROFILE_INVALID ×1 | metadata/rebuild still reclean | `C handoff → NH8` |
+
+### 11.4 文档状态
+
+`draft → executing → executed（2026-08-30）`。
+residual → `AP-NH8` 七意图/namespace；`AP-NH9` mega 回归。
 
 ---
 
@@ -781,3 +821,4 @@ AP-NH7 10+3 vertical activation
 | `v0.1` | `2026-08-29` | Grok workflow new-harvest-nh6-nh9-action-plans | 由 final §7.7 派生；HEAD `1221aa1` 独立核行号；消费 NH1–NH6 交接与 RA04/RA08 |
 | `v0.2` | `2026-08-29` | Grok fix-fleet | 吸收已核实 review：T09 PASS 只跑 🆕 exhausted_zero 四 node，HEAD zero 段 ⛔；T03/T08 8.1 来源改为 🆕/⛔ 对齐跑法；T03 从「NH6 未 GO ⇒ T03–T08 未观察」排除；⛔3 锚改为 `src/contracts/api/models.py:505-510` + `retrieval_request.py:265-270`；g0 overlay `generation_assemble.py:17-62` |
 | `v0.3` | `2026-08-29` | Grok recon-fix | T04/T05/T06 步骤与 source-lanes 谓词补 NH5 facet 命中/排除；T01 锁死 manifest `strategy_cells`/`op_cells`/`intent_illegal`/`digest` 字段 |
+| `v1.0` | `2026-08-30` | Grok | 执行回填 §11；文档状态 `executed`；T01–T10 PASS `6256a97` |

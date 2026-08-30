@@ -1,0 +1,11 @@
+{
+  "commit": "6256a97bb4265e72a46f776f6951eb2a71abaa44",
+  "observed_at_utc": "2026-08-30T02:28:40Z",
+  "tests": [
+    "tests/e2e/test_nh7_exhausted_zero.py::test_disposition_exhausted_zero_not_indexed_success",
+    "tests/e2e/test_nh7_exhausted_zero.py::test_exhaustion_proof_retrieval_empty",
+    "tests/e2e/test_nh7_exhausted_zero.py::test_same_fingerprint_replay_same_disposition",
+    "tests/e2e/test_nh7_exhausted_zero.py::test_noop_terminal_alone_is_not_product_zero"
+  ],
+  "result": "result_disposition=exhausted_zero; zero child/item/revision/vector/publication_proof; facet-empty search 200; replay same task_uuid keeps disposition; NOOP mapping does not write exhausted_zero; missing proof 422 SCATTER_EXHAUSTION_PROOF_REQUIRED"
+}

@@ -1,0 +1,12 @@
+{
+  "commit": "6256a97bb4265e72a46f776f6951eb2a71abaa44",
+  "observed_at_utc": "2026-08-30T02:28:40Z",
+  "tests": [
+    "tests/e2e/test_nh7_multimodal_lanes.py::test_pdf_document_understanding_query",
+    "tests/e2e/test_nh7_multimodal_lanes.py::test_pdf_ocr_query",
+    "tests/e2e/test_nh7_multimodal_lanes.py::test_doc_document_understanding_query",
+    "tests/e2e/test_nh7_multimodal_lanes.py::test_doc_ocr_query",
+    "tests/e2e/test_nh7_multimodal_lanes.py::test_doc_vision_query"
+  ],
+  "result": "five local_object upload lanes each namespaced+facet hit; DU/vision send live S11 payloads; OCR uses IsolatedDeterministicOcr"
+}

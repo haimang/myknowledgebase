@@ -1,0 +1,10 @@
+{
+  "commit": "6256a97bb4265e72a46f776f6951eb2a71abaa44",
+  "observed_at_utc": "2026-08-30T02:28:40Z",
+  "tests": [
+    "tests/e2e/test_nh7_registered_api_retrieval.py::test_chinatax_member_namespace_hit",
+    "tests/e2e/test_nh7_registered_api_retrieval.py::test_domain_member_namespace_hit",
+    "tests/e2e/test_nh7_registered_api_retrieval.py::test_realestate_member_namespace_hit"
+  ],
+  "result": "each provider member clean_text hits namespaced+realm search; omitted namespace 422; no sqlite3"
+}

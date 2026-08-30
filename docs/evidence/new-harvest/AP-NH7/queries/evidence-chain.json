@@ -1,0 +1,14 @@
+{
+  "commit": "6256a97bb4265e72a46f776f6951eb2a71abaa44",
+  "observed_at_utc": "2026-08-30T02:28:40Z",
+  "helper": "tests/e2e/nh7_publication.py::assert_first_publication_closure",
+  "wired_into": ["T03", "T04", "T05", "T06", "T07", "T08"],
+  "asserts": [
+    "actual_binding_state=sealed",
+    "actual_binding_digest 64-hex != s05_binding_digest",
+    "S04 keys realm/type/channel/source_name/is_active/context_tags",
+    "mkb_publication_proofs >= 1",
+    "mkb_index_active_pointers lifecycle_state=active >= 1",
+    "g0 original body == admitted clean_text (normalized)"
+  ]
+}

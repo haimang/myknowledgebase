@@ -1,0 +1,10 @@
+{
+  "commit": "6256a97bb4265e72a46f776f6951eb2a71abaa44",
+  "observed_at_utc": "2026-08-30T02:28:40Z",
+  "tests": [
+    "tests/e2e/test_nh7_inline_static_retrieval.py::test_inline_doc_deterministic_namespace_facet_hit",
+    "tests/e2e/test_nh7_inline_static_retrieval.py::test_http_static_web_deterministic_namespace_facet_hit"
+  ],
+  "search": "POST /v1/teams/{t}/retrieval:search with namespace_key + realm + vector_channel=original",
+  "result": "HTTP 200 hits; omitted namespace 422 RETRIEVE_SCHEMA_NAMESPACE_REQUIRED"
+}

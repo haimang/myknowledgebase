@@ -1,0 +1,10 @@
+{
+  "commit": "6256a97bb4265e72a46f776f6951eb2a71abaa44",
+  "observed_at_utc": "2026-08-30T02:28:40Z",
+  "tests": [
+    "tests/e2e/test_nh7_print_pdf_retrieval.py::test_print_fact_pdf_clean_namespace_hit",
+    "tests/e2e/test_nh7_print_pdf_retrieval.py::test_print_path_does_not_call_html_sanitizer",
+    "tests/e2e/test_nh7_print_pdf_retrieval.py::test_render_success_does_not_close_print_lane"
+  ],
+  "result": "print_pdf fact + S11 PDF INPUT OBSERVED query; sanitize_html_document call count 0; render-only ingest writes zero print facts/processes"
+}
