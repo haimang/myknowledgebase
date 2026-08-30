@@ -61,6 +61,7 @@ class ObjectUploadService:
                 expected_sha256=expected_sha256,
             ),
         )
+        await self._run_fault_hook("after_promote_before_catalog")
         replay = False
         async with self._persistence.transaction() as tx:
             team = await tx.fetchone("SELECT status FROM mkb_teams WHERE team_uuid=?", (team_uuid,))

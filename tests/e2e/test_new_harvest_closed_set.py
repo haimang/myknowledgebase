@@ -13,6 +13,27 @@ from src.contracts.common.ids import uuid7
 from src.contracts.common.time import utc_now
 from src.runtime.supply.pdf_parser import build_compressed_pdf_fixture
 from tests.e2e.test_nh4_public_upload import _upload
+from tests.e2e.test_registered_api_scatter import (
+    _create_team as _scatter_team,
+)
+from tests.e2e.test_registered_api_scatter import (
+    _FailOneScatterChild,
+)
+from tests.e2e.test_registered_api_scatter import (
+    _items as _scatter_items,
+)
+from tests.e2e.test_registered_api_scatter import (
+    _records as _scatter_records,
+)
+from tests.e2e.test_registered_api_scatter import (
+    _settings as _scatter_settings,
+)
+from tests.e2e.test_registered_api_scatter import (
+    _submit as _scatter_submit,
+)
+from tests.e2e.test_registered_api_scatter import (
+    _wait_for_terminal as _scatter_wait,
+)
 from tests.e2e.test_source_capability_paths import _settings
 
 _TOKEN = "source-capability-token"
@@ -339,3 +360,182 @@ def test_missing_supply_typed_fail_not_live_dod(tmp_path: Path) -> None:
         )
         assert search.status_code == 200, search.text
         assert search.json()["results"] == []
+
+
+_SCATTER_HEADERS = {"Authorization": "Bearer scatter-token"}
+
+
+def _scatter_search(
+    client: TestClient,
+    team_uuid: str,
+    namespace: str,
+    query: str,
+    filters: dict[str, str] | None = None,
+):
+    body: dict[str, Any] = {
+        "schema_version": "mkb.retrieval.v2",
+        "team_uuid": team_uuid,
+        "namespace_key": namespace,
+        "query": query,
+        "return_k": 10,
+        "recall_k": 20,
+    }
+    if filters:
+        body["filters"] = filters
+    return client.post(f"/v1/teams/{team_uuid}/retrieval:search", headers=_SCATTER_HEADERS, json=body)
+
+
+def _scatter_control(client: TestClient, team_uuid: str, external_key: str, content: str) -> None:
+    task_uuid, trace_uuid = uuid7(), uuid7()
+    seeded = client.post(
+        f"/v1/teams/{team_uuid}/tasks",
+        headers=_SCATTER_HEADERS,
+        json={
+            "schema_version": "mkb.task.v1",
+            "team_uuid": team_uuid,
+            "task_uuid": task_uuid,
+            "trace_uuid": trace_uuid,
+            "request_intent": "intake.ingest",
+            "payload": {
+                "json_prompt_id": "promptB.json.generic",
+                "source": {
+                    "source_kind": "inline_payload",
+                    "external_key": external_key,
+                    "content": content,
+                    "realm": "documentation",
+                    "type": "article",
+                    "channel": "general",
+                    "source_name": external_key,
+                },
+            },
+            "audit": _audit(team_uuid, task_uuid, trace_uuid),
+        },
+    )
+    assert seeded.status_code == 201, seeded.text
+    assert _scatter_wait(client, team_uuid=team_uuid, task_uuid=task_uuid, headers=_SCATTER_HEADERS)["status"] == "succeeded"
+
+
+def test_exhausted_zero_namespace_search_empty(tmp_path: Path) -> None:
+    app = create_app(_scatter_settings(tmp_path))
+    team_uuid = uuid7()
+    with TestClient(app, raise_server_exceptions=True) as client:
+        _scatter_team(client, team_uuid=team_uuid, headers=_SCATTER_HEADERS)
+        _scatter_control(client, team_uuid, "nh9-zero-control", "NH9 exhausted zero control sentinel zephyrquartz")
+        before = _vectors(app, client, team_uuid)
+        namespace = _namespace(app, client, team_uuid)
+        task_uuid = _scatter_submit(client, team_uuid=team_uuid, headers=_SCATTER_HEADERS, records=[])
+        terminal = _scatter_wait(client, team_uuid=team_uuid, task_uuid=task_uuid, headers=_SCATTER_HEADERS)
+        assert terminal["status"] == "succeeded", terminal
+        assert terminal["result_disposition"] == "exhausted_zero"
+        assert terminal["result_disposition"] != "indexed_success"
+        empty = _scatter_search(
+            client,
+            team_uuid,
+            namespace,
+            "Tax fixture reaches",
+            {"realm": "tax_china", "vector_channel": "original"},
+        )
+        assert empty.status_code == 200, empty.text
+        assert empty.json()["results"] == []
+        control = _scatter_search(client, team_uuid, namespace, "zephyrquartz", {"vector_channel": "original"})
+        assert control.status_code == 200, control.text
+        assert control.json()["results"]
+        assert _vectors(app, client, team_uuid) == before
+
+
+def test_required_child_failed_parent_not_retrievable(tmp_path: Path) -> None:
+    app = create_app(_scatter_settings(tmp_path))
+    team_uuid = uuid7()
+    with TestClient(app, raise_server_exceptions=True) as client:
+        _scatter_team(client, team_uuid=team_uuid, headers=_SCATTER_HEADERS)
+        _scatter_control(client, team_uuid, "nh9-child-fail-control", "NH9 child-fail control sentinel zephyrquartz")
+        app.state.container.workflow_worker.handler = _FailOneScatterChild(
+            app.state.container.workflow_worker.handler
+        )
+        namespace = _namespace(app, client, team_uuid)
+        task_uuid = _scatter_submit(
+            client,
+            team_uuid=team_uuid,
+            headers=_SCATTER_HEADERS,
+            records=_scatter_records("nh9-child-fail"),
+        )
+        failed = _scatter_wait(client, team_uuid=team_uuid, task_uuid=task_uuid, headers=_SCATTER_HEADERS)
+        assert failed["status"] == "failed", failed
+        assert failed["error"]["code"] == "scatter-required-child-failed"
+        items = _scatter_items(client, team_uuid=team_uuid, task_uuid=task_uuid, headers=_SCATTER_HEADERS)
+        outcomes = sorted(item["outcome"] for item in items)
+        assert outcomes == ["failed", "succeeded"]
+        assert any(item.get("publication_ready") for item in items)
+        failed_item = next(item for item in items if item["outcome"] == "failed")
+        hidden = _scatter_search(
+            client,
+            team_uuid,
+            namespace,
+            "nh9-child-fail",
+            {
+                "intake_item_uuid": str(failed_item["intake_item_uuid"]),
+                "vector_channel": "original",
+            },
+        )
+        assert hidden.status_code == 200, hidden.text
+        assert hidden.json()["results"] == []
+        assert failed["status"] != "succeeded"
+
+
+def test_bad_member_root_not_succeeded_zero_hits(tmp_path: Path) -> None:
+    app = create_app(_scatter_settings(tmp_path))
+    team_uuid = uuid7()
+    with TestClient(app, raise_server_exceptions=True) as client:
+        _scatter_team(client, team_uuid=team_uuid, headers=_SCATTER_HEADERS)
+        _scatter_control(client, team_uuid, "nh9-bad-member-control", "NH9 bad-member control sentinel zephyrquartz")
+        before = _vectors(app, client, team_uuid)
+        namespace = _namespace(app, client, team_uuid)
+        task_uuid, trace_uuid = uuid7(), uuid7()
+        created = client.post(
+            f"/v1/teams/{team_uuid}/tasks",
+            headers=_SCATTER_HEADERS,
+            json={
+                "schema_version": "mkb.task.v1",
+                "team_uuid": team_uuid,
+                "task_uuid": task_uuid,
+                "trace_uuid": trace_uuid,
+                "request_intent": "intake.ingest",
+                "payload": {
+                    "json_prompt_id": "promptB.json.generic",
+                    "source": {
+                        "source_kind": "registered_api",
+                        "external_key": "nh9-bad-member",
+                        "connector_key": "nh9",
+                        "provider": "chinatax",
+                        "operation": "get_articles",
+                        "definition_version": "v1",
+                        "representation": "raw",
+                        "records": [{"id": "nh9-empty-clean", "label": "公告", "column": "政策法规"}],
+                        "exhaustion_proof": "caller_frozen_records.v1",
+                    },
+                },
+                "audit": _audit(team_uuid, task_uuid, trace_uuid),
+            },
+        )
+        if created.status_code == 201:
+            terminal = _scatter_wait(client, team_uuid=team_uuid, task_uuid=task_uuid, headers=_SCATTER_HEADERS)
+            assert terminal["status"] != "succeeded", terminal
+        else:
+            assert created.status_code == 422, created.text
+            tasks = _port(
+                app,
+                client,
+                "SELECT COUNT(*) AS n FROM mkb_tasks WHERE team_uuid=? AND task_uuid=?",
+                (team_uuid, task_uuid),
+            )
+            assert tasks is not None and int(tasks["n"]) == 0
+        assert _vectors(app, client, team_uuid) == before
+        hidden = _scatter_search(
+            client,
+            team_uuid,
+            namespace,
+            "nh9-empty-clean",
+            {"realm": "tax_china", "vector_channel": "original"},
+        )
+        assert hidden.status_code == 200, hidden.text
+        assert hidden.json()["results"] == []

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import time
 from pathlib import Path
 from typing import Any
@@ -23,6 +24,9 @@ from tests.e2e.test_nh3_seal_crash_windows import (
 from tests.e2e.test_nh3_seal_crash_windows import (
     test_route_seal_fault_windows_leave_no_half_commit as _seal_fault_windows,
 )
+from tests.e2e.test_nh4_public_upload import _settings as _nh4_upload_settings
+from tests.e2e.test_nh4_public_upload import _team as _nh4_team
+from tests.e2e.test_nh4_public_upload import _upload as _nh4_upload
 from tests.e2e.test_source_capability_paths import _settings
 from tests.integration.test_nh2_selected_output_control import _seed
 from tests.integration.test_nh3_fact_history_uow import _running_process, _success
@@ -381,3 +385,50 @@ def test_w_nh_outbox_redelivery_no_extra_vector_upsert(tmp_path: Path) -> None:
         )
         assert after is not None
         assert int(after["n"]) == int(before["n"])
+
+
+def test_w_nh_prom_cat_crash_no_usable_handle(tmp_path: Path) -> None:
+    app = create_app(_nh4_upload_settings(tmp_path).model_copy(update={"object_gc_enabled": False}))
+
+    def fault(stage: str) -> None:
+        if stage == "after_promote_before_catalog":
+            raise RuntimeError("W-NH-PROM-CAT")
+
+    app.state.container.object_upload._uow_fault_hook = fault  # noqa: SLF001
+    team_uuid = uuid7()
+    headers = {"Authorization": "Bearer nh4-upload-token"}
+    body = b"nh9-prom-cat-orphan-bytes"
+    digest = hashlib.sha256(body).hexdigest()
+    handle = f"mkbobj:v1:{team_uuid}:{digest}"
+    with TestClient(app, raise_server_exceptions=False) as client:
+        _nh4_team(client, team_uuid, headers)
+        response = _nh4_upload(client, team_uuid, headers, body)
+        assert response.status_code == 500, response.text
+        counts = _port(
+            app,
+            client,
+            "SELECT (SELECT COUNT(*) FROM mkb_stored_objects WHERE team_uuid=?) AS catalog, "
+            "(SELECT COUNT(*) FROM mkb_object_references WHERE team_uuid=?) AS refs, "
+            "(SELECT COUNT(*) AS n FROM mkb_intake_items WHERE team_uuid=?) AS items",
+            (team_uuid, team_uuid, team_uuid),
+        )
+        assert counts is not None
+        assert int(counts["catalog"]) == 0
+        assert int(counts["refs"]) == 0
+        assert int(counts["items"]) == 0
+        stat = client.get(
+            f"/v1/teams/{team_uuid}/objects:stat",
+            headers=headers,
+            params={"handle": handle},
+        )
+        assert stat.status_code == 404, stat.text
+        staging = tmp_path / "objects" / "staging"
+        leftover = list(staging.glob("promote-*")) if staging.exists() else []
+
+        async def reap() -> int:
+            return await app.state.container.object_upload_lifecycle.scan_once()
+
+        result = client.portal.call(reap)
+        assert result.released_pending == 0
+        assert leftover == [] or not any(path.exists() for path in leftover)
+        assert int(_port(app, client, "SELECT COUNT(*) AS n FROM mkb_intake_items WHERE team_uuid=?", (team_uuid,))["n"]) == 0
