@@ -1,5 +1,30 @@
 {
+  "assurance_digest": "f359c330a253eb38f76e56a81355cdbdce0e99987b817bd1bb938411e3e3bcb7",
   "digest": "57c19c6bcb1c4b82bb741886808b8f3b342259aa795dbaae8b285140e1da740a",
+  "experiment": {
+    "in_closure_join": false,
+    "launch_date": null,
+    "scores": null
+  },
+  "fake_green": [
+    "FG-NH-01",
+    "FG-NH-02",
+    "FG-NH-03",
+    "FG-NH-04",
+    "FG-NH-05",
+    "FG-NH-06",
+    "FG-NH-07",
+    "FG-NH-08",
+    "FG-NH-09",
+    "FG-NH-10",
+    "FG-NH-11",
+    "FG-NH-12",
+    "FG-NH-13",
+    "FG-NH-14",
+    "FG-NH-15",
+    "FG-NH-16",
+    "FG-NH-17"
+  ],
   "intent_illegal": [
     {
       "disposition": "rejected_before_task",
@@ -42,6 +67,163 @@
       "http_status": 422,
       "illegal_combination": "source_descriptor_on_non_ingest_intent",
       "request_intent": "index.rebuild"
+    }
+  ],
+  "legal_cells": [
+    {
+      "actual_binding": "sealed",
+      "kind": "strategy",
+      "min_layer": "L4",
+      "negative": false,
+      "path": "default-root",
+      "query": "namespaced_facet_hit",
+      "semantic": "s04_six_tuple",
+      "strategy_key": "web.deterministic"
+    },
+    {
+      "actual_binding": "sealed",
+      "kind": "strategy",
+      "min_layer": "L4",
+      "negative": false,
+      "path": "default-root",
+      "query": "namespaced_facet_hit",
+      "semantic": "s04_six_tuple",
+      "strategy_key": "web.llm_rewrite"
+    },
+    {
+      "actual_binding": "sealed",
+      "kind": "strategy",
+      "min_layer": "L4",
+      "negative": false,
+      "path": "default-root",
+      "query": "namespaced_facet_hit",
+      "semantic": "s04_six_tuple",
+      "strategy_key": "web.browser_print_pdf"
+    },
+    {
+      "actual_binding": "sealed",
+      "kind": "strategy",
+      "min_layer": "L4",
+      "negative": false,
+      "path": "default-root",
+      "query": "namespaced_facet_hit",
+      "semantic": "s04_six_tuple",
+      "strategy_key": "pdf.text_layer"
+    },
+    {
+      "actual_binding": "sealed",
+      "kind": "strategy",
+      "min_layer": "L4",
+      "negative": false,
+      "path": "default-root",
+      "query": "namespaced_facet_hit",
+      "semantic": "s04_six_tuple",
+      "strategy_key": "pdf.document_understanding"
+    },
+    {
+      "actual_binding": "sealed",
+      "kind": "strategy",
+      "min_layer": "L4",
+      "negative": false,
+      "path": "default-root",
+      "query": "namespaced_facet_hit",
+      "semantic": "s04_six_tuple",
+      "strategy_key": "pdf.ocr"
+    },
+    {
+      "actual_binding": "sealed",
+      "kind": "strategy",
+      "min_layer": "L4",
+      "negative": false,
+      "path": "default-root",
+      "query": "namespaced_facet_hit",
+      "semantic": "s04_six_tuple",
+      "strategy_key": "doc.deterministic"
+    },
+    {
+      "actual_binding": "sealed",
+      "kind": "strategy",
+      "min_layer": "L4",
+      "negative": false,
+      "path": "default-root",
+      "query": "namespaced_facet_hit",
+      "semantic": "s04_six_tuple",
+      "strategy_key": "doc.document_understanding"
+    },
+    {
+      "actual_binding": "sealed",
+      "kind": "strategy",
+      "min_layer": "L4",
+      "negative": false,
+      "path": "default-root",
+      "query": "namespaced_facet_hit",
+      "semantic": "s04_six_tuple",
+      "strategy_key": "doc.ocr"
+    },
+    {
+      "actual_binding": "sealed",
+      "kind": "strategy",
+      "min_layer": "L4",
+      "negative": false,
+      "path": "default-root",
+      "query": "namespaced_facet_hit",
+      "semantic": "s04_six_tuple",
+      "strategy_key": "doc.vision"
+    },
+    {
+      "actual_binding": "sealed",
+      "kind": "registered_api",
+      "min_layer": "L4",
+      "negative": false,
+      "operation": "get_articles",
+      "path": "default-root",
+      "provider": "chinatax",
+      "query": "namespaced_facet_hit",
+      "semantic": "provider_mapped"
+    },
+    {
+      "actual_binding": "sealed",
+      "kind": "registered_api",
+      "min_layer": "L4",
+      "negative": false,
+      "operation": "get_agency_listings",
+      "path": "default-root",
+      "provider": "domain",
+      "query": "namespaced_facet_hit",
+      "semantic": "provider_mapped"
+    },
+    {
+      "actual_binding": "sealed",
+      "kind": "registered_api",
+      "min_layer": "L4",
+      "negative": false,
+      "operation": "get_listings",
+      "path": "default-root",
+      "provider": "realestate",
+      "query": "namespaced_facet_hit",
+      "semantic": "provider_mapped"
+    }
+  ],
+  "negative_cells": [
+    {
+      "disposition": "fail_loud",
+      "negative_kind": "empty",
+      "query_expected": 0
+    },
+    {
+      "disposition": "fail_loud",
+      "negative_kind": "unknown",
+      "query_expected": 0
+    },
+    {
+      "disposition": "rejected_before_task",
+      "negative_kind": "illegal-intent",
+      "query_expected": 0
+    },
+    {
+      "disposition": "typed_unavailable",
+      "negative_kind": "missing-supply",
+      "query_expected": 0
     }
   ],
   "op_cells": [
@@ -211,5 +393,100 @@
       "prompt_version": "v1",
       "strategy_key": "doc.vision"
     }
+  ],
+  "windows": [
+    "W-NH-CREATE",
+    "W-NH-SEL",
+    "W-NH-SEAL",
+    "W-NH-PROCESS",
+    "W-NH-PROM-CAT",
+    "W-NH-GC-INGEST",
+    "W-NH-FANIN",
+    "W-NH-PUB",
+    "W-NH-OUTBOX"
+  ],
+  "work_ids": [
+    "NH1-01",
+    "NH1-02",
+    "NH1-03",
+    "NH1-04",
+    "NH1-05",
+    "NH1-06",
+    "NH1-07",
+    "NH1-08",
+    "NH1-09",
+    "NH2-01",
+    "NH2-02",
+    "NH2-03",
+    "NH2-04",
+    "NH2-05",
+    "NH2-06",
+    "NH2-07",
+    "NH2-08",
+    "NH3-01",
+    "NH3-02",
+    "NH3-03",
+    "NH3-04",
+    "NH3-05",
+    "NH3-06",
+    "NH3-07",
+    "NH3-08",
+    "NH3-09",
+    "NH3-10",
+    "NH4-01",
+    "NH4-02",
+    "NH4-03",
+    "NH4-04",
+    "NH4-05",
+    "NH4-06",
+    "NH4-07",
+    "NH4-08",
+    "NH5-01",
+    "NH5-02",
+    "NH5-03",
+    "NH5-04",
+    "NH5-05",
+    "NH5-06",
+    "NH5-07",
+    "NH5-08",
+    "NH6-01",
+    "NH6-02",
+    "NH6-03",
+    "NH6-04",
+    "NH6-05",
+    "NH6-06",
+    "NH6-07",
+    "NH6-08",
+    "NH6-09",
+    "NH6-10",
+    "NH7-01",
+    "NH7-02",
+    "NH7-03",
+    "NH7-04",
+    "NH7-05",
+    "NH7-06",
+    "NH7-07",
+    "NH7-08",
+    "NH7-09",
+    "NH7-10",
+    "NH8-01",
+    "NH8-02",
+    "NH8-03",
+    "NH8-04",
+    "NH8-05",
+    "NH8-06",
+    "NH8-07",
+    "NH8-08",
+    "NH9-01",
+    "NH9-02",
+    "NH9-03",
+    "NH9-04",
+    "NH9-05",
+    "NH9-06",
+    "NH9-07",
+    "NH9-08",
+    "NH9-09",
+    "NH9-10",
+    "NH9-11"
   ]
 }

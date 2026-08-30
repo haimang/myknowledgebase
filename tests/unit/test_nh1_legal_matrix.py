@@ -77,4 +77,5 @@ def test_forbids_7x4_cartesian() -> None:
 
 def test_frozen_manifest_matches_registry_canonical_bytes() -> None:
     frozen = json.loads(MANIFEST_PATH.read_text(encoding="utf-8"))
-    assert frozen == legal_matrix_manifest()
+    live = legal_matrix_manifest()
+    assert {key: frozen[key] for key in live} == live

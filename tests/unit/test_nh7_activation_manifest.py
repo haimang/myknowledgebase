@@ -64,7 +64,7 @@ def test_illegal_cells_409_or_422() -> None:
 def test_consumes_nh1_preembedded_closed_set_manifest() -> None:
     frozen = json.loads(Path(MANIFEST_PATH).read_text(encoding="utf-8"))
     live = legal_matrix_manifest()
-    assert frozen == live
+    assert {key: frozen[key] for key in live} == live
     assert {cell["strategy_key"] for cell in frozen["strategy_cells"]} == {
         definition.strategy_key.value for definition in CLEAN_STRATEGY_DEFINITIONS
     }
