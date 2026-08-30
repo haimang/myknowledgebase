@@ -380,6 +380,8 @@ class IntakeCoreMixin:
             "clean.map.registered_api": self._clean_registered_api,
             "intake.collection.seal": self._seal,
             "intake.preflight_validate": self._preflight,
+            "intake.replay_frozen_clean": self._replay_frozen_clean,
+            "intake.metadata_no_change": self._metadata_no_change,
             "intake.accept_snapshot": self._accept_snapshot,
             "lsrag.transcribe_markdown": self._transcribe_markdown,
             "lsrag.structurize": self._structurize,
@@ -509,11 +511,25 @@ class IntakeCoreMixin:
         except MkbError as exc:
             raise MkbError("INTAKE_REBUILD_INPUT_MISSING", "Frozen clean artifact is unavailable", 409) from exc
         expected = clean.get("content_digest")
-        if hashlib.sha256(data).hexdigest() != expected:
-            raise MkbError("INTAKE_REBUILD_INPUT_INVALID", "Frozen clean artifact failed its digest fence", 409)
+        if hashlib.sha256(data).hexdigest() == expected:
+            try:
+                return data.decode("utf-8")
+            except UnicodeDecodeError as exc:
+                raise MkbError(
+                    "INTAKE_REBUILD_INPUT_INVALID", "Frozen clean artifact failed its digest fence", 409
+                ) from exc
         try:
-            return data.decode("utf-8")
-        except UnicodeDecodeError as exc:
+            document = json.loads(data)
+        except (UnicodeDecodeError, json.JSONDecodeError, TypeError, ValueError) as exc:
             raise MkbError(
                 "INTAKE_REBUILD_INPUT_INVALID", "Frozen clean artifact failed its digest fence", 409
             ) from exc
+        clean_text = document.get("clean_text") if isinstance(document, dict) else None
+        if (
+            isinstance(document, dict)
+            and document.get("schema_version") == "mkb.scatter-clean-member.v1"
+            and isinstance(clean_text, str)
+            and stable_digest({"text": clean_text}) == expected
+        ):
+            return clean_text
+        raise MkbError("INTAKE_REBUILD_INPUT_INVALID", "Frozen clean artifact failed its digest fence", 409)

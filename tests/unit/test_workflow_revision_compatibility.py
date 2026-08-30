@@ -273,3 +273,66 @@ async def test_new_task_does_not_resolve_old_selector_key(tmp_path: Path) -> Non
         assert identity.workflow_key != "intake.ingest.single.http-static.lsrag.v1"
     finally:
         await persistence.close()
+
+
+@pytest.mark.asyncio
+async def test_old_pin_completes_after_nh8_guards(tmp_path: Path) -> None:
+    await test_old_pin_sequence_unchanged_after_kind_family_activation(tmp_path)
+
+
+@pytest.mark.asyncio
+async def test_new_task_kind_only_not_old_selector(tmp_path: Path) -> None:
+    persistence = SqlitePersistence(tmp_path / "nh8-kind-only.sqlite3", Path("src/persistence/migrations"))
+    await persistence.migrate()
+    registry = WorkflowRegistryService(persistence)
+    try:
+        await registry.bootstrap()
+        ingest = await registry.resolve_for_source("intake.ingest", "inline_payload", None)
+        rebuild = await registry.resolve_for_source("intake.ingest", None, None)
+        assert ingest.workflow_key == "intake.ingest.kind.inline-payload.lsrag.v1"
+        assert rebuild.workflow_key == ingest.workflow_key
+        assert "http_resource.static" not in ingest.workflow_key
+        start_guards = {
+            route.guard_key
+            for route in BUILTIN_INLINE_KIND_WORKFLOW.routes
+            if route.from_step_key == "start" and route.guard_key
+        }
+        assert "request_intent_rebuild" in start_guards
+        assert "request_intent_index_rebuild" in start_guards
+    finally:
+        await persistence.close()
+
+
+@pytest.mark.asyncio
+async def test_bounded_retire_rolls_back_when_in_flight(tmp_path: Path) -> None:
+    persistence = SqlitePersistence(tmp_path / "nh8-retire.sqlite3", Path("src/persistence/migrations"))
+    await persistence.migrate()
+    registry = WorkflowRegistryService(persistence)
+    try:
+        registered_v1 = await registry.register(HISTORICAL_SINGLE_INTAKE_LSRAG_WORKFLOW_V1)
+        _, _, execution_uuid = await _seed_v1_execution(persistence, registered_v1)
+        await registry.register(BUILTIN_SINGLE_INTAKE_LSRAG_WORKFLOW)
+        await registry.register(BUILTIN_INLINE_KIND_WORKFLOW)
+        retired = WorkflowRuntime(persistence, BUILTIN_INLINE_KIND_WORKFLOW, retry_delay_seconds=0)
+        with pytest.raises(MkbError, match="workflow-binding-mismatch|workflow-compiled-plan-unavailable"):
+            await retired.materialize_root(execution_uuid)
+        async with persistence.transaction() as tx:
+            processes = await tx.fetchall(
+                "SELECT process_uuid FROM mkb_processes WHERE execution_uuid=?", (execution_uuid,)
+            )
+        assert processes == []
+        restored = WorkflowRuntime(
+            persistence,
+            BUILTIN_INLINE_KIND_WORKFLOW,
+            additional_definitions=(BUILTIN_SINGLE_INTAKE_LSRAG_WORKFLOW,),
+            compatibility_definitions=(HISTORICAL_SINGLE_INTAKE_LSRAG_WORKFLOW_V1,),
+            retry_delay_seconds=0,
+        )
+        assert await restored.materialize_root(execution_uuid)
+        async with persistence.transaction() as tx:
+            initial = await tx.fetchone(
+                "SELECT process_key FROM mkb_processes WHERE execution_uuid=?", (execution_uuid,)
+            )
+        assert initial == {"process_key": "intake.acquire.inline"}
+    finally:
+        await persistence.close()

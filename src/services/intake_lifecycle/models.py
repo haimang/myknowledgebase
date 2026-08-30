@@ -181,6 +181,7 @@ class FrozenMetadataUpdate:
     target: FrozenIntakeTarget
     base_semantics: tuple[FrozenMetadataValue, ...]
     semantics: tuple[FrozenMetadataValue, ...]
+    metadata_disposition: Literal["no_change", "changed"] = "changed"
 
     def as_manifest(self) -> dict[str, Any]:
         return {
@@ -188,6 +189,7 @@ class FrozenMetadataUpdate:
             "target": self.target.as_manifest(),
             "base_semantics": [value.as_manifest() for value in self.base_semantics],
             "semantics": [value.as_manifest() for value in self.semantics],
+            "metadata_disposition": self.metadata_disposition,
         }
 
 

@@ -33,6 +33,17 @@ class IntakeAcceptanceLifecycleMixin:
                 raise MkbError("REBUILD_TARGET_INVALID", "Frozen Intake rebuild target is invalid", 422)
             next_state = dict(state)
             next_state["accepted_at"] = utc_now()
+            if isinstance(state.get("metadata_refresh_source"), Mapping):
+                next_state["construct_mode"] = "metadata_refresh"
+                next_state["metadata_refresh_mode"] = _METADATA_REFRESH_REUSE_SUMMARIES
+                fingerprint = target.get("revision_fingerprint")
+                merged = state.get("metadata_merged_semantics")
+                if not isinstance(merged, Mapping):
+                    merged = await self._revision_semantics_map(command.team_uuid, str(target["intake_revision_uuid"]))
+                    next_state["metadata_merged_semantics"] = merged
+                if isinstance(fingerprint, str):
+                    next_state["metadata_fingerprint"] = fingerprint
+                    next_state["metadata_refresh_headers"] = self._metadata_refresh_headers(merged, fingerprint)
             material = self._material(
                 command,
                 next_state,
@@ -336,6 +347,41 @@ class IntakeAcceptanceLifecycleMixin:
                 "request_intent": "intake.update_metadata",
             }, callback
 
+
+    async def _revision_semantics_map(self, team_uuid: str, revision_uuid: str) -> dict[str, dict[str, Any]]:
+        async with self._persistence.transaction() as tx:
+            rows = await tx.fetchall(
+                "SELECT s.semantic_key,s.definition_version,s.value_kind,s.value_bool,s.value_int,s.value_real,"
+                "s.value_text,s.value_artifact_uuid,s.value_digest,d.definition_digest,d.fingerprint_participation "
+                "FROM mkb_intake_revision_semantics AS s "
+                "JOIN mkb_intake_semantic_definitions AS d ON d.semantic_key=s.semantic_key "
+                "AND d.definition_version=s.definition_version "
+                "WHERE s.team_uuid=? AND s.intake_revision_uuid=? ORDER BY s.semantic_key",
+                (team_uuid, revision_uuid),
+            )
+        merged: dict[str, dict[str, Any]] = {}
+        for row in rows:
+            value: object
+            if row["value_text"] is not None:
+                value = row["value_text"]
+            elif row["value_int"] is not None:
+                value = row["value_int"]
+            elif row["value_real"] is not None:
+                value = row["value_real"]
+            elif row["value_artifact_uuid"] is not None:
+                value = row["value_artifact_uuid"]
+            else:
+                value = row["value_bool"]
+            merged[str(row["semantic_key"])] = {
+                "semantic_key": row["semantic_key"],
+                "definition_version": row["definition_version"],
+                "definition_digest": row["definition_digest"],
+                "value_kind": row["value_kind"],
+                "fingerprint_participation": bool(row["fingerprint_participation"]),
+                "value": value,
+                "value_digest": row["value_digest"],
+            }
+        return merged
 
     async def _merged_metadata_semantics(
             self,

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from typing import Any
+from typing import Any, Literal
 
 from src.contracts.api.models import (
     IndexRebuildPayload,
@@ -61,7 +61,19 @@ class IntakeTargetResolver:
                 team_uuid=team_uuid,
                 intake_revision_uuid=target.intake_revision_uuid,
             )
-        return FrozenMetadataUpdate(target=target, base_semantics=base_semantics, semantics=semantics)
+        disposition: Literal["no_change", "changed"] = "no_change"
+        base_by_key = {value.semantic_key: value for value in base_semantics}
+        for submitted in semantics:
+            current = base_by_key.get(submitted.semantic_key)
+            if current is None or current.value_digest != submitted.value_digest:
+                disposition = "changed"
+                break
+        return FrozenMetadataUpdate(
+            target=target,
+            base_semantics=base_semantics,
+            semantics=semantics,
+            metadata_disposition=disposition,
+        )
 
     async def resolve_lifecycle_target(self, team_uuid: str, payload: IntakeLifecyclePayload) -> FrozenIntakeTarget:
         """Freeze the current CAS coordinate for a lifecycle Task.

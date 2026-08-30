@@ -203,6 +203,13 @@ class TaskCreateMixin:
                     self._root_execution_role(prepared.workflow.execution_role) if prepared is not None else "root"
                 ),
                 retry_of_execution_uuid=None,
+                payload_extra=(
+                    {"metadata_disposition": prepared.intent_context.get("metadata_disposition")}
+                    if prepared is not None
+                    and isinstance(prepared.intent_context, dict)
+                    and prepared.intent_context.get("metadata_disposition") in {"no_change", "changed"}
+                    else None
+                ),
             )
             if request.request_intent == "intake.rebuild" and prepared is not None:
                 await self._insert_atomic_rebuild_restart(
@@ -347,6 +354,7 @@ class TaskCreateMixin:
         manifest_digest: str | None,
         execution_role: str,
         retry_of_execution_uuid: str | None,
+        payload_extra: dict[str, Any] | None = None,
     ) -> None:
         if execution_role not in {"root", "scatter_root"}:
             raise MkbError("workflow-root-role-invalid", "Workflow cannot materialize a Task root execution", 503)
@@ -397,7 +405,7 @@ class TaskCreateMixin:
             "status,row_revision,manifest_ref,manifest_digest,created_at,updated_at,payload_extra) "
             "VALUES (?,?,?,?,?,?,NULL,"
             "?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,"
-            "'ready',0,?,?,?,?,'{}')",
+            "'ready',0,?,?,?,?,?)",
             (
                 execution_uuid,
                 team_uuid,
@@ -427,6 +435,7 @@ class TaskCreateMixin:
                 resolved_manifest_digest,
                 now,
                 now,
+                _json(payload_extra or {}),
             ),
         )
 

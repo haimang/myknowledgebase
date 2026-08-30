@@ -189,3 +189,107 @@ def test_metadata_refresh_inherits_clean_and_projects_facets(tmp_path: Path) -> 
         assert facet_count > 0
         assert _search(client, team_uuid, headers, old["namespace_key"], "realm-after")["results"]
         assert _search(client, team_uuid, headers, old["namespace_key"], "realm-before")["results"] == []
+
+
+def test_metadata_refresh_process_absence_handoff_to_nh8(tmp_path: Path) -> None:
+    """NH5-T08-B / NH8-T03: metadata refresh must not materialize acquire/decode/clean."""
+
+    app = create_app(_settings(tmp_path))
+    team_uuid, ingest_task, ingest_trace = uuid7(), uuid7(), uuid7()
+    headers = {"Authorization": "Bearer source-capability-token"}
+    with TestClient(app, raise_server_exceptions=True) as client:
+        assert client.post(
+            "/v1/teams",
+            headers=headers,
+            json={"schema_version": "mkb.team.v1", "team_uuid": team_uuid, "name": "nh5-metadata-absence"},
+        ).status_code == 201
+        ingest = client.post(
+            f"/v1/teams/{team_uuid}/tasks",
+            headers=headers,
+            json={
+                "schema_version": "mkb.task.v1",
+                "team_uuid": team_uuid,
+                "task_uuid": ingest_task,
+                "trace_uuid": ingest_trace,
+                "request_intent": "intake.ingest",
+                "payload": {
+                    "json_prompt_id": "promptB.json.generic",
+                    "source": {
+                        "source_kind": "inline_payload",
+                        "external_key": "nh5-metadata-absence",
+                        "content": "NH5 metadata semantic refresh admitted clean body",
+                        "realm": "realm-before",
+                        "type": "article",
+                        "channel": "policy",
+                        "source_name": "metadata-source",
+                        "context_tags": ["tag:before"],
+                    },
+                },
+                "audit": {
+                    "schema_version": "mkb.task-audit.v1",
+                    "team_uuid": team_uuid,
+                    "task_uuid": ingest_task,
+                    "trace_uuid": ingest_trace,
+                    "audit_type": "business_review",
+                    "audit_status": "not_required",
+                    "source": "nh5-metadata",
+                    "created_at": utc_now(),
+                },
+            },
+        )
+        assert ingest.status_code == 201, ingest.text
+        assert _wait(client, team_uuid, ingest_task, headers)["status"] == "succeeded"
+
+        async def item() -> dict:
+            async with app.state.container.persistence.transaction() as tx:
+                row = await tx.fetchone(
+                    "SELECT intake_item_uuid,latest_revision_uuid FROM mkb_intake_items WHERE team_uuid=?",
+                    (team_uuid,),
+                )
+            assert row is not None
+            return dict(row)
+
+        target = client.portal.call(item)
+        metadata_task, metadata_trace = uuid7(), uuid7()
+        update = client.post(
+            f"/v1/teams/{team_uuid}/tasks",
+            headers=headers,
+            json={
+                "schema_version": "mkb.task.v1",
+                "team_uuid": team_uuid,
+                "task_uuid": metadata_task,
+                "trace_uuid": metadata_trace,
+                "request_intent": "intake.update_metadata",
+                "payload": {
+                    "intake_item_uuid": target["intake_item_uuid"],
+                    "expected_intake_revision_uuid": target["latest_revision_uuid"],
+                    "semantics": {"realm": "realm-after", "context_tags": "tag:after"},
+                },
+                "audit": {
+                    "schema_version": "mkb.task-audit.v1",
+                    "team_uuid": team_uuid,
+                    "task_uuid": metadata_task,
+                    "trace_uuid": metadata_trace,
+                    "audit_type": "business_review",
+                    "audit_status": "not_required",
+                    "source": "nh5-metadata",
+                    "created_at": utc_now(),
+                },
+            },
+        )
+        assert update.status_code == 201, update.text
+        terminal = _wait(client, team_uuid, metadata_task, headers)
+        assert terminal["status"] == "succeeded", terminal
+
+        async def processes() -> list[str]:
+            async with app.state.container.persistence.transaction() as tx:
+                rows = await tx.fetchall(
+                    "SELECT process_key FROM mkb_processes WHERE team_uuid=? AND task_uuid=?",
+                    (team_uuid, metadata_task),
+                )
+            return [str(row["process_key"]) for row in rows]
+
+        keys = client.portal.call(processes)
+        forbidden = [key for key in keys if key.startswith(("intake.acquire.", "intake.decode.", "clean."))]
+        assert forbidden == [], keys
+        assert "lsrag.structurize" not in keys

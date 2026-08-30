@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import time
 from pathlib import Path
 
 from fastapi.testclient import TestClient
@@ -205,6 +206,15 @@ def test_illegal_cells_fail_before_task_insert(tmp_path: Path) -> None:
                 422,
                 "INTAKE_SEMANTIC_KEY_UNREGISTERED",
             ),
+            (
+                "empty-semantics",
+                {
+                    "request_intent": "intake.update_metadata",
+                    "payload": {"intake_item_uuid": uuid7(), "semantics": {}},
+                },
+                422,
+                "task-schema-invalid",
+            ),
         ]
         for name, extra, status, code in cases:
             task_uuid, trace_uuid = uuid7(), uuid7()
@@ -225,8 +235,215 @@ def test_illegal_cells_fail_before_task_insert(tmp_path: Path) -> None:
             assert tasks == 0 and processes == 0, name
 
 
+def _wait(client: TestClient, team_uuid: str, task_uuid: str) -> dict[str, object]:
+    deadline = time.monotonic() + 30
+    latest: dict[str, object] = {}
+    while time.monotonic() < deadline:
+        response = client.get(f"/v1/teams/{team_uuid}/tasks/{task_uuid}", headers=_HEADERS)
+        latest = response.json()
+        if latest.get("status") in {"succeeded", "failed", "cancelled"}:
+            return latest
+        time.sleep(0.02)
+    return latest
+
+
+def test_deleted_and_inactive_fail_before_task_insert(tmp_path: Path) -> None:
+    app = create_app(_settings(tmp_path))
+    team_uuid = uuid7()
+    with TestClient(app, raise_server_exceptions=True) as client:
+        assert (
+            client.post(
+                "/v1/teams",
+                headers=_HEADERS,
+                json={"schema_version": "mkb.team.v1", "team_uuid": team_uuid, "name": "nh8-deleted"},
+            ).status_code
+            == 201
+        )
+        ingest_uuid, ingest_trace = uuid7(), uuid7()
+        created = client.post(
+            f"/v1/teams/{team_uuid}/tasks",
+            headers=_HEADERS,
+            json={
+                "schema_version": "mkb.task.v1",
+                "team_uuid": team_uuid,
+                "task_uuid": ingest_uuid,
+                "trace_uuid": ingest_trace,
+                "request_intent": "intake.ingest",
+                "payload": {
+                    "json_prompt_id": "promptB.json.generic",
+                    "source": {
+                        "source_kind": "inline_payload",
+                        "external_key": "nh8-deleted-item",
+                        "content": "NH8 deleted item sentinel",
+                        "realm": "documentation",
+                        "type": "article",
+                        "channel": "general",
+                        "source_name": "nh8-deleted",
+                    },
+                },
+                "audit": _audit(team_uuid, ingest_uuid, ingest_trace),
+            },
+        )
+        assert created.status_code == 201, created.text
+        assert _wait(client, team_uuid, ingest_uuid)["status"] == "succeeded"
+
+        async def item_uuid() -> str:
+            async with app.state.container.persistence.transaction() as tx:
+                row = await tx.fetchone(
+                    "SELECT intake_item_uuid FROM mkb_intake_items WHERE team_uuid=?",
+                    (team_uuid,),
+                )
+            assert row is not None
+            return str(row["intake_item_uuid"])
+
+        target = client.portal.call(item_uuid)
+        delete_uuid, delete_trace = uuid7(), uuid7()
+        deleted = client.post(
+            f"/v1/teams/{team_uuid}/tasks",
+            headers=_HEADERS,
+            json={
+                "schema_version": "mkb.task.v1",
+                "team_uuid": team_uuid,
+                "task_uuid": delete_uuid,
+                "trace_uuid": delete_trace,
+                "request_intent": "intake.delete",
+                "payload": {"intake_item_uuid": target},
+                "audit": _audit(team_uuid, delete_uuid, delete_trace),
+            },
+        )
+        assert deleted.status_code == 201, deleted.text
+        assert _wait(client, team_uuid, delete_uuid)["status"] == "succeeded"
+        rebuild_uuid, rebuild_trace = uuid7(), uuid7()
+        rebuild = client.post(
+            f"/v1/teams/{team_uuid}/tasks",
+            headers=_HEADERS,
+            json={
+                "schema_version": "mkb.task.v1",
+                "team_uuid": team_uuid,
+                "task_uuid": rebuild_uuid,
+                "trace_uuid": rebuild_trace,
+                "request_intent": "intake.rebuild",
+                "payload": {"intake_item_uuid": target},
+                "audit": _audit(team_uuid, rebuild_uuid, rebuild_trace),
+            },
+        )
+        assert rebuild.status_code == 409, rebuild.text
+        assert rebuild.json()["error"]["code"] == "intake-item-deleted"
+        assert rebuild.json()["error"]["code"] in _CLOSED_409
+        assert _counts(app, team_uuid, rebuild_uuid, client) == (0, 0)
+        for intent in ("intake.update_metadata", "intake.deactivate", "intake.reactivate"):
+            extra_uuid, extra_trace = uuid7(), uuid7()
+            payload: dict[str, object] = {"intake_item_uuid": target}
+            if intent == "intake.update_metadata":
+                payload["semantics"] = {"realm": "documentation"}
+            extra = client.post(
+                f"/v1/teams/{team_uuid}/tasks",
+                headers=_HEADERS,
+                json={
+                    "schema_version": "mkb.task.v1",
+                    "team_uuid": team_uuid,
+                    "task_uuid": extra_uuid,
+                    "trace_uuid": extra_trace,
+                    "request_intent": intent,
+                    "payload": payload,
+                    "audit": _audit(team_uuid, extra_uuid, extra_trace),
+                },
+            )
+            assert extra.status_code == 409, (intent, extra.text)
+            assert extra.json()["error"]["code"] == "intake-item-deleted"
+            assert _counts(app, team_uuid, extra_uuid, client) == (0, 0)
+
+
+def test_inactive_index_rebuild_fail_before_task_insert(tmp_path: Path) -> None:
+    app = create_app(_settings(tmp_path))
+    team_uuid = uuid7()
+    with TestClient(app, raise_server_exceptions=True) as client:
+        assert (
+            client.post(
+                "/v1/teams",
+                headers=_HEADERS,
+                json={"schema_version": "mkb.team.v1", "team_uuid": team_uuid, "name": "nh8-inactive"},
+            ).status_code
+            == 201
+        )
+        ingest_uuid, ingest_trace = uuid7(), uuid7()
+        created = client.post(
+            f"/v1/teams/{team_uuid}/tasks",
+            headers=_HEADERS,
+            json={
+                "schema_version": "mkb.task.v1",
+                "team_uuid": team_uuid,
+                "task_uuid": ingest_uuid,
+                "trace_uuid": ingest_trace,
+                "request_intent": "intake.ingest",
+                "payload": {
+                    "json_prompt_id": "promptB.json.generic",
+                    "source": {
+                        "source_kind": "inline_payload",
+                        "external_key": "nh8-inactive-item",
+                        "content": "NH8 inactive item sentinel",
+                        "realm": "documentation",
+                        "type": "article",
+                        "channel": "general",
+                        "source_name": "nh8-inactive",
+                    },
+                },
+                "audit": _audit(team_uuid, ingest_uuid, ingest_trace),
+            },
+        )
+        assert created.status_code == 201, created.text
+        assert _wait(client, team_uuid, ingest_uuid)["status"] == "succeeded"
+
+        async def item_uuid() -> str:
+            async with app.state.container.persistence.transaction() as tx:
+                row = await tx.fetchone(
+                    "SELECT intake_item_uuid FROM mkb_intake_items WHERE team_uuid=?",
+                    (team_uuid,),
+                )
+            assert row is not None
+            return str(row["intake_item_uuid"])
+
+        target = client.portal.call(item_uuid)
+        deactivate_uuid, deactivate_trace = uuid7(), uuid7()
+        deactivated = client.post(
+            f"/v1/teams/{team_uuid}/tasks",
+            headers=_HEADERS,
+            json={
+                "schema_version": "mkb.task.v1",
+                "team_uuid": team_uuid,
+                "task_uuid": deactivate_uuid,
+                "trace_uuid": deactivate_trace,
+                "request_intent": "intake.deactivate",
+                "payload": {"intake_item_uuid": target},
+                "audit": _audit(team_uuid, deactivate_uuid, deactivate_trace),
+            },
+        )
+        assert deactivated.status_code == 201, deactivated.text
+        assert _wait(client, team_uuid, deactivate_uuid)["status"] == "succeeded"
+        index_uuid, index_trace = uuid7(), uuid7()
+        indexed = client.post(
+            f"/v1/teams/{team_uuid}/tasks",
+            headers=_HEADERS,
+            json={
+                "schema_version": "mkb.task.v1",
+                "team_uuid": team_uuid,
+                "task_uuid": index_uuid,
+                "trace_uuid": index_trace,
+                "request_intent": "index.rebuild",
+                "payload": {"scope": "intake_item", "intake_item_uuid": target},
+                "audit": _audit(team_uuid, index_uuid, index_trace),
+            },
+        )
+        assert indexed.status_code == 409, indexed.text
+        assert indexed.json()["error"]["code"] == "index-rebuild-item-not-active"
+        assert _counts(app, team_uuid, index_uuid, client) == (0, 0)
+
+
 def test_http_422_vs_409_code_closed_set() -> None:
     assert "task-schema-invalid" in _CLOSED_422
     assert "INTAKE_SEMANTIC_KEY_UNREGISTERED" in _CLOSED_422
+    assert "METADATA_SEMANTICS_EMPTY" in _CLOSED_422
     assert "intake-item-deleted" in _CLOSED_409
     assert "index-rebuild-item-not-active" in _CLOSED_409
+    assert "intake-revision-unavailable" in _CLOSED_409
+    assert "intake-revision-mismatch" in _CLOSED_409

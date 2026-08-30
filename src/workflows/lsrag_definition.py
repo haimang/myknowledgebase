@@ -337,12 +337,21 @@ _ROUTES = [
         priority=0,
     ),
     WorkflowRouteDefinition(
-        route_key="accept_snapshot.metadata_refresh",
+        route_key="accept_snapshot.rebuild_publication",
         from_step_key="accept_snapshot",
         to_step_key="construct",
         route_kind=WorkflowRouteKind.BRANCH,
         outcome_selector=WorkflowOutcomeSelector.SUCCEEDED,
         priority=0,
+        guard_key="request_intent_rebuild",
+    ),
+    WorkflowRouteDefinition(
+        route_key="accept_snapshot.metadata_refresh",
+        from_step_key="accept_snapshot",
+        to_step_key="construct",
+        route_kind=WorkflowRouteKind.BRANCH,
+        outcome_selector=WorkflowOutcomeSelector.SUCCEEDED,
+        priority=1,
         guard_key="request_intent_metadata_refresh",
     ),
     WorkflowRouteDefinition(
@@ -649,6 +658,12 @@ BUILTIN_SINGLE_INTAKE_LSRAG_WORKFLOW: Final[WorkflowDefinition] = WorkflowDefini
             predicate_type="registered_request_intent",
             operator="eq",
             expected_value="index.rebuild",
+        ),
+        WorkflowGuardDefinition(
+            guard_key="request_intent_rebuild",
+            predicate_type="registered_request_intent",
+            operator="eq",
+            expected_value="intake.rebuild",
         ),
         WorkflowGuardDefinition(
             guard_key="request_intent_metadata_refresh",

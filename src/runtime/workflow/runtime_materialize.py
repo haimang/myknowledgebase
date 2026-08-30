@@ -162,6 +162,16 @@ class WorkflowMaterializeMixin:
             "WHERE team_uuid=? AND causation_execution_uuid=? AND action_key='no_change' LIMIT 1",
             (execution["team_uuid"], execution["execution_uuid"]),
         )
+        extra = execution.get("payload_extra")
+        if isinstance(extra, str):
+            try:
+                extra = json.loads(extra)
+            except (TypeError, ValueError, json.JSONDecodeError):
+                extra = None
+        if isinstance(extra, dict):
+            declared = extra.get("metadata_disposition")
+            if declared in {"no_change", "changed"}:
+                context["metadata_disposition"] = declared
         if no_change is not None:
             context["metadata_disposition"] = "no_change"
         audit = await tx.fetchone(

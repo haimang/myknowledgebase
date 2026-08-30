@@ -37,6 +37,7 @@ class IntakeAcquisitionIntentsMixin:
             # dedicated preflight branch below verifies every coordinate before
             # this replay can enter the derived-generation path.
             clean_bytes = clean_text.encode("utf-8")
+            refresh_source = await self._freeze_metadata_refresh_source(command, target)
             rebuild_input_evidence = {
                 "schema_version": "mkb.rebuild-clean-input-evidence.v1",
                 "input_kind": "accepted_clean_artifact",
@@ -73,6 +74,9 @@ class IntakeAcquisitionIntentsMixin:
                 "clean_text": clean_text,
                 "clean_digest": stable_digest({"text": clean_text}),
                 "rebuild_input_evidence": rebuild_input_evidence,
+                "construct_mode": "metadata_refresh",
+                "metadata_refresh_mode": _METADATA_REFRESH_REUSE_SUMMARIES,
+                "metadata_refresh_source": refresh_source,
                 "rebuild_input_kind": "accepted_clean_artifact",
                 "require_human_review": False,
                 "intake_source_uuid": target["intake_source_uuid"],
@@ -110,6 +114,43 @@ class IntakeAcquisitionIntentsMixin:
                     raise MkbError("REBUILD_TARGET_STALE", "Frozen Intake rebuild target changed before execution", 409)
 
             return material, {}, callback
+
+    async def _replay_frozen_clean(
+        self, command: ProcessCommand, state: dict[str, Any]
+    ) -> tuple[_StageMaterial, dict[str, Any], Callable[[UnitOfWork, Mapping[str, str]], Awaitable[None]]]:
+        intent = state.get("request_intent")
+        if intent == "intake.rebuild":
+            material, extra, callback = await self._acquire_rebuild(command, state)
+        elif intent == "intake.update_metadata":
+            material, extra, callback = await self._acquire_metadata_update(command, state)
+        else:
+            raise MkbError("INTAKE_INTENT_UNSUPPORTED", "Frozen-clean replay does not recognize this Task intent", 422)
+        envelope_state = dict(material.envelope.get("state") or {})
+        clean_text = envelope_state.get("clean_text")
+        if not isinstance(clean_text, str) or not clean_text.strip():
+            raise MkbError("PIPELINE_INPUT_INVALID", "Frozen clean candidate is unavailable", 422)
+        clean_digest = envelope_state.get("clean_digest") or stable_digest({"text": clean_text})
+        rewritten = self._material(
+            command,
+            envelope_state,
+            {
+                "clean_candidate": {
+                    "content_digest": clean_digest,
+                    "char_count": len(clean_text),
+                    "evidence": envelope_state.get("rebuild_input_evidence")
+                    or envelope_state.get("clean_evidence")
+                    or {"mode": "replay_frozen_clean"},
+                }
+            },
+        )
+        return rewritten, extra, callback
+
+    async def _metadata_no_change(
+        self, command: ProcessCommand, state: dict[str, Any]
+    ) -> tuple[_StageMaterial, dict[str, Any], Callable[[UnitOfWork, Mapping[str, str]], Awaitable[None]]]:
+        if state.get("request_intent") != "intake.update_metadata":
+            raise MkbError("INTAKE_INTENT_UNSUPPORTED", "Metadata no-change requires update_metadata", 422)
+        return await self._acquire_metadata_update(command, state)
 
 
     async def _acquire_metadata_update(

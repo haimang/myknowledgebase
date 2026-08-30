@@ -836,11 +836,15 @@ class IntakeCleanPreflightMixin:
         raw = state.get("raw_text")
         clean_text = state.get("clean_text")
         clean_digest = state.get("clean_digest")
+        admitted_digests = {
+            _digest_bytes(clean_text.encode("utf-8")) if isinstance(clean_text, str) else None,
+            stable_digest({"text": clean_text}) if isinstance(clean_text, str) else None,
+        }
         if (
             not isinstance(raw, str)
             or not isinstance(clean_text, str)
             or evidence.get("clean_text_digest") != stable_digest({"text": raw})
-            or _digest_bytes(clean_text.encode("utf-8")) != clean_artifact["content_digest"]
+            or clean_artifact["content_digest"] not in admitted_digests
             or clean_digest != stable_digest({"text": clean_text})
         ):
             raise MkbError("PREFLIGHT_EVIDENCE_INVALID", "Rebuild clean representation failed its digest fence", 409)
@@ -850,31 +854,11 @@ class IntakeCleanPreflightMixin:
             or state.get("raw_byte_size") != len(raw.encode("utf-8"))
         ):
             raise MkbError("PREFLIGHT_EVIDENCE_INVALID", "Rebuild representation evidence is incomplete", 422)
-        decode = state.get("decode_evidence")
-        decoded = state.get("decoded_text")
-        decoded_digest = state.get("decoded_digest")
-        if (
-            not isinstance(decode, Mapping)
-            or decode.get("decode_capability") != "intake.decode.text_json_html"
-            or decode.get("input_raw_byte_digest") != state.get("raw_byte_digest")
-            or not isinstance(decoded, str)
-            or decoded_digest
-            != stable_digest(
-                {
-                    "canonicalizer": "intake.decode.text_json_html",
-                    "media_type": "text/plain",
-                    "text": decoded,
-                }
-            )
-        ):
-            raise MkbError("PREFLIGHT_EVIDENCE_INVALID", "Rebuild decode evidence is unavailable", 422)
-        clean = state.get("clean_evidence")
-        if (
-            not isinstance(clean, Mapping)
-            or not str(clean.get("clean_capability") or "").startswith("clean.")
-            or clean.get("input_decoded_digest") != decoded_digest
-        ):
-            raise MkbError("PREFLIGHT_EVIDENCE_INVALID", "Rebuild clean evidence is unavailable", 422)
+        # Exact-clean replay never materializes decode/clean Processes.  The
+        # frozen accepted-clean Artifact is the lineage; do not demand a
+        # synthetic decode_evidence/clean_evidence envelope.
+        if raw != clean_text:
+            raise MkbError("PREFLIGHT_EVIDENCE_INVALID", "Rebuild replay is not the frozen clean bytes", 409)
         root_digest = state.get("candidate_root_digest")
         if root_digest != stable_digest(
             {"external_key": target["normalized_external_key"], "clean_digest": clean_digest}
@@ -883,7 +867,7 @@ class IntakeCleanPreflightMixin:
         return [
             {"key": "frozen_clean_artifact_binding", "result": "passed"},
             {"key": "rebuild_representation_complete", "result": "passed"},
-            {"key": "rebuild_decode_clean_lineage_complete", "result": "passed"},
+            {"key": "rebuild_frozen_clean_lineage_complete", "result": "passed"},
             {"key": "candidate_set_complete", "result": "passed"},
         ]
 

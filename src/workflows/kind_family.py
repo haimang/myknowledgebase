@@ -201,7 +201,12 @@ def _compose(
     context_slots: list[WorkflowPortDefinition] | None = None,
 ) -> WorkflowDefinition:
     tail = shared_tail_components()
-    clean_steps = [step for step in prefix_steps if step.process_key and step.process_key.startswith("clean.")]
+    clean_steps = [
+        step
+        for step in prefix_steps
+        if step.process_key
+        and (step.process_key.startswith("clean.") or step.process_key == "intake.replay_frozen_clean")
+    ]
     control = _selected_control(clean_steps)
     control_routes = [
         _route("selected_clean.to_seal", "selected_clean", "seal_candidate_set"),
@@ -258,6 +263,24 @@ def _inline_kind() -> WorkflowDefinition:
     acquire = _acquire("acquire_inline", "intake.acquire.inline")
     decode = _decode("decode_text", "intake.decode.text_json_html")
     clean = _clean("clean_deterministic", "clean.extract.deterministic")
+    replay = _process(
+        "replay_frozen_clean",
+        "intake.replay_frozen_clean",
+        input_schema="mkb.intake.source-descriptor.v1",
+        output_slot="clean_candidate",
+        output_schema="mkb.intake.clean-candidate.v1",
+        phase=WorkflowPhaseKey.PREFLIGHT_ADMISSION,
+        proof="rebuild_clean_replay_proof",
+    )
+    metadata_noop = _process(
+        "metadata_no_change",
+        "intake.metadata_no_change",
+        input_schema="mkb.intake.source-descriptor.v1",
+        output_slot="metadata_admission",
+        output_schema="mkb.intake.candidate-set-seal.v1",
+        phase=WorkflowPhaseKey.UPDATING_METADATA,
+        proof="metadata_no_change_proof",
+    )
     routes = [
         _route(
             "start.index_rebuild",
@@ -266,6 +289,30 @@ def _inline_kind() -> WorkflowDefinition:
             selector=WorkflowOutcomeSelector.ALWAYS,
             priority=0,
             guard="request_intent_index_rebuild",
+        ),
+        _route(
+            "start.rebuild",
+            "start",
+            "replay_frozen_clean",
+            selector=WorkflowOutcomeSelector.ALWAYS,
+            priority=1,
+            guard="request_intent_rebuild",
+        ),
+        _route(
+            "start.metadata_no_change",
+            "start",
+            "metadata_no_change",
+            selector=WorkflowOutcomeSelector.ALWAYS,
+            priority=2,
+            guard="metadata_no_change",
+        ),
+        _route(
+            "start.metadata_refresh",
+            "start",
+            "replay_frozen_clean",
+            selector=WorkflowOutcomeSelector.ALWAYS,
+            priority=3,
+            guard="request_intent_metadata_refresh",
         ),
         _route("start.acquire", "start", "acquire_inline", selector=WorkflowOutcomeSelector.ALWAYS, priority=10),
         _route(
@@ -289,24 +336,25 @@ def _inline_kind() -> WorkflowDefinition:
             priority=2,
             guard="request_intent_delete",
         ).model_copy(update={"route_kind": WorkflowRouteKind.TERMINAL}),
-        _route(
-            "acquire.metadata_no_change",
-            "acquire_inline",
-            "succeeded",
-            priority=3,
-            guard="metadata_no_change",
-        ).model_copy(update={"route_kind": WorkflowRouteKind.TERMINAL}),
         _route("acquire.decode", "acquire_inline", "decode_text", priority=10),
         _route("decode.clean", "decode_text", "clean_deterministic"),
         _route("clean.selected", "clean_deterministic", "selected_clean"),
+        _route("replay.selected", "replay_frozen_clean", "selected_clean"),
+        _route("metadata_no_change.succeeded", "metadata_no_change", "succeeded").model_copy(
+            update={"route_kind": WorkflowRouteKind.TERMINAL, "outcome_selector": WorkflowOutcomeSelector.SUCCEEDED}
+        ),
         _route("index.succeeded", "index_rebuild", "succeeded").model_copy(
             update={"route_kind": WorkflowRouteKind.TERMINAL}
         ),
-        *_terminal_routes(["index_rebuild", "acquire_inline", "decode_text", "clean_deterministic"]),
+        *_terminal_routes(
+            ["index_rebuild", "acquire_inline", "decode_text", "clean_deterministic", "replay_frozen_clean", "metadata_no_change"]
+        ),
     ]
     bindings = [
         _bind_context("index_rebuild", "index_rebuild_scope", "index_rebuild_scope"),
         _bind_context("acquire_inline", "input", "source_descriptor"),
+        _bind_context("replay_frozen_clean", "input", "source_descriptor"),
+        _bind_context("metadata_no_change", "input", "source_descriptor"),
         _bind("decode_text", "input", "acquire_inline", "acquisition_evidence"),
         _bind("clean_deterministic", "input", "decode_text", "decoded_representation"),
     ]
@@ -320,7 +368,7 @@ def _inline_kind() -> WorkflowDefinition:
     return _compose(
         workflow_key=INLINE_KIND_WORKFLOW_KEY,
         display_name="Inline-payload kind LS-RAG",
-        prefix_steps=[index_step, acquire, decode, clean],
+        prefix_steps=[index_step, acquire, decode, clean, replay, metadata_noop],
         prefix_routes=routes,
         prefix_bindings=bindings,
         prefix_guards=guards,
