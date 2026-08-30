@@ -19,7 +19,7 @@
 
 > **本阶段最关键的 known gap（对下游影响）**：
 > 1. 全仓仍有 5 个 namespace/rebuild 失败，属 NH8 红债，不是本 AP 假绿。
-> 2. HEAD scatter 文件仍含 sqlite3 段；T08 PASS 主文件是 🆕 `test_nh7_registered_api_retrieval.py`，未把未清 sqlite3 的 HEAD 节点列入 8.1。
+> 2. `tests/e2e/test_registered_api_scatter.py` 已无 `sqlite3.connect`（仅 `database_path` 文件名）；T08 PASS 主文件是 🆕 `test_nh7_registered_api_retrieval.py`。
 > 3. `web.llm_rewrite` 走 default-root CLI stub（非 patch）；print/DU/vision 走 S11 local fixture。库名仍不是 Truth。
 > 4. NH1 promptA reader 清单在 canonical 对齐后已改 readers（三文件互斥 SHA 未改）。
 

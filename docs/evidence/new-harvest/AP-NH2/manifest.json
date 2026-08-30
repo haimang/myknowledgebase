@@ -18,7 +18,7 @@
   "work_ids": ["NH2-01", "NH2-02", "NH2-03", "NH2-04", "NH2-05", "NH2-06", "NH2-07", "NH2-08"],
   "test_ids": ["NH2-T01", "NH2-T02", "NH2-T03", "NH2-T04", "NH2-T05", "NH2-T06", "NH2-T07"],
   "kind_graph_count": 3,
-  "shared_tail_digest": "e36b5bac5a82994e0a4743c9c43394dcff89e5ae4297a1d2eb5f58ab80e0af13",
+  "shared_tail_digest": "48c390595f603617cc0923f649e67d9dd0a1cf61a7636f8029dc16fd551fe1b2",
   "legacy_compat_plan_count": 16,
   "observed_at_utc": "2026-08-29T18:53:27Z",
   "closure_type": "closed-with-explicit-deferrals"

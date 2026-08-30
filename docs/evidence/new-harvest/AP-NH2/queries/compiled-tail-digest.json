@@ -1,26 +1,27 @@
 {
-  "shared_tail_digest": "e36b5bac5a82994e0a4743c9c43394dcff89e5ae4297a1d2eb5f58ab80e0af13",
+  "shared_tail_digest": "48c390595f603617cc0923f649e67d9dd0a1cf61a7636f8029dc16fd551fe1b2",
+  "lineage": "NH8 27fc3ca added accept_snapshot.rebuild_publication; cardinality remains 1. Compiled graph identity refreshes when prefix guards/routes change.",
   "tail_source": "src/workflows/lsrag_shared_tail.py::shared_tail_components",
   "graphs": [
     {
       "workflow_key": "intake.ingest.kind.inline-payload.lsrag.v1",
-      "compiled_digest": "63b34ae19f156e61cdfa8d394b5258db48d558f5b794722ffba2049bf870b7c8",
-      "steps": 18,
-      "routes": 53,
-      "bindings": 20
+      "compiled_digest": "06e0b8d2ccbf001bfe700e1e27d320a08a81be2866dcd9d4b36cc8eacbcf3375",
+      "steps": 20,
+      "routes": 62,
+      "bindings": 23
     },
     {
       "workflow_key": "intake.ingest.kind.local-object.lsrag.v1",
-      "compiled_digest": "de435c1abe40c1743c6b69342ed67de23f5d33113be60a7828407cefaa6fce66",
+      "compiled_digest": "b7e29c217e6917ceaf821ff35bb85a0b72d8e461724ed1badcfa2ec6aca98a7b",
       "steps": 25,
-      "routes": 75,
+      "routes": 76,
       "bindings": 33
     },
     {
       "workflow_key": "intake.ingest.kind.http-resource.lsrag.v1",
-      "compiled_digest": "1acf5bd8a34d7ed2809ef08064bfc3695b6db5fdd8a49c0edd0fb7fec17fc207",
+      "compiled_digest": "38a7b416aa7ce32b303cf3c322e9c1ed1e10ab975d0472107edb818eafb44ff5",
       "steps": 33,
-      "routes": 104,
+      "routes": 105,
       "bindings": 44
     }
   ],

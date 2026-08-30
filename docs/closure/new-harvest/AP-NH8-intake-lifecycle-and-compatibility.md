@@ -19,8 +19,8 @@
 
 > **本阶段最关键的 known gap（对下游影响）**：
 > 1. NH9 仍须做 closed-set / crash 全窗 / Capstone I–J；本 AP 不注入 W-NH-* kill。
-> 2. HEAD scatter 文件仍可能含 sqlite3 段；T08 PASS 主文件是 🆕 `test_nh8_api_item_intents.py`。
-> 3. 公开二次 `intake.delete` 对已 deleted Item 是 409 `intake-item-deleted`（零新 Task），不是同 idempotency_key 的服务层 no-op。
+> 2. `test_registered_api_scatter.py` 已无 sqlite3 直读；T08 PASS 主文件是 🆕 `test_nh8_api_item_intents.py`。
+> 3. 公开二次 `intake.delete` 对已 deleted Item 是 409 `intake-item-deleted`（零新 Task），不是同 idempotency_key 的服务层 no-op。rebuild/metadata/index.rebuild 零 acquire/decode/clean 进程；deactivate/reactivate/delete 仍物化 1 个 lifecycle acquire 进程。
 > 4. registered_api member 的 frozen clean 是 `mkb.scatter-clean-member.v1` JSON envelope；replay 解包正文，不把 CAS sha256 误当成 `clean_digest`。
 
 ---
@@ -81,7 +81,7 @@ Review notes (implementation land `27fc3ca`):
 | 项 | 类型 | 当前状态 | 承接位置 / 触发条件 | 责任方 |
 |----|------|----------|---------------------|--------|
 | Closed-set generator / crash windows / Capstone I–J | C | query 终态已在本 AP | AP-NH9 | NH9 |
-| HEAD scatter sqlite3 nodes | B | ⛔ 未列入 T08 PASS 主文件 | NH9 若 🔱 须先 Port 化 | successor |
+| scatter sqlite3 直读（已关闭） | B | ✅ 无 sqlite3.connect | — | closed |
 | Existing-object new-cleaner upgrade | A | OOS `O-NH-03` / `T-O-401` | 新 owner-gate | owner |
 | S16 browser egress sign-off | A | NH6 已诚实未伪造；本 AP 不重开 | none | — |
 

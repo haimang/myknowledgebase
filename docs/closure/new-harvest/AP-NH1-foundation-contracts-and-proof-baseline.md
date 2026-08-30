@@ -34,7 +34,7 @@
 | `NH1-04` CONTROL spike | ✅ closed / verified | `1cdc066` + zero/one/double/missing/cycle PASS + Q11/Q18 + UTC |
 | `NH1-05` actual-S05 spike | ✅ closed / verified | `1cdc066` + states/UoW/replay/conflict PASS + Q10/Q20 + UTC |
 | `NH1-06` runtime smoke | ✅ closed / verified | `1cdc066` + `87eeadf` + `5 PASS ×3` + Q13/Q19/Q23 + UTC |
-| `NH1-07` legal matrices | ✅ closed / verified | `1cdc066` + manifest digest `f7199ee…d235c3` + Q17/Q25 + UTC |
+| `NH1-07` legal matrices | ✅ closed / verified | `1cdc066` + NH6 OCR field refresh digest `57c19c6bcb1c4b82bb741886808b8f3b342259aa795dbaae8b285140e1da740a` + Q17/Q25 + UTC |
 | `NH1-08` prompt inventory | ✅ closed / verified | `1cdc066` + 3 distinct SHA-256/readers + M-NH-07 + UTC |
 | `NH1-09` foundation pack | ✅ closed / verified | evidence manifest/interfaces + `stop-or-go=GO` + Q26 + UTC |
 

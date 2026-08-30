@@ -30,7 +30,7 @@
 |------|------|----------------------------------------|
 | `NH2-01` CONTROL | ✅ closed / verified | `81f1271` + T02 6 PASS + Q11/T-O-391 + `2026-08-29T18:53:27Z` |
 | `NH2-02` guards | ✅ closed / verified | `81f1271` + T03 8 PASS + Q12/Q22 + UTC |
-| `NH2-03/04` graphs | ✅ closed / verified | `81f1271` + T04/T05 + tail digest `e36b5b…af13` + T-O-387/388 + UTC |
+| `NH2-03/04` graphs | ✅ closed / verified | `81f1271` + T04/T05 + live tail digest `48c39059…fe1b2` (NH8 27fc3ca rebuilt tail; cardinality 1) + T-O-387/388 + UTC |
 | `NH2-05/06` resolver/fence | ✅ closed / verified | `81f1271` + kind resolver / undeclared 409 PASS + T-O-379/384 + UTC |
 | `NH2-07` compat | ✅ closed / verified | `81f1271` + old sequence PASS + digest diff 0/16 + Q18 + UTC |
 | `NH2-08` redlines | ✅ closed / verified | `81f1271` + five architecture nodes PASS + T-O-377/398 + UTC |

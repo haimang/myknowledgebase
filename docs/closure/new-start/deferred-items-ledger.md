@@ -73,3 +73,25 @@
 | `NS6-VF97` | 第1轮 VF97 | `[true-deferred]` | browser/OCR/Vision | NS5 O3 / NS6 O4 | 能力 charter | owner |
 | `NS6-T01-hotfix` | VF1 soak | `known-hotfix` | BEGIN-cancel 用 `to_thread` 睡眠门 | in-process sqlite BEGIN cancel SIGSEGV | pyturso cancel-during-BEGIN 另开 harness | 文档 |
 | `NS6-VF62` | 第1轮 VF62 | NS5 carry-forward | 重叠 `run_once` 仍关 | **不是**业主 true-deferred；NS6 AP 本轮仍不得打开 | heartbeat soak 后新 charter | owner |
+
+## NH1–NH9 第 1 轮审查后 — 2026-08-30
+
+来源：`docs/code-review/new-harvest/NH1-NH9-review-VF-ledger.md`。本段只登记经复核且本轮诚实不修的项。`[true-bug]` 已全部修复，不在此表。
+
+| ID | 来源 | 归属 | 摘要 | 后延原因 | reopen 触发器 | 承接 |
+|----|------|------|------|----------|----------------|------|
+| `NH-VF3.r` | VF3 剩余 | `[partial-delivery] 剩余切片` | acquire/decode/clean stage envelope 仍持久化 raw_text | 去正文需 CAS-first 管线，decode 仍读 transport state | 下游以 envelope 正文为权威 | 表示权威 AP |
+| `NH-VF4.r` | VF4 剩余 | `[partial-delivery] 剩余切片` | retrieval 读时不重算 publication set digest | 024 已禁 indexed content_digest 改写；无 SQLite 聚合 SHA | 大集合 TOCTOU / 跨行篡改 | serving AP |
+| `NH-VF9.r` | VF9 剩余 | `[partial-delivery] 剩余切片` | 完整 7×state 矩阵与 index.rebuild stale cardinality | 本轮只把 deactivated metadata 收到 admission 409 | NH8 rereview | NH8 |
+| `NH-VF10` | VF10 | `[partial-delivery]` | retry_wait 同 digest 再投非 no-op；full_task alias 复制 | 需独立 crash-before-response 注入 | 该窗口出现双失败告警 | workflow replay AP |
+| `NH-VF13` | VF13 | `[partial-delivery]` | pre-catalog CAS orphan / staging lease / ingest reservation | S13 大改；本轮只修 quarantine 对账与会话 hold | GC 看到无 catalog 的 final 文件 | S13 |
+| `NH-VF14.r` | VF14 剩余 | `[true-deferred]` | 真模型端点、S16 签收、PromptRef complete_bound、封闭字形 OCR | 战役已披露 stub/fixture；owner 未授权 live 模型 | owner 授权 subprocess/vLLM | owner |
+| `NH-VF21` | VF21 | `[true-deferred]` | kind 图 revision_number=1 原位演进 | 升号需把旧 compiled digest 登记 compat；本战役 in-flight=0 | 下一次图内容变更 | workflow registry |
+| `NH-VF27.r` | VF27 剩余 | `[partial-delivery] 剩余切片` | 进程级 kill + `recover_expired_leases` | 九窗已诚实降为 hook/CAS；未测新进程恢复 | 要证明 lease recovery | NH9 rereview |
+| `NH-VF29` | VF29 | `[true-deferred]` | 全仓 pytest 910/910 未写入 closure | campaign DoD 是 unique 62 | 发版要以全仓绿为闸 | owner |
+| `NH-VF36` | VF36 | `[true-deferred]` | index pointer 四态无写入者 | 预留枚举 | 启用 building/retiring | index AP |
+| `NH-VF37` | VF37 | `[true-deferred]` | unique 冲突靠错误文本；单 sqlite 写锁 | 非 NH 引入 | 换多写者后端 | harness |
+| `NH-VF38` | VF38 | `[true-deferred]` | inline promote 在第二 UoW 前 | 设计允许 S13 orphan | 无效 Team 刷盘 | S13 |
+| `NH-VF39` | VF39 | `[true-deferred]` | M-NH-04 无 DDL；旧图常驻 registered | T-O-398 旧 pin 共存 | retirement charter | NH8 后续 |
+| `NH-VF41.r` | VF41 剩余 | `[partial-delivery] 剩余切片` | helper 拆模块、sentinel 非原词、missing_supply 钉死单码 | 本轮只对齐 pending=2 | 测试治理 charter | tests |
+| `NH-VF42` | VF42 | `[true-deferred]` | T11 checker 不执行命令 | 改执行器会改变 NH9 DoD 形状 | 证据伪造事件 | NH9 |

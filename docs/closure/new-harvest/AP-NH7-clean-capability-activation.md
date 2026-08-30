@@ -19,7 +19,7 @@
 
 > **本阶段最关键的 known gap（对下游影响）**：
 > 1. 全仓仍有 5 个 namespace/rebuild 失败，属 NH8 红债，不是本 AP 假绿。
-> 2. HEAD scatter 文件仍含 sqlite3 段；T08 PASS 主文件是 🆕 `test_nh7_registered_api_retrieval.py`，未把未清 sqlite3 的 HEAD 节点列入 8.1。
+> 2. `tests/e2e/test_registered_api_scatter.py` 已无 `sqlite3.connect`（仅 `database_path` 文件名）；T08 PASS 主文件是 🆕 `test_nh7_registered_api_retrieval.py`。残留 `sqlite3.connect` 在 campaign 外：`test_inline_ingress_staging.py` / `test_ns1_pipeline.py` / `test_ns2_dispatch_lanes.py` / `test_human_review_gate.py`。
 > 3. `web.llm_rewrite` 走 default-root CLI stub（非 patch）；print/DU/vision 走 S11 local fixture。库名仍不是 Truth。
 > 4. NH1 promptA reader 清单在 canonical 对齐后已改 readers（三文件互斥 SHA 未改）。
 
@@ -81,7 +81,7 @@ Review notes (implementation land `6256a97`):
 | Seven intents / exact-clean bypass / metadata no_change | C | unchanged | AP-NH8 | NH8 |
 | Index/reactivate namespace + rebuild STRUCTURE_PROFILE_INVALID | C | five repository failures | AP-NH8 | NH8 |
 | Campaign mega / crash windows / closed-set generator | C | query 终态已在本 AP | AP-NH9 | NH9 |
-| HEAD scatter sqlite3 + publication_ready-only nodes | B | ⛔ 未列入 T08/T09 PASS 主文件 | NH8/NH9 若 🔱 须先 Port 化 | successor |
+| scatter sqlite3 直读（已关闭） | B | ✅ 仅 database_path 文件名；campaign 外 4 个 e2e 仍 sqlite3.connect | 后继 harness charter | successor |
 
 ---
 

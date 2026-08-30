@@ -11,11 +11,53 @@
     "W-NH-PROM-CAT",
     "W-NH-GC-INGEST"
   ],
+  "injection_grain": "in-process function hook / UoW fault / DB rollback; not process-kill + lease-recovery",
   "nodes": [
-    "test_w_nh_create_between_identity_and_insert",
-    "test_w_nh_process_outcome_cas_effect_once",
-    "test_fanin_crash_repairs_via_persistence_port",
-    "test_w_nh_prom_cat_crash_no_usable_handle"
+    {
+      "window": "W-NH-CREATE",
+      "node": "test_w_nh_create_between_identity_and_insert",
+      "grain": "wrapper raise around tasks.create before INSERT"
+    },
+    {
+      "window": "W-NH-SEL",
+      "node": "test_route_seal_and_clean_eligibility_commit_together_and_propagate_command",
+      "grain": "in-UoW selected-output fault hook"
+    },
+    {
+      "window": "W-NH-SEAL",
+      "node": "test_route_seal_fault_windows_leave_no_half_commit",
+      "grain": "in-UoW actual_s05_fault_hook"
+    },
+    {
+      "window": "W-NH-PROCESS",
+      "node": "test_w_nh_process_outcome_cas_effect_once",
+      "grain": "outcome CAS conflict; no process kill"
+    },
+    {
+      "window": "W-NH-FANIN",
+      "node": "test_fanin_crash_repairs_via_persistence_port",
+      "grain": "DB rollback + production supervisor repair"
+    },
+    {
+      "window": "W-NH-PUB",
+      "node": "test_w_nh_pub_incomplete_proof_not_visible",
+      "grain": "post-success proof actual_count tamper fence; not mid-callback crash"
+    },
+    {
+      "window": "W-NH-OUTBOX",
+      "node": "test_w_nh_outbox_redelivery_no_extra_vector",
+      "grain": "manual pending reset + second dispatch"
+    },
+    {
+      "window": "W-NH-PROM-CAT",
+      "node": "test_w_nh_prom_cat_crash_no_usable_handle",
+      "grain": "_uow_fault_hook after_promote_before_catalog"
+    },
+    {
+      "window": "W-NH-GC-INGEST",
+      "node": "test_interleave_ttl_and_ingest",
+      "grain": "TTL after acquire success"
+    }
   ],
-  "observed_at_utc": "2026-08-30T06:10:00Z"
+  "observed_at_utc": "2026-08-30T12:00:00Z"
 }
