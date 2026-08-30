@@ -1,0 +1,81 @@
+AP-NH9 test evidence
+Observed at: 2026-08-30T06:10:00Z
+Implementation commit: f7db57c74c54445c4fe9b09c5500b27c99f5baf0
+Prior: 8754df3 P1; 50c2246 P2; 8196a0a P3; 6390d9b P4; 6fbb1a7 P5
+Environment: Python 3.12; pytest 8.3.5; PersistencePort; no sqlite3 in T02–T09 unique files; Layer-A namespace required
+Truth: T-O-376/378/381/383/399/400/406; Q3/Q10/Q17/Q18/Q19/Q20/Q24/Q26
+
+NH9-T01..T11 closed-set suite
+
+NH9-T01
+Command: uv run pytest tests/unit/test_nh9_closed_set_manifest.py -q
+Result: PASS
+Digest: 57c19c6bcb1c4b82bb741886808b8f3b342259aa795dbaae8b285140e1da740a (NH1 strategy/op/intent bytes kept)
+
+NH9-T02
+Command: uv run pytest tests/e2e/test_nh9_task_identity_conflict.py::test_same_fingerprint_replays_original_view tests/e2e/test_nh9_task_identity_conflict.py::test_different_fingerprint_409_task_identity_conflict tests/e2e/test_nh9_task_identity_conflict.py::test_concurrent_double_flight_single_root tests/e2e/test_intake_identity_replay.py -q
+Result: PASS (Port-ized identity; no sqlite3)
+Truth: T-O-383
+
+NH9-T03
+Command: uv run pytest tests/e2e/test_new_harvest_closed_set.py::test_empty_html_clean_empty_zero_hits tests/e2e/test_new_harvest_closed_set.py::test_empty_pdf_text_zero_hits tests/e2e/test_new_harvest_closed_set.py::test_unknown_filter_key_422_zero_hits tests/e2e/test_new_harvest_closed_set.py::test_bad_api_member_zero_hits tests/e2e/test_new_harvest_closed_set.py::test_missing_supply_typed_fail_not_live_dod -q
+Result: PASS
+Truth: T-O-378/383; Q3
+
+NH9-T04
+Command: uv run pytest tests/e2e/test_new_harvest_crash_windows.py::test_w_nh_create_between_identity_and_insert tests/e2e/test_new_harvest_crash_windows.py::test_w_nh_process_outcome_cas_effect_once tests/e2e/test_new_harvest_crash_windows.py::test_w_nh_process_different_outcome_conflict tests/e2e/test_nh3_seal_crash_windows.py -q
+Result: PASS
+Truth: T-O-400/383; Q20
+
+NH9-T05
+Command: uv run pytest tests/e2e/test_new_harvest_crash_windows.py::test_w_nh_fanin_parent_waiting_repairs_once tests/e2e/test_new_harvest_crash_windows.py::test_w_nh_pub_incomplete_proof_not_visible tests/e2e/test_new_harvest_crash_windows.py::test_w_nh_outbox_redelivery_no_extra_vector_upsert tests/e2e/test_nh1_fanin_recovery_port.py::test_fanin_crash_repairs_via_persistence_port -q
+Result: PASS
+Truth: Q26; FG-NH-12
+
+NH9-T06
+Command: uv run pytest tests/unit/test_ns6_gc_toctou.py::test_gc_restore_when_live_reference_arrives_during_quarantine tests/unit/test_ns6_gc_toctou.py::test_gc_restore_when_upload_pending_arrives_during_quarantine tests/unit/test_ns6_gc_toctou.py::test_collect_candidates_skips_live_upload_pending tests/unit/test_nh4_upload_ttl_gc.py::test_ttl_without_ingest_releases_then_grace_tombstone tests/unit/test_nh4_upload_ttl_gc.py::test_staging_incomplete_never_catalogued_is_reaped tests/e2e/test_nh4_upload_replay_race.py::test_interleave_parallel_upload_and_gc tests/e2e/test_nh4_upload_replay_race.py::test_interleave_ttl_and_ingest tests/e2e/test_nh4_upload_replay_race.py::test_tombstone_then_reupload_new_handle_zero_item tests/e2e/test_new_harvest_crash_windows.py::test_w_nh_prom_cat_crash_no_usable_handle -q
+Result: PASS
+Truth: Q24; W-NH-PROM-CAT/W-NH-GC-INGEST
+
+NH9-T07
+Command: uv run pytest tests/e2e/test_nh7_exhausted_zero.py::test_disposition_exhausted_zero_not_indexed_success tests/e2e/test_nh7_exhausted_zero.py::test_exhaustion_proof_retrieval_empty tests/e2e/test_nh7_exhausted_zero.py::test_same_fingerprint_replay_same_disposition tests/e2e/test_nh7_exhausted_zero.py::test_noop_terminal_alone_is_not_product_zero tests/e2e/test_new_harvest_closed_set.py::test_exhausted_zero_namespace_search_empty tests/e2e/test_new_harvest_closed_set.py::test_required_child_failed_parent_not_retrievable tests/e2e/test_new_harvest_closed_set.py::test_bad_member_root_not_succeeded_zero_hits -q
+Result: PASS
+Truth: Q17; FG-NH-04/12
+
+NH9-T08
+Command: uv run pytest tests/unit/test_workflow_revision_compatibility.py tests/integration/test_nh3_s05_migration.py tests/domain/test_nh3_actual_readers_scan.py::test_architecture_scan_zero_actual_readers_of_legacy_column -q
+Result: PASS, 11 passed
+Truth: Q10/Q18; T-O-390/398/401; FG-NH-08/09
+
+NH9-T09
+Command: uv run pytest tests/e2e/test_new_harvest_closed_set.py::test_every_legal_knowledge_cell_namespace_facet_proof tests/e2e/test_nh5_facet_retrieval.py tests/unit/test_nh5_facet_sql_not_postfilter.py -q
+Result: PASS, 16 passed ~215s
+Truth: T-O-376/389; Q26; FG-NH-01/03/04/05/06/07/14
+Node: test_every_legal_knowledge_cell_namespace_facet_proof
+
+NH9-T10
+Command: uv run pytest tests/e2e/test_nh6_parser_isolation.py::test_parser_subprocess_has_no_network tests/e2e/test_nh6_parser_isolation.py::test_resource_kill_on_timeout tests/e2e/test_nh6_parser_isolation.py::test_malicious_pdf_does_not_kill_api tests/e2e/test_new_harvest_runtime_security.py::test_browser_runs_non_root tests/e2e/test_new_harvest_runtime_security.py::test_production_forbids_no_sandbox tests/e2e/test_new_harvest_runtime_security.py::test_browser_egress_rechecks_each_redirect tests/e2e/test_new_harvest_runtime_security.py::test_parser_process_network_denied tests/e2e/test_new_harvest_runtime_security.py::test_backpressure_zero_downstream tests/e2e/test_nh6_readiness.py::test_positive_probe_matches_presence tests/e2e/test_nh6_readiness.py::test_missing_binary_component_not_overall_green tests/e2e/test_nh6_readiness.py::test_models_list_insufficient_for_ready tests/e2e/test_nh6_readiness.py::test_create_app_readiness_without_patch -q
+Result: PASS, 12 passed ~88s
+Optional index: test_campaign_security_signoff_aggregates_nh6_gates PASS
+Truth: Q19; T-O-399; FG-NH-11
+Node: test_backpressure_zero_downstream
+
+NH9-T11
+Command: uv run pytest tests/domain/test_nh9_evidence_pack_checker.py::test_nine_packs_have_six_artifacts tests/domain/test_nh9_evidence_pack_checker.py::test_each_test_id_has_four_tuple tests/domain/test_nh9_evidence_pack_checker.py::test_fg_nh_01_to_17_all_green tests/domain/test_nh9_evidence_pack_checker.py::test_no_expired_waiver_and_no_foundational_override tests/domain/test_nh9_evidence_pack_checker.py::test_experiment_not_in_closure_join -q
+Result: PASS (this pack)
+Truth: T-O-406/380; FG-NH-16/17
+
+Anti-fake-green
+- no sqlite3 in T02 unique files (Port)
+- RETRIEVE_SCHEMA_NAMESPACE_REQUIRED on omitted namespace
+- no _browser_fetcher assignment in closed_set (AST Store scan)
+- test_w_nh_create_between_identity_and_insert
+- test_fanin_crash_repairs_via_persistence_port
+- test_every_legal_knowledge_cell_namespace_facet_proof
+- test_backpressure_zero_downstream is L2 security, not unit-only
+
+Static review
+Command: uv run ruff check <changed Python>
+Result: PASS
+Command: git diff --check
+Result: PASS

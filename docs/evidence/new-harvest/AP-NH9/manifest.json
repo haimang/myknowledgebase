@@ -1,0 +1,80 @@
+{
+  "schema_version": "mkb.new-harvest-evidence.v1",
+  "ap": "AP-NH9",
+  "status": "executed",
+  "commit": "f7db57c74c54445c4fe9b09c5500b27c99f5baf0",
+  "prior_commits": [
+    "8754df3",
+    "50c2246",
+    "8196a0a",
+    "6390d9b",
+    "6fbb1a7"
+  ],
+  "truth_cite": [
+    "T-O-376",
+    "T-O-378",
+    "T-O-380",
+    "T-O-381",
+    "T-O-383",
+    "T-O-389",
+    "T-O-390",
+    "T-O-397",
+    "T-O-398",
+    "T-O-399",
+    "T-O-400",
+    "T-O-401",
+    "T-O-404",
+    "T-O-406",
+    "T-O-407"
+  ],
+  "q_cite": [
+    "Q3",
+    "Q10",
+    "Q17",
+    "Q18",
+    "Q19",
+    "Q20",
+    "Q24",
+    "Q26"
+  ],
+  "work_ids": [
+    "NH9-01",
+    "NH9-02",
+    "NH9-03",
+    "NH9-04",
+    "NH9-05",
+    "NH9-06",
+    "NH9-07",
+    "NH9-08",
+    "NH9-09",
+    "NH9-10",
+    "NH9-11"
+  ],
+  "test_ids": [
+    "NH9-T01",
+    "NH9-T02",
+    "NH9-T03",
+    "NH9-T04",
+    "NH9-T05",
+    "NH9-T06",
+    "NH9-T07",
+    "NH9-T08",
+    "NH9-T09",
+    "NH9-T10",
+    "NH9-T11"
+  ],
+  "hard_gate_result": {
+    "passed": "T01-T10 recorded; T11 this pack",
+    "failed": 0,
+    "level": "L1/L2/L3/L4/F/R/C/S"
+  },
+  "nh1_digest": "57c19c6bcb1c4b82bb741886808b8f3b342259aa795dbaae8b285140e1da740a",
+  "assurance_digest": "f359c330a253eb38f76e56a81355cdbdce0e99987b817bd1bb938411e3e3bcb7",
+  "experiment": {
+    "launch_date": null,
+    "scores": null,
+    "in_closure_join": false
+  },
+  "observed_at_utc": "2026-08-30T06:10:00Z",
+  "closure_type": "closed-with-explicit-deferrals"
+}

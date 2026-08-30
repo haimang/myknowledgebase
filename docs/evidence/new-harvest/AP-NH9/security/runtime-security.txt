@@ -1,0 +1,21 @@
+NH9-T10 runtime security join
+Observed at: 2026-08-30T06:10:00Z
+Commit: f7db57c74c54445c4fe9b09c5500b27c99f5baf0
+
+PASS nodes (NH6 already built; NH9 indexes):
+- test_parser_subprocess_has_no_network
+- test_resource_kill_on_timeout
+- test_malicious_pdf_does_not_kill_api
+- test_browser_runs_non_root
+- test_production_forbids_no_sandbox
+- test_browser_egress_rechecks_each_redirect
+- test_parser_process_network_denied
+- test_backpressure_zero_downstream
+- test_positive_probe_matches_presence
+- test_missing_binary_component_not_overall_green
+- test_models_list_insufficient_for_ready
+- test_create_app_readiness_without_patch
+
+Result: PASS, 12 passed. Optional campaign index PASS.
+Truth: Q19 / T-O-399 / FG-NH-11
+No S16 sign-off is forged in this pack.

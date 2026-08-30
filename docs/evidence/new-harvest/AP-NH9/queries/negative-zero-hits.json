@@ -1,0 +1,11 @@
+{
+  "test": "NH9-T03/T07",
+  "empty_html": "zero_hits",
+  "empty_pdf": "zero_hits",
+  "unknown_filter": "RETRIEVE_FILTER_INVALID",
+  "bad_api_member": "root_not_succeeded",
+  "missing_supply": "typed_fail_not_live_dod",
+  "exhausted_zero": "namespace_search_empty",
+  "required_child_failed": "parent_not_retrievable",
+  "observed_at_utc": "2026-08-30T06:10:00Z"
+}

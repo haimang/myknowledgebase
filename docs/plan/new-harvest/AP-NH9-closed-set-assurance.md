@@ -24,7 +24,7 @@
 > 关联 reference-anchor:
 > - [`assessment-analysis-09-assurance-replay-concurrency-and-compatibility.md`](../../eval/new-harvest/reference-anchor/assessment-analysis-09-assurance-replay-concurrency-and-compatibility.md)（主面）
 > - 邻面 RA01–RA08 只消费 gap ID / 失败法，不重写功能设计
-> 文档状态: `draft`
+> 文档状态: `executed`
 > 台账 ID 区间（final §11.A `7.9 AP-NH9`）：`NH9-01..11 / NH9-A01..07 / NH9-T01..11`
 > HEAD: `1221aa1`（代码分母）；文档 HEAD `76b20a0`
 
@@ -694,7 +694,7 @@ closed-set assurance / immutable closure
 - **技术前提**：HEAD `1221aa1` 代码分母；NH1–NH8 功能已按各自台账落地。本 AP 不改生产 DDL/pyproject/生产配置。
 - **运行时前提**：L3/L4 需要 NH6 真实 binary/model 与 default-root 注入；缺供给 → T09 正格 FAIL（交回 NH6/NH7），禁止 skip 当 PASS。
 - **组织协作前提**：无新 owner-gate。NH6–NH8 AP 后入库时，本文件只 join 其 Test-ID 路径，不改冻结 T-O。
-- **上线 / 合并前提**：`NH9-T01..T11` 全 PASS；`FG-NH-01..17` 全绿；无未解释 S1/过期 waiver。文档状态保持 `draft` 直至执行回填。
+- **上线 / 合并前提**：`NH9-T01..T11` 全 PASS；`FG-NH-01..17` 全绿；无未解释 S1/过期 waiver。文档状态已 `executed`。
 
 ### 9.3 文档同步要求
 
@@ -781,13 +781,41 @@ PASS 证据四元组形态（执行期填写）：`commit SHA + pytest node PASS
 
 ## 11. 执行日志回填（仅 `executed` 状态使用）
 
-> 文档状态为 `draft`，本节省略实填。执行完成后改用 `respond-execution-log` 厚版回填。residual 交后继 charter，**不回填本阶段**。
+> 执行者：`Grok`
+> 执行时间：`2026-08-30`
+> 文档状态：`draft → executing → executed`
+> 代码改动统计：P1–P6 分 commit；实现收口 `f7db57c`；PROM-CAT hook 1 行
 
-- **实际执行摘要**：`{待执行}`
-- **Phase 偏差**（逐条带分类）：`{待执行}`
-- **阻塞与处理**：`{待执行}`（预期：上游功能缺口 → campaign blocked，交回 NH6/7/8）
-- **测试发现**（含全绿计数 + 新暴露事实）：`{待执行}`
-- **后续 handoff**：`{待执行}` → campaign closure；experiment 发车另册（`T-O-380`）
+- **实际执行摘要**：P1 冻结 82/windows/FG；P2 Port 化 replay + fail-loud zeros；P3 CREATE/PROCESS/FANIN/PUB/OUTBOX 并 wrap NH3-T07/NH1-T02；P4 PROM-CAT/GC 交错 + scatter query；P5 old-pin + 13 正格 mega；P6 NH6 安全 join + pack checker。
+- **Phase 偏差**：
+  - public replay 信号是 HTTP 200 vs 201，不是 JSON `replayed`（substrate-fit）。
+  - 失败 ingest 无 Layer-A namespace；T03 用 control seed + facet isolation（substrate-fit）。
+  - T07 不把 HEAD scatter handler 文件当 PASS；closed_set 用 handler 仅作 child-fail 注入，query 才是绿。
+  - `.experiment` gitignore；骨架可存在，不进 join（计划偏差 / T-O-380）。
+- **阻塞与处理**：无上游功能缺口交回。T04 具名 SEL/SEAL 在 crash_windows wrap；T08 架构扫描别名 `test_architecture_scan_zero_actual_readers_of_legacy_column`。
+- **测试发现**：T01–T10 各 AP 跑法 PASS。T09 16 passed ~215s。T10 12 passed ~88s。T11 本包。
+- **后续 handoff**：`CROSS-NH` 耦合审查与全量回归。experiment 发车另册（`T-O-380`）。S16 不伪造。
+
+### 11.1 逐工作项状态
+
+| 工作项 | 状态 | PR | 实际落点 | 备注 |
+|--------|------|----|----------|------|
+| `NH9-01` | ✅ done | `8754df3` | closed-set manifest + T01 | digest 保持 NH1 |
+| `NH9-02` | ✅ done | `50c2246` | identity conflict + Port replay | T02 |
+| `NH9-03` | ✅ done | `50c2246` | closed_set 负格 | T03 |
+| `NH9-04` | ✅ done | `8196a0a` | crash_windows CREATE/PROCESS/FANIN/PUB/OUTBOX | T04/T05 |
+| `NH9-05` | ✅ done | `6390d9b` | upload interleave + PROM-CAT | T06 |
+| `NH9-06` | ✅ done | `6390d9b` | exhausted_zero / child-fail query | T07 |
+| `NH9-07` | ✅ done | `6fbb1a7` | NH2/NH3 compat wrap | T08 |
+| `NH9-08` | ✅ done | `6fbb1a7` | 13 legal-cell mega | T09 |
+| `NH9-09` | ✅ done | `f7db57c` | NH6 T10 join | T10 |
+| `NH9-10` | ✅ done | this pack | evidence checker | T11 |
+| `NH9-11` | ✅ done | manifest experiment | 非 DoD | 无独立 Test-ID |
+
+### 11.4 文档状态
+
+`draft → executing → executed（2026-08-30）`。
+residual → `CROSS-NH`。
 
 ---
 
@@ -798,3 +826,4 @@ PASS 证据四元组形态（执行期填写）：`commit SHA + pytest node PASS
 | `v0.1` | `2026-08-29` | Grok workflow new-harvest-nh6-nh9-action-plans | 由 final §7.9 派生；RA09 + HEAD `1221aa1` 独立核对；join NH1–NH5 §8.4/§10.4 与 §7.6–7.8 冻结 ID |
 | `v0.2` | `2026-08-29` | Grok fix-fleet | 吸收已核实 review：T11 只映射 NH9-10，去掉 schema-exists DoD node，FG 必须引用 tests.txt 反假绿 node；T02 去掉 staging sqlite3 文件；T03/T06 跑法改为显式 path::node；T07 删除 HEAD scatter 假绿节点并抄入 NH7-T09 四 node；T09 补 facet SQL unit；T10 抄入 NH6 T02/T05/T08/T09 path::node；fan-in 锚 `runtime_scatter.py:277-483` |
 | `v0.3` | `2026-08-29` | Grok recon-fix | Capstone 表改为「主 AP + NH9 交叉」；T08-B 仍红点名 `NH8-03`/`NH8-T03`；T02 未 Port 化 identity 文件不得进跑法；T10 只 🔱 NH6 已建 node（禁同名 🆕，unit 不得关 backpressure）；T01 锁死 10+3 字段名 |
+| `v1.0` | `2026-08-30` | Grok | 执行回填 §11；文档状态 `executed`；T01–T11 PASS `f7db57c` |

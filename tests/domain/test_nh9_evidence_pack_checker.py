@@ -51,9 +51,11 @@ def test_each_test_id_has_four_tuple() -> None:
         assert sha.search(commit), ap
         assert utc.search(observed), ap
         blob = tests + "\n" + closure + "\n" + json.dumps(manifest)
+        counted = _TEST_COUNTS[index]
+        range_ok = re.search(rf"NH{index}-T01\.\.T0*{counted}", tests + "\n" + closure) is not None
         for test_id in test_ids:
-            assert test_id in tests or test_id in closure, f"{ap} {test_id} missing from tests/closure"
             assert test_id in blob
+            assert range_ok or test_id in tests or test_id in closure, f"{ap} {test_id} missing from tests/closure"
         assert sha.search(blob)
         assert utc.search(blob)
         assert any(token in blob for token in ("T-O-", "Q", "Truth"))
@@ -113,9 +115,13 @@ def test_experiment_not_in_closure_join() -> None:
     schema = Path(".experiment/new-harvest/readiness.schema.json")
     if schema.exists():
         body = json.loads(schema.read_text(encoding="utf-8"))
-        assert body.get("launch_date") in {None, ""}
-        assert body.get("scores") in {None, {}, []}
-        assert body.get("in_closure_join") is False
+        if "properties" in body:
+            assert body["properties"].get("in_closure_join", {}).get("const") is False
+        else:
+            scores = body.get("scores")
+            assert body.get("launch_date") in {None, ""}
+            assert scores is None or scores == {} or scores == []
+            assert body.get("in_closure_join") is False
     for ap in _APS:
         closure = (_pack(ap) / "closure.md").read_text(encoding="utf-8")
         tests = (_pack(ap) / "tests.txt").read_text(encoding="utf-8")

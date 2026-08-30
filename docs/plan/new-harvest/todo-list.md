@@ -95,10 +95,10 @@
 - [x] `NH9-CODE-P4` [代码制作] Phase 4 object race + scatter（`NH9-05/06`；`NH9-T05/T06/T07`）。`blocked-by: NH9-CODE-P3`
 - [x] `NH9-CODE-P5` [代码制作] Phase 5 compat + retrieval-facet mega（`NH9-07/08`；`NH9-T03/T08/T09`）。`blocked-by: NH9-CODE-P4`
 - [x] `NH9-CODE-P6` [代码制作] Phase 6 security/evidence/experiment isolation（`NH9-09/10/11`；`NH9-T10/T11`；experiment 不入 DoD）。`blocked-by: NH9-CODE-P5`
-- [-] `NH9-CLOSE` [代码审查，测试与文档回填] `NH9-T01..T11`、`FG-NH-01..17`、capstone A–J、日志、evidence、closure、commit。`blocked-by: NH9-CODE-P6`
+- [x] `NH9-CLOSE` [代码审查，测试与文档回填] `NH9-T01..T11`、`FG-NH-01..17`、capstone A–J、日志、evidence、closure、commit。`blocked-by: NH9-CODE-P6`
 
 ## Cross-NH campaign closure
 
-- [ ] `CROSS-NH-REVIEW` [跨阶段代码审查] 检查 NH1–NH9 contract/migration/runtime/public/retrieval/lifecycle 的跨阶段耦合、owner `T-O-390..407` 与 foundational truth 零漂移。`blocked-by: NH9-CLOSE`
-- [ ] `CROSS-NH-TEST` [跨阶段测试与修复] 执行完整测试集、固定 capstone 文件、race/crash/security/compat/mega；持续测试↔修复直到无 in-scope 失败。`blocked-by: CROSS-NH-REVIEW`
+- [x] `CROSS-NH-REVIEW` [跨阶段代码审查] 检查 NH1–NH9 contract/migration/runtime/public/retrieval/lifecycle 的跨阶段耦合、owner `T-O-390..407` 与 foundational truth 零漂移。`blocked-by: NH9-CLOSE`
+- [-] `CROSS-NH-TEST` [跨阶段测试与修复] 执行完整测试集、固定 capstone 文件、race/crash/security/compat/mega；持续测试↔修复直到无 in-scope 失败。`blocked-by: CROSS-NH-REVIEW`
 - [ ] `CROSS-NH-CLOSE` [最终文档回填与提交] 输出 consolidated closure、核对九份 AP 日志/closure/evidence/commit 四元组、最终提交并报告。`blocked-by: CROSS-NH-TEST`

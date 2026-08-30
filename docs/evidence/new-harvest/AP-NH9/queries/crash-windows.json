@@ -1,0 +1,21 @@
+{
+  "test": "NH9-T04/T05/T06",
+  "windows": [
+    "W-NH-CREATE",
+    "W-NH-SEL",
+    "W-NH-SEAL",
+    "W-NH-PROCESS",
+    "W-NH-FANIN",
+    "W-NH-PUB",
+    "W-NH-OUTBOX",
+    "W-NH-PROM-CAT",
+    "W-NH-GC-INGEST"
+  ],
+  "nodes": [
+    "test_w_nh_create_between_identity_and_insert",
+    "test_w_nh_process_outcome_cas_effect_once",
+    "test_fanin_crash_repairs_via_persistence_port",
+    "test_w_nh_prom_cat_crash_no_usable_handle"
+  ],
+  "observed_at_utc": "2026-08-30T06:10:00Z"
+}

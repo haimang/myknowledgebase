@@ -1,0 +1,14 @@
+{
+  "nh1_digest": "57c19c6bcb1c4b82bb741886808b8f3b342259aa795dbaae8b285140e1da740a",
+  "assurance_digest": "f359c330a253eb38f76e56a81355cdbdce0e99987b817bd1bb938411e3e3bcb7",
+  "work_ids": 82,
+  "legal_cells": 13,
+  "negative_cells": 4,
+  "windows": 9,
+  "fake_green": 17,
+  "experiment": {
+    "launch_date": null,
+    "scores": null,
+    "in_closure_join": false
+  }
+}

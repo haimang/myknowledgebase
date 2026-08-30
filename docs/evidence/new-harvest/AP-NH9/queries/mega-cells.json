@@ -1,0 +1,11 @@
+{
+  "test": "NH9-T09",
+  "node": "test_every_legal_knowledge_cell_namespace_facet_proof",
+  "legal_cells": 13,
+  "result": "PASS",
+  "facet_sql": [
+    "tests/e2e/test_nh5_facet_retrieval.py",
+    "tests/unit/test_nh5_facet_sql_not_postfilter.py"
+  ],
+  "observed_at_utc": "2026-08-30T06:10:00Z"
+}
