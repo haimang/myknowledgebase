@@ -1,11 +1,14 @@
-"""NH9-T03: empty/unknown/bad-member/missing-supply fail loud with zero retrieval hits."""
+"""NH9-T03/T07/T09: closed-set fail-loud zeros, scatter query, and legal-cell mega."""
 
 from __future__ import annotations
 
+import ast
+import json
 import time
 from pathlib import Path
 from typing import Any
 
+import pytest
 from fastapi.testclient import TestClient
 
 from api.app import create_app
@@ -539,3 +542,93 @@ def test_bad_member_root_not_succeeded_zero_hits(tmp_path: Path) -> None:
         )
         assert hidden.status_code == 200, hidden.text
         assert hidden.json()["results"] == []
+
+
+def _legal_cells() -> list[dict[str, Any]]:
+    manifest = json.loads(Path("tests/fixtures/new_harvest/closed_set_manifest.v1.json").read_text(encoding="utf-8"))
+    return list(manifest["legal_cells"])
+
+
+def _cell_id(cell: dict[str, Any]) -> str:
+    if cell.get("kind") == "strategy":
+        return str(cell["strategy_key"])
+    return f"{cell['provider']}.{cell['operation']}"
+
+
+def _lane_runners() -> dict[str, Any]:
+    from tests.e2e.test_nh7_browser_dom_retrieval import (
+        test_web_llm_rewrite_namespace_hit as web_llm_rewrite,
+    )
+    from tests.e2e.test_nh7_inline_static_retrieval import (
+        test_http_static_web_deterministic_namespace_facet_hit as web_deterministic,
+    )
+    from tests.e2e.test_nh7_inline_static_retrieval import (
+        test_inline_doc_deterministic_namespace_facet_hit as doc_deterministic,
+    )
+    from tests.e2e.test_nh7_multimodal_lanes import (
+        test_doc_document_understanding_query as doc_document_understanding,
+    )
+    from tests.e2e.test_nh7_multimodal_lanes import test_doc_ocr_query as doc_ocr
+    from tests.e2e.test_nh7_multimodal_lanes import test_doc_vision_query as doc_vision
+    from tests.e2e.test_nh7_multimodal_lanes import (
+        test_pdf_document_understanding_query as pdf_document_understanding,
+    )
+    from tests.e2e.test_nh7_multimodal_lanes import test_pdf_ocr_query as pdf_ocr
+    from tests.e2e.test_nh7_pdf_text_retrieval import (
+        test_http_pdf_text_layer_namespace_hit as pdf_text_layer,
+    )
+    from tests.e2e.test_nh7_print_pdf_retrieval import (
+        test_print_fact_pdf_clean_namespace_hit as web_browser_print_pdf,
+    )
+    from tests.e2e.test_nh7_registered_api_retrieval import (
+        test_chinatax_member_namespace_hit as chinatax_get_articles,
+    )
+    from tests.e2e.test_nh7_registered_api_retrieval import (
+        test_domain_member_namespace_hit as domain_get_agency_listings,
+    )
+    from tests.e2e.test_nh7_registered_api_retrieval import (
+        test_realestate_member_namespace_hit as realestate_get_listings,
+    )
+    from tests.e2e.test_nh8_delete_tombstone import (
+        test_delete_tombstone_rejects_rebuild_and_search_empty as delete_zero,
+    )
+
+    return {
+        "doc.deterministic": doc_deterministic,
+        "web.deterministic": web_deterministic,
+        "web.llm_rewrite": web_llm_rewrite,
+        "web.browser_print_pdf": web_browser_print_pdf,
+        "pdf.text_layer": pdf_text_layer,
+        "pdf.document_understanding": pdf_document_understanding,
+        "pdf.ocr": pdf_ocr,
+        "doc.document_understanding": doc_document_understanding,
+        "doc.ocr": doc_ocr,
+        "doc.vision": doc_vision,
+        "chinatax.get_articles": chinatax_get_articles,
+        "domain.get_agency_listings": domain_get_agency_listings,
+        "realestate.get_listings": realestate_get_listings,
+        "delete_zero": delete_zero,
+    }
+
+
+@pytest.mark.parametrize("cell", _legal_cells(), ids=_cell_id)
+def test_every_legal_knowledge_cell_namespace_facet_proof(tmp_path: Path, cell: dict[str, Any]) -> None:
+    source = Path("tests/e2e/test_new_harvest_closed_set.py").read_text(encoding="utf-8")
+    tree = ast.parse(source)
+    assigned = [
+        node.attr
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Attribute)
+        and node.attr == "_browser_fetcher"
+        and isinstance(node.ctx, ast.Store)
+    ]
+    assert assigned == []
+    cell_id = _cell_id(cell)
+    runners = _lane_runners()
+    runner = runners.get(cell_id)
+    assert runner is not None, f"legal cell {cell_id} has no NH7 lane to join"
+    runner(tmp_path)
+    if cell_id == "doc.deterministic":
+        lifecycle = tmp_path / "lifecycle-delete"
+        lifecycle.mkdir()
+        runners["delete_zero"](lifecycle)
