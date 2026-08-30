@@ -28,7 +28,7 @@
 > - `docs/eval/new-harvest/reference-anchor/assessment-analysis-03-representation-and-reacquisition.md`（只消费 print/PDF **观察诚实**；生产供给在本 AP）
 > 关联 reference-anchor:
 > - 上列 RA05（主面）/ RA03（表示诚实，不选库）——正/反例参考系，**不是**新 Truth
-> 文档状态: `draft`
+> 文档状态: `executed`
 > 台账 ID 区间（final §11.A `7.6 AP-NH6`）：`NH6-01..10 / NH6-A01..06 / NH6-T01..10`
 > HEAD: `1221aa1`
 > 代码分母: `1221aa1`（其后提交只改 `docs/`；`src/`/`api/`/`intake/`/`tests/` 行号以本文件独立 `read_file` 为准）
@@ -714,13 +714,65 @@ docs/evidence/new-harvest/AP-NH6/
 
 ## 11. 执行日志回填（仅 `executed` 状态使用）
 
-> 文档状态为 `draft`，本节省略执行事实。下列为模板占位，执行完成后改用 `respond-execution-log` 厚版回填。residual 交后继 AP，不回填为本阶段完成。
+> 执行者：`Grok`
+> 执行时间：`2026-08-30`（evidence UTC `2026-08-30T00:01:17Z`）
+> 文档状态：`draft → executing → executed`
+> 代码改动统计：实现提交 `63c4398`（54 files；无新业务 migration）
 
-- **实际执行摘要**：`{EXECUTION_SUMMARY}`（未执行）
-- **Phase 偏差**（逐条带分类）：`{PHASE_VARIANCE}`
-- **阻塞与处理**：`{BLOCKERS_AND_RESOLUTION}`
-- **测试发现**（含全绿计数 + 新暴露事实）：`{TEST_FINDINGS}`
-- **后续 handoff**：GO 供给 → `AP-NH7` 10+3 live（query 仍缺则 NH7 FAIL）；安全面 → `AP-NH9` 🔱 `test_new_harvest_runtime_security.py`
+- **实际执行摘要**：
+  - Phase 1（`NH6-01`）：五类 supply identity（`pdf.parse` / `browser.render` / `browser.print_pdf` / `ocr.deterministic` / `s11.multimodal`）分账 cap/limit/readiness；库名不进 registry。
+  - Phase 2（`NH6-02`）：`IsolatedPdfParser` 无网 subprocess；decode 权威从 `_extract_pdf_text` 撤到 parser；absent/encrypted 分码。
+  - Phase 3（`NH6-03/04`）：共享 Firefox/geckodriver；S16 prefetch + 闭代理；render DOM 与 print `%PDF-` 独立预算；淘汰常量 profile。
+  - Phase 4（`NH6-05/06`）：`MultimodalGenerateRequest` + adapter parts；确定性 OCR 无 PromptRef；CLI 仍拒 binary。
+  - Phase 5（`NH6-07..10`）：具名闸满载零调用；`/ready` 正负与 models-list 不足；SBOM；`create_app()` 注入真实 port。
+- **Phase 偏差（计划 vs 实际）**：
+  - `NH6-V01 (substrate-fit)`：`runtime_supply_readiness_required` 默认 false，离线/既有测试 `/ready` 仍走 BASE 九项；T09 以 flag=true 证明生产供给门。
+  - `NH6-V02 (capability literal)`：未新增 `InferenceCapability` vision/ocr 字面；multimodal 复用 `text_generate` binding，闸键为 `s11.multimodal`。
+  - `NH6-V03 (browser network)`：页面不直连源 URL；S16 prefetch 后 `data:` 执行 + 出站代理 127.0.0.1:9。
+  - `NH6-V04 (matrix digest)`：`pdf.ocr`/`doc.ocr` 去 PromptRef（T-O-386）；live closed-set digest 刷新为 `57c19c6…`；NH1 GO 结论不变。
+  - `NH6-V05 (print ToUnicode)`：主机 CJK 默认字体把 ASCII `1` 抽成 U+FFFD；print 强制 DejaVu Latin 字体。
+- **阻塞与处理**：无 NH6 hard-gate blocker。S16 签收栏已建且留空。五个 namespace/rebuild 失败保持 NH8 红债。
+- **测试发现**：NH6 hard suite `45 passed`；全仓 `799 collected / 794 passed / 5 successor-owned failed`。
+- **后续 handoff**：GO 供给 → `AP-NH7` 10+3 live（query 仍缺则 NH7 FAIL）；安全面 → `AP-NH9` 🔱 `test_new_harvest_runtime_security.py`。
+
+### 11.1 逐工作项状态
+
+| 工作项 | 状态 | PR / commit | 实际落点 | 备注 |
+|--------|------|-------------|----------|------|
+| `NH6-01` | `✅ done` | `63c4398` | `src/runtime/supply/identities.py`; config/health keys | five identities |
+| `NH6-02` | `✅ done` | `63c4398` | `src/runtime/supply/pdf_parser.py`; decode in `acquisition_ingest.py` | isolated pdftotext |
+| `NH6-03` | `✅ done` | `63c4398` | `src/runtime/supply/browser.py` render; `api/app.py` inject | SPA DOM |
+| `NH6-04` | `✅ done` | `63c4398` | same runtime `print_pdf`; independent cap | `%PDF-` |
+| `NH6-05` | `✅ done` | `63c4398` | `MultimodalGenerateRequest`; `local_vllm.multimodal_generate` | parts not string |
+| `NH6-06` | `✅ done` | `63c4398` | `deterministic_ocr.py`; `intake` OCR 503 vs local port | no cloud/latest |
+| `NH6-07` | `✅ done` | `63c4398` | `ConcurrencyGate` named caps; facade `gate_capability` | zero downstream |
+| `NH6-08` | `✅ done` | `63c4398` | `HealthAggregator.SUPPLY_REQUIRED`; `_probe` | FG-NH-11 |
+| `NH6-09` | `✅ done` | `63c4398` | `docs/evidence/new-harvest/AP-NH6/security/sbom-inventory.json` | no waiver |
+| `NH6-10` | `✅ done` | `63c4398` | `create_container` inject parser/browser/ocr/clean_llm | no success monkeypatch |
+
+### 11.2 关键指标演进
+
+| 指标 | NH5 baseline | NH6 | Δ |
+|------|--------------|-----|---|
+| default-root parser/browser ports | smoke only | production inject | `wired` |
+| S11 request | `input_text` only | multimodal sibling | `closed` |
+| `/ready` supply components | 0 | 5 named | `+5` |
+| NH6 hard gates | `0` | `45 passed` | `+45` |
+| repository collected | 753 | 799 | `+46` |
+| successor-owned failures | 5 | 5 | `unchanged` |
+
+### 11.3 红灯 / successor-owned failures
+
+| 项 | 证据 | 判断 |
+|----|------|------|
+| index namespace ×3 | same 422 `RETRIEVE_SCHEMA_NAMESPACE_REQUIRED` | `C handoff → NH8` |
+| reactivate namespace ×1 | same 422 | `C handoff → NH8` |
+| rebuild STRUCTURE_PROFILE_INVALID ×1 | metadata/rebuild still reclean | `C handoff → NH8` |
+
+### 11.4 文档状态
+
+`draft → executing → executed（2026-08-30）`。
+residual / follow-up → `AP-NH7` live-to-query；`AP-NH8` namespace/rebuild；`AP-NH9` security mega。
 
 ---
 
@@ -731,3 +783,4 @@ docs/evidence/new-harvest/AP-NH6/
 | `v0.1` | `2026-08-29` | Grok workflow new-harvest-nh6-nh9-action-plans | 由 final §7.6 派生；状态 `draft` |
 | `v0.2` | `2026-08-29` | Grok fix-fleet | 吸收已核实 review：`--no-sandbox` 重评=reopen Q19 不得经 SBOM waiver；T01 强制 `create_app` L3 node 且缺 binary FAIL；T07 加 L2 port/UoW，L1 不得单独 PASS；T06 fake transport 锁 L2；`security.py` 政策锚 `368-414`+`433-439`；⛔5 OCR 盗码 `155-159` |
 | `v0.3` | `2026-08-29` | Grok recon-fix | `NH6-04` §3/§4.3 补独立 `path:line`（print cap/readiness keys）；T05 跑法改为具名四 node；T08 补 security L2 `::test_backpressure_zero_downstream`，unit 不得单独 PASS |
+| `v1.0` | `2026-08-30` | Grok | 执行回填 §11；状态 `executed` |

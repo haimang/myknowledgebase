@@ -1,0 +1,22 @@
+AP-NH6 test evidence
+Observed at: 2026-08-30T00:01:17Z
+Implementation commit: 63c4398aa6e97a2d272bde9efd1fcbd30f426906
+Environment: Python 3.12.3; pytest 8.3.5; isolated pdftotext/unshare; Firefox 154.0.1 + geckodriver 0.37.1; no monkeypatch success path
+
+NH6-T01..T10 hard-gate suite
+Command: uv run pytest tests/e2e/test_nh6_pdf_parser.py tests/e2e/test_nh6_parser_isolation.py tests/e2e/test_nh6_browser_render.py tests/e2e/test_nh6_browser_print.py tests/e2e/test_nh6_multimodal_adapter.py tests/e2e/test_nh6_readiness.py tests/e2e/test_new_harvest_runtime_security.py::test_browser_runs_non_root tests/e2e/test_new_harvest_runtime_security.py::test_production_forbids_no_sandbox tests/e2e/test_new_harvest_runtime_security.py::test_browser_egress_rechecks_each_redirect tests/e2e/test_new_harvest_runtime_security.py::test_parser_process_network_denied tests/e2e/test_new_harvest_runtime_security.py::test_backpressure_zero_downstream tests/integration/test_nh6_multimodal_request.py tests/integration/test_nh6_ocr_vision_port.py tests/unit/test_nh6_ocr_vision_errors.py tests/unit/test_nh6_backpressure_zero_calls.py tests/unit/test_nh6_supply_identities.py tests/unit/test_dispatch_embed_and_gates.py tests/domain/test_nh6_sbom_inventory.py -q
+Result: PASS, 45 passed
+Levels: L1/L2/L3. No L4 query. T03/T04/T06/T09 used create_app() default-root without fetcher monkeypatch.
+
+Static review
+Command: uv run ruff check src intake tests api
+Result: PASS
+Command: git diff --check
+Result: PASS
+
+Default-root repository diagnostic after implementation commit
+Command: uv run pytest -q --tb=line
+Collected: 799
+Result: 794 passed, 5 failed.
+Successor-owned failures unchanged from AP-NH5: index/retrieval namespace x3; reactivate/retrieval namespace x1; rebuild exact-clean STRUCTURE_PROFILE_INVALID x1.
+NH1 evidence digest and NH1-T06 print-text extraction were repaired in this land (OCR cells dropped PromptRef; Firefox print forced Latin ToUnicode).

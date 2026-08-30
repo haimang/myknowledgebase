@@ -1,0 +1,31 @@
+{
+  "schema_version": "mkb.nh6-gate-metrics-evidence.v1",
+  "commit": "63c4398aa6e97a2d272bde9efd1fcbd30f426906",
+  "observed_at_utc": "2026-08-30T00:01:17Z",
+  "named_caps": [
+    "pdf.parse",
+    "browser.render",
+    "browser.print_pdf",
+    "ocr.deterministic",
+    "s11.multimodal",
+    "embed",
+    "structured_generate",
+    "text_generate",
+    "cli"
+  ],
+  "dispatch_pools_remain": ["local-inference", "non-interactive", "embed"],
+  "full_gate": {
+    "second_call_code": "INFERENCE_BACKPRESSURE",
+    "http_status": 503,
+    "downstream_parser_calls_unchanged": true,
+    "downstream_browser_calls_unchanged": true,
+    "downstream_multimodal_payloads": 0
+  },
+  "source_tests": [
+    "tests/unit/test_nh6_backpressure_zero_calls.py::test_full_gate_zero_parser_calls",
+    "tests/unit/test_nh6_backpressure_zero_calls.py::test_full_gate_zero_browser_render_and_print_calls",
+    "tests/unit/test_nh6_backpressure_zero_calls.py::test_full_gate_zero_multimodal_adapter_calls",
+    "tests/e2e/test_new_harvest_runtime_security.py::test_backpressure_zero_downstream",
+    "tests/unit/test_dispatch_embed_and_gates.py"
+  ]
+}

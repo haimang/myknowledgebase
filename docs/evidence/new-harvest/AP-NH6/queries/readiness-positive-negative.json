@@ -1,0 +1,37 @@
+{
+  "schema_version": "mkb.nh6-readiness-evidence.v1",
+  "commit": "63c4398aa6e97a2d272bde9efd1fcbd30f426906",
+  "observed_at_utc": "2026-08-30T00:01:17Z",
+  "source_tests": [
+    "tests/e2e/test_nh6_readiness.py::test_positive_probe_matches_presence",
+    "tests/e2e/test_nh6_readiness.py::test_missing_binary_component_not_overall_green",
+    "tests/e2e/test_nh6_readiness.py::test_models_list_insufficient_for_ready",
+    "tests/e2e/test_nh6_readiness.py::test_create_app_readiness_without_patch"
+  ],
+  "positive": {
+    "http_status": 200,
+    "status": "ready",
+    "runtime_supply_readiness_required": true,
+    "supply_ok": {
+      "supply_pdf_parse": true,
+      "supply_browser_render": true,
+      "supply_browser_print_pdf": true,
+      "supply_ocr_deterministic": true,
+      "supply_s11_multimodal": true
+    },
+    "multimodal_probe_is_media_request": true
+  },
+  "missing_binaries": {
+    "http_status": 503,
+    "status": "not_ready",
+    "supply_pdf_parse": {"name": "supply_pdf_parse", "ok": false, "code": "not_ready"},
+    "supply_browser_render_ok": false,
+    "supply_browser_print_ok": false
+  },
+  "models_list_insufficient": {
+    "http_status": 503,
+    "status": "not_ready",
+    "inference_binding": true,
+    "supply_s11_multimodal": false
+  }
+}
