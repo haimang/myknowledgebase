@@ -108,6 +108,54 @@ def test_parser_process_network_denied() -> None:
     assert "--net" in parser.command()
 
 
+def test_campaign_security_signoff_aggregates_nh6_gates() -> None:
+    """NH9-T10 optional campaign index: NH6 nodes already listed, no new product asserts."""
+
+    tests_txt = Path("docs/evidence/new-harvest/AP-NH6/tests.txt").read_text(encoding="utf-8")
+    for listed in (
+        "tests/e2e/test_nh6_parser_isolation.py",
+        "tests/e2e/test_nh6_readiness.py",
+        "test_browser_runs_non_root",
+        "test_production_forbids_no_sandbox",
+        "test_browser_egress_rechecks_each_redirect",
+        "test_parser_process_network_denied",
+        "test_backpressure_zero_downstream",
+    ):
+        assert listed in tests_txt, listed
+    nodes = {
+        "tests/e2e/test_nh6_parser_isolation.py": (
+            "test_parser_subprocess_has_no_network",
+            "test_resource_kill_on_timeout",
+            "test_malicious_pdf_does_not_kill_api",
+        ),
+        "tests/e2e/test_nh6_readiness.py": (
+            "test_positive_probe_matches_presence",
+            "test_missing_binary_component_not_overall_green",
+            "test_models_list_insufficient_for_ready",
+            "test_create_app_readiness_without_patch",
+        ),
+        "tests/e2e/test_new_harvest_runtime_security.py": (
+            "test_browser_runs_non_root",
+            "test_production_forbids_no_sandbox",
+            "test_browser_egress_rechecks_each_redirect",
+            "test_parser_process_network_denied",
+            "test_backpressure_zero_downstream",
+        ),
+    }
+    for path, names in nodes.items():
+        source = Path(path).read_text(encoding="utf-8")
+        for name in names:
+            assert f"def {name}" in source, name
+    forbidden = ("which " + "chromium", "import " + "pypdf")
+    for path in (
+        Path("tests/e2e/test_new_harvest_closed_set.py"),
+        Path("tests/e2e/test_new_harvest_crash_windows.py"),
+        Path("tests/domain/test_nh9_evidence_pack_checker.py"),
+    ):
+        text = path.read_text(encoding="utf-8")
+        assert all(token not in text for token in forbidden)
+
+
 def test_backpressure_zero_downstream(tmp_path: Path) -> None:
     with (
         local_multimodal_server() as (base_url, model_key, payloads),

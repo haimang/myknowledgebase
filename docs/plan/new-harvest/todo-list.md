@@ -94,8 +94,8 @@
 - [x] `NH9-CODE-P3` [代码制作] Phase 3 crash windows（`NH9-04`；`NH9-T04/T05`）。`blocked-by: NH9-CODE-P2`
 - [x] `NH9-CODE-P4` [代码制作] Phase 4 object race + scatter（`NH9-05/06`；`NH9-T05/T06/T07`）。`blocked-by: NH9-CODE-P3`
 - [x] `NH9-CODE-P5` [代码制作] Phase 5 compat + retrieval-facet mega（`NH9-07/08`；`NH9-T03/T08/T09`）。`blocked-by: NH9-CODE-P4`
-- [-] `NH9-CODE-P6` [代码制作] Phase 6 security/evidence/experiment isolation（`NH9-09/10/11`；`NH9-T10/T11`；experiment 不入 DoD）。`blocked-by: NH9-CODE-P5`
-- [ ] `NH9-CLOSE` [代码审查，测试与文档回填] `NH9-T01..T11`、`FG-NH-01..17`、capstone A–J、日志、evidence、closure、commit。`blocked-by: NH9-CODE-P6`
+- [x] `NH9-CODE-P6` [代码制作] Phase 6 security/evidence/experiment isolation（`NH9-09/10/11`；`NH9-T10/T11`；experiment 不入 DoD）。`blocked-by: NH9-CODE-P5`
+- [-] `NH9-CLOSE` [代码审查，测试与文档回填] `NH9-T01..T11`、`FG-NH-01..17`、capstone A–J、日志、evidence、closure、commit。`blocked-by: NH9-CODE-P6`
 
 ## Cross-NH campaign closure
 
