@@ -22,12 +22,15 @@ _CLOSED_422 = {
     "INTAKE_SEMANTIC_KEY_UNREGISTERED",
     "METADATA_SEMANTICS_EMPTY",
     "SCATTER_EXHAUSTION_PROOF_REQUIRED",
+    "CLEAN_STRATEGY_KIND_INCOMPATIBLE",
+    "METADATA_SEMANTIC_SYSTEM_OWNED",
 }
 _CLOSED_409 = {
     "intake-item-deleted",
     "index-rebuild-item-not-active",
     "intake-revision-unavailable",
     "intake-revision-mismatch",
+    "METADATA_TARGET_STALE",
 }
 
 

@@ -175,12 +175,37 @@ CLEAN_STEP_STRATEGIES: dict[str, str] = {
     "clean_web_llm_reacquire": CleanStrategyKey.WEB_LLM_REWRITE.value,
 }
 
+SOURCE_KIND_ACQUIRE_CAPABILITIES: dict[str, frozenset[str]] = {
+    "inline_payload": frozenset({"intake.acquire.inline"}),
+    "local_object": frozenset({"intake.acquire.local_object"}),
+    "http_resource": frozenset({"intake.acquire.http_static", "intake.acquire.http_browser"}),
+    "registered_api": frozenset({"intake.acquire.registered_api"}),
+}
+
 
 def resolve_clean_strategy(strategy_key: str) -> CleanStrategyDefinition:
     definition = _BY_KEY.get(strategy_key)
     if definition is None:
         raise MkbError("CLEAN_STRATEGY_UNSUPPORTED", "Clean strategy is not registered", 409)
     return definition
+
+
+def assert_clean_strategy_applicable(source_kind: str, strategy_key: str | None) -> None:
+    """Reject kind×strategy combinations that can never reach a declared worker."""
+
+    if strategy_key is None:
+        return
+    definition = resolve_clean_strategy(strategy_key)
+    allowed = SOURCE_KIND_ACQUIRE_CAPABILITIES.get(source_kind)
+    if allowed is None:
+        raise MkbError("SOURCE_KIND_INVALID", "Source kind is not registered", 422)
+    if allowed.isdisjoint(definition.acquire_capabilities):
+        raise MkbError(
+            "CLEAN_STRATEGY_KIND_INCOMPATIBLE",
+            "Declared clean strategy is not applicable to this source kind",
+            422,
+            {"source_kind": source_kind, "clean_strategy": strategy_key},
+        )
 
 
 def clean_strategy_manifest_digest() -> str:
@@ -233,6 +258,8 @@ __all__ = [
     "CANONICAL_CLEAN_PROMPT_VERSION",
     "CLEAN_STEP_STRATEGIES",
     "CLEAN_STRATEGY_DEFINITIONS",
+    "SOURCE_KIND_ACQUIRE_CAPABILITIES",
+    "assert_clean_strategy_applicable",
     "CleanStrategyDefinition",
     "CleanStrategyKey",
     "HISTORICAL_CLEAN_PROMPT_KEYS",

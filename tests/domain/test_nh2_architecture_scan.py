@@ -51,6 +51,7 @@ def test_three_kind_graphs_share_one_tail_source() -> None:
     digests = {shared_tail_digest(graph) for graph in BUILTIN_KIND_WORKFLOWS}
     assert len(BUILTIN_KIND_WORKFLOWS) == 3
     assert len(digests) == 1
+    assert next(iter(digests)) == "48c390595f603617cc0923f649e67d9dd0a1cf61a7636f8029dc16fd551fe1b2"
     assert all(step.step_kind is not WorkflowStepKind.JOIN for graph in BUILTIN_KIND_WORKFLOWS for step in graph.steps)
     source = Path("src/workflows/kind_family.py").read_text(encoding="utf-8")
     assert "shared_tail_components" in source

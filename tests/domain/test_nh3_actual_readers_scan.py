@@ -14,7 +14,11 @@ def test_architecture_scan_zero_actual_readers_of_legacy_column() -> None:
 
 def test_runtime_has_no_legacy_s05_actual_reader() -> None:
     root = Path(__file__).resolve().parents[2]
-    reader_pattern = re.compile(r"\[\s*['\"]s05_binding_digest['\"]\s*\]|\.get\(\s*['\"]s05_binding_digest")
+    reader_pattern = re.compile(
+        r"\[\s*['\"]s05_binding_digest['\"]\s*\]|"
+        r"\.get\(\s*['\"]s05_binding_digest|"
+        r"row\[['\"]s05_binding_digest['\"]\]"
+    )
     offenders: list[str] = []
     for base in (root / "src" / "contracts", root / "src" / "runtime", root / "src" / "services"):
         for path in base.rglob("*.py"):

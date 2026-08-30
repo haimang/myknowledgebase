@@ -52,11 +52,17 @@ class IntakeAcceptanceSnapshotMixin:
                 raise MkbError("PIPELINE_INPUT_INVALID", "Accepted snapshot is missing immutable intake coordinates", 422)
             next_state = dict(state)
             next_state["accepted_at"] = utc_now()
-            raw_bytes = str(state.get("raw_text") or "").encode("utf-8")
+            raw_text = str(state.get("raw_text") or "")
+            if state.get("raw_binary_transport"):
+                raw_bytes = raw_text.encode("latin-1")
+                raw_media_type = str(state.get("media_type") or "application/octet-stream")
+            else:
+                raw_bytes = raw_text.encode("utf-8")
+                raw_media_type = "text/plain"
             clean_bytes = str(state.get("clean_text") or "").encode("utf-8")
             raw_stat = await self._storage.promote(
                 raw_bytes,
-                PromoteRequest(team_uuid=command.team_uuid, purpose="process_io", media_type="text/plain"),
+                PromoteRequest(team_uuid=command.team_uuid, purpose="process_io", media_type=raw_media_type),
             )
             clean_stat = await self._storage.promote(
                 clean_bytes,
@@ -65,6 +71,7 @@ class IntakeAcceptanceSnapshotMixin:
             next_state["raw_cas_digest"] = raw_stat.sha256
             next_state["raw_cas_size"] = raw_stat.size_bytes
             next_state["raw_cas_handle"] = raw_stat.handle.value
+            next_state["raw_cas_media_type"] = raw_media_type
             next_state["clean_cas_digest"] = clean_stat.sha256
             next_state["clean_cas_size"] = clean_stat.size_bytes
             next_state["clean_cas_handle"] = clean_stat.handle.value
@@ -112,7 +119,7 @@ class IntakeAcceptanceSnapshotMixin:
                     command.team_uuid,
                     digest=str(next_state["raw_cas_digest"]),
                     size=int(next_state["raw_cas_size"]),
-                    media_type="text/plain",
+                    media_type=str(next_state.get("raw_cas_media_type") or "text/plain"),
                     now=now,
                 )
                 clean_object_uuid = await self._catalog_cas_object_tx(

@@ -50,6 +50,7 @@ def representation_path_digest(rows: list[dict[str, str]]) -> str:
                 "raw_byte_digest": row["raw_byte_digest"],
                 "representation_kind": row["representation_kind"],
                 "observer_version": row["observer_version"],
+                "main_text_presence": row.get("main_text_presence", "unknown"),
             }
             for row in rows
         ]
@@ -75,8 +76,11 @@ async def append_representation_tx(
             {"step_key": observation.step_key},
         )
     history = await tx.fetchall(
-        "SELECT step_key,capability,raw_byte_digest,representation_kind,observer_version "
-        "FROM mkb_acquire_decode_history WHERE execution_uuid=? ORDER BY ordinal",
+        "SELECT h.step_key,h.capability,h.raw_byte_digest,h.representation_kind,h.observer_version,"
+        "f.main_text_presence "
+        "FROM mkb_acquire_decode_history AS h "
+        "JOIN mkb_representation_facts AS f ON f.representation_fact_uuid=h.representation_fact_uuid "
+        "WHERE h.execution_uuid=? ORDER BY h.ordinal",
         (observation.execution_uuid,),
     )
     path = [
@@ -86,6 +90,7 @@ async def append_representation_tx(
             "raw_byte_digest": str(row["raw_byte_digest"]),
             "representation_kind": str(row["representation_kind"]),
             "observer_version": str(row["observer_version"]),
+            "main_text_presence": str(row["main_text_presence"]),
         }
         for row in history
     ]
@@ -96,6 +101,7 @@ async def append_representation_tx(
             "raw_byte_digest": observation.raw_byte_digest,
             "representation_kind": observation.representation_kind,
             "observer_version": observation.observer_version,
+            "main_text_presence": observation.main_text_presence,
         }
     )
     ordinal = len(path)

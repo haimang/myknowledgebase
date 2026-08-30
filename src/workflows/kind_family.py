@@ -250,7 +250,7 @@ def _compose(
         steps=all_steps,
         routes=[*prefix_routes, *control_routes, *tail.routes],
         bindings=[*prefix_bindings, *control_bindings, *tail.bindings],
-        guards=[*prefix_guards, *tail.guards],
+        guards=list({guard.guard_key: guard for guard in (*prefix_guards, *tail.guards)}.values()),
     )
 
 
@@ -360,6 +360,8 @@ def _inline_kind() -> WorkflowDefinition:
     ]
     guards = [
         _guard("request_intent_index_rebuild", "registered_request_intent", "index.rebuild"),
+        _guard("request_intent_rebuild", "registered_request_intent", "intake.rebuild"),
+        _guard("request_intent_metadata_refresh", "registered_request_intent", "intake.update_metadata"),
         _guard("request_intent_deactivate", "registered_request_intent", "intake.deactivate"),
         _guard("request_intent_reactivate", "registered_request_intent", "intake.reactivate"),
         _guard("request_intent_delete", "registered_request_intent", "intake.delete"),

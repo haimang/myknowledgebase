@@ -123,7 +123,11 @@ _METRIC_CATALOG = MappingProxyType(
             "mkb_task_result_disposition_total",
             "counter",
             labels=("disposition",),
-            allowed={"disposition": frozenset({"indexed_success", "exhausted_zero", "failed", "cancelled"})},
+            allowed={
+                "disposition": frozenset(
+                    {"indexed_success", "exhausted_zero", "lifecycle_success", "failed", "cancelled"}
+                )
+            },
         ),
         "mkb_index_generation_active": _metric(
             "mkb_index_generation_active",

@@ -516,25 +516,29 @@ class WorkflowOutcomeMixin:
                 process["fencing_generation"],
             ),
         )
-        if updated.rowcount == 1:
-            from src.runtime.intake.generation_evidence import write_pending_generation_evidence_tx
-
-            await write_pending_generation_evidence_tx(tx, process)
-            event_payload = {"error_code": error_code, "failure_disposition": failure_disposition}
-            if extras:
-                event_payload.update(extras)
-            await self._record_event_tx(
-                tx,
-                execution=process,
-                event_type="process.status_changed",
-                aggregate="process",
-                summary="Process reached a terminal failure",
-                process_uuid=process["process_uuid"],
-                status_before=process["status"],
-                status_after=ProcessStatus.FAILED.value,
-                severity="error",
-                payload=event_payload,
+        if updated.rowcount != 1:
+            raise ConflictError(
+                "stale-process-fence",
+                "Process failure could not be written against the claimed fencing generation",
             )
+        from src.runtime.intake.generation_evidence import write_pending_generation_evidence_tx
+
+        await write_pending_generation_evidence_tx(tx, process)
+        event_payload = {"error_code": error_code, "failure_disposition": failure_disposition}
+        if extras:
+            event_payload.update(extras)
+        await self._record_event_tx(
+            tx,
+            execution=process,
+            event_type="process.status_changed",
+            aggregate="process",
+            summary="Process reached a terminal failure",
+            process_uuid=process["process_uuid"],
+            status_before=process["status"],
+            status_after=ProcessStatus.FAILED.value,
+            severity="error",
+            payload=event_payload,
+        )
 
     async def _terminalize_execution_tx(
         self,
@@ -696,8 +700,20 @@ class WorkflowOutcomeMixin:
         )
         metrics = getattr(self, "metrics", None)
         if projected and metrics is not None:
+            task_row = await tx.fetchone(
+                "SELECT request_intent FROM mkb_tasks WHERE team_uuid=? AND task_uuid=?",
+                (execution["team_uuid"], execution["task_uuid"]),
+            )
+            intent = str((task_row or {}).get("request_intent") or "")
             if exhausted_zero:
                 disposition = "exhausted_zero"
+            elif task_status == TaskStatus.SUCCEEDED and intent in {
+                "intake.deactivate",
+                "intake.reactivate",
+                "intake.delete",
+                "index.rebuild",
+            }:
+                disposition = "lifecycle_success"
             elif task_status == TaskStatus.SUCCEEDED:
                 disposition = "indexed_success"
             elif task_status == TaskStatus.FAILED:

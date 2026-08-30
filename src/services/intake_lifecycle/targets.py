@@ -55,6 +55,7 @@ class IntakeTargetResolver:
                 intake_item_uuid=payload.intake_item_uuid,
                 expected_revision_uuid=payload.expected_intake_revision_uuid,
                 require_clean_artifact=False,
+                require_active=True,
             )
             base_semantics = await self._revision_metadata_values_tx(
                 tx,
@@ -152,6 +153,7 @@ class IntakeTargetResolver:
         intake_item_uuid: str,
         expected_revision_uuid: str | None,
         require_clean_artifact: bool,
+        require_active: bool = False,
     ) -> FrozenIntakeTarget:
         item = await tx.fetchone(
             "SELECT * FROM mkb_intake_items WHERE team_uuid=? AND intake_item_uuid=?",
@@ -164,6 +166,8 @@ class IntakeTargetResolver:
             raise NotFoundError("intake-item-not-found", "Intake item was not found")
         if item["lifecycle_state"] == "deleted":
             raise ConflictError("intake-item-deleted", "Deleted Intake items cannot be rebuilt or updated")
+        if require_active and item["lifecycle_state"] != "active":
+            raise ConflictError("METADATA_TARGET_STALE", "Metadata update requires an active Intake item")
         revision_uuid = expected_revision_uuid or item["latest_revision_uuid"]
         if revision_uuid is None:
             raise ConflictError("intake-revision-unavailable", "Intake item has no accepted revision")
@@ -221,10 +225,16 @@ class IntakeTargetResolver:
         for semantic_key in sorted(semantics):
             if not isinstance(semantic_key, str) or not semantic_key or len(semantic_key) > 128:
                 raise MkbError("METADATA_SEMANTIC_KEY_INVALID", "Metadata semantic key is invalid", 422)
-            if semantic_key in {"filter_metadata", "context_metadata"}:
+            if semantic_key in {
+                "filter_metadata",
+                "context_metadata",
+                "source_representation",
+                "canonical_content",
+                "is_active",
+            }:
                 raise MkbError(
                     "METADATA_SEMANTIC_SYSTEM_OWNED",
-                    "Metadata blobs are derived from the typed semantic dimensions",
+                    "System-owned semantic keys are derived and cannot be replaced by public metadata",
                     422,
                 )
             definitions = await tx.fetchall(

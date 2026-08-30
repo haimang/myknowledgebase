@@ -177,6 +177,23 @@ class ScatterAcceptanceWriter:
                 "change_set_digest": change_set_digest,
             }
         )
+        existing_snapshot = await tx.fetchone(
+            "SELECT intake_snapshot_uuid,observation_fingerprint FROM mkb_intake_snapshots "
+            "WHERE team_uuid=? AND intake_source_uuid=? AND observation_key=?",
+            (command.team_uuid, acceptance.intake_source_uuid, acceptance.observation_key),
+        )
+        if existing_snapshot is not None:
+            if existing_snapshot["observation_fingerprint"] != acceptance.observation_fingerprint:
+                raise MkbError(
+                    "INTAKE_OBSERVATION_CONFLICT",
+                    "Registered API observation already exists with a different digest",
+                    409,
+                )
+            raise MkbError(
+                "INTAKE_OBSERVATION_REPLAY",
+                "Registered API observation already exists; reuse the original coordinates",
+                409,
+            )
         await tx.execute(
             "INSERT INTO mkb_intake_snapshots "
             "(team_uuid,intake_snapshot_uuid,intake_source_uuid,observation_key,observation_fingerprint,candidate_root_digest,"

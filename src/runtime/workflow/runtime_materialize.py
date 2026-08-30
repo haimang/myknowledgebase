@@ -69,14 +69,25 @@ class WorkflowMaterializeMixin:
             and route_context.get("main_text_presence") == "absent"
         ):
             guards = {guard.guard_key: guard for guard in plan.guards}
-            has_declared_reacquire = any(
-                route.guard_key is not None
-                and (guard := guards.get(route.guard_key)) is not None
-                and guard.predicate_type == "representation_main_text_presence"
+
+            def _is_reacquire(route: WorkflowRouteDefinition) -> bool:
+                if route.guard_key is None:
+                    return False
+                guard = guards.get(route.guard_key)
+                return (
+                    guard is not None
+                    and guard.predicate_type == "representation_main_text_presence"
+                    and guard.expected_value == "absent"
+                )
+
+            # T-O-402 is http-only. Presence of the typed guard on the plan,
+            # not a leftover route at this step, is the kind-graph capability.
+            plan_declares_reacquire = any(
+                guard.predicate_type == "representation_main_text_presence"
                 and guard.expected_value == "absent"
-                for route in candidates
+                for guard in plan.guards
             )
-            if not has_declared_reacquire:
+            if plan_declares_reacquire and not any(_is_reacquire(route) for route in candidates):
                 raise ConflictError(
                     "workflow-reacquire-edge-undeclared",
                     "An absent text representation has no declared forward reacquisition edge",
@@ -91,6 +102,16 @@ class WorkflowMaterializeMixin:
             # A normal/branch/terminal route has a single deterministic winner.
             if route.route_kind.value != "fan_out":
                 break
+        declared = route_context.get("selected_clean_strategy")
+        if isinstance(declared, str) and declared and selected:
+            from src.contracts.intake.strategies import CLEAN_STEP_STRATEGIES
+
+            bound = CLEAN_STEP_STRATEGIES.get(selected[0].to_step_key)
+            if bound is not None and bound != declared:
+                raise ConflictError(
+                    "workflow-claimed-strategy-unreachable",
+                    "Declared clean strategy is not reachable from the observed representation",
+                )
         payload = {
             "workflow_key": plan.workflow_key,
             "workflow_revision_uuid": execution["workflow_revision_uuid"],
@@ -860,6 +881,7 @@ class WorkflowMaterializeMixin:
             "accepted_outcome_digest": None if source_process is None else source_process["accepted_outcome_digest"],
             "output_manifest_ref": selected["output_manifest_ref"],
             "output_manifest_digest": selected["output_manifest_digest"],
+            "representation_fact_digest": selected["output_manifest_digest"],
             "route_decision_digest": route_digest,
             "fallback_used": selected["fallback_used"],
         }

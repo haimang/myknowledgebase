@@ -223,7 +223,7 @@ DEFAULT_ACTIONS = (
     # A metadata change is an explicit canonical Revision append.  Keeping it
     # separate from acceptance makes its ledger intent queryable without
     # inventing a mutable semantic side channel.
-    ("update_metadata", "active|deactivated", "create_revision"),
+    ("update_metadata", "active", "create_revision"),
 )
 
 DEFAULT_SEMANTICS = (

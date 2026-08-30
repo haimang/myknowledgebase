@@ -334,19 +334,15 @@ class IntakeAcquisitionIngestMixin:
             )
         now = utc_now()
         root_external_key = external_key.strip()
-        raw_digest = stable_digest(
+        collection_bytes = canonical_json(records)
+        raw_digest = _digest_bytes(collection_bytes)
+        collection_byte_count = len(collection_bytes)
+        observation_digest = stable_digest(
             {
                 "source_external_key": root_external_key.casefold(),
-                "records": [
-                    {
-                        "member_ordinal": member["member_ordinal"],
-                        "raw_digest": member["raw_digest"],
-                    }
-                    for member in members
-                ],
+                "records_digest": raw_digest,
             }
         )
-        collection_byte_count = sum(len(canonical_json(member["raw_record"])) for member in members)
         exhaustion_proof = descriptor.get("exhaustion_proof")
         acquisition_evidence = {
             "schema_version": "mkb.acquisition-evidence.v1",
@@ -383,6 +379,7 @@ class IntakeAcquisitionIngestMixin:
             "api_definition_version": definition_version,
             "collection_exhaustion_proof": exhaustion_proof,
             "raw_digest": raw_digest,
+            "observation_digest": observation_digest,
             "raw_byte_digest": raw_digest,
             "raw_byte_size": collection_byte_count,
             "declared_media_type": "application/json",

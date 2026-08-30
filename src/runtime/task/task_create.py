@@ -2,13 +2,14 @@
 
 from __future__ import annotations
 
+import hashlib
 from typing import Any
 
 from src.contracts.api.models import (
     TaskCreateRequest,
 )
 from src.contracts.common.errors import ConflictError, MkbError, NotFoundError
-from src.contracts.common.ids import stable_digest, uuid7
+from src.contracts.common.ids import canonical_json, stable_digest, uuid7
 from src.contracts.common.time import utc_now
 from src.persistence.ports import PersistencePort, UnitOfWork
 from src.runtime.task.helpers import _json
@@ -86,6 +87,15 @@ class TaskCreateMixin:
         now = utc_now()
         self._assert_future_deadline(request.deadline_at, received_at=now)
         source = getattr(request.payload, "source", None)
+        if request.request_intent == "intake.ingest" and source is not None:
+            from src.contracts.intake.strategies import assert_clean_strategy_applicable
+
+            assert_clean_strategy_applicable(
+                str(getattr(source, "source_kind", "")),
+                getattr(source, "clean_strategy", None),
+            )
+        if source is not None and getattr(source, "source_kind", None) == "registered_api":
+            await self._assert_registered_api_observation_free(request)
         if (
             source is not None
             and getattr(source, "source_kind", None) == "registered_api"
@@ -439,6 +449,35 @@ class TaskCreateMixin:
             ),
         )
 
+    async def _assert_registered_api_observation_free(self, request: TaskCreateRequest) -> None:
+        source = getattr(request.payload, "source", None)
+        if source is None:
+            return
+        key = str(getattr(source, "external_key", "") or "").strip().casefold()
+        records = list(getattr(source, "records", []) or [])
+        records_digest = hashlib.sha256(canonical_json(records)).hexdigest()
+        observation_digest = stable_digest(
+            {"source_external_key": key, "records_digest": records_digest}
+        )
+        async with self.persistence.transaction() as tx:
+            row = await tx.fetchone(
+                "SELECT snap.observation_fingerprint FROM mkb_intake_sources AS s "
+                "LEFT JOIN mkb_intake_snapshots AS snap ON snap.team_uuid=s.team_uuid "
+                "AND snap.intake_source_uuid=s.intake_source_uuid AND snap.observation_key=? "
+                "WHERE s.team_uuid=? AND s.source_kind='registered_api' AND s.normalized_external_key=?",
+                (key, request.team_uuid, key),
+            )
+        if row is None or row["observation_fingerprint"] is None:
+            return
+        if row["observation_fingerprint"] == observation_digest:
+            raise ConflictError(
+                "INTAKE_OBSERVATION_REPLAY",
+                "Registered API observation already exists",
+            )
+        raise ConflictError(
+            "INTAKE_OBSERVATION_CONFLICT",
+            "Registered API observation already exists with a different digest",
+        )
 
     async def _link_execution_object_refs(
         self,

@@ -215,7 +215,7 @@ class RetrievalRequestMixin:
                     {"keys": sorted(unknown)},
                 )
             schema_version = self._request_value(request, "schema_version")
-            if schema_version is not None and schema_version != "mkb.retrieval.v1":
+            if schema_version is not None and schema_version not in {"mkb.retrieval.v1", "mkb.retrieval.v2"}:
                 raise MkbError("RETRIEVE_SCHEMA_INVALID", "unsupported retrieval schema version", 422)
         team_uuid = self._request_value(request, "team_uuid")
         raw_query = self._request_value(request, "query")
