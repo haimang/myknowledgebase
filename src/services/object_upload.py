@@ -102,6 +102,7 @@ class ObjectUploadService:
             else:
                 replay = True
             await self._run_fault_hook("after_catalog_before_pending")
+            hold_owner = uuid7()
             await tx.execute(
                 "INSERT OR IGNORE INTO mkb_object_references "
                 "(reference_uuid,team_uuid,stored_object_uuid,purpose,owner_kind,owner_uuid,expected_digest,"
@@ -111,7 +112,7 @@ class ObjectUploadService:
                     uuid7(),
                     team_uuid,
                     stored_object_uuid,
-                    stored_object_uuid,
+                    hold_owner,
                     stat.sha256,
                     stat.size_bytes,
                     utc_now(),
@@ -121,7 +122,7 @@ class ObjectUploadService:
                 "SELECT reference_uuid FROM mkb_object_references WHERE team_uuid=? AND stored_object_uuid=? "
                 "AND purpose='upload_pending' AND owner_kind='public_upload' AND owner_uuid=? "
                 "AND released_at IS NULL",
-                (team_uuid, stored_object_uuid, stored_object_uuid),
+                (team_uuid, stored_object_uuid, hold_owner),
             )
             if pending is None:
                 raise MkbError("OBJECT_PENDING_COMMIT_FAILED", "Object pending hold did not commit", 503)

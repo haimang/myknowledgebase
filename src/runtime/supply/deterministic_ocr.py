@@ -84,17 +84,25 @@ class IsolatedDeterministicOcr:
         )
 
     def command(self, media_type: str) -> tuple[str, ...]:
-        command: list[str] = [
-            str(self.unshare_binary),
-            "--net",
-            "--",
-            str(self.prlimit_binary),
-            "--as=536870912",
-            "--cpu=8",
-            "--nofile=64",
-            f"--fsize={self.max_output_bytes}",
-            "--",
-        ]
+        command: list[str] = [str(self.unshare_binary)]
+        if os.geteuid() != 0:
+            command.extend(("-U", "--map-root-user"))
+        command.extend(
+            (
+                "--net",
+                "--",
+                str(self.prlimit_binary),
+            )
+        )
+        command.extend(
+            (
+                "--as=536870912",
+                "--cpu=8",
+                "--nofile=64",
+                f"--fsize={self.max_output_bytes}",
+                "--",
+            )
+        )
         if os.geteuid() == 0:
             account = pwd.getpwnam("nobody")
             command.extend(

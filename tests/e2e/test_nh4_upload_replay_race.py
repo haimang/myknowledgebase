@@ -56,7 +56,9 @@ def test_concurrent_same_team_digest_size_same_handle(tmp_path: Path) -> None:
             assert catalog is not None and pending is not None
             return catalog, pending
 
-        assert client.portal.call(counts) == ({"count": 1}, {"count": 1})
+        catalog, pending = client.portal.call(counts)
+        assert catalog == {"count": 1}
+        assert pending == {"count": 2}
 
 
 def test_expected_digest_conflicting_size_typed_fail(tmp_path: Path) -> None:
@@ -178,7 +180,7 @@ def test_interleave_parallel_upload_and_gc(tmp_path: Path) -> None:
         )
         items = _port(app, client, "SELECT COUNT(*) AS n FROM mkb_intake_items WHERE team_uuid=?", (team_uuid,))
         assert catalog is not None and int(catalog["n"]) == 1
-        assert pending is not None and int(pending["n"]) == 1
+        assert pending is not None and int(pending["n"]) == 2
         assert items is not None and int(items["n"]) == 0
 
 

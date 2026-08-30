@@ -3,10 +3,13 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from dataclasses import dataclass
 from datetime import timedelta
 
 from src.services.object_upload_ttl import ObjectUploadLifecycleResult, ObjectUploadLifecycleService
+
+_LOG = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True, slots=True)
@@ -40,7 +43,7 @@ class ObjectUploadLifecycleScanner:
             except asyncio.CancelledError:
                 raise
             except Exception:
-                pass
+                _LOG.exception("object upload lifecycle scan failed")
             try:
                 await asyncio.wait_for(stop_event.wait(), timeout=self._schedule.interval.total_seconds())
             except TimeoutError:

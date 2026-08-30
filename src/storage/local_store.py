@@ -219,6 +219,21 @@ class LocalObjectStore:
         os.replace(quarantined, live)
         return True
 
+    async def list_quarantined(self) -> tuple[tuple[str, str], ...]:
+        """Return (team_uuid, digest) pairs currently sitting in quarantine."""
+
+        root = self.root / "quarantine"
+        if not root.exists():
+            return ()
+        found: list[tuple[str, str]] = []
+        for team_dir in root.iterdir():
+            if not team_dir.is_dir():
+                continue
+            for path in team_dir.iterdir():
+                if path.is_file() and len(path.name) == 64:
+                    found.append((team_dir.name, path.name))
+        return tuple(found)
+
     async def destroy_quarantined(self, team_uuid: str, handle: ObjectHandle) -> None:
         digest = digest_from_handle(team_uuid, handle)
         quarantined = self._quarantine_path(team_uuid, digest)

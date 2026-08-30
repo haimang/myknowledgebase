@@ -9,10 +9,13 @@ HTTP surface or giving business services filesystem access.
 from __future__ import annotations
 
 import asyncio
+import logging
 from dataclasses import dataclass
 from datetime import timedelta
 
 from src.services.object_gc import ObjectGcScanResult, ObjectGcService
+
+_LOG = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True, slots=True)
@@ -48,6 +51,7 @@ class ObjectGcScanner:
             except asyncio.CancelledError:
                 raise
             except Exception:
+                _LOG.exception("object GC scan failed")
                 # One BUSY / adapter failure must not stop the only scanner.
                 timeout = max(self._schedule.interval.total_seconds(), 1.0)
                 try:

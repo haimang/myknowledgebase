@@ -262,6 +262,15 @@ async def _probe(container: Container) -> dict[str, bool]:
     }
 
 
+def _health_required(settings: Settings) -> tuple[str, ...]:
+    if not settings.runtime_supply_readiness_required:
+        return HealthAggregator.BASE_REQUIRED
+    supply = list(HealthAggregator.SUPPLY_REQUIRED)
+    if not settings.multimodal_enabled:
+        supply = [name for name in supply if name != "supply_s11_multimodal"]
+    return (*HealthAggregator.BASE_REQUIRED, *supply)
+
+
 def create_container(settings: Settings | None = None) -> Container:
     settings = settings or Settings()
     persistence = build_persistence(
@@ -569,9 +578,7 @@ def create_container(settings: Settings | None = None) -> Container:
         metrics,
         ttl_seconds=30 if settings.runtime_supply_readiness_required else 0.5,
         cache_fingerprint=lambda: container.tokens.active_fingerprints,
-        required=(
-            HealthAggregator.REQUIRED if settings.runtime_supply_readiness_required else HealthAggregator.BASE_REQUIRED
-        ),
+        required=_health_required(settings),
     )
     return container
 

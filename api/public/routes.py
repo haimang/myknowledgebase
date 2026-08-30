@@ -100,6 +100,8 @@ def _expected_upload_digest(request: Request) -> str | None:
 def _reject_filename_identity(request: Request) -> None:
     disposition = request.headers.get("content-disposition")
     decoded = unquote(disposition) if disposition else None
+    if decoded and ("\x00" in decoded or "%00" in decoded.casefold()):
+        raise MkbError("SEC_PATH_REJECTED", "Upload filenames cannot contain NUL", 422)
     if decoded and any(marker in decoded for marker in ("..", "/", "\\")):
         raise MkbError("SEC_PATH_REJECTED", "Upload filenames cannot contain path syntax", 422)
 

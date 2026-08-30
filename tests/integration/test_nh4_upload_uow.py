@@ -76,12 +76,11 @@ async def test_catalog_and_upload_pending_commit_before_record_is_returned(tmp_p
             "size_bytes": len(body),
             "tombstoned_at": None,
         }
-        assert pending == {
-            "purpose": "upload_pending",
-            "owner_kind": "public_upload",
-            "owner_uuid": record.stored_object_uuid,
-            "released_at": None,
-        }
+        assert pending["purpose"] == "upload_pending"
+        assert pending["owner_kind"] == "public_upload"
+        assert pending["released_at"] is None
+        assert pending["owner_uuid"] != record.stored_object_uuid
+        assert len(str(pending["owner_uuid"])) == 36
         assert all(value == {"count": 0} for value in counts.values())
     finally:
         await persistence.close()
@@ -117,7 +116,8 @@ async def test_same_bytes_replay_one_live_catalog_and_pending(tmp_path: Path) ->
                 "AND purpose='upload_pending' AND released_at IS NULL",
                 (team_uuid,),
             )
-        assert catalogs == pending == {"count": 1}
+        assert catalogs == {"count": 1}
+        assert pending == {"count": 2}
     finally:
         await persistence.close()
 

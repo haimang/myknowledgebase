@@ -166,9 +166,32 @@ class ObjectGcService:
             )
         return tuple(self._candidate_from_row(row) for row in rows)
 
+    async def reconcile_quarantine(self) -> int:
+        """Restore quarantined bytes whose catalogue row is still live."""
+
+        lister = getattr(self._storage, "list_quarantined", None)
+        if not callable(lister):
+            return 0
+        restored = 0
+        for team_uuid, digest in await lister():
+            async with self._persistence.transaction() as tx:
+                live = await tx.fetchone(
+                    "SELECT stored_object_uuid FROM mkb_stored_objects "
+                    "WHERE team_uuid=? AND content_digest=? AND tombstoned_at IS NULL",
+                    (team_uuid, digest),
+                )
+            if live is None:
+                continue
+            handle = ObjectHandle(value=f"mkbobj:v1:{team_uuid}:{digest}")
+            restore = getattr(self._storage, "restore_quarantined", None)
+            if callable(restore) and await restore(team_uuid, handle):
+                restored += 1
+        return restored
+
     async def scan_once(self, *, limit: int = 100) -> ObjectGcScanResult:
         """Run one bounded scan, leaving every uncertainty catalogued/live."""
 
+        await self.reconcile_quarantine()
         candidates = await self.collect_candidates(limit=limit)
         results: list[ObjectGcCandidateResult] = []
         for candidate in candidates:

@@ -246,6 +246,9 @@ class HardenedBrowserRuntime:
             deadline = time.monotonic() + timeout_seconds
             with httpx.Client(base_url=endpoint, timeout=timeout_seconds, trust_env=False) as client:
                 _wait_for_webdriver(client, process, deadline)
+                firefox_args = ["-headless"]
+                if any("no-sandbox" in argument.casefold() for argument in firefox_args):
+                    raise MkbError("BROWSER_SANDBOX_DISABLED", "Production browser sandbox cannot be disabled", 503)
                 created = client.post(
                     "/session",
                     json={
@@ -253,7 +256,7 @@ class HardenedBrowserRuntime:
                             "alwaysMatch": {
                                 "browserName": "firefox",
                                 "moz:firefoxOptions": {
-                                    "args": ["-headless"],
+                                    "args": firefox_args,
                                     "prefs": {
                                         "network.proxy.type": 1,
                                         "network.proxy.http": "127.0.0.1",

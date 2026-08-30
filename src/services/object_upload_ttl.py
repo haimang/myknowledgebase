@@ -71,8 +71,12 @@ class ObjectUploadLifecycleService:
             if stored is None:
                 raise MkbError("OBJECT_NOT_FOUND", "Object was not found", 404)
             result = await tx.execute(
-                "UPDATE mkb_object_references SET released_at=? WHERE team_uuid=? AND stored_object_uuid=? "
-                "AND purpose='upload_pending' AND owner_kind='public_upload' AND released_at IS NULL",
+                "UPDATE mkb_object_references SET released_at=? WHERE reference_uuid=("
+                "SELECT reference_uuid FROM mkb_object_references "
+                "WHERE team_uuid=? AND stored_object_uuid=? AND purpose='upload_pending' "
+                "AND owner_kind='public_upload' AND released_at IS NULL "
+                "ORDER BY created_at DESC, reference_uuid DESC LIMIT 1"
+                ") AND released_at IS NULL",
                 (now, team_uuid, stored["stored_object_uuid"]),
             )
         return result.rowcount > 0

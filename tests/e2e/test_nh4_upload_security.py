@@ -25,6 +25,8 @@ def test_filename_path_traversal_rejected(tmp_path: Path) -> None:
             'filename="../escape.txt"',
             'filename="..\\..\\windows.txt"',
             'filename="%2e%2e%2fencoded.txt"',
+            'filename="nul\x00name.txt"',
+            "filename=\"percent%00nul.txt\"",
         ):
             response = client.post(
                 f"/v1/teams/{team_uuid}/objects:upload",

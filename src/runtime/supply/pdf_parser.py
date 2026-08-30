@@ -80,7 +80,10 @@ class IsolatedPdfParser:
         )
 
     def isolation_prefix(self, *, output_limit: int | None = None) -> tuple[str, ...]:
-        prefix: list[str] = [str(self.unshare_binary), "--net", "--", str(self.prlimit_binary)]
+        prefix: list[str] = [str(self.unshare_binary)]
+        if os.geteuid() != 0:
+            prefix.extend(("-U", "--map-root-user"))
+        prefix.extend(("--net", "--", str(self.prlimit_binary)))
         prefix.extend(("--as=536870912", "--cpu=5", "--nofile=64"))
         if output_limit is not None:
             prefix.append(f"--fsize={output_limit}")
