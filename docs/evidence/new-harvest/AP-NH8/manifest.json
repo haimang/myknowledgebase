@@ -1,0 +1,55 @@
+{
+  "schema_version": "mkb.new-harvest-evidence.v1",
+  "ap": "AP-NH8",
+  "status": "executed",
+  "commit": "27fc3ca4c193e8f365a8d6228643d60a5de9d9e5",
+  "prior_commits": [
+    "a575210"
+  ],
+  "truth_cite": [
+    "T-O-394",
+    "T-O-398",
+    "T-O-401",
+    "T-O-405",
+    "T-O-407"
+  ],
+  "q_cite": [
+    "Q14",
+    "Q18",
+    "Q21",
+    "Q25",
+    "Q27"
+  ],
+  "work_ids": [
+    "NH8-01",
+    "NH8-02",
+    "NH8-03",
+    "NH8-04",
+    "NH8-05",
+    "NH8-06",
+    "NH8-07",
+    "NH8-08"
+  ],
+  "test_ids": [
+    "NH8-T01",
+    "NH8-T02",
+    "NH8-T03",
+    "NH8-T04",
+    "NH8-T05",
+    "NH8-T06",
+    "NH8-T07",
+    "NH8-T08",
+    "NH8-T09",
+    "NH8-T10"
+  ],
+  "hard_gate_result": {
+    "passed": 29,
+    "failed": 0,
+    "level": "L1/L2/L3/L4"
+  },
+  "migration_id": null,
+  "m_nh_09": "signed-behavioral-no-ddl",
+  "compat_retirement_review": "signed-in-flight-fail-closed-with-rollback",
+  "observed_at_utc": "2026-08-30T04:53:13Z",
+  "closure_type": "closed-with-explicit-deferrals"
+}

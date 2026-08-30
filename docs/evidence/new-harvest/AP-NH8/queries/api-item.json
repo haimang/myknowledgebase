@@ -1,0 +1,17 @@
+{
+  "schema_version": "mkb.nh8-api-item.v1",
+  "commit": "27fc3ca",
+  "observed_at_utc": "2026-08-30T04:53:13Z",
+  "source_test": "tests/e2e/test_nh8_api_item_intents.py::test_registered_api_item_seven_intents_share_single_services",
+  "provider": "chinatax",
+  "member_source_kind": "registered_api",
+  "rebuild_forbidden_process_count": 0,
+  "rebuild_execution_role_not_scatter_child": true,
+  "post_ingest_lifecycle_scatter_child_count": 0,
+  "deactivate_search_empty": true,
+  "reactivate_search_empty": true,
+  "index_rebuild_process_keys": ["index.rebuild"],
+  "delete_rebuild_http": 409,
+  "delete_rebuild_code": "intake-item-deleted",
+  "monkeypatch": false
+}

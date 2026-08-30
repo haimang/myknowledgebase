@@ -1,0 +1,14 @@
+{
+  "schema_version": "mkb.nh8-lineage.v1",
+  "commit": "27fc3ca",
+  "observed_at_utc": "2026-08-30T04:53:13Z",
+  "source_test": "tests/unit/test_nh8_lineage_matrix.py",
+  "full_task_actual_columns_equal": true,
+  "rebuild_start_route": "replay_frozen_clean",
+  "rebuild_process_key": "intake.replay_frozen_clean",
+  "index_start_before_acquire": true,
+  "index_inserts_revision": false,
+  "upgrade_entrance_count": 0,
+  "restart_scope_check": "atomic_intake_item|full_task",
+  "request_intent_count": 7
+}

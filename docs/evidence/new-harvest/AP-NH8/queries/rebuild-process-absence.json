@@ -1,0 +1,14 @@
+{
+  "schema_version": "mkb.nh8-rebuild-process-absence.v1",
+  "commit": "27fc3ca",
+  "observed_at_utc": "2026-08-30T04:53:13Z",
+  "source_test": "tests/e2e/test_intake_rebuild_metadata.py::test_rebuild_replays_frozen_clean_without_acquire_decode_clean",
+  "forbidden_process_count": 0,
+  "replay_process_key": "intake.replay_frozen_clean",
+  "revision_count_unchanged": true,
+  "clean_content_digest_exact": true,
+  "clean_stored_object_uuid_exact": true,
+  "index_generation_delta": 1,
+  "namespace_omitted_code": "RETRIEVE_SCHEMA_NAMESPACE_REQUIRED",
+  "namespaced_payload_equals_admitted_clean": true
+}

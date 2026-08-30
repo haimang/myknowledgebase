@@ -1,0 +1,34 @@
+{
+  "schema_version": "mkb.nh8-intent-matrix.v1",
+  "commit": "27fc3ca",
+  "observed_at_utc": "2026-08-30T04:53:13Z",
+  "source_test": "tests/unit/test_nh8_intent_applicability.py",
+  "legal_ingest_task_count": 1,
+  "http_422_codes": [
+    "task-schema-invalid",
+    "workflow-intent-not-supported",
+    "INTAKE_INTENT_UNSUPPORTED",
+    "SOURCE_KIND_INVALID",
+    "INTAKE_SEMANTIC_KEY_UNREGISTERED",
+    "METADATA_SEMANTICS_EMPTY"
+  ],
+  "http_409_codes": [
+    "intake-item-deleted",
+    "index-rebuild-item-not-active",
+    "intake-revision-unavailable",
+    "intake-revision-mismatch"
+  ],
+  "illegal_cells_zero_task_process": true,
+  "cells": [
+    "eighth-intent",
+    "fifth-kind",
+    "workflow-key",
+    "rebuild-with-source",
+    "ingest-with-item",
+    "unregistered-semantic",
+    "empty-semantics",
+    "deleted-rebuild",
+    "deleted-metadata-lifecycle",
+    "inactive-index-rebuild"
+  ]
+}

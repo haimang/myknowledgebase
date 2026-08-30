@@ -1,0 +1,12 @@
+{
+  "schema_version": "mkb.nh8-index-generation.v1",
+  "commit": "27fc3ca",
+  "observed_at_utc": "2026-08-30T04:53:13Z",
+  "source_test": "tests/e2e/test_index_rebuild.py::test_scoped_index_rebuild_promotes_generation_without_new_intake_revision",
+  "revision_count": 1,
+  "process_keys": [["index.rebuild", "succeeded"]],
+  "active_index_generation_after": 2,
+  "old_generation_rows_retained": true,
+  "search_hit_generations": [2],
+  "namespace_omitted_code": "RETRIEVE_SCHEMA_NAMESPACE_REQUIRED"
+}

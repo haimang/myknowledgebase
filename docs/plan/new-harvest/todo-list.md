@@ -79,13 +79,13 @@
 
 ## NH8 — intake lifecycle and compatibility
 
-- [-] `NH8-CODE-P1` [代码制作] Phase 1 seven-intent applicability/error contract（`NH8-01`；`NH8-T01`）。`blocked-by: NH7-CLOSE`
-- [ ] `NH8-CODE-P2` [代码制作] Phase 2 rebuild/metadata exact-clean bypass（`NH8-02/03`；`NH8-T02/T03`；关闭 NH5-T08-B）。`blocked-by: NH8-CODE-P1`
-- [ ] `NH8-CODE-P3` [代码制作] Phase 3 lifecycle query law（`NH8-04`；`NH8-T04/T05/T06`）。`blocked-by: NH8-CODE-P2`
-- [ ] `NH8-CODE-P4` [代码制作] Phase 4 index.rebuild（`NH8-05`；`NH8-T07`）。`blocked-by: NH8-CODE-P3`
-- [ ] `NH8-CODE-P5` [代码制作] Phase 5 API Item shared lifecycle（`NH8-06`；`NH8-T08`）。`blocked-by: NH8-CODE-P4`
-- [ ] `NH8-CODE-P6` [代码制作] Phase 6 old-pin compat + lineage（`NH8-07/08`；`NH8-T09/T10`）。`blocked-by: NH8-CODE-P5`
-- [ ] `NH8-CLOSE` [代码审查，测试与文档回填] `NH8-T01..T10` L1–L4、M-NH-09/retirement review、日志、evidence、closure、commit。`blocked-by: NH8-CODE-P6`
+- [x] `NH8-CODE-P1` [代码制作] Phase 1 seven-intent applicability/error contract（`NH8-01`；`NH8-T01`）。`blocked-by: NH7-CLOSE`
+- [x] `NH8-CODE-P2` [代码制作] Phase 2 rebuild/metadata exact-clean bypass（`NH8-02/03`；`NH8-T02/T03`；关闭 NH5-T08-B）。`blocked-by: NH8-CODE-P1`
+- [x] `NH8-CODE-P3` [代码制作] Phase 3 lifecycle query law（`NH8-04`；`NH8-T04/T05/T06`）。`blocked-by: NH8-CODE-P2`
+- [x] `NH8-CODE-P4` [代码制作] Phase 4 index.rebuild（`NH8-05`；`NH8-T07`）。`blocked-by: NH8-CODE-P3`
+- [x] `NH8-CODE-P5` [代码制作] Phase 5 API Item shared lifecycle（`NH8-06`；`NH8-T08`）。`blocked-by: NH8-CODE-P4`
+- [x] `NH8-CODE-P6` [代码制作] Phase 6 old-pin compat + lineage（`NH8-07/08`；`NH8-T09/T10`）。`blocked-by: NH8-CODE-P5`
+- [x] `NH8-CLOSE` [代码审查，测试与文档回填] `NH8-T01..T10` L1–L4、M-NH-09/retirement review、日志、evidence、closure、commit。`blocked-by: NH8-CODE-P6`
 
 ## NH9 — closed-set assurance
 

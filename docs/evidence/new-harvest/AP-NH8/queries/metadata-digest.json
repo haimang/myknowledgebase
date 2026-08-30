@@ -1,0 +1,20 @@
+{
+  "schema_version": "mkb.nh8-metadata-digest.v1",
+  "commit": "27fc3ca",
+  "observed_at_utc": "2026-08-30T04:53:13Z",
+  "source_tests": [
+    "tests/e2e/test_intake_rebuild_metadata.py::test_metadata_no_change_changed_zero_acquire_decode_clean",
+    "tests/e2e/test_nh5_metadata_semantic_refresh.py::test_metadata_refresh_process_absence_handoff_to_nh8",
+    "tests/e2e/test_nh5_metadata_semantic_refresh.py::test_metadata_refresh_inherits_clean_and_projects_facets"
+  ],
+  "no_change_transition": "no_change",
+  "no_change_revision_unchanged": true,
+  "changed_new_revision": true,
+  "clean_content_digest_exact_copy": true,
+  "clean_stored_object_uuid_exact_copy": true,
+  "structurize_absent": true,
+  "t08_b_forbidden_process_count": 0,
+  "t08_b_status": "green",
+  "facet_realm_after_hits": true,
+  "facet_realm_before_empty": true
+}

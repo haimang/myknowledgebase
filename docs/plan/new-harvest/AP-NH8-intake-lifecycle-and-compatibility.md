@@ -26,7 +26,7 @@
 > 关联 reference-anchor:
 > - [`assessment-analysis-08-publication-and-intake-lifecycle.md`](../../eval/new-harvest/reference-anchor/assessment-analysis-08-publication-and-intake-lifecycle.md)
 > - [`assessment-analysis-02-s05-two-stage-binding-and-recovery.md`](../../eval/new-harvest/reference-anchor/assessment-analysis-02-s05-two-stage-binding-and-recovery.md)（restart 只消费；禁止与 `G-NH-19` 共用）
-> 文档状态: `draft`
+> 文档状态: `executed`
 
 **台账 ID 区间（final §11.A / §7.8）**：`NH8-01..08` / `NH8-A01..06` / `NH8-T01..10`。禁止重编号、合并或删除这些 ID。
 
@@ -695,16 +695,16 @@ HEAD `1221aa1` 已有七意图 Literal 闭集（`src/contracts/api/models.py:278
 
 | 收口目标 | 工作项 | Test-ID | PASS 标准（可判定谓词） | PASS 证据（四元组）| 状态 |
 |----------|--------|---------|-------------------------|---------------------|------|
-| 非法格 admission 拒绝且零 Task/Process | `NH8-01` | `NH8-T01` | 每非法格 HTTP∈{422,409} 且 code∈闭集；该 `task_uuid` 的 `mkb_tasks` COUNT=0 且 `mkb_processes` COUNT=0 | `commit SHA + 422/409 PASS + Q25 + UTC` | `未观察` |
-| rebuild 零 acquire/decode/clean Process，digest exact | `NH8-02` | `NH8-T02` | process_key 家族计数=0；clean digest/object uuid 等于 frozen 输入；namespaced search payload=原 clean | `commit SHA + process/query PASS + Q27 + UTC` | `未观察` |
-| metadata 零 clean Process；no-change 短路；changed 切代 inherit | `NH8-03` | `NH8-T03` | no-change 无新 Revision；changed 新 Revision ∧ digest 不变 ∧ T08-B 计数=0 PASS | `commit SHA + revision/digest/facet PASS + Q27 + UTC` | `未观察` |
-| deactivate 后 query empty | `NH8-04` | `NH8-T04` | serving NULL ∧ pointer/vector withdrawn ∧ namespaced `results==[]` | `commit SHA + withdraw/query PASS + Q25 + UTC` | `未观察` |
-| reactivate 仍 empty 直到新 publish | `NH8-04` | `NH8-T05` | reactivate 后 serving 仍 NULL ∧ search `[]`；rebuild 后命中 | `commit SHA + pointer/query PASS + Q25 + UTC` | `未观察` |
-| delete tombstone / rebuild 409 | `NH8-04` | `NH8-T06` | rebuild POST 409 `intake-item-deleted` ∧ 新 Task COUNT=0 ∧ search `[]` | `commit SHA + 409/query PASS + Q25 + UTC` | `未观察` |
-| 新 generation、零 Revision/source/clean、旧代不命中 | `NH8-05` | `NH8-T07` | revision COUNT 不变；process 仅 `index.rebuild`；search hits 不含旧 generation | `commit SHA + generation/query PASS + Q25 + UTC` | `未观察` |
-| API Item 七意图同法、无 child kernel | `NH8-06` | `NH8-T08` | role≠`SCATTER_CHILD`；与 T02–T07 同谓词 | `commit SHA + API lifecycle PASS + Q25 + UTC` | `未观察` |
-| old pin 完成、新 Task 只 kind graph | `NH8-07` | `NH8-T09` | 旧序列不变；新 identity∈kind 闭集；in-flight>0 时 retire 失败可 rollback | `commit SHA + old/new sequence PASS + Q18 + UTC` | `未观察` |
-| full_task exact；upgrade 入口=0；rebuild/index 分账 | `NH8-08` | `NH8-T10` | actual digest 相等；upgrade scan=0；index 不 UPDATE S05、不 INSERT revision | `commit SHA + lineage PASS + Q21/Q27 + UTC` | `未观察` |
+| 非法格 admission 拒绝且零 Task/Process | `NH8-01` | `NH8-T01` | 每非法格 HTTP∈{422,409} 且 code∈闭集；该 `task_uuid` 的 `mkb_tasks` COUNT=0 且 `mkb_processes` COUNT=0 | `27fc3ca + 422/409 PASS + Q25 + 2026-08-30T04:53:13Z` | `PASS` |
+| rebuild 零 acquire/decode/clean Process，digest exact | `NH8-02` | `NH8-T02` | process_key 家族计数=0；clean digest/object uuid 等于 frozen 输入；namespaced search payload=原 clean | `27fc3ca + process/query PASS + Q27 + 2026-08-30T04:53:13Z` | `PASS` |
+| metadata 零 clean Process；no-change 短路；changed 切代 inherit | `NH8-03` | `NH8-T03` | no-change 无新 Revision；changed 新 Revision ∧ digest 不变 ∧ T08-B 计数=0 PASS | `27fc3ca + revision/digest/facet PASS + Q27 + 2026-08-30T04:53:13Z` | `PASS` |
+| deactivate 后 query empty | `NH8-04` | `NH8-T04` | serving NULL ∧ pointer/vector withdrawn ∧ namespaced `results==[]` | `27fc3ca + withdraw/query PASS + Q25 + 2026-08-30T04:53:13Z` | `PASS` |
+| reactivate 仍 empty 直到新 publish | `NH8-04` | `NH8-T05` | reactivate 后 serving 仍 NULL ∧ search `[]`；rebuild 后命中 | `27fc3ca + pointer/query PASS + Q25 + 2026-08-30T04:53:13Z` | `PASS` |
+| delete tombstone / rebuild 409 | `NH8-04` | `NH8-T06` | rebuild POST 409 `intake-item-deleted` ∧ 新 Task COUNT=0 ∧ search `[]` | `27fc3ca + 409/query PASS + Q25 + 2026-08-30T04:53:13Z` | `PASS` |
+| 新 generation、零 Revision/source/clean、旧代不命中 | `NH8-05` | `NH8-T07` | revision COUNT 不变；process 仅 `index.rebuild`；search hits 不含旧 generation | `27fc3ca + generation/query PASS + Q25 + 2026-08-30T04:53:13Z` | `PASS` |
+| API Item 七意图同法、无 child kernel | `NH8-06` | `NH8-T08` | role≠`SCATTER_CHILD`；与 T02–T07 同谓词 | `27fc3ca + API lifecycle PASS + Q25 + 2026-08-30T04:53:13Z` | `PASS` |
+| old pin 完成、新 Task 只 kind graph | `NH8-07` | `NH8-T09` | 旧序列不变；新 identity∈kind 闭集；in-flight>0 时 retire 失败可 rollback | `27fc3ca + old/new sequence PASS + Q18 + 2026-08-30T04:53:13Z` | `PASS` |
+| full_task exact；upgrade 入口=0；rebuild/index 分账 | `NH8-08` | `NH8-T10` | actual digest 相等；upgrade scan=0；index 不 UPDATE S05、不 INSERT revision | `27fc3ca + lineage PASS + Q21/Q27 + 2026-08-30T04:53:13Z` | `PASS` |
 
 ### 10.3 Definition of Done
 
@@ -748,13 +748,37 @@ HEAD `1221aa1` 已有七意图 Literal 闭集（`src/contracts/api/models.py:278
 
 ## 11. 执行日志回填（仅 `executed` 状态使用）
 
-> 文档状态为 `draft`，非 `executed`。本节按模板占位；执行完成后改用 `respond-execution-log` 厚回填。residual 交后继 charter，不回填本阶段。
+> 执行者：`Grok`
+> 执行时间：`2026-08-30`
+> 文档状态：`draft → executing → executed`
+> 代码改动统计：`19 文件修改 / 3 新建 / schema bump 0`（实现 `27fc3ca`；admission 起步 `a575210`）
 
-- **实际执行摘要**：尚未执行。
-- **Phase 偏差**（逐条带分类）：尚未执行。
-- **阻塞与处理**：尚未执行。
-- **测试发现**（含全绿计数 + 新暴露事实）：尚未执行。
-- **后续 handoff**：执行后交接 `AP-NH9`（Capstone I/J、crash 全窗、closed-set）；不得把本 AP 未绿的 exact-clean/lifecycle 功能缺口留给 NH9 第一次补。
+- **实际执行摘要**：P1 闭集 admission；P2 start-route replay/no-change + T08-B 转绿；P3–P5 namespaced lifecycle/index/API；P6 old-pin retire/rollback + lineage scan。
+- **Phase 偏差**：
+  - rebuild 仍经 `replay_frozen_clean → selected_clean → seal → preflight → accept_snapshot → construct`，未直达 accept（substrate-fit；process_key 家族仍为 0）。
+  - scatter member clean 是 JSON envelope，replay 解包 `clean_text`（substrate-fit）。
+  - 公开二次 delete 对 tombstone 为 409 零 Task，不是同 fence 服务层 no-op（与非法格 deleted 合同一致）。
+- **阻塞与处理**：preflight 曾要求 decode/clean evidence → 改为 frozen-artifact lineage。API rebuild digest fence 曾把 `clean_digest` 当 CAS sha256 → 识别 envelope。
+- **测试发现**：hard-gate `29 passed / 0 failed` ~206s。ingest selected-output 回归 7 passed。
+- **后续 handoff**：`AP-NH9` closed-set / crash / Capstone I–J。不得第一次补七意图/exact-clean。
+
+### 11.1 逐工作项状态
+
+| 工作项 | 状态 | PR | 实际落点 | 备注 |
+|--------|------|----|----------|------|
+| `NH8-01` | ✅ done | `27fc3ca` | `targets.py` / `test_nh8_intent_applicability.py` | T01 |
+| `NH8-02` | ✅ done | `27fc3ca` | `kind_family.py` / `acquisition_intents.py` | T02 |
+| `NH8-03` | ✅ done | `27fc3ca` | `payload_extra` disposition / T08-B | T03 |
+| `NH8-04` | ✅ done | `27fc3ca` | reactivate + delete tombstone e2e | T04–T06 |
+| `NH8-05` | ✅ done | `27fc3ca` | `test_index_rebuild.py` Port+namespace | T07 |
+| `NH8-06` | ✅ done | `27fc3ca` | `test_nh8_api_item_intents.py` | T08 |
+| `NH8-07` | ✅ done | `27fc3ca` | retire/rollback tests | T09 |
+| `NH8-08` | ✅ done | `27fc3ca` | `test_nh8_lineage_matrix.py` | T10 |
+
+### 11.4 文档状态
+
+`draft → executing → executed（2026-08-30）`。
+residual → `AP-NH9`。
 
 ---
 
@@ -765,3 +789,4 @@ HEAD `1221aa1` 已有七意图 Literal 闭集（`src/contracts/api/models.py:278
 | `v0.1` | `2026-08-29` | Grok workflow new-harvest-nh6-nh9-action-plans | 由 final §7.8 派生；消费 Q21/Q25/Q27 与 RA08/RA02；关闭 NH5-T08-B 交接 |
 | `v0.2` | `2026-08-29` | Grok fix-fleet | 吸收已核实 review：T02 唯一 PASS node=`::test_rebuild_replays_frozen_clean_without_acquire_decode_clean` 禁「或拆出」；T04/T05/T07 未清 sqlite3/namespace 前 ⛔ 不得进跑法；T05 独立 node；admission 锚 `config_snapshots.py:135`+`task_create.py:88,106`；`lifecycle_apply.py:34-134`；namespace raise `265-270` |
 | `v0.3` | `2026-08-29` | Grok recon-fix | 头部钉 `NH5-T08-B` 关闭点=`NH8-T03`；T03 PASS 改为具名 node + 与 T02 同 sqlite3/namespace ⛔ 闸，禁止整份 HEAD rebuild 文件无条件跑法 |
+| `v1.0` | `2026-08-30` | Grok | 执行回填 §11；文档状态 `executed`；T01–T10 PASS `27fc3ca` |

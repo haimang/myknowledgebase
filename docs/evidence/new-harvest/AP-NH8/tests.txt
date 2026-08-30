@@ -1,0 +1,32 @@
+AP-NH8 test evidence
+Observed at: 2026-08-30T04:53:13Z
+Implementation commit: 27fc3ca4c193e8f365a8d6228643d60a5de9d9e5
+Prior start: a575210 feat(new-harvest): start NH8 seven-intent admission matrix
+Environment: Python 3.12; pytest 8.3.5; PersistencePort; no sqlite3 in T02–T08 files; Layer-A namespace required
+
+NH8-T01..T10 hard-gate suite
+Command: uv run pytest tests/unit/test_nh8_intent_applicability.py tests/e2e/test_intake_rebuild_metadata.py tests/e2e/test_nh5_metadata_semantic_refresh.py tests/e2e/test_intake_reactivate.py tests/e2e/test_nh8_delete_tombstone.py tests/e2e/test_index_rebuild.py tests/e2e/test_nh8_api_item_intents.py tests/unit/test_workflow_revision_compatibility.py tests/unit/test_nh8_lineage_matrix.py -q --tb=line
+Result: PASS, 29 passed, duration ~206s
+Levels: T01 L1/L2; T02/T03 L2/L4; T04–T08 L3/L4 namespaced search; T09/T10 L2/C.
+
+Unique PASS nodes
+- NH8-T02 tests/e2e/test_intake_rebuild_metadata.py::test_rebuild_replays_frozen_clean_without_acquire_decode_clean
+- NH8-T03 tests/e2e/test_intake_rebuild_metadata.py::test_metadata_no_change_changed_zero_acquire_decode_clean
+- NH8-T03 handoff tests/e2e/test_nh5_metadata_semantic_refresh.py::test_metadata_refresh_process_absence_handoff_to_nh8 (count=0)
+- NH8-T04 tests/e2e/test_intake_reactivate.py::test_reactivate_restores_active_lifecycle_but_not_stale_serving_state
+- NH8-T05 tests/e2e/test_intake_reactivate.py::test_reactivate_search_empty_until_rebuild
+- NH8-T06 tests/e2e/test_nh8_delete_tombstone.py
+- NH8-T07 tests/e2e/test_index_rebuild.py::test_scoped_index_rebuild_promotes_generation_without_new_intake_revision
+- NH8-T08 tests/e2e/test_nh8_api_item_intents.py::test_registered_api_item_seven_intents_share_single_services
+- NH8-T09 tests/unit/test_workflow_revision_compatibility.py (includes test_old_pin_completes_after_nh8_guards, test_new_task_kind_only_not_old_selector, test_bounded_retire_rolls_back_when_in_flight)
+- NH8-T10 tests/unit/test_nh8_lineage_matrix.py
+
+Static review
+Command: uv run ruff check <changed Python>
+Result: PASS
+Command: git diff --check
+Result: PASS
+
+Regression smokes
+Command: uv run pytest tests/e2e/test_nh7_inline_static_retrieval.py::test_inline_doc_deterministic_namespace_facet_hit tests/integration/test_nh2_selected_output_control.py -q --tb=line
+Result: PASS, 7 passed

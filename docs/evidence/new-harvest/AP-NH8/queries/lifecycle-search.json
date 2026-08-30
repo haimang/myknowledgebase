@@ -1,0 +1,37 @@
+{
+  "schema_version": "mkb.nh8-lifecycle-search.v1",
+  "commit": "27fc3ca",
+  "observed_at_utc": "2026-08-30T04:53:13Z",
+  "source_tests": [
+    "tests/e2e/test_intake_reactivate.py::test_reactivate_restores_active_lifecycle_but_not_stale_serving_state",
+    "tests/e2e/test_intake_reactivate.py::test_reactivate_search_empty_until_rebuild",
+    "tests/e2e/test_nh8_delete_tombstone.py::test_delete_tombstone_rejects_rebuild_and_search_empty",
+    "tests/e2e/test_nh8_delete_tombstone.py::test_deleted_item_reactivate_409"
+  ],
+  "deactivate": {
+    "lifecycle_state": "deactivated",
+    "serving_revision_uuid": null,
+    "pointer": "withdrawn",
+    "vector": "withdrawn",
+    "namespaced_results": []
+  },
+  "reactivate": {
+    "lifecycle_state": "active",
+    "serving_revision_uuid": null,
+    "pointer": "withdrawn",
+    "vector": "withdrawn",
+    "namespaced_results": [],
+    "restores_old_generation": false
+  },
+  "rebuild_after_reactivate_hits_admitted_clean": true,
+  "delete": {
+    "lifecycle_state": "deleted",
+    "rebuild_http": 409,
+    "rebuild_code": "intake-item-deleted",
+    "rebuild_task_count": 0,
+    "reactivate_http": 409,
+    "cleanup_intent_count": 1,
+    "namespaced_results": []
+  },
+  "namespace_omitted_code": "RETRIEVE_SCHEMA_NAMESPACE_REQUIRED"
+}
