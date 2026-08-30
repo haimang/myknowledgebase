@@ -100,5 +100,5 @@
 ## Cross-NH campaign closure
 
 - [x] `CROSS-NH-REVIEW` [跨阶段代码审查] 检查 NH1–NH9 contract/migration/runtime/public/retrieval/lifecycle 的跨阶段耦合、owner `T-O-390..407` 与 foundational truth 零漂移。`blocked-by: NH9-CLOSE`
-- [-] `CROSS-NH-TEST` [跨阶段测试与修复] 执行完整测试集、固定 capstone 文件、race/crash/security/compat/mega；持续测试↔修复直到无 in-scope 失败。`blocked-by: CROSS-NH-REVIEW`
-- [ ] `CROSS-NH-CLOSE` [最终文档回填与提交] 输出 consolidated closure、核对九份 AP 日志/closure/evidence/commit 四元组、最终提交并报告。`blocked-by: CROSS-NH-TEST`
+- [x] `CROSS-NH-TEST` [跨阶段测试与修复] 执行完整测试集、固定 capstone 文件、race/crash/security/compat/mega；持续测试↔修复直到无 in-scope 失败。`blocked-by: CROSS-NH-REVIEW`
+- [x] `CROSS-NH-CLOSE` [最终文档回填与提交] 输出 consolidated closure、核对九份 AP 日志/closure/evidence/commit 四元组、最终提交并报告。`blocked-by: CROSS-NH-TEST`
