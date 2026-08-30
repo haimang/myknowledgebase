@@ -1,17 +1,7 @@
-"""NS9-FX2: intake identity replay must not dangle the item revision pointer.
-
-Re-ingesting identical content under the same ``external_key`` replays the
-existing intake revision by semantic fingerprint.  The replay decision ran
-inside the outcome TX *after* the output state had been materialized, so the
-replayed task published a state that referenced a revision row which was never
-inserted, and the intake item's ``latest_revision_uuid`` pointed at it.  The
-next generation artifact commit then died on a FOREIGN KEY violation that was
-swallowed as an untyped commit failure.
-"""
+"""NS9-FX2 / NH9-T02: intake identity replay must not dangle the item revision pointer."""
 
 from __future__ import annotations
 
-import sqlite3
 import time
 from pathlib import Path
 
@@ -106,26 +96,38 @@ def test_identity_replay_reuses_revision_and_keeps_pointer_resolved(tmp_path: Pa
         second = _ingest(client, headers, team_uuid, uuid7(), content)
         assert second["status"] == "succeeded", second
 
-    with sqlite3.connect(f"file:{tmp_path / 'mkb.sqlite3'}?mode=ro", uri=True) as connection:
-        connection.row_factory = sqlite3.Row
-        item = connection.execute(
-            "SELECT latest_revision_uuid FROM mkb_intake_items WHERE normalized_external_key=?",
-            ("intake-identity-replay-golden",),
-        ).fetchone()
-        assert item is not None
-        dangling = connection.execute(
-            "SELECT COUNT(*) FROM mkb_intake_revisions WHERE intake_revision_uuid=?",
-            (item["latest_revision_uuid"],),
-        ).fetchone()[0]
+        async def inspect() -> tuple[str, int, int, int]:
+            async with app.state.container.persistence.transaction() as tx:
+                item = await tx.fetchone(
+                    "SELECT intake_item_uuid,latest_revision_uuid FROM mkb_intake_items "
+                    "WHERE team_uuid=? AND normalized_external_key=?",
+                    (team_uuid, "intake-identity-replay-golden"),
+                )
+                assert item is not None
+                dangling = await tx.fetchone(
+                    "SELECT COUNT(*) AS n FROM mkb_intake_revisions "
+                    "WHERE team_uuid=? AND intake_revision_uuid=?",
+                    (team_uuid, item["latest_revision_uuid"]),
+                )
+                revision_count = await tx.fetchone(
+                    "SELECT COUNT(*) AS n FROM mkb_intake_revisions WHERE team_uuid=? AND intake_item_uuid=?",
+                    (team_uuid, item["intake_item_uuid"]),
+                )
+                orphans = await tx.fetchone(
+                    "SELECT COUNT(*) AS n FROM mkb_generation_artifacts WHERE team_uuid=? "
+                    "AND intake_revision_uuid IS NOT NULL AND intake_revision_uuid NOT IN "
+                    "(SELECT intake_revision_uuid FROM mkb_intake_revisions WHERE team_uuid=?)",
+                    (team_uuid, team_uuid),
+                )
+            assert dangling is not None and revision_count is not None and orphans is not None
+            return str(item["latest_revision_uuid"]), int(dangling["n"]), int(revision_count["n"]), int(orphans["n"])
+
+        latest, dangling, revision_count, orphans = client.portal.call(inspect)
+        assert latest
         assert dangling == 1, "latest_revision_uuid must point at an existing revision row after replay"
-        revision_count = connection.execute(
-            "SELECT COUNT(*) FROM mkb_intake_revisions WHERE intake_item_uuid IN "
-            "(SELECT intake_item_uuid FROM mkb_intake_items WHERE normalized_external_key=?)",
-            ("intake-identity-replay-golden",),
-        ).fetchone()[0]
         assert revision_count == 1, "identical content must replay one revision, not mint new ones"
-        orphan_artifacts = connection.execute(
-            "SELECT COUNT(*) FROM mkb_generation_artifacts WHERE intake_revision_uuid NOT IN "
-            "(SELECT intake_revision_uuid FROM mkb_intake_revisions)"
-        ).fetchone()[0]
-        assert orphan_artifacts == 0
+        assert orphans == 0
+
+
+def test_identity_replay_queries_via_persistence_port(tmp_path: Path) -> None:
+    test_identity_replay_reuses_revision_and_keeps_pointer_resolved(tmp_path)
