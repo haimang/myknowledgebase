@@ -33,15 +33,20 @@ EXPECTED_DENOMINATORS = {
 PROMPT_A_SOURCES = {
     "promptA.default": {
         "relative_path": "prompt-a-clean-v1.md",
-        "readers": ["src/contracts/intake/strategies.py", "src/services/registry.py"],
+        "readers": [
+            "src/contracts/intake/strategies.py",
+            "src/services/registry.py",
+            "src/services/config_snapshots.py",
+            "src/services/prompt_profiles.py",
+        ],
     },
     "promptA.clean": {
         "relative_path": "clean/promptA.clean.v1.md",
-        "readers": ["src/services/config_snapshots.py", "src/services/registry.py"],
+        "readers": ["src/contracts/intake/strategies.py", "src/services/registry.py"],
     },
     "promptA.documentation.default": {
         "relative_path": "clean/promptA.documentation.default.v1.md",
-        "readers": ["src/services/prompt_profiles.py", "src/services/registry.py"],
+        "readers": ["src/services/registry.py"],
     },
 }
 
