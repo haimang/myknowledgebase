@@ -20,10 +20,26 @@ _PROMPT = CleanPrompt(
 
 
 class _PdfLLM:
-    async def complete(self, *, prompt: str, text: str | None = None, blob: bytes | None = None, media_type: str | None = None) -> str:
+    async def complete(
+        self, *, prompt: str, text: str | None = None, blob: bytes | None = None, media_type: str | None = None
+    ) -> str:
         del prompt, text, media_type
         assert blob is not None and blob.startswith(b"%PDF-")
         return "Understood PDF section one.\nUnderstood PDF section two."
+
+
+class _PdfOcr:
+    async def recognize(self, blob: bytes, *, media_type: str):  # type: ignore[no-untyped-def]
+        assert blob.startswith(b"%PDF-") and media_type == "application/pdf"
+
+        class _Result:
+            text = "OCR PDF section"
+
+            @staticmethod
+            def evidence() -> dict[str, object]:
+                return {"producer": "test-deterministic-ocr", "prompt_ref": None}
+
+        return _Result()
 
 
 @pytest.mark.asyncio
@@ -72,8 +88,7 @@ async def test_pdf_ocr_is_a_distinct_explicit_strategy() -> None:
         blob=b"%PDF-1.4 scanned fixture",
         capability="clean.ocr.local",
         strategy="pdf.ocr",
-        llm=_PdfLLM(),
-        prompt=_PROMPT,
+        ocr=_PdfOcr(),
     )
     assert result.evidence["channel"] == "pdf"
     assert result.evidence["mode"] == "ocr"

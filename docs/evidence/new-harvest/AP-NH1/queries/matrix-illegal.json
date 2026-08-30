@@ -1,5 +1,5 @@
 {
-  "digest": "f7199ee795fabfe332ad1eadd024debe3633fad1d664349763903dc9f8d235c3",
+  "digest": "57c19c6bcb1c4b82bb741886808b8f3b342259aa795dbaae8b285140e1da740a",
   "illegal_combination": "source_descriptor_on_non_ingest_intent",
   "disposition": "rejected_before_task",
   "http_status": 422,

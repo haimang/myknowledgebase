@@ -29,6 +29,11 @@ from src.runtime.http_acquisition import HttpAcquirer
 from src.runtime.index_retirement import IndexGenerationRetirementScanner, IndexGenerationRetirementSchedule
 from src.runtime.inference.claude_cli import DeterministicNs1Stub, SubprocessClaudeCli
 from src.runtime.inference.facade import ConcurrencyGate, InferenceFacade
+from src.runtime.inference.multimodal import (
+    ObjectStoreMediaResolver,
+    S11CleanLanguageModel,
+    configured_multimodal_binding,
+)
 from src.runtime.inference.supply import SupplyBinding, SupplyFence
 from src.runtime.intake.representation_history import PersistenceRepresentationFactReader
 from src.runtime.intake_pipeline import IntakePipeline
@@ -36,6 +41,9 @@ from src.runtime.metrics import MetricRegistry, default_metrics
 from src.runtime.object_gc import ObjectGcScanner, ObjectGcSchedule
 from src.runtime.object_upload import ObjectUploadLifecycleScanner, ObjectUploadLifecycleSchedule
 from src.runtime.security import ActiveTokenSet, EgressPolicy, FixedWindowRateLimiter, SecretResolver, safe_request_id
+from src.runtime.supply.browser import HardenedBrowserRuntime
+from src.runtime.supply.deterministic_ocr import IsolatedDeterministicOcr
+from src.runtime.supply.pdf_parser import IsolatedPdfParser
 from src.runtime.task_service import TaskService
 from src.runtime.workflow.dispatch import DispatchCaps
 from src.runtime.workflow_engine import WorkflowRuntime, WorkflowWorker
@@ -91,6 +99,10 @@ class Container:
     lifecycle: IntakeLifecycleService
     tasks: TaskService
     inference: InferenceFacade
+    pdf_parser: IsolatedPdfParser | None
+    browser_runtime: HardenedBrowserRuntime | None
+    clean_llm: S11CleanLanguageModel | None
+    deterministic_ocr: IsolatedDeterministicOcr | None
     retrieval_access: ArtifactRetrievalAccess
     retrieval: RetrievalService
     outcome_committer: OutcomeArtifactCommitter
@@ -201,6 +213,44 @@ async def _probe(container: Container) -> dict[str, bool]:
             inference_ok = all([await container.inference.probe_binding(binding) for binding in bindings])
         except Exception:
             inference_ok = False
+    supplies = {
+        "supply_pdf_parse": False,
+        "supply_browser_render": False,
+        "supply_browser_print_pdf": False,
+        "supply_ocr_deterministic": False,
+        "supply_s11_multimodal": False,
+    }
+    if container.settings.runtime_supply_readiness_required:
+
+        async def safe(callable_probe) -> bool:  # type: ignore[no-untyped-def]
+            if not callable(callable_probe):
+                return False
+            try:
+                return bool(await callable_probe())
+            except Exception:
+                return False
+
+        parser_probe = getattr(container.pdf_parser, "readiness", None)
+        render_probe = (
+            (lambda: container.browser_runtime.readiness("browser.render"))
+            if container.browser_runtime is not None
+            else None
+        )
+        print_probe = (
+            (lambda: container.browser_runtime.readiness("browser.print_pdf"))
+            if container.browser_runtime is not None
+            else None
+        )
+        ocr_probe = getattr(container.deterministic_ocr, "readiness", None)
+        multimodal_probe = getattr(container.clean_llm, "readiness", None)
+        values = await asyncio.gather(
+            safe(parser_probe),
+            safe(render_probe),
+            safe(print_probe),
+            safe(ocr_probe),
+            safe(multimodal_probe),
+        )
+        supplies = dict(zip(supplies, values, strict=True))
     return {
         **persistence,
         "registry_bootstrap": registry_ok,
@@ -208,6 +258,7 @@ async def _probe(container: Container) -> dict[str, bool]:
         "inference_binding": inference_ok,
         "obs_tables": obs_tables,
         "sec_token_loaded": container.tokens.loaded,
+        **supplies,
     }
 
 
@@ -241,6 +292,12 @@ def create_container(settings: Settings | None = None) -> Container:
         secret_slot=secret_slot,
         secret_resolver=secret_resolver,
         generate_timeout_seconds=settings.inference_generate_timeout_seconds,
+        media_resolver=ObjectStoreMediaResolver(storage),
+    )
+    enabled_bindings = default_enabled_inference_bindings()
+    multimodal_binding = configured_multimodal_binding(
+        model_key=settings.multimodal_model_key,
+        model_version=settings.multimodal_model_version,
     )
     supply_fence = SupplyFence(
         [
@@ -249,7 +306,10 @@ def create_container(settings: Settings | None = None) -> Container:
                 base_url=settings.inference_vllm_base_url,
                 secret_slot=secret_slot,
             )
-            for binding in default_enabled_inference_bindings()
+            for binding in (
+                *enabled_bindings,
+                *((multimodal_binding,) if settings.multimodal_enabled else ()),
+            )
         ]
     )
     dispatch_caps = DispatchCaps.from_settings(settings)
@@ -260,6 +320,11 @@ def create_container(settings: Settings | None = None) -> Container:
             "structured_generate": dispatch_caps.local_running,
             "text_generate": dispatch_caps.local_running,
             "cli": dispatch_caps.ni_running,
+            "pdf.parse": settings.pdf_parser_concurrency,
+            "browser.render": settings.browser_render_concurrency,
+            "browser.print_pdf": settings.browser_print_concurrency,
+            "s11.multimodal": settings.multimodal_concurrency,
+            "ocr.deterministic": settings.deterministic_ocr_concurrency,
         },
     )
     inference = InferenceFacade(
@@ -276,9 +341,26 @@ def create_container(settings: Settings | None = None) -> Container:
         dispatch_caps=dispatch_caps,
         gate=inference_gate,
     )
-    config_snapshots = ConfigSnapshotService(
-        persistence, storage, workflows, settings, security_audit=security_audit
+    text_binding = next(binding for binding in enabled_bindings if binding.capability_key == "text_generate")
+    clean_llm = (
+        S11CleanLanguageModel(
+            inference,
+            text_binding=text_binding,
+            multimodal_binding=multimodal_binding,
+        )
+        if settings.multimodal_enabled
+        else None
     )
+    deterministic_ocr: IsolatedDeterministicOcr | None = None
+    if settings.deterministic_ocr_enabled:
+        try:
+            deterministic_ocr = IsolatedDeterministicOcr.discover(
+                gate=inference_gate,
+                timeout_seconds=settings.deterministic_ocr_timeout_seconds,
+            )
+        except MkbError:
+            deterministic_ocr = None
+    config_snapshots = ConfigSnapshotService(persistence, storage, workflows, settings, security_audit=security_audit)
     tasks = TaskService(persistence, teams, events, config_snapshots)
     retrieval_access = ArtifactRetrievalAccess(persistence, storage)
     retrieval = RetrievalService(
@@ -299,6 +381,34 @@ def create_container(settings: Settings | None = None) -> Container:
         max_response_bytes=settings.acquisition_max_response_bytes,
         on_egress_denied=lambda reason: metrics.increment("mkb_sec_egress_denied_total", reason=reason),
     )
+    pdf_parser: IsolatedPdfParser | None = None
+    if settings.pdf_parser_enabled:
+        try:
+            pdf_parser = IsolatedPdfParser.discover(
+                parser_binary=settings.pdf_parser_binary,
+                timeout_seconds=settings.pdf_parser_timeout_seconds,
+                gate=inference_gate,
+            )
+        except MkbError:
+            # Composition remains live enough to expose an honest typed 503 and
+            # a negative readiness component.  Missing native supply must not
+            # turn into a silent observer fallback or an import-time crash.
+            pdf_parser = None
+    browser_runtime: HardenedBrowserRuntime | None = None
+    if settings.browser_runtime_enabled:
+        try:
+            browser_runtime = HardenedBrowserRuntime.discover(
+                acquirer=http_acquirer,
+                gate=inference_gate,
+                browser_binary=settings.browser_binary,
+                webdriver_binary=settings.browser_webdriver_binary,
+                render_timeout_seconds=settings.browser_render_timeout_seconds,
+                print_timeout_seconds=settings.browser_print_timeout_seconds,
+                render_output_bytes=settings.browser_render_max_bytes,
+                print_output_bytes=settings.browser_print_max_bytes,
+            )
+        except MkbError:
+            browser_runtime = None
 
     async def workflow_claim_readiness() -> bool:
         """Fence workers on the same complete readiness closure as admission."""
@@ -352,10 +462,15 @@ def create_container(settings: Settings | None = None) -> Container:
             storage,
             outcome_committer,
             http_fetcher=http_acquirer,
+            browser_fetcher=browser_runtime,
+            clean_llm=clean_llm,
+            deterministic_ocr=deterministic_ocr,
             inference=inference,
             claude_cli=ns1_cli,
             live_inference=settings.live_inference,
             acquisition_max_response_bytes=settings.acquisition_max_response_bytes,
+            print_max_response_bytes=settings.browser_print_max_bytes,
+            pdf_parser=pdf_parser,
             billing=DefaultBillingService(),
             lifecycle=lifecycle,
             index_retirement=index_retirement,
@@ -424,6 +539,10 @@ def create_container(settings: Settings | None = None) -> Container:
         lifecycle=lifecycle,
         tasks=tasks,
         inference=inference,
+        pdf_parser=pdf_parser,
+        browser_runtime=browser_runtime,
+        clean_llm=clean_llm,
+        deterministic_ocr=deterministic_ocr,
         retrieval_access=retrieval_access,
         retrieval=retrieval,
         outcome_committer=outcome_committer,
@@ -448,7 +567,11 @@ def create_container(settings: Settings | None = None) -> Container:
     container.health = HealthAggregator(
         probe,
         metrics,
+        ttl_seconds=30 if settings.runtime_supply_readiness_required else 0.5,
         cache_fingerprint=lambda: container.tokens.active_fingerprints,
+        required=(
+            HealthAggregator.REQUIRED if settings.runtime_supply_readiness_required else HealthAggregator.BASE_REQUIRED
+        ),
     )
     return container
 

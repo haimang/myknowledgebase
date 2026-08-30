@@ -18,7 +18,7 @@ import json
 import re
 import unicodedata
 from collections.abc import Awaitable, Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Literal
 
 from src.contracts.common.errors import MkbError
@@ -33,18 +33,41 @@ _PDF_TEXT = re.compile(rb"\((?:\\.|[^\\()])*\)\s*(?:Tj|')")
 _PDF_ARRAY_TEXT = re.compile(rb"\[(.*?)\]\s*TJ", re.S)
 _PDF_LITERAL = re.compile(rb"\((?:\\.|[^\\()])*\)")
 
+
 @dataclass(frozen=True, slots=True)
 class BrowserPrintResult:
     """A browser port's real PDF bytes and measured runtime profile identity."""
 
     body: bytes
     profile_identity: str
+    source_evidence: dict[str, object] = field(default_factory=dict)
+    runtime_uid: int | None = None
+    launch_args: tuple[str, ...] = ()
+    timeout_seconds: float | None = None
+    output_limit_bytes: int | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class BrowserRenderResult:
+    """A browser port's executed DOM and measured runtime profile identity."""
+
+    body: str
+    profile_identity: str
+    source_evidence: dict[str, object] = field(default_factory=dict)
+    runtime_uid: int | None = None
+    launch_args: tuple[str, ...] = ()
+    timeout_seconds: float | None = None
+    output_limit_bytes: int | None = None
 
 
 HttpFetcher = Callable[[str], str | bytes | HttpAcquisitionResult | Awaitable[str | bytes | HttpAcquisitionResult]]
 BrowserFetcher = Callable[
     [str],
-    str | bytes | BrowserPrintResult | Awaitable[str | bytes | BrowserPrintResult],
+    str
+    | bytes
+    | BrowserRenderResult
+    | BrowserPrintResult
+    | Awaitable[str | bytes | BrowserRenderResult | BrowserPrintResult],
 ]
 
 # S07 has two explicit construction modes.  Metadata refresh is intentionally
@@ -315,4 +338,3 @@ def _json(value: Any) -> str:
 
 def _digest_bytes(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
-

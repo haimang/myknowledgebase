@@ -22,6 +22,7 @@ def local_mock_settings(
         "native_vector_required": False,
         "inference_probe_enabled": False,
         "live_inference": False,
+        "runtime_supply_readiness_required": False,
     }
     payload.update(kwargs)
     return Settings(**payload)

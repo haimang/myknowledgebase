@@ -69,6 +69,12 @@ class CleanLanguageModel(Protocol):
     ) -> str: ...
 
 
+class DeterministicOcr(Protocol):
+    """Prompt-free local OCR port; model-bound OCR belongs to S11 instead."""
+
+    async def recognize(self, blob: bytes, *, media_type: str) -> object: ...
+
+
 HttpFetch = Callable[[str], str | bytes | Awaitable[str | bytes]]
 BrowserFetch = HttpFetch
 

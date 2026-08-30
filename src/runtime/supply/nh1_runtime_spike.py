@@ -102,6 +102,8 @@ class Nh1RuntimeSpike:
             f"--regid={nobody.pw_gid}",
             "--clear-groups",
             str(self.pdf_text_binary),
+            "-enc",
+            "UTF-8",
             "-",
             "-",
         ]
@@ -169,7 +171,16 @@ class Nh1RuntimeSpike:
                         "capabilities": {
                             "alwaysMatch": {
                                 "browserName": "firefox",
-                                "moz:firefoxOptions": {"args": ["-headless"]},
+                                "moz:firefoxOptions": {
+                                    "args": ["-headless"],
+                                    "prefs": {
+                                        "font.language.group": "x-western",
+                                        "font.name.serif.x-western": "DejaVu Serif",
+                                        "font.name.sans-serif.x-western": "DejaVu Sans",
+                                        "font.name.serif.ja": "DejaVu Serif",
+                                        "font.name.sans-serif.ja": "DejaVu Sans",
+                                    },
+                                },
                             }
                         }
                     },
@@ -180,6 +191,7 @@ class Nh1RuntimeSpike:
                 capabilities = value["capabilities"]
                 browser_pid = int(capabilities["moz:processID"])
                 html = (
+                    "<style>html,body,*{font-family:'DejaVu Sans',sans-serif !important}</style>"
                     "<main id='app'>static shell</main>"
                     f"<script>document.getElementById('app').textContent={marker!r}</script>"
                 )

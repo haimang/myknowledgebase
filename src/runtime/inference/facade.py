@@ -29,6 +29,8 @@ from src.contracts.inference.models import (
     InferenceRequest,
     InferenceResult,
     InferenceUsage,
+    MultimodalGenerateRequest,
+    MultimodalGenerateResponse,
     RerankRequest,
     RerankResponse,
     RerankScore,
@@ -70,7 +72,9 @@ def coerce_json_object_text(text: str) -> str:
     try:
         _, end = decoder.raw_decode(stripped, start)
     except json.JSONDecodeError as exc:
-        raise MkbError("INFERENCE_VALIDATION_STRUCTURED", "Structured model response is not a JSON object", 502) from exc
+        raise MkbError(
+            "INFERENCE_VALIDATION_STRUCTURED", "Structured model response is not a JSON object", 502
+        ) from exc
     rest = stripped[end:].lstrip()
     extra_start = -1
     if rest.startswith("{") or rest.startswith("["):
@@ -111,7 +115,10 @@ class ConcurrencyGate:
         if not 1 <= global_max_in_flight <= 4_096:
             raise ValueError("global_max_in_flight must be between 1 and 4096")
         normalized = dict(capability_limits or {})
-        if any(not isinstance(key, str) or not key or not 1 <= value <= global_max_in_flight for key, value in normalized.items()):
+        if any(
+            not isinstance(key, str) or not key or not 1 <= value <= global_max_in_flight
+            for key, value in normalized.items()
+        ):
             raise ValueError("capability limits must be positive and bounded by the global limit")
         self._global_max = global_max_in_flight
         self._capability_limits = normalized
@@ -224,6 +231,24 @@ class InferenceFacade:
         assert isinstance(response, TextGenerateResponse)
         return response
 
+    async def multimodal_generate(self, request: MultimodalGenerateRequest) -> MultimodalGenerateResponse:
+        """Run prompt-bound media under S11 while keeping its supply gate distinct."""
+
+        if request.binding.capability_key != "text_generate":
+            raise MkbError("INFERENCE_CONFIG_CAPABILITY", "Multimodal generation requires a text binding", 503)
+        operation = getattr(self._adapter, "multimodal_generate", None)
+        if not callable(operation):
+            raise MkbError("INFERENCE_CONFIG_MULTIMODAL_UNAVAILABLE", "Multimodal adapter is unavailable", 503)
+        response = await self._invoke(
+            capability="text_generate",
+            gate_capability="s11.multimodal",
+            request=request,
+            operation=lambda: operation(request),
+            validator=self._validate_multimodal_generation,
+        )
+        assert isinstance(response, MultimodalGenerateResponse)
+        return response
+
     async def structured_generate(
         self,
         request: StructuredGenerateRequest,
@@ -249,9 +274,7 @@ class InferenceFacade:
                 typed_value = validator(value) if validator is not None else None
             except Exception as exc:
                 raise MkbError("INFERENCE_VALIDATION_STRUCTURED", "Structured model response is invalid", 502) from exc
-            return StructuredGenerateResponse.model_validate(
-                {**response.model_dump(mode="python"), "value": value}
-            )
+            return StructuredGenerateResponse.model_validate({**response.model_dump(mode="python"), "value": value})
 
         response = await self._invoke(
             capability="structured_generate",
@@ -350,6 +373,7 @@ class InferenceFacade:
         self,
         *,
         capability: InferenceCapability,
+        gate_capability: str | None = None,
         request: InferenceRequest,
         operation: Callable[[], Awaitable[InferenceResult]],
         validator: Callable[[InferenceResult], _T],
@@ -362,7 +386,8 @@ class InferenceFacade:
         except MkbError as exc:
             await self._record_failure(invocation_uuid, request_digest, capability, request, exc.code, started)
             raise
-        lease = await self._gate.try_acquire(capability)
+        gate_key = gate_capability or capability
+        lease = await self._gate.try_acquire(gate_key)
         if lease is None:
             error = MkbError("INFERENCE_BACKPRESSURE", "Inference concurrency gate is full", 503)
             await self._record_failure(invocation_uuid, request_digest, capability, request, error.code, started)
@@ -391,7 +416,7 @@ class InferenceFacade:
                         await self._gate.release(lease)
                         lease = None
                         await self._sleep(self._retry_delay(attempt))
-                        lease = await self._gate.try_acquire(capability)
+                        lease = await self._gate.try_acquire(gate_key)
                         if lease is None:
                             error = MkbError("INFERENCE_BACKPRESSURE", "Inference concurrency gate is full", 503)
                             await self._record_failure(
@@ -404,11 +429,15 @@ class InferenceFacade:
                         if exc.code == "INFERENCE_TRANSPORT_RETRYABLE"
                         else exc
                     )
-                    await self._record_failure(invocation_uuid, request_digest, capability, request, error.code, started)
+                    await self._record_failure(
+                        invocation_uuid, request_digest, capability, request, error.code, started
+                    )
                     raise error from exc
                 except Exception as exc:
                     error = MkbError("INFERENCE_INTERNAL_UNEXPECTED", "Inference invocation failed", 503)
-                    await self._record_failure(invocation_uuid, request_digest, capability, request, error.code, started)
+                    await self._record_failure(
+                        invocation_uuid, request_digest, capability, request, error.code, started
+                    )
                     raise error from exc
             raise AssertionError("bounded inference loop should always return or raise")
         finally:
@@ -426,7 +455,9 @@ class InferenceFacade:
                 except MkbError as exc:
                     if exc.code != "INFERENCE_TRANSPORT_RETRYABLE" or attempt + 1 == self._max_attempts:
                         if exc.code == "INFERENCE_TRANSPORT_RETRYABLE":
-                            raise MkbError("INFERENCE_TRANSPORT_EXHAUSTED", "Inference transport was exhausted", 503) from exc
+                            raise MkbError(
+                                "INFERENCE_TRANSPORT_EXHAUSTED", "Inference transport was exhausted", 503
+                            ) from exc
                         raise
                     await self._sleep(self._retry_delay(attempt))
             raise AssertionError("bounded inference loop should always return or raise")
@@ -436,7 +467,9 @@ class InferenceFacade:
 
     def _preflight(self, capability: InferenceCapability, binding: InferenceBinding) -> None:
         if binding.capability_key != capability:
-            raise MkbError("INFERENCE_CONFIG_CAPABILITY", "Inference binding capability does not match the request", 503)
+            raise MkbError(
+                "INFERENCE_CONFIG_CAPABILITY", "Inference binding capability does not match the request", 503
+            )
         if getattr(self._adapter, "adapter_kind", None) != binding.adapter_kind:
             self._record_supply_reject("SEC_SUPPLY_UNBOUND")
             raise MkbError("SEC_SUPPLY_UNBOUND", "Inference adapter does not match the frozen binding", 503)
@@ -471,6 +504,16 @@ class InferenceFacade:
                 for document in request.documents
             ]
             material["top_n"] = request.top_n
+        elif isinstance(request, MultimodalGenerateRequest):
+            material["prompt_ref"] = request.prompt_ref
+            material["prompt_digest"] = request.prompt_digest
+            material["media_type"] = request.media_type
+            material["media_digest"] = request.media_digest
+            material["media_coordinate"] = "bounded_bytes" if request.media_bytes is not None else "object_handle"
+            material["purpose"] = request.purpose
+            material["input_digest"] = (
+                stable_digest({"input": request.input_text}) if request.input_text is not None else None
+            )
         elif isinstance(request, GenerateRequest):
             material["prompt_ref"] = request.prompt_ref
             material["prompt_digest"] = request.prompt_digest
@@ -493,10 +536,15 @@ class InferenceFacade:
         ):
             raise MkbError("INFERENCE_SPACE_VIOLATION", "Embedding response conflicts with the frozen Layer A", 422)
         try:
-            if any(len(vector) != raw.dimension or not all(math.isfinite(float(value)) for value in vector) for vector in raw.vectors):
+            if any(
+                len(vector) != raw.dimension or not all(math.isfinite(float(value)) for value in vector)
+                for vector in raw.vectors
+            ):
                 raise ValueError("invalid vector")
         except (TypeError, ValueError) as exc:
-            raise MkbError("INFERENCE_SPACE_VIOLATION", "Embedding response conflicts with the frozen Layer A", 422) from exc
+            raise MkbError(
+                "INFERENCE_SPACE_VIOLATION", "Embedding response conflicts with the frozen Layer A", 422
+            ) from exc
         return raw
 
     @staticmethod
@@ -509,6 +557,13 @@ class InferenceFacade:
     def _validate_text_generation(cls, raw: InferenceResult) -> TextGenerateResponse:
         response = cls._validate_generation(raw)
         return TextGenerateResponse.model_validate(response.model_dump(mode="python"))
+
+    @classmethod
+    def _validate_multimodal_generation(cls, raw: InferenceResult) -> MultimodalGenerateResponse:
+        response = cls._validate_generation(raw)
+        if not response.text.strip():
+            raise MkbError("INFERENCE_VALIDATION_RESPONSE", "Multimodal generation returned empty text", 502)
+        return MultimodalGenerateResponse.model_validate(response.model_dump(mode="python"))
 
     @staticmethod
     def _validate_rerank(raw: InferenceResult) -> RerankResponse:

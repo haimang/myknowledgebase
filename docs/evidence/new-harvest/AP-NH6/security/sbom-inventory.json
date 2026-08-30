@@ -1,0 +1,239 @@
+{
+  "schema_version": "mkb.nh6-runtime-sbom.v1",
+  "generated_at": "2026-08-30T00:00:00Z",
+  "repository_license": "Proprietary",
+  "truth_status": "implementation_pin_only",
+  "host_profile": "ubuntu-24.04-arm64",
+  "capabilities": [
+    {
+      "capability_key": "pdf.parse",
+      "readiness_key": "supply_pdf_parse",
+      "identity": "pdftotext-isolated-subprocess",
+      "pins": [
+        {
+          "component": "poppler-utils",
+          "version": "24.02.0-1ubuntu9.9",
+          "observed_path": "/usr/bin/pdftotext",
+          "sha256": "63895bdf2b686cd38cc68e397161c6273ed23e0a328614d1a03ab84ec3c845e9",
+          "purl": "pkg:deb/ubuntu/poppler-utils@24.02.0-1ubuntu9.9?arch=arm64"
+        }
+      ],
+      "license": {
+        "spdx": "GPL-2.0-or-later",
+        "integration": "separate_executable_subprocess",
+        "linked_into_main_process": false,
+        "review_source": "https://cgit.freedesktop.org/poppler/poppler/tree/COPYING"
+      },
+      "sbom": {
+        "format": "CycloneDX-compatible component record",
+        "component_type": "application"
+      },
+      "cve_baseline": {
+        "reviewed_at": "2026-08-30T00:00:00Z",
+        "status": "security_update_applied",
+        "fixed_package_floor": "24.02.0-1ubuntu9.9",
+        "references": [
+          "https://ubuntu.com/security/notices/USN-8400-1"
+        ],
+        "notes": "CVE-2026-10118 floor applied; parser remains non-root, no-network and resource-capped."
+      },
+      "isolation": "new network namespace; uid 65534; CPU/address-space/fd/output/time caps",
+      "upgrade": "Apply the current Ubuntu Noble security revision, update this exact hash, then rerun NH6-T01/T02/T09/T10.",
+      "rollback": "Restore the previous distro package only with a named owner waiver; disable pdf_parser_enabled meanwhile.",
+      "owner_waiver": null
+    },
+    {
+      "capability_key": "browser.render",
+      "readiness_key": "supply_browser_render",
+      "identity": "firefox-geckodriver-render-profile",
+      "pins": [
+        {
+          "component": "firefox-snap",
+          "version": "154.0.1-1+revision-8801",
+          "observed_path": "/snap/firefox/current/usr/lib/firefox/firefox",
+          "sha256": "9efa736704eba9573028b68963ce31cc90586e0b1fd63edd541df940d9e5a04e",
+          "purl": "pkg:generic/firefox@154.0.1-1?revision=8801"
+        },
+        {
+          "component": "geckodriver",
+          "version": "0.37.1",
+          "observed_path": "/snap/firefox/current/usr/lib/firefox/geckodriver",
+          "sha256": "ae323993bc7a816eacfe0cb58255f250a74ed9037b9b1002190a0129c8ea72cd",
+          "purl": "pkg:github/mozilla/geckodriver@v0.37.1"
+        }
+      ],
+      "license": {
+        "spdx": "MPL-2.0",
+        "integration": "separate_executable_subprocess",
+        "linked_into_main_process": false,
+        "review_source": "https://www.mozilla.org/en-US/about/legal/firefox/"
+      },
+      "sbom": {
+        "format": "CycloneDX-compatible component record",
+        "component_type": "application"
+      },
+      "cve_baseline": {
+        "reviewed_at": "2026-08-30T00:00:00Z",
+        "status": "fixed_release_or_newer",
+        "fixed_release_floor": "154.0",
+        "references": [
+          "https://www.mozilla.org/en-US/security/advisories/mfsa2026-74/",
+          "https://github.com/mozilla/geckodriver/releases/tag/v0.37.1"
+        ],
+        "notes": "Firefox 154.0.1 is newer than the MFSA 2026-74 fixed floor; process remains non-root with native sandbox arguments intact."
+      },
+      "isolation": "uid 65534; no --no-sandbox; S16-prefetched HTML; page HTTP(S) forced to a closed proxy",
+      "upgrade": "Update Firefox/geckodriver together, refresh both hashes, rerun NH6-T03/T05/T09.",
+      "rollback": "Disable browser_runtime_enabled if the paired profile fails readiness; never add --no-sandbox.",
+      "owner_waiver": null
+    },
+    {
+      "capability_key": "browser.print_pdf",
+      "readiness_key": "supply_browser_print_pdf",
+      "identity": "firefox-geckodriver-print-profile",
+      "pins": [
+        {
+          "component": "firefox-snap",
+          "version": "154.0.1-1+revision-8801",
+          "observed_path": "/snap/firefox/current/usr/lib/firefox/firefox",
+          "sha256": "9efa736704eba9573028b68963ce31cc90586e0b1fd63edd541df940d9e5a04e",
+          "purl": "pkg:generic/firefox@154.0.1-1?revision=8801"
+        },
+        {
+          "component": "geckodriver",
+          "version": "0.37.1",
+          "observed_path": "/snap/firefox/current/usr/lib/firefox/geckodriver",
+          "sha256": "ae323993bc7a816eacfe0cb58255f250a74ed9037b9b1002190a0129c8ea72cd",
+          "purl": "pkg:github/mozilla/geckodriver@v0.37.1"
+        }
+      ],
+      "license": {
+        "spdx": "MPL-2.0",
+        "integration": "separate_executable_subprocess",
+        "linked_into_main_process": false,
+        "review_source": "https://github.com/mozilla/geckodriver"
+      },
+      "sbom": {
+        "format": "CycloneDX-compatible component record",
+        "component_type": "application"
+      },
+      "cve_baseline": {
+        "reviewed_at": "2026-08-30T00:00:00Z",
+        "status": "fixed_release_or_newer",
+        "fixed_release_floor": "154.0",
+        "references": [
+          "https://www.mozilla.org/en-US/security/advisories/mfsa2026-74/",
+          "https://github.com/mozilla/geckodriver/releases/tag/v0.37.1"
+        ],
+        "notes": "Shares the reviewed binary but has its own print profile, cap and positive %PDF probe."
+      },
+      "isolation": "same hardened non-root runtime as render; distinct concurrency/timeout/output budget",
+      "upgrade": "Update the shared pair and independently rerun NH6-T04/T05/T09.",
+      "rollback": "Disable browser_runtime_enabled on failed print readiness; render success never waives print failure.",
+      "owner_waiver": null
+    },
+    {
+      "capability_key": "ocr.deterministic",
+      "readiness_key": "supply_ocr_deterministic",
+      "identity": "mkb-glyph5x7-worker",
+      "pins": [
+        {
+          "component": "python3.12-noble",
+          "version": "3.12.3-1ubuntu0.16",
+          "observed_path": "/usr/bin/python3.12",
+          "sha256": "1401f5c1ddd9e8f9d77622113a8d04b5f7ef57c0e3f40dd29db248a5aa91622e",
+          "purl": "pkg:deb/ubuntu/python3.12@3.12.3-1ubuntu0.16?arch=arm64"
+        },
+        {
+          "component": "mkb-glyph-ocr-worker",
+          "version": "sha256:e33a3b2e1c7dfab4d508b451014ceb5cc1c5aa782180f7de992df0798f015ee2",
+          "observed_path": "src/runtime/supply/glyph_ocr_worker.py",
+          "sha256": "e33a3b2e1c7dfab4d508b451014ceb5cc1c5aa782180f7de992df0798f015ee2",
+          "purl": "pkg:generic/mkb-glyph-ocr-worker@e33a3b2e1c7d"
+        },
+        {
+          "component": "poppler-utils-pdf-raster",
+          "version": "24.02.0-1ubuntu9.9",
+          "observed_path": "/usr/bin/pdftoppm",
+          "sha256": "8f7ac21466faa61f10bc76b15de4034d8f473a6e045488a8b605f33aa4e3e782",
+          "purl": "pkg:deb/ubuntu/poppler-utils@24.02.0-1ubuntu9.9?arch=arm64"
+        }
+      ],
+      "license": {
+        "spdx": "Proprietary AND PSF-2.0 AND GPL-2.0-or-later",
+        "integration": "code_owned_worker_plus_separate_executables",
+        "linked_into_main_process": false,
+        "review_source": "https://docs.python.org/3/license.html"
+      },
+      "sbom": {
+        "format": "CycloneDX-compatible component record",
+        "component_type": "application"
+      },
+      "cve_baseline": {
+        "reviewed_at": "2026-08-30T00:00:00Z",
+        "status": "security_updates_applied",
+        "python_fixed_floor": "3.12.3-1ubuntu0.15",
+        "poppler_fixed_floor": "24.02.0-1ubuntu9.9",
+        "references": [
+          "https://lists.ubuntu.com/archives/noble-changes/2026-July/057108.html",
+          "https://ubuntu.com/security/notices/USN-8400-1"
+        ],
+        "notes": "Observed Python package is newer than the 0.15 security floor and Poppler is at the CVE-2026-10118 fixed floor."
+      },
+      "isolation": "new network namespace; uid 65534; CPU/address-space/fd/output/time caps; no PromptRef",
+      "upgrade": "Update distro pins and the code-owned worker hash together; rerun NH6-T07/T09/T10.",
+      "rollback": "Disable deterministic_ocr_enabled on a failed pin/readiness check; no cloud fallback.",
+      "owner_waiver": null
+    },
+    {
+      "capability_key": "s11.multimodal",
+      "readiness_key": "supply_s11_multimodal",
+      "identity": "local-vllm-qwen2.5-vl-7b",
+      "pins": [
+        {
+          "component": "Qwen2.5-VL-7B-Instruct",
+          "version": "cc594898137f460bfe9f0759e9844b3ce807cfb5",
+          "sha256": null,
+          "purl": "pkg:huggingface/Qwen/Qwen2.5-VL-7B-Instruct@cc594898137f460bfe9f0759e9844b3ce807cfb5"
+        },
+        {
+          "component": "mkb-local-vllm-adapter",
+          "version": "sha256:f3fc9d8410b8cae9d364c2bf00026cd07dd1e5ef6d722735996c072a679ee6ab",
+          "observed_path": "src/llm_adapters/local_vllm.py",
+          "sha256": "f3fc9d8410b8cae9d364c2bf00026cd07dd1e5ef6d722735996c072a679ee6ab",
+          "purl": "pkg:generic/mkb-local-vllm-adapter@f3fc9d8410b8"
+        },
+        {
+          "component": "httpx",
+          "version": "0.28.1",
+          "observed_path": "uv.lock",
+          "sha256": "387a6f8965636d8a2eb56ca3cfe15e3352a0c885d55c473a0c45f3d63677c3e5",
+          "purl": "pkg:pypi/httpx@0.28.1"
+        }
+      ],
+      "license": {
+        "spdx": "Apache-2.0",
+        "integration": "local_inference_endpoint_and_python_http_adapter",
+        "linked_into_main_process": true,
+        "review_source": "https://huggingface.co/Qwen/Qwen2.5-VL-7B-Instruct/tree/cc594898137f460bfe9f0759e9844b3ce807cfb5"
+      },
+      "sbom": {
+        "format": "CycloneDX-compatible component record",
+        "component_type": "machine-learning-model"
+      },
+      "cve_baseline": {
+        "reviewed_at": "2026-08-30T00:00:00Z",
+        "status": "weights_pinned_runtime_scan_required_at_deploy",
+        "references": [
+          "https://github.com/vllm-project/vllm/blob/main/LICENSE",
+          "https://huggingface.co/Qwen/Qwen2.5-VL-7B-Instruct/tree/cc594898137f460bfe9f0759e9844b3ce807cfb5"
+        ],
+        "notes": "Model weights are immutable at the recorded revision; the independently deployed local vLLM image must attach its own image digest and scanner report before multimodal_enabled=true."
+      },
+      "isolation": "local S11 endpoint; explicit PromptRef/model/media digest; bounded bytes or S13 handle; no cloud fallback",
+      "upgrade": "Change only to a reviewed immutable model revision plus endpoint image SBOM; rerun NH6-T06/T07/T09/T10.",
+      "rollback": "Set multimodal_enabled=false and expose readiness false; never switch endpoint/model silently.",
+      "owner_waiver": null
+    }
+  ]
+}

@@ -5,13 +5,14 @@ from __future__ import annotations
 import time
 from pathlib import Path
 
+import pytest
 from fastapi.testclient import TestClient
 
 from api.app import create_app
 from src.contracts.common.ids import uuid7
 from src.contracts.common.time import utc_now
-from src.runtime.http_acquisition import HttpAcquisitionResult, redacted_url_identity
 from tests.e2e.test_source_capability_paths import _settings
+from tests.nh6_runtime_support import local_spa_server
 
 SEMANTICS = {
     "realm": "documentation",
@@ -57,30 +58,26 @@ def _wait(client: TestClient, team_uuid: str, task_uuid: str, headers: dict[str,
     return latest
 
 
-def test_four_kinds_persist_nonstub_six_tuple_with_provenance(tmp_path: Path) -> None:
+@pytest.fixture
+def http_origin():  # type: ignore[no-untyped-def]
+    with local_spa_server() as (origin, _marker):
+        yield origin
+
+
+def test_four_kinds_persist_nonstub_six_tuple_with_provenance(tmp_path: Path, http_origin: str) -> None:
     app = create_app(_settings(tmp_path))
     team_uuid = uuid7()
     headers = {"Authorization": "Bearer source-capability-token"}
 
-    def static_fetch(url: str) -> HttpAcquisitionResult:
-        body = b"<article>NH5 HTTP semantic body</article>"
-        identity = redacted_url_identity(url)
-        return HttpAcquisitionResult(
-            body=body,
-            initial_url_identity=identity,
-            final_url_identity=identity,
-            response_media_type="text/html",
-            status_code=200,
-            redirect_count=0,
-        )
-
-    app.state.container.workflow_worker.handler._http_fetcher = static_fetch  # type: ignore[attr-defined]
     with TestClient(app, raise_server_exceptions=True) as client:
-        assert client.post(
-            "/v1/teams",
-            headers=headers,
-            json={"schema_version": "mkb.team.v1", "team_uuid": team_uuid, "name": "nh5-four-kind"},
-        ).status_code == 201
+        assert (
+            client.post(
+                "/v1/teams",
+                headers=headers,
+                json={"schema_version": "mkb.team.v1", "team_uuid": team_uuid, "name": "nh5-four-kind"},
+            ).status_code
+            == 201
+        )
         uploaded = client.post(
             f"/v1/teams/{team_uuid}/objects:upload",
             headers={**headers, "content-type": "text/plain"},
@@ -104,7 +101,7 @@ def test_four_kinds_persist_nonstub_six_tuple_with_provenance(tmp_path: Path) ->
             {
                 "source_kind": "http_resource",
                 "external_key": "nh5-http",
-                "url": "https://public.example/nh5",
+                "url": f"{http_origin}/static",
                 "acquisition_mode": "static",
                 **SEMANTICS,
             },
@@ -169,11 +166,14 @@ def test_public_generic_missing_semantics_rejected_without_task(tmp_path: Path) 
     team_uuid = uuid7()
     headers = {"Authorization": "Bearer source-capability-token"}
     with TestClient(app, raise_server_exceptions=True) as client:
-        assert client.post(
-            "/v1/teams",
-            headers=headers,
-            json={"schema_version": "mkb.team.v1", "team_uuid": team_uuid, "name": "nh5-reject"},
-        ).status_code == 201
+        assert (
+            client.post(
+                "/v1/teams",
+                headers=headers,
+                json={"schema_version": "mkb.team.v1", "team_uuid": team_uuid, "name": "nh5-reject"},
+            ).status_code
+            == 201
+        )
         request = _body(
             team_uuid,
             {"source_kind": "inline_payload", "external_key": "missing-semantics", "content": "body"},

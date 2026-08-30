@@ -1,6 +1,6 @@
 {
   "canonical_manifest": "tests/fixtures/new_harvest/closed_set_manifest.v1.json",
-  "digest": "f7199ee795fabfe332ad1eadd024debe3633fad1d664349763903dc9f8d235c3",
+  "digest": "57c19c6bcb1c4b82bb741886808b8f3b342259aa795dbaae8b285140e1da740a",
   "strategy_keys": [
     "web.deterministic",
     "web.llm_rewrite",

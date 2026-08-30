@@ -13,7 +13,7 @@ CacheFingerprint = Callable[[], object]
 
 
 class HealthAggregator:
-    REQUIRED = (
+    BASE_REQUIRED = (
         "schema_migration",
         "registry_bootstrap",
         "db_primary",
@@ -24,6 +24,14 @@ class HealthAggregator:
         "obs_tables",
         "sec_token_loaded",
     )
+    SUPPLY_REQUIRED = (
+        "supply_pdf_parse",
+        "supply_browser_render",
+        "supply_browser_print_pdf",
+        "supply_ocr_deterministic",
+        "supply_s11_multimodal",
+    )
+    REQUIRED = (*BASE_REQUIRED, *SUPPLY_REQUIRED)
 
     def __init__(
         self,
@@ -32,11 +40,15 @@ class HealthAggregator:
         *,
         ttl_seconds: float = 0.5,
         cache_fingerprint: CacheFingerprint | None = None,
+        required: tuple[str, ...] | None = None,
     ) -> None:
         self._probe = probe
         self._metrics = metrics
         self._ttl_seconds = ttl_seconds
         self._cache_fingerprint = cache_fingerprint
+        self._required = tuple(required or self.REQUIRED)
+        if not self._required or any(name not in self.REQUIRED for name in self._required):
+            raise ValueError("health required components must be a non-empty registered subset")
         self._lock = asyncio.Lock()
         self._inflight: asyncio.Task[dict[str, object]] | None = None
         self._last_result: dict[str, object] | None = None
@@ -104,5 +116,6 @@ class HealthAggregator:
         ]
         for component in components:
             self._metrics.set("mkb_readiness", float(component["ok"]), component=component["name"])
-        is_ready = all(component["ok"] for component in components)
+        required = set(self._required)
+        is_ready = all(component["ok"] for component in components if component["name"] in required)
         return {"status": "ready" if is_ready else "not_ready", "live": True, "components": components}

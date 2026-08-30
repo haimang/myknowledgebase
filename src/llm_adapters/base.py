@@ -9,6 +9,8 @@ from src.contracts.inference.models import (
     EmbeddingResponse,
     GenerateRequest,
     GenerateResponse,
+    MultimodalGenerateRequest,
+    MultimodalGenerateResponse,
 )
 
 
@@ -23,6 +25,8 @@ class InferenceAdapter(Protocol):
     async def embed(self, request: EmbeddingRequest) -> EmbeddingResponse: ...
 
     async def generate(self, request: GenerateRequest) -> GenerateResponse: ...
+
+    async def multimodal_generate(self, request: MultimodalGenerateRequest) -> MultimodalGenerateResponse: ...
 
     async def rerank(self, query: str, documents: list[str]) -> list[float]: ...
 

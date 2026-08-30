@@ -20,15 +20,33 @@ _PROMPT = CleanPrompt(
 
 
 class _DocLLM:
-    async def complete(self, *, prompt: str, text: str | None = None, blob: bytes | None = None, media_type: str | None = None) -> str:
+    async def complete(
+        self, *, prompt: str, text: str | None = None, blob: bytes | None = None, media_type: str | None = None
+    ) -> str:
         del prompt
         if blob:
             return f"OCR:{media_type}:{len(blob)}"
         return f"DOC:{text}"
 
 
+class _DocOcr:
+    async def recognize(self, blob: bytes, *, media_type: str):  # type: ignore[no-untyped-def]
+        assert blob and media_type == "image/png"
+
+        class _Result:
+            text = f"OCR:{media_type}:{len(blob)}"
+
+            @staticmethod
+            def evidence() -> dict[str, object]:
+                return {"producer": "test-deterministic-ocr", "prompt_ref": None}
+
+        return _Result()
+
+
 def test_doc_deterministic_html_extracts_text() -> None:
-    result = clean_deterministic("<p>Hello <b>docs</b></p>", media_type="text/html", capability="clean.extract.deterministic")
+    result = clean_deterministic(
+        "<p>Hello <b>docs</b></p>", media_type="text/html", capability="clean.extract.deterministic"
+    )
     assert "Hello" in result.text
     assert "docs" in result.text
 
@@ -43,13 +61,12 @@ async def test_doc_llm_cleans_general_document() -> None:
 
 
 @pytest.mark.asyncio
-async def test_ocr_succeeds_when_llm_is_injected() -> None:
+async def test_ocr_succeeds_when_deterministic_port_is_injected() -> None:
     result = await clean_document(
         blob=b"\x89PNG\r\n\x1a\nxx",
         media_type="image/png",
         capability="clean.ocr.local",
-        llm=_DocLLM(),
-        prompt=_PROMPT,
+        ocr=_DocOcr(),
     )
     assert result.text.startswith("OCR:image/png:")
     assert result.capability == "clean.ocr.local"

@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import base64
+import hashlib
+import inspect
 import json
 import math
 from collections.abc import Mapping
@@ -20,6 +23,8 @@ from src.contracts.inference.models import (
     GenerateResponse,
     InferenceBinding,
     InferenceUsage,
+    MultimodalGenerateRequest,
+    MultimodalGenerateResponse,
     StructuredGenerateRequest,
 )
 from src.contracts.lsrag.layered_content import load_layered_json_schema
@@ -30,6 +35,12 @@ class SecretValueResolver(Protocol):
     """Structural port shared with S16's logical-slot SecretResolver."""
 
     def resolve(self, slot: str) -> str: ...
+
+
+class MediaHandleResolver(Protocol):
+    """Resolve an already authorized S13 logical handle, never a filesystem path."""
+
+    def resolve_media(self, team_uuid: str, object_handle: str) -> bytes: ...
 
 
 _GRAMMAR_METADATA_KEYS = ("$id", "$schema", "title", "description")
@@ -129,6 +140,7 @@ class LocalVllmAdapter:
         generate_timeout_seconds: float | None = None,
         transport: httpx.AsyncBaseTransport | None = None,
         bearer_token: str | None = None,
+        media_resolver: MediaHandleResolver | None = None,
     ) -> None:
         if bearer_token is not None:
             raise ValueError("raw bearer_token is not supported; configure secret_slot and secret_resolver")
@@ -154,6 +166,7 @@ class LocalVllmAdapter:
             else max(self.timeout_seconds, 180.0)
         )
         self._transport = transport
+        self._media_resolver = media_resolver
         self._client: httpx.AsyncClient | None = None
 
     def _headers(self) -> dict[str, str]:
@@ -245,6 +258,81 @@ class LocalVllmAdapter:
             )
         except ValidationError as exc:
             raise MkbError("INFERENCE_VALIDATION_RESPONSE", "Generation response is malformed", 502) from exc
+
+    async def multimodal_generate(self, request: MultimodalGenerateRequest) -> MultimodalGenerateResponse:
+        """Transport explicit media parts under the request's exact binding."""
+
+        self._assert_binding(request.binding)
+        media = await self._resolve_media(request)
+        encoded = base64.b64encode(media).decode("ascii")
+        user_parts: list[dict[str, Any]] = []
+        if isinstance(request.input_text, str) and request.input_text.strip():
+            user_parts.append({"type": "text", "text": request.input_text})
+        user_parts.append(
+            {
+                "type": "image_url",
+                "image_url": {
+                    "url": f"data:{request.media_type};base64,{encoded}",
+                    "detail": "auto",
+                },
+            }
+        )
+        payload: dict[str, Any] = {
+            "model": request.binding.model_key,
+            "messages": [
+                {"role": "system", "content": request.prompt_text},
+                {"role": "user", "content": user_parts},
+            ],
+            "stream": False,
+            "chat_template_kwargs": {"enable_thinking": False},
+        }
+        response = await self._request(
+            "/v1/chat/completions",
+            payload,
+            timeout=self.generate_timeout_seconds,
+        )
+        self._assert_provider_model(response, request.binding)
+        text = self._completion_content(response)
+        try:
+            return MultimodalGenerateResponse(
+                text=text,
+                model_key=request.binding.model_key,
+                model_version=request.binding.model_version,
+                usage=self._usage(response),
+            )
+        except ValidationError as exc:
+            raise MkbError("INFERENCE_VALIDATION_RESPONSE", "Multimodal response is malformed", 502) from exc
+
+    async def probe_multimodal(self, request: MultimodalGenerateRequest) -> bool:
+        """A positive media call is the probe; model-list presence is insufficient."""
+
+        try:
+            response = await self.multimodal_generate(request)
+            return bool(response.text.strip())
+        except Exception:
+            return False
+
+    async def _resolve_media(self, request: MultimodalGenerateRequest) -> bytes:
+        if request.media_bytes is not None:
+            return request.media_bytes
+        resolver = self._media_resolver
+        if resolver is None or request.object_handle is None:
+            raise MkbError("INFERENCE_MEDIA_HANDLE_UNAVAILABLE", "Media handle resolver is unavailable", 503)
+        try:
+            media = resolver.resolve_media(request.team_uuid, request.object_handle)
+            if inspect.isawaitable(media):
+                media = await media
+        except MkbError:
+            raise
+        except Exception as exc:
+            raise MkbError("INFERENCE_MEDIA_HANDLE_UNAVAILABLE", "Media handle could not be resolved", 503) from exc
+        if not isinstance(media, bytes) or not media:
+            raise MkbError("INFERENCE_MEDIA_INVALID", "Resolved media is empty or invalid", 422)
+        if len(media) > 20 * 1024 * 1024:
+            raise MkbError("INFERENCE_MEDIA_TOO_LARGE", "Resolved media exceeds the request cap", 413)
+        if hashlib.sha256(media).hexdigest() != request.media_digest:
+            raise MkbError("INFERENCE_MEDIA_DIGEST", "Resolved media failed its digest fence", 409)
+        return media
 
     async def rerank(self, query: str, documents: list[str]) -> list[float]:
         # The deployed local vLLM profile may not expose a rerank endpoint.  It
@@ -373,4 +461,4 @@ class LocalVllmAdapter:
         )
 
 
-__all__ = ["LocalVllmAdapter", "SecretValueResolver"]
+__all__ = ["LocalVllmAdapter", "MediaHandleResolver", "SecretValueResolver"]

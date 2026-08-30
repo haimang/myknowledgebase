@@ -60,12 +60,12 @@
 
 ## NH6 — local runtime supply and security
 
-- [-] `NH6-CODE-P1` [代码制作] Phase 1 supply identities（`NH6-01`；`NH6-T09/T10`）。`blocked-by: NH5-CLOSE`（同时满足 NH1 GO + NH3 closure）
-- [ ] `NH6-CODE-P2` [代码制作] Phase 2 isolated PDF parser（`NH6-02`；`NH6-T01/T02`）。`blocked-by: NH6-CODE-P1`
-- [ ] `NH6-CODE-P3` [代码制作] Phase 3 browser render/print 双能力（`NH6-03/04`；`NH6-T03/T04/T05`）。`blocked-by: NH6-CODE-P2`
-- [ ] `NH6-CODE-P4` [代码制作] Phase 4 S11 multimodal + OCR/Vision bindings（`NH6-05/06`；`NH6-T06/T07`）。`blocked-by: NH6-CODE-P3`
-- [ ] `NH6-CODE-P5` [代码制作] Phase 5 gates/readiness/SBOM/default wiring（`NH6-07..10`；`NH6-T08/T09/T10`）。`blocked-by: NH6-CODE-P4`
-- [ ] `NH6-CLOSE` [代码审查，测试与文档回填] `NH6-T01..T10`、S16 签收栏、日志、evidence、closure、commit。`blocked-by: NH6-CODE-P5`
+- [x] `NH6-CODE-P1` [代码制作] Phase 1 supply identities（`NH6-01`；`NH6-T09/T10`）。`blocked-by: NH5-CLOSE`（同时满足 NH1 GO + NH3 closure）
+- [x] `NH6-CODE-P2` [代码制作] Phase 2 isolated PDF parser（`NH6-02`；`NH6-T01/T02`）。`blocked-by: NH6-CODE-P1`
+- [x] `NH6-CODE-P3` [代码制作] Phase 3 browser render/print 双能力（`NH6-03/04`；`NH6-T03/T04/T05`）。`blocked-by: NH6-CODE-P2`
+- [x] `NH6-CODE-P4` [代码制作] Phase 4 S11 multimodal + OCR/Vision bindings（`NH6-05/06`；`NH6-T06/T07`）。`blocked-by: NH6-CODE-P3`
+- [x] `NH6-CODE-P5` [代码制作] Phase 5 gates/readiness/SBOM/default wiring（`NH6-07..10`；`NH6-T08/T09/T10`）。`blocked-by: NH6-CODE-P4`
+- [-] `NH6-CLOSE` [代码审查，测试与文档回填] `NH6-T01..T10`、S16 签收栏、日志、evidence、closure、commit。`blocked-by: NH6-CODE-P5`
 
 ## NH7 — clean capability activation
 

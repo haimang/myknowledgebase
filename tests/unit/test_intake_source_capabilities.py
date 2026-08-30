@@ -17,6 +17,7 @@ from src.contracts.runtime.models import ProcessCommand
 from src.contracts.storage.models import ObjectHandle
 from src.persistence.sqlite_port import SqlitePersistence
 from src.runtime.http_acquisition import HttpAcquirer, HttpAcquisitionResult, redacted_url_identity
+from src.runtime.intake.types import _extract_pdf_text
 from src.runtime.intake_pipeline import IntakePipeline
 from src.runtime.security import EgressPolicy
 from src.services.config_snapshots import ConfigSnapshotService
@@ -51,6 +52,19 @@ class _CatalogFixture:
                 raise AssertionError(sql)
 
         yield _Tx()
+
+
+class _ObservedPdf:
+    def __init__(self, blob: bytes) -> None:
+        self.text, self._evidence = _extract_pdf_text(blob)
+
+    def evidence(self) -> dict[str, object]:
+        return dict(self._evidence)
+
+
+class _PdfObserverPort:
+    async def parse(self, blob: bytes) -> _ObservedPdf:
+        return _ObservedPdf(blob)
 
 
 def _command(process_key: str = "intake.acquire.inline") -> ProcessCommand:
@@ -174,6 +188,7 @@ async def test_http_static_browser_and_pdf_profiles_have_distinct_evidence() -> 
         None,
         http_fetcher=lambda _: static_response,
         browser_fetcher=lambda _: "<main>browser rendered text</main>",
+        pdf_parser=_PdfObserverPort(),
     )  # type: ignore[arg-type]
     command = _command()
 
@@ -213,8 +228,14 @@ async def test_http_static_browser_and_pdf_profiles_have_distinct_evidence() -> 
     assert browser.evidence["representation_kind"] == "rendered"
     assert browser.evidence["browser_profile"] == "injected-fetcher.v1"
 
-    pipeline._http_fetcher = lambda _: pdf
-    acquired_pdf = await pipeline._acquire_content(
+    pdf_pipeline = IntakePipeline(
+        None,
+        _ObjectFixture({}),
+        None,
+        http_fetcher=lambda _: pdf,
+        pdf_parser=_PdfObserverPort(),
+    )  # type: ignore[arg-type]
+    acquired_pdf = await pdf_pipeline._acquire_content(
         command,
         {
             "source_kind": "http_resource",
@@ -229,7 +250,7 @@ async def test_http_static_browser_and_pdf_profiles_have_distinct_evidence() -> 
     )
     assert acquired_pdf.media_type == "application/pdf"
     assert acquired_pdf.evidence["acquisition_capability"] == "intake.acquire.http_static"
-    decoded, _, _ = await pipeline._decode(
+    decoded, _, _ = await pdf_pipeline._decode(
         _command("intake.decode.pdf"),
         {
             "raw_text": acquired_pdf.raw_text,

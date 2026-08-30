@@ -28,6 +28,11 @@ _READINESS_COMPONENTS = frozenset(
         "inference_binding",
         "obs_tables",
         "sec_token_loaded",
+        "supply_pdf_parse",
+        "supply_browser_render",
+        "supply_browser_print_pdf",
+        "supply_ocr_deterministic",
+        "supply_s11_multimodal",
     }
 )
 _OUTBOX_KINDS = frozenset(
@@ -35,9 +40,7 @@ _OUTBOX_KINDS = frozenset(
 )
 _CAPABILITIES = frozenset({"embed", "rerank", "structured_generate", "text_generate"})
 _COMMON_RESULTS = frozenset({"success", "conflict", "error", "ok", "noop", "fail"})
-_OBS_TABLES = frozenset(
-    {"mkb_domain_events", "mkb_ops_diagnostic_logs", "mkb_security_audit_events"}
-)
+_OBS_TABLES = frozenset({"mkb_domain_events", "mkb_ops_diagnostic_logs", "mkb_security_audit_events"})
 
 
 @dataclass(frozen=True, slots=True)
@@ -83,9 +86,7 @@ _METRIC_CATALOG = MappingProxyType(
         ),
         "mkb_process_running": _metric("mkb_process_running", "gauge"),
         "mkb_workflow_legacy_pin_total": _metric("mkb_workflow_legacy_pin_total", "counter"),
-        "mkb_outbox_depth": _metric(
-            "mkb_outbox_depth", "gauge", labels=("kind",), allowed={"kind": _OUTBOX_KINDS}
-        ),
+        "mkb_outbox_depth": _metric("mkb_outbox_depth", "gauge", labels=("kind",), allowed={"kind": _OUTBOX_KINDS}),
         "mkb_outbox_dead_total": _metric(
             "mkb_outbox_dead_total", "gauge", labels=("kind",), allowed={"kind": _OUTBOX_KINDS}
         ),
@@ -94,7 +95,10 @@ _METRIC_CATALOG = MappingProxyType(
             "mkb_readiness", "gauge", labels=("component",), allowed={"component": _READINESS_COMPONENTS}
         ),
         "mkb_repair_applied_total": _metric(
-            "mkb_repair_applied_total", "counter", labels=("outcome",), allowed={"outcome": frozenset({"ok", "noop", "fail"})}
+            "mkb_repair_applied_total",
+            "counter",
+            labels=("outcome",),
+            allowed={"outcome": frozenset({"ok", "noop", "fail"})},
         ),
         "mkb_diagnostic_drop_total": _metric(
             "mkb_diagnostic_drop_total",
@@ -135,19 +139,28 @@ _METRIC_CATALOG = MappingProxyType(
             "mkb_config_ops_reload_total", "counter", labels=("result",), allowed={"result": frozenset({"ok", "fail"})}
         ),
         "mkb_sec_auth_total": _metric(
-            "mkb_sec_auth_total", "counter", labels=("result",), allowed={"result": frozenset({"missing", "invalid", "ok"})}
+            "mkb_sec_auth_total",
+            "counter",
+            labels=("result",),
+            allowed={"result": frozenset({"missing", "invalid", "ok"})},
         ),
         "mkb_sec_rate_limited_total": _metric(
             "mkb_sec_rate_limited_total", "counter", labels=("dim",), allowed={"dim": frozenset({"token", "ip"})}
         ),
         "mkb_sec_rate_limiter_degraded": _metric("mkb_sec_rate_limiter_degraded", "gauge"),
         "mkb_sec_egress_denied_total": _metric(
-            "mkb_sec_egress_denied_total", "counter", labels=("reason",), allowed={"reason": frozenset({"policy", "redirect"})}
+            "mkb_sec_egress_denied_total",
+            "counter",
+            labels=("reason",),
+            allowed={"reason": frozenset({"policy", "redirect"})},
         ),
         "mkb_sec_secret_unresolved_total": _metric("mkb_sec_secret_unresolved_total", "counter"),
         "mkb_sec_audit_write_fail_total": _metric("mkb_sec_audit_write_fail_total", "counter"),
         "mkb_sec_token_reload_total": _metric(
-            "mkb_sec_token_reload_total", "counter", labels=("result",), allowed={"result": frozenset({"ok", "fail", "last_good"})}
+            "mkb_sec_token_reload_total",
+            "counter",
+            labels=("result",),
+            allowed={"result": frozenset({"ok", "fail", "last_good"})},
         ),
         "mkb_sec_supply_reject_total": _metric(
             "mkb_sec_supply_reject_total",

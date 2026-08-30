@@ -101,13 +101,20 @@ async def test_runtime_clean_step_delegates_to_intake() -> None:
 
 
 @pytest.mark.asyncio
-async def test_runtime_ocr_uses_injected_intake_llm() -> None:
-    class _LLM:
-        async def complete(self, **kwargs: object) -> str:
-            del kwargs
-            return "recognized letters"
+async def test_runtime_ocr_uses_prompt_free_deterministic_port() -> None:
+    class _Result:
+        text = "recognized letters"
 
-    pipeline = IntakePipeline(None, None, None, clean_llm=_LLM(), clean_prompt=_PROMPT)  # type: ignore[arg-type]
+        @staticmethod
+        def evidence() -> dict[str, object]:
+            return {"producer": "test-deterministic-ocr", "prompt_ref": None}
+
+    class _OCR:
+        async def recognize(self, _blob: bytes, *, media_type: str) -> _Result:
+            assert media_type == "image/png"
+            return _Result()
+
+    pipeline = IntakePipeline(None, None, None, deterministic_ocr=_OCR())  # type: ignore[arg-type]
     command = _command("clean.ocr.local")
     state = {
         "decoded_text": "",
@@ -190,8 +197,19 @@ async def test_http_pdf_text_layer_never_enters_web_sanitizer(monkeypatch: pytes
 
 @pytest.mark.asyncio
 async def test_runtime_pdf_ocr_uses_pdf_strategy() -> None:
-    llm = _RecordingLLM("scanned PDF text")
-    pipeline = IntakePipeline(None, None, None, clean_llm=llm, clean_prompt=_PROMPT)  # type: ignore[arg-type]
+    class _Result:
+        text = "scanned PDF text"
+
+        @staticmethod
+        def evidence() -> dict[str, object]:
+            return {"producer": "test-deterministic-ocr", "prompt_ref": None}
+
+    class _OCR:
+        async def recognize(self, _blob: bytes, *, media_type: str) -> _Result:
+            assert media_type == "application/pdf"
+            return _Result()
+
+    pipeline = IntakePipeline(None, None, None, deterministic_ocr=_OCR())  # type: ignore[arg-type]
     material, _extra, _callback = await pipeline._clean(
         _command("clean.ocr.local"),
         {

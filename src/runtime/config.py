@@ -5,7 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Literal
 
-from pydantic import Field, SecretStr
+from pydantic import Field, SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -46,6 +46,21 @@ class Settings(BaseSettings):
     ns1_cli_mode: Literal["disabled", "stub", "subprocess"] = "stub"
     ns1_cli_executable: str = "claude"
     inference_generate_timeout_seconds: float = Field(default=180, ge=1, le=3600)
+    multimodal_enabled: bool = False
+    multimodal_model_key: str = Field(default="Qwen/Qwen2.5-VL-7B-Instruct", min_length=1, max_length=256)
+    multimodal_model_version: str = Field(
+        default="cc594898137f460bfe9f0759e9844b3ce807cfb5",
+        min_length=1,
+        max_length=128,
+    )
+    multimodal_concurrency: int = Field(default=2, ge=1, le=64)
+    deterministic_ocr_enabled: bool = True
+    deterministic_ocr_timeout_seconds: float = Field(default=10, ge=0.1, le=300)
+    deterministic_ocr_concurrency: int = Field(default=2, ge=1, le=64)
+    # Legacy/offline profiles keep these components visible but non-required.
+    # A new-harvest deployment explicitly enables the full supply readiness
+    # closure together with its pinned multimodal endpoint.
+    runtime_supply_readiness_required: bool = False
     dispatch_local_running: int = Field(default=2, ge=1, le=64)
     dispatch_local_queued: int = Field(default=6, ge=1, le=256)
     dispatch_ni_running: int = Field(default=2, ge=1, le=64)
@@ -65,6 +80,19 @@ class Settings(BaseSettings):
     egress_allow_private_default: bool = False
     egress_allow_http: bool = False
     acquisition_max_response_bytes: int = Field(default=8 * 1024 * 1024, ge=1, le=64 * 1024 * 1024)
+    pdf_parser_enabled: bool = True
+    pdf_parser_binary: Path | None = None
+    pdf_parser_timeout_seconds: float = Field(default=8, ge=0.1, le=300)
+    pdf_parser_concurrency: int = Field(default=2, ge=1, le=64)
+    browser_runtime_enabled: bool = True
+    browser_binary: Path | None = None
+    browser_webdriver_binary: Path | None = None
+    browser_render_timeout_seconds: float = Field(default=20, ge=1, le=300)
+    browser_print_timeout_seconds: float = Field(default=30, ge=1, le=300)
+    browser_render_max_bytes: int = Field(default=8 * 1024 * 1024, ge=1, le=64 * 1024 * 1024)
+    browser_print_max_bytes: int = Field(default=32 * 1024 * 1024, ge=1, le=256 * 1024 * 1024)
+    browser_render_concurrency: int = Field(default=2, ge=1, le=64)
+    browser_print_concurrency: int = Field(default=1, ge=1, le=64)
     http_trusted_hosts: str = "localhost,127.0.0.1"
     object_gc_enabled: bool = True
     object_gc_grace_seconds: int = Field(default=24 * 60 * 60, ge=1, le=365 * 24 * 60 * 60)
@@ -88,6 +116,14 @@ class Settings(BaseSettings):
     obs_retention_security_audit_days: int = Field(default=180, ge=1, le=36_500)
     obs_retention_interval_seconds: int = Field(default=60 * 60, ge=1, le=24 * 60 * 60)
     obs_retention_batch_size: int = Field(default=1_000, ge=1, le=10_000)
+
+    @field_validator("multimodal_model_key", "multimodal_model_version")
+    @classmethod
+    def reject_floating_multimodal_identity(cls, value: str) -> str:
+        normalized = value.strip()
+        if not normalized or normalized.casefold() == "latest" or normalized.casefold().endswith(":latest"):
+            raise ValueError("multimodal model identity must be pinned and cannot use latest")
+        return normalized
 
     @property
     def resolved_database_path(self) -> Path:

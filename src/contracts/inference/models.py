@@ -8,10 +8,11 @@ before handing a result to a domain service.
 
 from __future__ import annotations
 
+import hashlib
 import json
 from typing import Annotated, Any, Literal
 
-from pydantic import Field, field_validator
+from pydantic import Field, field_validator, model_validator
 
 from src.contracts.common.models import PayloadExtraModel, StrictModel
 
@@ -65,7 +66,21 @@ class InferenceRequest(PayloadExtraModel):
     def _payload_extra_is_not_a_hidden_prompt_or_secret(cls, value: dict[str, Any]) -> dict[str, Any]:
         # ``payload_extra`` is an extension seam, not a way to bypass the
         # explicit request fields or sneak material into invocation evidence.
-        forbidden = {"authorization", "token", "password", "secret", "api_key", "prompt", "content", "vector"}
+        forbidden = {
+            "authorization",
+            "token",
+            "password",
+            "secret",
+            "api_key",
+            "prompt",
+            "content",
+            "vector",
+            "media",
+            "media_bytes",
+            "image",
+            "blob",
+            "object_handle",
+        }
         if any(str(key).casefold() in forbidden for key in value):
             raise ValueError("inference payload_extra contains a forbidden key")
         try:
@@ -115,6 +130,34 @@ class TextGenerateRequest(GenerateRequest):
 class StructuredGenerateRequest(GenerateRequest):
     json_schema_ref: BoundedIdentifier
     json_schema_digest: Digest
+
+
+class MultimodalGenerateRequest(InferenceRequest):
+    """Prompt-bound media request; bytes never hide in input_text/payload_extra."""
+
+    prompt_ref: BoundedIdentifier
+    prompt_digest: Digest
+    prompt_text: Annotated[str, Field(min_length=1, max_length=1_000_000)]
+    input_text: Annotated[str | None, Field(default=None, max_length=1_000_000)] = None
+    media_type: Annotated[str, Field(pattern=r"^(application/pdf|image/[a-z0-9.+-]+)$")]
+    media_digest: Digest
+    media_bytes: bytes | None = Field(default=None, max_length=20 * 1024 * 1024)
+    object_handle: Annotated[
+        str | None,
+        Field(default=None, pattern=r"^mkbobj:v1:[a-zA-Z0-9._:-]+$"),
+    ] = None
+    purpose: Literal["ocr", "vision", "document_understanding"]
+
+    @model_validator(mode="after")
+    def validate_media_coordinate(self) -> MultimodalGenerateRequest:
+        if (self.media_bytes is None) == (self.object_handle is None):
+            raise ValueError("exactly one of media_bytes or object_handle is required")
+        if self.media_bytes is not None:
+            if not self.media_bytes:
+                raise ValueError("media_bytes must not be empty")
+            if hashlib.sha256(self.media_bytes).hexdigest() != self.media_digest:
+                raise ValueError("media_bytes do not match media_digest")
+        return self
 
 
 class InferenceResult(StrictModel):
@@ -174,6 +217,10 @@ class StructuredGenerateResponse(GenerateResponse):
         return value
 
 
+class MultimodalGenerateResponse(GenerateResponse):
+    pass
+
+
 class InferenceInvocationRecord(StrictModel):
     """The safe, D04-shaped subset written by an injectable invocation sink."""
 
@@ -205,6 +252,8 @@ __all__ = [
     "InferenceResult",
     "InferenceUsage",
     "InvocationContext",
+    "MultimodalGenerateRequest",
+    "MultimodalGenerateResponse",
     "RerankDocument",
     "RerankRequest",
     "RerankResponse",

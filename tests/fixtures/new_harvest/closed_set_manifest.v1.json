@@ -1,5 +1,5 @@
 {
-  "digest": "f7199ee795fabfe332ad1eadd024debe3633fad1d664349763903dc9f8d235c3",
+  "digest": "57c19c6bcb1c4b82bb741886808b8f3b342259aa795dbaae8b285140e1da740a",
   "intent_illegal": [
     {
       "disposition": "rejected_before_task",
@@ -148,10 +148,10 @@
       "channel": "pdf",
       "clean_capability": "clean.ocr.local",
       "definition_version": "v1",
-      "llm_required": true,
+      "llm_required": false,
       "max_input_bytes": 20971520,
-      "prompt_key": "promptA.default",
-      "prompt_version": "v1",
+      "prompt_key": null,
+      "prompt_version": null,
       "strategy_key": "pdf.ocr"
     },
     {
@@ -191,10 +191,10 @@
       "channel": "doc",
       "clean_capability": "clean.ocr.local",
       "definition_version": "v1",
-      "llm_required": true,
+      "llm_required": false,
       "max_input_bytes": 20971520,
-      "prompt_key": "promptA.default",
-      "prompt_version": "v1",
+      "prompt_key": null,
+      "prompt_version": null,
       "strategy_key": "doc.ocr"
     },
     {

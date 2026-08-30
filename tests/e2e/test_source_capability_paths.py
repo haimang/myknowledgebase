@@ -7,6 +7,7 @@ import json
 import time
 from pathlib import Path
 
+import pytest
 from fastapi.testclient import TestClient
 
 from api.app import create_app
@@ -14,8 +15,8 @@ from src.contracts.common.ids import uuid7
 from src.contracts.common.time import utc_now
 from src.contracts.storage.models import ObjectHandle
 from src.runtime.config import Settings
-from src.runtime.http_acquisition import HttpAcquisitionResult, redacted_url_identity
 from src.storage.local_store import LocalObjectStore
+from tests.nh6_runtime_support import local_spa_server
 
 
 def _settings(tmp_path: Path) -> Settings:
@@ -30,6 +31,10 @@ def _settings(tmp_path: Path) -> Settings:
         native_vector_required=False,
         rate_limit_ip_per_min=1_000,
         rate_limit_token_per_min=2_000,
+        egress_allow_http=True,
+        egress_allow_literal_ip=True,
+        egress_allow_private_default=True,
+        runtime_supply_readiness_required=False,
     )
 
 
@@ -71,31 +76,21 @@ def _await_terminal(client: TestClient, team_uuid: str, task_uuid: str, headers:
     return latest
 
 
-def test_local_static_browser_and_pdf_sources_produce_distinct_frozen_acquisition_evidence(tmp_path: Path) -> None:
+@pytest.fixture
+def source_origin():  # type: ignore[no-untyped-def]
+    with local_spa_server() as (origin, _marker):
+        yield origin
+
+
+def test_local_static_browser_and_pdf_sources_produce_distinct_frozen_acquisition_evidence(
+    tmp_path: Path,
+    source_origin: str,
+) -> None:
     token = "source-capability-token"
     team_uuid = uuid7()
     app = create_app(_settings(tmp_path))
-    container = app.state.container
 
-    static_url = "https://public.example/static?opaque=not-persisted"
-    static_bytes = b"<main>static capability text</main>"
-    pdf_bytes = b"%PDF-1.4\n1 0 obj << /Type /Page >>\nstream\nBT (pdf capability text) Tj ET\nendstream\nendobj\n"
-
-    def static_fetcher(url: str) -> HttpAcquisitionResult | bytes:
-        if url.endswith("/document.pdf"):
-            return pdf_bytes
-        return HttpAcquisitionResult(
-            body=static_bytes,
-            initial_url_identity=redacted_url_identity(url),
-            final_url_identity=redacted_url_identity(url),
-            response_media_type="text/html; charset=utf-8",
-            status_code=200,
-            redirect_count=0,
-        )
-
-    pipeline = container.workflow_worker.handler
-    pipeline._http_fetcher = static_fetcher  # type: ignore[attr-defined]
-    pipeline._browser_fetcher = lambda _: "<main>browser capability text</main>"  # type: ignore[attr-defined]
+    static_url = f"{source_origin}/static?opaque=not-persisted"
     headers = {"Authorization": f"Bearer {token}"}
     cases = [
         (
@@ -135,7 +130,7 @@ def test_local_static_browser_and_pdf_sources_produce_distinct_frozen_acquisitio
                 "channel": "general",
                 "source_name": "test-fixture",
                 "external_key": "source-browser",
-                "url": "https://public.example/browser",
+                "url": f"{source_origin}/spa",
                 "acquisition_mode": "browser",
             },
             "intake.acquire.http_browser",
@@ -149,7 +144,7 @@ def test_local_static_browser_and_pdf_sources_produce_distinct_frozen_acquisitio
                 "channel": "general",
                 "source_name": "test-fixture",
                 "external_key": "source-pdf",
-                "url": "https://public.example/document.pdf",
+                "url": f"{source_origin}/document.pdf",
                 "acquisition_mode": "pdf",
             },
             "intake.acquire.http_static",
@@ -246,7 +241,7 @@ def test_local_static_browser_and_pdf_sources_produce_distinct_frozen_acquisitio
 def test_local_image_reaches_the_exact_ocr_workflow_then_fails_closed_when_unconfigured(tmp_path: Path) -> None:
     token = "source-capability-token"
     team_uuid, task_uuid, trace_uuid = uuid7(), uuid7(), uuid7()
-    app = create_app(_settings(tmp_path))
+    app = create_app(_settings(tmp_path).model_copy(update={"deterministic_ocr_enabled": False}))
     headers = {"Authorization": f"Bearer {token}"}
 
     with TestClient(app, raise_server_exceptions=True) as client:

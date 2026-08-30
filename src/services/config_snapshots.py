@@ -183,6 +183,21 @@ class ConfigSnapshotService:
         l2: dict[str, Any] = {
             "inference_vllm_base_url": self.settings.inference_vllm_base_url,
             "inference_mode": "live" if self.settings.live_inference else "deterministic",
+            "multimodal_supply": {
+                "enabled": self.settings.multimodal_enabled,
+                "capability": "s11.multimodal",
+                "model_key": self.settings.multimodal_model_key,
+                "model_version": self.settings.multimodal_model_version,
+                "binding_digest": stable_digest(
+                    {
+                        "capability": "text_generate",
+                        "supply_capability": "s11.multimodal",
+                        "adapter_kind": "local_vllm",
+                        "model_key": self.settings.multimodal_model_key,
+                        "model_version": self.settings.multimodal_model_version,
+                    }
+                ),
+            },
         }
         if isinstance(request.payload, IntakeIngestPayload):
             l2["compression_channel"] = compression_channel
@@ -517,11 +532,15 @@ class ConfigSnapshotService:
         if request.request_intent in {"intake.deactivate", "intake.reactivate", "intake.delete"}:
             assert isinstance(request.payload, IntakeLifecyclePayload)
             return {
-                "target": (await self.targets.resolve_lifecycle_target(request.team_uuid, request.payload)).as_manifest()
+                "target": (
+                    await self.targets.resolve_lifecycle_target(request.team_uuid, request.payload)
+                ).as_manifest()
             }
         if request.request_intent == "index.rebuild":
             assert isinstance(request.payload, IndexRebuildPayload)
-            return {"scope": (await self.targets.resolve_index_rebuild(request.team_uuid, request.payload)).as_manifest()}
+            return {
+                "scope": (await self.targets.resolve_index_rebuild(request.team_uuid, request.payload)).as_manifest()
+            }
         raise MkbError("workflow-intent-not-supported", "No workflow is registered for this Task intent", 422)
 
     def _load_l0(self) -> dict[str, Any]:

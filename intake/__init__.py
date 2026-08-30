@@ -12,7 +12,15 @@ from typing import Any
 from intake.api import clean_registered_api_members
 from intake.doc import clean_deterministic, clean_document
 from intake.pdf import clean_pdf
-from intake.types import BrowserFetch, CleanLanguageModel, CleanMember, CleanPrompt, CleanResult, HttpFetch
+from intake.types import (
+    BrowserFetch,
+    CleanLanguageModel,
+    CleanMember,
+    CleanPrompt,
+    CleanResult,
+    DeterministicOcr,
+    HttpFetch,
+)
 from intake.web import clean_web
 from src.contracts.common.errors import MkbError
 from src.contracts.intake.strategies import CleanStrategyKey
@@ -43,8 +51,10 @@ async def dispatch_clean(
     provider: str | None = None,
     operation: str | None = None,
     definition_version: str | None = None,
+    team_uuid: str | None = None,
     strategy: str | None = None,
     llm: CleanLanguageModel | None = None,
+    ocr: DeterministicOcr | None = None,
     http_fetch: HttpFetch | None = None,
     browser_fetch: BrowserFetch | None = None,
     prompt: CleanPrompt | None = None,
@@ -57,7 +67,9 @@ async def dispatch_clean(
         if members is None:
             raise MkbError("SCATTER_STATE_INVALID", "Registered API clean map lacks members", 422)
         if not all(isinstance(value, str) and value for value in (provider, operation, definition_version)):
-            raise MkbError("CLEAN_PROVIDER_OPERATION_REQUIRED", "Registered API clean requires an exact provider binding", 422)
+            raise MkbError(
+                "CLEAN_PROVIDER_OPERATION_REQUIRED", "Registered API clean requires an exact provider binding", 422
+            )
         return clean_registered_api_members(
             members,
             provider=provider,
@@ -86,7 +98,9 @@ async def dispatch_clean(
             capability=capability,
             strategy=pdf_strategy,
             llm=llm,
+            ocr=ocr,
             prompt=prompt,
+            team_uuid=team_uuid,
         )
     if capability in {"clean.ocr.local", "clean.extract.vision", "clean.extract.doc_llm"} or (
         isinstance(media_type, str) and media_type.startswith("image/")
@@ -105,7 +119,9 @@ async def dispatch_clean(
             capability=capability,
             strategy=document_strategy,
             llm=llm,
+            ocr=ocr,
             prompt=prompt,
+            team_uuid=team_uuid,
         )
     if capability in {"clean.extract.web", "clean.extract.web_llm"}:
         kind = "rendered" if representation == "rendered" else "static"
@@ -128,7 +144,9 @@ async def dispatch_clean(
     if not isinstance(text, str):
         raise MkbError("PIPELINE_INPUT_INVALID", "Decoded representation is unavailable", 422)
     if strategy not in {None, CleanStrategyKey.DOC_DETERMINISTIC.value}:
-        raise MkbError("CLEAN_STRATEGY_CAPABILITY_MISMATCH", "Deterministic strategy does not match the Process capability", 409)
+        raise MkbError(
+            "CLEAN_STRATEGY_CAPABILITY_MISMATCH", "Deterministic strategy does not match the Process capability", 409
+        )
     return clean_deterministic(text, media_type=media_type, capability=capability)
 
 

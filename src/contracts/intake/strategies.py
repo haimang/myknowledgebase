@@ -100,10 +100,8 @@ CLEAN_STRATEGY_DEFINITIONS: tuple[CleanStrategyDefinition, ...] = (
         channel="pdf",
         acquire_capabilities=("intake.acquire.local_object", "intake.acquire.http_static"),
         clean_capability="clean.ocr.local",
-        llm_required=True,
+        llm_required=False,
         browser_required=False,
-        prompt_key="promptA.default",
-        prompt_version="v1",
         max_input_bytes=_MIB20,
     ),
     CleanStrategyDefinition(
@@ -131,10 +129,8 @@ CLEAN_STRATEGY_DEFINITIONS: tuple[CleanStrategyDefinition, ...] = (
         channel="doc",
         acquire_capabilities=("intake.acquire.local_object",),
         clean_capability="clean.ocr.local",
-        llm_required=True,
+        llm_required=False,
         browser_required=False,
-        prompt_key="promptA.default",
-        prompt_version="v1",
         max_input_bytes=_MIB20,
     ),
     CleanStrategyDefinition(

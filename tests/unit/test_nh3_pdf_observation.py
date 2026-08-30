@@ -12,6 +12,19 @@ from src.runtime.intake.pipeline import IntakePipeline
 from src.runtime.intake.types import _extract_pdf_text
 
 
+class _ObservedPdf:
+    def __init__(self, blob: bytes) -> None:
+        self.text, self._evidence = _extract_pdf_text(blob)
+
+    def evidence(self) -> dict[str, object]:
+        return dict(self._evidence)
+
+
+class _RepresentationObserverPort:
+    async def parse(self, blob: bytes) -> _ObservedPdf:
+        return _ObservedPdf(blob)
+
+
 @pytest.mark.parametrize(
     ("blob", "expected", "expected_text"),
     [
@@ -59,7 +72,7 @@ def _command() -> ProcessCommand:
 async def test_absent_pdf_layer_is_successful_decode_observation() -> None:
     blob = b"%PDF-1.4\n1 0 obj << /Type /Page /Subtype /Image >> endobj\n%%EOF"
     raw_digest = stable_digest({"fixture": "absent"})
-    pipeline = IntakePipeline(None, None, None)  # type: ignore[arg-type]
+    pipeline = IntakePipeline(None, None, None, pdf_parser=_RepresentationObserverPort())  # type: ignore[arg-type]
     material, _, _ = await pipeline._decode(  # noqa: SLF001
         _command(),
         {
