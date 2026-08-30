@@ -83,6 +83,12 @@ def test_fanin_recovery_uses_application_port_and_finishes_once(tmp_path: Path) 
         assert root["summary_completed_at"]
 
 
+def test_fanin_crash_repairs_via_persistence_port(tmp_path: Path) -> None:
+    """NH9-T05 🔱 alias for the NH1-T02 Port recovery node."""
+
+    test_fanin_recovery_uses_application_port_and_finishes_once(tmp_path)
+
+
 def test_nh1_recovery_files_forbid_driver_bypass() -> None:
     forbidden = ("import " + "sqlite3", "sqlite3" + ".connect")
     for path in (
