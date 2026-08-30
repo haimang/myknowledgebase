@@ -167,7 +167,7 @@ def test_documentation_domain_flavor_resolves_to_documentation_prompt_cluster() 
 
     selection = service._resolve_prompt_selection(_catalog_rows(), SimpleNamespace(payload=payload))
 
-    assert selection["clean"]["prompt_id"] == "promptA.documentation.default"
+    assert selection["clean"]["prompt_id"] == "promptA.default"
     assert selection["markdown"]["prompt_id"] == "promptB.documentation.qna"
     assert selection["json"]["prompt_id"] == "promptB.documentation.g1"
     assert selection["json"]["granularity_set"] == [0, 1]

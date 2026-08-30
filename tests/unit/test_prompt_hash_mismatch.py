@@ -45,6 +45,28 @@ async def test_prompt_byte_drift_after_bootstrap_is_prompt_hash_mismatch(tmp_pat
 
 
 @pytest.mark.asyncio
+async def test_promptA_clean_byte_drift_is_prompt_hash_mismatch(tmp_path: Path) -> None:
+    source_prompts = Path(__file__).resolve().parents[2] / "data" / "prompts"
+    prompt_root = tmp_path / "prompts"
+    shutil.copytree(source_prompts, prompt_root)
+    persistence = SqlitePersistence(tmp_path / "prompt-a.sqlite3", Path("src/persistence/migrations"))
+    registry = RegistryService(persistence, prompt_root)
+    try:
+        await persistence.migrate()
+        await registry.bootstrap()
+        body, digest = await registry.load_prompt("promptA.default", "v1")
+        assert body
+        assert len(digest) == 64
+        target = prompt_root / "prompt-a-clean-v1.md"
+        target.write_text(body + "\n# drifted promptA\n", encoding="utf-8")
+        with pytest.raises(MkbError) as exc_info:
+            await registry.load_prompt("promptA.default", "v1")
+        assert exc_info.value.code == "PROMPT_HASH_MISMATCH"
+    finally:
+        await persistence.close()
+
+
+@pytest.mark.asyncio
 async def test_live_generation_config_fails_on_prompt_hash_mismatch(tmp_path: Path) -> None:
     """IntakePipeline frozen L4 prompt check uses the same fail-closed code."""
 

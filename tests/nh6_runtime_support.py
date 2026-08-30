@@ -51,6 +51,18 @@ class _SpaHandler(BaseHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(body)
             return
+        if self.path.startswith("/empty-spa"):
+            body = (
+                "<!doctype html><html><body><main id='app'></main>"
+                f"<script>document.getElementById('app').textContent={self.marker!r}</script>"
+                "</body></html>"
+            ).encode()
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+            return
         egress_script = (
             f"fetch('http://{self.headers.get('host')}/beacon').catch(() => undefined);"
             if self.path == "/egress-attempt"

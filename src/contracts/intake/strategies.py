@@ -146,6 +146,14 @@ CLEAN_STRATEGY_DEFINITIONS: tuple[CleanStrategyDefinition, ...] = (
     ),
 )
 
+# M-NH-07: new Tasks freeze this catalog identity. Historical ids remain
+# loadable for exact replay of already-sealed snapshots.
+CANONICAL_CLEAN_PROMPT_KEY = "promptA.default"
+CANONICAL_CLEAN_PROMPT_VERSION = "v1"
+HISTORICAL_CLEAN_PROMPT_KEYS = frozenset(
+    {"promptA.default", "promptA.clean", "promptA.documentation.default"}
+)
+
 _BY_KEY = {definition.strategy_key.value: definition for definition in CLEAN_STRATEGY_DEFINITIONS}
 
 # Graph step_key is the binding identity. One process_key may serve two strategies.
@@ -221,10 +229,13 @@ def derive_selected_clean_strategy(
 
 
 __all__ = [
+    "CANONICAL_CLEAN_PROMPT_KEY",
+    "CANONICAL_CLEAN_PROMPT_VERSION",
     "CLEAN_STEP_STRATEGIES",
     "CLEAN_STRATEGY_DEFINITIONS",
     "CleanStrategyDefinition",
     "CleanStrategyKey",
+    "HISTORICAL_CLEAN_PROMPT_KEYS",
     "clean_strategy_manifest_digest",
     "derive_selected_clean_strategy",
     "resolve_bound_clean_strategy",

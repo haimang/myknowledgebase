@@ -12,7 +12,13 @@ from intake.types import CleanLanguageModel, CleanMember, CleanPrompt, CleanResu
 from src.contracts.common.errors import MkbError
 from src.contracts.common.ids import stable_digest
 from src.contracts.common.time import utc_now
-from src.contracts.intake.strategies import resolve_bound_clean_strategy, resolve_clean_strategy
+from src.contracts.intake.strategies import (
+    CANONICAL_CLEAN_PROMPT_KEY,
+    CANONICAL_CLEAN_PROMPT_VERSION,
+    HISTORICAL_CLEAN_PROMPT_KEYS,
+    resolve_bound_clean_strategy,
+    resolve_clean_strategy,
+)
 from src.contracts.runtime.models import ProcessCommand
 from src.persistence.ports import UnitOfWork
 from src.runtime.inference.claude_cli import ClaudeCliCleanLanguageModel
@@ -153,8 +159,8 @@ class IntakeCleanPreflightMixin:
         if injected is not None:
             if (
                 not isinstance(injected, CleanPrompt)
-                or injected.key != definition.prompt_key
-                or injected.version != definition.prompt_version
+                or injected.key not in HISTORICAL_CLEAN_PROMPT_KEYS
+                or injected.version != (definition.prompt_version or CANONICAL_CLEAN_PROMPT_VERSION)
             ):
                 raise MkbError("PROMPT_HASH_MISMATCH", "Injected clean prompt does not match the strategy", 503)
             return injected
@@ -177,16 +183,30 @@ class IntakeCleanPreflightMixin:
         prompts = (snapshot.get("l1") or {}).get("prompts")
         if not isinstance(prompts, list):
             raise MkbError("PROMPT_HASH_MISMATCH", "Frozen clean prompt registry is unavailable", 503)
+        wanted_key = definition.prompt_key or CANONICAL_CLEAN_PROMPT_KEY
+        wanted_version = definition.prompt_version or CANONICAL_CLEAN_PROMPT_VERSION
         pointer = next(
             (
                 item
                 for item in prompts
                 if isinstance(item, Mapping)
-                and item.get("prompt_key") == definition.prompt_key
-                and item.get("prompt_version") == definition.prompt_version
+                and item.get("prompt_key") == wanted_key
+                and item.get("prompt_version") == wanted_version
             ),
             None,
         )
+        if not isinstance(pointer, Mapping):
+            # Exact replay of snapshots frozen before M-NH-07 canonicalization.
+            pointer = next(
+                (
+                    item
+                    for item in prompts
+                    if isinstance(item, Mapping)
+                    and item.get("prompt_key") in HISTORICAL_CLEAN_PROMPT_KEYS
+                    and item.get("prompt_version") == wanted_version
+                ),
+                None,
+            )
         if not isinstance(pointer, Mapping):
             raise MkbError("PROMPT_HASH_MISMATCH", "Frozen clean prompt pointer is unavailable", 503)
         relative_path = pointer.get("git_relative_path")
@@ -207,8 +227,8 @@ class IntakeCleanPreflightMixin:
         if actual_sha != expected_sha:
             raise MkbError("PROMPT_HASH_MISMATCH", "Clean prompt bytes do not match the frozen pointer", 503)
         return CleanPrompt(
-            key=definition.prompt_key or "",
-            version=definition.prompt_version or "",
+            key=str(pointer.get("prompt_key") or wanted_key),
+            version=str(pointer.get("prompt_version") or wanted_version),
             text=prompt_text,
             content_sha256=actual_sha,
         )

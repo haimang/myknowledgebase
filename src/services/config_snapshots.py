@@ -55,7 +55,7 @@ _OVERRIDE_CAPS: dict[str, int] = {
 }
 _REGISTERED_PROFILES = frozenset({"clean.web.v1", "clean.document.v1", "clean.default.v1"})
 _DEFAULT_PROMPT_IDS = {
-    "clean": "promptA.clean",
+    "clean": "promptA.default",
     "summarizer": "promptC.summarizer",
 }
 # Keys that must never be accepted even if a future DTO loosens extra=forbid.

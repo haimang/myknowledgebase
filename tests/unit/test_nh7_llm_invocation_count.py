@@ -8,8 +8,9 @@ import pytest
 
 from intake import dispatch_clean
 from intake.types import CleanPrompt
-from src.contracts.intake.strategies import CleanStrategyKey
+from src.contracts.intake.strategies import CANONICAL_CLEAN_PROMPT_KEY, CleanStrategyKey
 from src.runtime.supply.pdf_parser import build_compressed_pdf_fixture
+from src.services.prompt_profiles import default_prompt_ids
 
 
 class _RecordingLlm:
@@ -72,3 +73,8 @@ async def test_llm_required_strategy_invokes_complete() -> None:
     )
     assert result.text == "LLM rewrite body"
     assert llm.complete_calls == 1
+
+
+def test_new_tasks_pin_canonical_promptA_default() -> None:
+    assert default_prompt_ids(domain="documentation", flavor="qna")["clean"] == CANONICAL_CLEAN_PROMPT_KEY
+    assert default_prompt_ids(domain=None, flavor=None).get("clean") is None

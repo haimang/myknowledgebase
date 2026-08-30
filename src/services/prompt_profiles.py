@@ -47,7 +47,7 @@ IntakeFlavor = Literal["qna", "eval", "closure", "plan", "code-review"]
 IntakeGranularity = Literal["g0", "g1", "g2"]
 
 _DOCUMENTATION_DEFAULTS: dict[str, str | None] = {
-    "clean": "promptA.documentation.default",
+    "clean": "promptA.default",
     "markdown": None,
     "json": "promptB.documentation.g1",
     "summarizer": "promptC.documentation.default",

@@ -10,7 +10,7 @@ from src.services.prompt_profiles import default_prompt_ids, json_prompt_id_for
 def test_documentation_flavor_selects_markdown_hop_and_g1_json() -> None:
     selected = default_prompt_ids(domain="documentation", flavor="code-review")
     assert selected == {
-        "clean": "promptA.documentation.default",
+        "clean": "promptA.default",
         "markdown": "promptB.documentation.code-review",
         "json": "promptB.documentation.g1",
         "summarizer": "promptC.documentation.default",
