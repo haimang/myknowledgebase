@@ -12,7 +12,7 @@ from intake.types import CleanLanguageModel, CleanMember, CleanPrompt, CleanResu
 from src.contracts.common.errors import MkbError
 from src.contracts.common.ids import stable_digest
 from src.contracts.common.time import utc_now
-from src.contracts.intake.strategies import CleanStrategyKey, resolve_clean_strategy
+from src.contracts.intake.strategies import resolve_bound_clean_strategy, resolve_clean_strategy
 from src.contracts.runtime.models import ProcessCommand
 from src.persistence.ports import UnitOfWork
 from src.runtime.inference.claude_cli import ClaudeCliCleanLanguageModel
@@ -50,24 +50,8 @@ class IntakeCleanPreflightMixin:
             raise MkbError("PIPELINE_INPUT_INVALID", "Decoded representation is unavailable", 422)
         representation_kind = (state.get("acquisition_evidence") or {}).get("representation_kind")
         representation = "rendered" if representation_kind == "rendered" else "static"
-        strategy = {
-            "clean.extract.deterministic": CleanStrategyKey.DOC_DETERMINISTIC.value,
-            "clean.extract.web": CleanStrategyKey.WEB_DETERMINISTIC.value,
-            "clean.extract.web_llm": CleanStrategyKey.WEB_LLM_REWRITE.value,
-            "clean.extract.pdf_text": CleanStrategyKey.PDF_TEXT_LAYER.value,
-            "clean.extract.pdf_llm": (
-                CleanStrategyKey.WEB_BROWSER_PRINT_PDF.value
-                if command.step_key == "clean_print_pdf"
-                else CleanStrategyKey.PDF_DOCUMENT_UNDERSTANDING.value
-            ),
-            "clean.extract.doc_llm": CleanStrategyKey.DOC_DOCUMENT_UNDERSTANDING.value,
-            "clean.ocr.local": (
-                CleanStrategyKey.PDF_OCR.value if media_type == "application/pdf" else CleanStrategyKey.DOC_OCR.value
-            ),
-            "clean.extract.vision": CleanStrategyKey.DOC_VISION.value,
-        }.get(command.process_key)
-        if strategy is None:
-            raise MkbError("CLEAN_STRATEGY_UNSUPPORTED", "Process has no registered clean strategy", 409)
+        bound = resolve_bound_clean_strategy(step_key=command.step_key, process_key=command.process_key)
+        strategy = bound.strategy_key.value
         prompt = await self._clean_prompt_material(command, strategy, state=state)
         llm = self._clean_language_model()
         cli_clean_supported = command.process_key not in {"clean.ocr.local", "clean.extract.vision"}
@@ -120,11 +104,15 @@ class IntakeCleanPreflightMixin:
         )
         if not isinstance(result, CleanResult):
             raise MkbError("CLEAN_RESULT_INVALID", "Single-document clean did not return a text artifact", 500)
+        if not result.text.strip():
+            raise MkbError("CLEAN_EMPTY", "Cleaning produced no admissible text", 422)
         next_state = dict(state)
         next_state["clean_text"] = result.text
         next_state["clean_digest"] = stable_digest({"text": result.text})
         next_state["clean_evidence"] = {
             "clean_capability": result.capability,
+            "clean_strategy": strategy,
+            "strategy_definition_digest": bound.definition_digest,
             "input_decoded_digest": state.get("decoded_digest"),
             **result.evidence,
         }

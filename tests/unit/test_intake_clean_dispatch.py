@@ -35,7 +35,7 @@ _PROMPT = CleanPrompt(
 )
 
 
-def _command(process_key: str) -> ProcessCommand:
+def _command(process_key: str, step_key: str = "clean_deterministic") -> ProcessCommand:
     return ProcessCommand.model_validate(
         {
             "schema_version": "mkb.process-command.v1",
@@ -44,6 +44,7 @@ def _command(process_key: str) -> ProcessCommand:
             "trace_uuid": uuid7(),
             "execution_uuid": uuid7(),
             "process_uuid": uuid7(),
+            "step_key": step_key,
             "process_key": process_key,
             "process_contract_version": "v1",
             "fencing_generation": 1,
@@ -115,7 +116,7 @@ async def test_runtime_ocr_uses_prompt_free_deterministic_port() -> None:
             return _Result()
 
     pipeline = IntakePipeline(None, None, None, deterministic_ocr=_OCR())  # type: ignore[arg-type]
-    command = _command("clean.ocr.local")
+    command = _command("clean.ocr.local", step_key="clean_doc_ocr")
     state = {
         "decoded_text": "",
         "decoded_digest": "f" * 64,
@@ -161,7 +162,7 @@ async def test_http_pdf_uses_pdf_channel_and_injected_llm() -> None:
 
     pipeline = IntakePipeline(None, None, None, clean_llm=llm, clean_prompt=_PROMPT)  # type: ignore[arg-type]
     material, _extra, _callback = await pipeline._clean(
-        _command("clean.extract.pdf_llm"),
+        _command("clean.extract.pdf_llm", step_key="clean_pdf_llm"),
         {
             "decoded_text": "layer",
             "decoded_digest": "1" * 64,
@@ -211,7 +212,7 @@ async def test_runtime_pdf_ocr_uses_pdf_strategy() -> None:
 
     pipeline = IntakePipeline(None, None, None, deterministic_ocr=_OCR())  # type: ignore[arg-type]
     material, _extra, _callback = await pipeline._clean(
-        _command("clean.ocr.local"),
+        _command("clean.ocr.local", step_key="clean_pdf_ocr"),
         {
             "decoded_text": "",
             "decoded_digest": "9" * 64,
@@ -233,10 +234,11 @@ async def test_runtime_pdf_ocr_uses_pdf_strategy() -> None:
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    ("process_key", "state", "expect_channel", "expect_text"),
+    ("process_key", "step_key", "state", "expect_channel", "expect_text"),
     [
         (
             "clean.extract.web",
+            "clean_web_static",
             {
                 "decoded_text": "<p>Live web process</p>",
                 "decoded_digest": "2" * 64,
@@ -252,6 +254,7 @@ async def test_runtime_pdf_ocr_uses_pdf_strategy() -> None:
         ),
         (
             "clean.extract.pdf_llm",
+            "clean_pdf_llm",
             {
                 "decoded_text": "pdf layer",
                 "decoded_digest": "3" * 64,
@@ -269,6 +272,7 @@ async def test_runtime_pdf_ocr_uses_pdf_strategy() -> None:
         ),
         (
             "clean.extract.doc_llm",
+            "clean_doc_llm",
             {
                 "decoded_text": "general notes",
                 "decoded_digest": "4" * 64,
@@ -286,13 +290,14 @@ async def test_runtime_pdf_ocr_uses_pdf_strategy() -> None:
 )
 async def test_live_process_keys_reach_dispatch_clean(
     process_key: str,
+    step_key: str,
     state: dict[str, object],
     expect_channel: str,
     expect_text: str,
 ) -> None:
     llm = _RecordingLLM("doc-or-pdf-llm")
     pipeline = IntakePipeline(None, None, None, clean_llm=llm, clean_prompt=_PROMPT)  # type: ignore[arg-type]
-    material, extra, callback = await pipeline._clean(_command(process_key), state)
+    material, extra, callback = await pipeline._clean(_command(process_key, step_key=step_key), state)
     await callback(None, {})  # type: ignore[arg-type]
     assert extra == {}
     cleaned = material.envelope["state"]["clean_text"]

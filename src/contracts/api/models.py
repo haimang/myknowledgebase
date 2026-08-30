@@ -39,6 +39,21 @@ class GenericSemanticSource(PayloadExtraModel):
     type: Annotated[str, Field(min_length=1, max_length=256)]
     channel: Annotated[str, Field(min_length=1, max_length=256)]
     source_name: Annotated[str, Field(min_length=1, max_length=512)]
+    clean_strategy: (
+        Literal[
+            "web.deterministic",
+            "web.llm_rewrite",
+            "web.browser_print_pdf",
+            "pdf.text_layer",
+            "pdf.document_understanding",
+            "pdf.ocr",
+            "doc.deterministic",
+            "doc.document_understanding",
+            "doc.ocr",
+            "doc.vision",
+        ]
+        | None
+    ) = None
     context_tags: list[Annotated[str, Field(min_length=1, max_length=512)]] = Field(
         default_factory=list,
         max_length=256,

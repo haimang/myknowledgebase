@@ -11,6 +11,7 @@ from src.contracts.intake.representation import (
     RepresentationObservation,
     RepresentationRouteFacts,
 )
+from src.contracts.intake.strategies import derive_selected_clean_strategy
 from src.persistence.ports import UnitOfWork
 
 
@@ -169,7 +170,8 @@ class PersistenceRepresentationFactReader:
         execution_uuid: str,
     ) -> RepresentationRouteFacts | None:
         row = await tx.fetchone(  # type: ignore[attr-defined]
-            "SELECT f.main_text_presence,f.media_family,f.observer_key,f.observer_version,f.fact_digest "
+            "SELECT f.main_text_presence,f.media_family,f.observer_key,f.observer_version,f.fact_digest,"
+            "f.representation_kind,f.text_layer "
             "FROM mkb_acquire_decode_history h JOIN mkb_representation_facts f "
             "ON f.representation_fact_uuid=h.representation_fact_uuid "
             "WHERE h.team_uuid=? AND h.execution_uuid=? "
@@ -178,12 +180,18 @@ class PersistenceRepresentationFactReader:
         )
         if row is None:
             return None
+        selected = derive_selected_clean_strategy(
+            media_family=str(row["media_family"]) if row.get("media_family") is not None else None,
+            text_layer=str(row["text_layer"]) if row.get("text_layer") is not None else None,
+            representation_kind=str(row["representation_kind"]) if row.get("representation_kind") is not None else None,
+        )
         return RepresentationRouteFacts(
             main_text_presence=str(row["main_text_presence"]),  # type: ignore[arg-type]
             media_family=str(row["media_family"]),  # type: ignore[arg-type]
             observer_key=str(row["observer_key"]),
             observer_version=str(row["observer_version"]),
             fact_digest=str(row["fact_digest"]),
+            selected_clean_strategy=selected,  # type: ignore[arg-type]
         )
 
 

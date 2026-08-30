@@ -69,7 +69,7 @@
 
 ## NH7 — clean capability activation
 
-- [ ] `NH7-CODE-P1` [代码制作] Phase 1 activation manifest + admitted-clean contract（`NH7-01/02`；`NH7-T01/T10`）。`blocked-by: NH6-CLOSE`（NH2/NH3/NH4/NH5/NH6 join 已满足）
+- [-] `NH7-CODE-P1` [代码制作] Phase 1 activation manifest + admitted-clean contract（`NH7-01/02`；`NH7-T01/T10`）。`blocked-by: NH6-CLOSE`（NH2/NH3/NH4/NH5/NH6 join 已满足）
 - [ ] `NH7-CODE-P2` [代码制作] Phase 2 promptA alignment（`NH7-03`；`NH7-T02`）。`blocked-by: NH7-CODE-P1`
 - [ ] `NH7-CODE-P3` [代码制作] Phase 3 deterministic/PDF live-to-retrieval（`NH7-04/05`；`NH7-T03/T04`）。`blocked-by: NH7-CODE-P2`
 - [ ] `NH7-CODE-P4` [代码制作] Phase 4 browser/print live-to-retrieval（`NH7-06/07`；`NH7-T05/T06`）。`blocked-by: NH7-CODE-P3`

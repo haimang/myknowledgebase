@@ -175,6 +175,9 @@ class WorkflowMaterializeMixin:
                 payload = envelope.get("payload") if isinstance(envelope, dict) else None
                 source = payload.get("source") if isinstance(payload, dict) else None
                 if isinstance(source, dict):
+                    declared_strategy = source.get("clean_strategy")
+                    if isinstance(declared_strategy, str) and declared_strategy:
+                        context["selected_clean_strategy"] = declared_strategy
                     acquisition_mode = source.get("acquisition_mode")
                     if acquisition_mode in {"static", "browser", "pdf"}:
                         context["acquisition_mode"] = acquisition_mode
@@ -215,7 +218,7 @@ class WorkflowMaterializeMixin:
                 context["main_text_presence"] = facts.main_text_presence
                 if facts.media_family is not None:
                     context["media_family"] = facts.media_family
-                if facts.selected_clean_strategy is not None:
+                if facts.selected_clean_strategy is not None and "selected_clean_strategy" not in context:
                     context["selected_clean_strategy"] = facts.selected_clean_strategy
         return context
 

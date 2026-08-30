@@ -67,7 +67,7 @@ class _PdfObserverPort:
         return _ObservedPdf(blob)
 
 
-def _command(process_key: str = "intake.acquire.inline") -> ProcessCommand:
+def _command(process_key: str = "intake.acquire.inline", step_key: str | None = None) -> ProcessCommand:
     digest = "0" * 64
     return ProcessCommand(
         schema_version="mkb.process-command.v1",
@@ -76,6 +76,7 @@ def _command(process_key: str = "intake.acquire.inline") -> ProcessCommand:
         trace_uuid=uuid7(),
         execution_uuid=uuid7(),
         process_uuid=uuid7(),
+        step_key=step_key,
         process_key=process_key,
         process_contract_version="v1",
         fencing_generation=1,
@@ -166,7 +167,10 @@ async def test_local_object_html_uses_structural_clean_and_nfc_lf_decode() -> No
     decoded, _, _ = await pipeline._decode(_command("intake.decode.text_json_html"), state)
     decoded_state = decoded.envelope["state"]
     assert decoded_state["decoded_text"] == "<main>Hello\nCafé<script>ignore me</script><p>world</p></main>"
-    cleaned, _, _ = await pipeline._clean(_command("clean.extract.deterministic"), decoded_state)
+    cleaned, _, _ = await pipeline._clean(
+        _command("clean.extract.deterministic", step_key="clean_deterministic"),
+        decoded_state,
+    )
     assert cleaned.envelope["state"]["clean_text"] == "Hello\nCafé\nworld"
     assert cleaned.envelope["state"]["clean_evidence"]["removed_tag_counts"] == {"script": 1}
 
@@ -284,13 +288,13 @@ async def test_browser_ocr_and_vision_are_explicit_controlled_capability_failure
 
     with pytest.raises(MkbError) as ocr:
         await pipeline._clean(
-            _command("clean.ocr.local"),
+            _command("clean.ocr.local", step_key="clean_doc_ocr"),
             {"decoded_text": "", "media_type": "image/png"},
         )
     assert ocr.value.code == "CLEAN_OCR_CAPABILITY_UNAVAILABLE"
     with pytest.raises(MkbError) as vision:
         await pipeline._clean(
-            _command("clean.extract.vision"),
+            _command("clean.extract.vision", step_key="clean_vision"),
             {"decoded_text": "", "media_type": "image/png"},
         )
     assert vision.value.code == "CLEAN_VISION_CAPABILITY_UNAVAILABLE"
