@@ -10,6 +10,7 @@ from pathlib import Path
 
 import pytest
 
+from src.persistence.nhx1_migration import MigrationStage, Nhx1MigrationService
 from src.persistence.sqlite_port import SqlitePersistence
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -95,3 +96,68 @@ def test_rev1_manifest_digest_is_self_authenticating() -> None:
     assert manifest["source_commit"] == "ba099ee305577cca2281a669afbca364111f200b"
     assert len(manifest["workflows"]) == 3
     assert {row["revision_number"] for row in manifest["workflows"]} == {1}
+
+
+@pytest.mark.asyncio
+async def test_prefx_024_database_migrates_forward(tmp_path: Path) -> None:
+    target = tmp_path / "upgrade.db"
+    shutil.copyfile(FIXTURES / "pre-fix-024.db", target)
+    persistence = SqlitePersistence(target, ROOT / "src/persistence/migrations")
+    try:
+        await persistence.migrate()
+        async with persistence.read_snapshot() as tx:
+            ledger = await tx.fetchall("SELECT migration_id FROM mkb_schema_migrations ORDER BY migration_id")
+            tables = await tx.fetchall("SELECT name FROM sqlite_master WHERE type='table'")
+        assert len(ledger) == 28
+        assert ledger[-1]["migration_id"] == "028_nhx1_ops_contracts"
+        assert "mkb_intake_observations" in {row["name"] for row in tables}
+        assert "mkb_publication_manifests" in {row["name"] for row in tables}
+    finally:
+        await persistence.close()
+
+
+@pytest.mark.asyncio
+async def test_migration_resume_is_idempotent(tmp_path: Path) -> None:
+    database = tmp_path / "resume.db"
+    persistence = SqlitePersistence(database, ROOT / "src/persistence/migrations")
+    await persistence.migrate()
+    service = Nhx1MigrationService(persistence)
+    progress = await service.start_or_resume("nhx1-fixture", MigrationStage.BACKFILL)
+    progress = await service.advance(
+        "nhx1-fixture", expected_revision=progress.row_revision, cursor_value="cursor-1", processed_delta=1
+    )
+    await persistence.close()
+    reopened = SqlitePersistence(database, ROOT / "src/persistence/migrations")
+    try:
+        service = Nhx1MigrationService(reopened)
+        resumed = await service.start_or_resume("nhx1-fixture", MigrationStage.BACKFILL)
+        assert resumed == progress
+    finally:
+        await reopened.close()
+
+
+@pytest.mark.asyncio
+async def test_legacy_rows_are_not_fabricated(tmp_path: Path) -> None:
+    target = tmp_path / "legacy.db"
+    shutil.copyfile(FIXTURES / "pre-fix-024.db", target)
+    persistence = SqlitePersistence(target, ROOT / "src/persistence/migrations")
+    try:
+        async with persistence.read_snapshot() as tx:
+            before = await tx.fetchone("SELECT * FROM mkb_workflow_selected_outputs")
+        await persistence.migrate()
+        async with persistence.read_snapshot() as tx:
+            after = await tx.fetchone("SELECT * FROM mkb_workflow_selected_outputs")
+            counts = [
+                (await tx.fetchone(f"SELECT COUNT(*) AS count FROM {table}"))["count"]
+                for table in (
+                    "mkb_intake_observations",
+                    "mkb_object_upload_sessions",
+                    "mkb_processing_binding_assertions",
+                    "mkb_selection_assertions_v2",
+                    "mkb_evidence_corrections",
+                )
+            ]
+        assert after == before
+        assert counts == [0, 0, 0, 0, 0]
+    finally:
+        await persistence.close()
