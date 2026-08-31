@@ -1484,3 +1484,33 @@ NHX1 coherent debt retirement（单阶段 / 串行DAG）
 |------|------|-------------|
 | `2026-08-31T04:38:50Z` | Phase 5 EXIT | commit `ff104a9` + fixed 25-file pytest command + `92 passed` + profile `test/sqlite+turso` |
 | `2026-08-31T04:38:50Z` | static gate | commit `ff104a9` + `uv run ruff check api intake src tests` + EXIT0 + profile `local` |
+
+### 11.9 Phase 6 — Capability / role / readiness / security
+
+> **执行时间**：`2026-08-31T04:58:17Z`
+> **代码改动统计**：`11 文件；2 个新建 runtime registry；27 process capability rows；schema bump 0`
+
+- **实际执行摘要**：
+  - `P6-01`：新增 `DeploymentRole`/`DeploymentRoleSpec`，明确 `api`、`workflow_worker`、`maintenance`、`all` 的 loop ownership；lifespan 按 role 启停 supervisor、GC、upload-TTL、index-retirement、retention，`all` 只作为显式组合。
+  - `P6-02`：新增 code-owned `ProcessCapabilityManifest`/`ProcessCapabilityRegistry`，从当前 builtin graph 收集 27 个 required process；每项含 handler、role、supply、side-effect、replay law 与 digest；app bootstrap 将其 durable 投影到 `mkb_process_capability_definitions`，unknown workflow/process fail-closed。
+  - `P6-03`：readiness 保留 liveness 与 role-specific required set 分离；worker/all 的 supervisor 连续失败达到阈值即 not-ready；API/maintenance 不因未部署 worker/browser/model 而伪装成 claim owner；ready response 返回 role、owned loops、manifest digest、claimable keys。
+  - `P6-04`：production profile 拒绝 deterministic NS1 stub/disabled supply，要求 subprocess、runtime supply readiness 与 pinned multimodal；worker claim 在 required supply 缺失时过滤对应 process。既有 S16 浏览器、parser、OCR、egress、backpressure 负向测试作为工程 gate。
+- **Phase 偏差（计划 vs 实际）**：
+  - `D-P6-01 (compat-substrate)`：为兼容 focused synthetic workflow tests，`WorkflowRegistryService` 仅在 app composition 注入 code-owned registry 时强制 capability validation；生产/实际 app 始终启用闭集，隔离单元可显式注册 synthetic process。
+  - `D-P6-02 (owner-gate)`：真实模型、binary 与 S16 具名签收不在本地环境；按 T-O-419 将 `NHX1-T22-E` 标为 `ready-for-owner-gate`，不改写为 PASS，不阻止工程链进入 Phase 7，但保留 Phase 9 join 阻塞。
+- **阻塞与处理**：无工程失败；`NHX1-T22-O` 是唯一外部 owner blocker，未使用 skip/xfail/stub 代替。
+- **测试发现**：Phase 6 固定 EXIT `61 passed`；`uv run ruff check api intake src tests` EXIT0；role loop、claim filtering、durable capability bootstrap、readiness failure threshold、10+3闭集与 S16 supply/security 回归全部通过。
+- **后续 handoff**：Phase 7 消费 role/capability availability，但不得开放 workflow selector/raw payload；operator control 必须使用 command receipt、expected generation、redaction/audit。T22-O 继续作为 owner gate 记录，不能在 Phase 7 中被降级。
+
+| 工作项 | 状态 | PR / commit | 实际落点 | 备注 |
+|--------|------|-------------|----------|------|
+| `P6-01` | `✅ done` | `d4ea697` | `src/runtime/roles.py`; `api/app.py`; `test_nhx1_roles_readiness.py` | T-O-416；四role loop ownership |
+| `P6-02` | `✅ done` | `d4ea697` | `capability_registry.py`; `governance_registry.py`; `workflow_registry.py`; capability gate test | T-O-412/419；27 process manifest/claim filter |
+| `P6-03` | `✅ done` | `d4ea697` | `config.py`; `health.py`; `metrics.py`; `api/app.py` | T-O-416/422；role-specific readiness/failure threshold |
+| `P6-04` | `🟡 partial` | `d4ea697` | prod profile validator; existing NH6 runtime supply/security tests | T-O-419；工程 gate ready，真实 owner attestation pending |
+
+| 时点 | 步骤 | 决策 / 产出 |
+|------|------|-------------|
+| `2026-08-31T04:58:17Z` | Phase 6 engineering EXIT | commit `d4ea6978e345d4bef2cd8c65cc989612c38cf2d6` + fixed 16-file pytest command + `61 passed` + profile `test/sqlite+turso` |
+| `2026-08-31T04:58:17Z` | T22-E gate | missing-supply/production-stub negative checks PASS；state `ready-for-owner-gate` |
+| `2026-08-31T04:58:17Z` | T22-O gate | real model/binary/S16 owner attestation absent；state `pending`，must join Phase 9 final |

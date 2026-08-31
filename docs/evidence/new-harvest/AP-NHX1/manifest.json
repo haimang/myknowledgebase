@@ -9,8 +9,8 @@
     {"phase": 3, "status": "verified", "code_commit": "b6769e10222bc9329d470adda50604e085b64cbd"},
     {"phase": 4, "status": "verified", "code_commit": "386f829bfdf9754dca4a5024cbbb08357fb41c6c"},
     {"phase": 5, "status": "verified", "code_commit": "ff104a9"},
-    {"phase": 6, "status": "in_progress"},
-    {"phase": 7, "status": "blocked_by_phase_6"},
+    {"phase": 6, "status": "ready_for_owner_gate", "code_commit": "d4ea697"},
+    {"phase": 7, "status": "in_progress"},
     {"phase": 8, "status": "blocked_by_phase_7"},
     {"phase": 9, "status": "blocked_by_phase_8_and_t22_o"}
   ],

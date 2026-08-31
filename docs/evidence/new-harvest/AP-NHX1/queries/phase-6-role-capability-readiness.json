@@ -1,0 +1,28 @@
+{
+  "deployment_roles": {
+    "api": ["public_read", "admission", "operator_read"],
+    "workflow_worker": ["workflow_supervisor", "process_claim"],
+    "maintenance": ["object_gc", "object_upload_lifecycle", "index_retirement", "observability_retention"],
+    "all": ["public_read", "admission", "workflow_supervisor", "object_gc", "object_upload_lifecycle", "index_retirement", "observability_retention"]
+  },
+  "process_capability_manifest": {
+    "process_count": 27,
+    "handler_key": "intake_pipeline",
+    "manifest_sha256": "0da033a2951bf7753d693ea8d93ac0ccb41497877b37c957b74a80bb0f64a390",
+    "unknown_process": "CAPABILITY_UNKNOWN"
+  },
+  "claim_filter": {
+    "role": "workflow_worker",
+    "missing_pdf_browser_ocr_multimodal": "not_claimable",
+    "inline": "claimable"
+  },
+  "readiness": {
+    "api_without_worker_loops": "ready",
+    "worker_supervisor_failure_threshold": "not_ready",
+    "production_stub": "rejected"
+  },
+  "owner_gate": {
+    "engineering": "ready-for-owner-gate",
+    "real_model_binary_s16_attestation": "pending"
+  }
+}

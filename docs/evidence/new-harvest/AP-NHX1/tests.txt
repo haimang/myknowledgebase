@@ -56,3 +56,15 @@
 - Static command/result: `uv run ruff check api intake src tests` → `EXIT0 · All checks passed!`
 - Migration evidence: `029_nhx1_evidence_identity_guards`, SHA-256 `4a6d9a55cfb2c4dc1f89208ddba3682e9aa9d0d325c061d2ff0cdabd4abd6ed9`; prior `001`/`018–024` checksums unchanged.
 - Truth/work join: `T-O-413/T-O-414/T-O-415/T-O-417/T-O-420/T-O-421` / `P5-01..P5-06` / `NHX1-T15..T20`.
+
+## Phase 6 — 2026-08-31T04:58:17Z
+
+- Commit under test: `d4ea6978e345d4bef2cd8c65cc989612c38cf2d6`
+- Profile: `test/sqlite+turso`, local Python 3.12 via `uv`
+- Command: `uv run pytest -q tests/e2e/test_nhx1_roles_readiness.py tests/integration/test_nhx1_capability_gate.py tests/e2e/test_nh6_readiness.py tests/e2e/test_new_harvest_runtime_security.py tests/e2e/test_nh6_parser_isolation.py tests/e2e/test_nh6_pdf_parser.py tests/e2e/test_nh6_browser_render.py tests/e2e/test_nh6_browser_print.py tests/e2e/test_nh6_multimodal_adapter.py tests/integration/test_nh6_multimodal_request.py tests/integration/test_nh6_ocr_vision_port.py tests/unit/test_nh6_backpressure_zero_calls.py tests/unit/test_nh6_ocr_vision_errors.py tests/unit/test_nh6_supply_identities.py tests/domain/test_nh6_sbom_inventory.py tests/unit/test_readiness_composition.py`
+- Result: `EXIT0 · 61 passed · zero skip/xfail`
+- Static command/result: `uv run ruff check api intake src tests` → `EXIT0 · All checks passed!`
+- Capability evidence: 27 process manifests durable-registered; unknown process and missing-supply claim paths fail closed; explicit role loop matrix passes.
+- Security evidence: existing NH6 browser/parser/OCR/backpressure suite passed, including non-root/no-sandbox, redirect egress checks, parser network denial, and bounded-pool zero downstream calls.
+- Owner gate: `NHX1-T22-E = ready-for-owner-gate`; `NHX1-T22-O = pending` because no real model/binary/S16 named attestation was supplied. This is a truthful external gate, not a test waiver.
+- Truth/work join: `T-O-415/T-O-416/T-O-418/T-O-419/T-O-422` / `P6-01..P6-04` / `NHX1-T21/T22-E/T25`.
