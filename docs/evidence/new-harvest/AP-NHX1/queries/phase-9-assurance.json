@@ -1,0 +1,29 @@
+{
+  "closed_set": {
+    "route_cells": 888,
+    "process_cells": 27,
+    "intent_lifecycle_cells": 21,
+    "manifest_digest": "938ff6ae740a13a89edf5d57188f77380b091923284efba7ad455a1f2e195fec",
+    "generator_byte_stable": true
+  },
+  "race_soak": {
+    "seeds": [0, 1, 2],
+    "identity_effect_once": true,
+    "sleep_based_verdict": false
+  },
+  "subprocess_crash": {
+    "kill": "SIGKILL process group",
+    "cold_restart": "recovered",
+    "hook_only": false
+  },
+  "full_repository": {
+    "pytest": "1010 passed",
+    "ruff": "EXIT0",
+    "diff_check": "EXIT0",
+    "skip_or_xfail": 0
+  },
+  "owner_gate": {
+    "T22-E": "ready-for-owner-gate",
+    "T22-O": "pending"
+  }
+}

@@ -25,7 +25,7 @@
 > - HEAD `ba099ee305577cca2281a669afbca364111f200b` 的代码/DDL/OpenAPI实测；§7内置锚区为本AP直接grounding真源
 > 关联 reference-anchor:
 > - 见 §7 内置 Reference-Anchor；安全威胁模型另指 `docs/baseline/domain-truth/S16-security-trust-boundary.md:438-465`
-> 文档状态: `executing`
+> 文档状态: `executed`（engineering gates complete；T-O-419/T22-O owner gate pending）
 > 计划 ID: `NHX1-P1-01..P9-04`；测试 ID: `NHX1-T01..NHX1-T30`
 
 **执行硬纪律**：这是一个 `NHX1` 阶段、九个严格串行 Phase 的行动计划。依赖链只有
@@ -1573,3 +1573,34 @@ NHX1 coherent debt retirement（单阶段 / 串行DAG）
 | `2026-08-31T05:50:08Z` | Phase 8 EXIT | commit `5e775f7d59cfc538b368ec1606e42647207c1a52` + fixed 12-file pytest command + `32 passed` + profile `test/sqlite+turso` |
 | `2026-08-31T05:50:08Z` | cutover gate | unresolved mismatch → 503; resolved mismatch → v2-only; legacy writer → typed 409 |
 | `2026-08-31T05:50:08Z` | rollback gate | admission stop committed; legacy writer revival not callable |
+
+### 11.12 Phase 9 — Graph-derived assurance / closure preparation
+
+> **执行时间**：`2026-08-31T07:39:33Z`
+> **代码改动统计**：`6 个 assurance/test fixture 文件；888 route cells + 27 process cells + 21 intent-state cells；schema bump 0`
+
+- **实际执行摘要**：
+  - `P9-01`：`generate_manifest.py` 从 builtin workflow/compiler、ProcessCapabilityRegistry 与 `INTAKE_INTENT_APPLICABILITY` 生成闭集；manifest 重跑字节稳定，888 reachable route cells、27 process capability cells、21 intent×lifecycle cells 均带 `NHX1-T27` 与最低层。
+  - `P9-02`：`test_nhx1_race_soak.py` 使用固定 seeds 与 ThreadPool barrier 检查同 Observation 至多一个 Task/attempt/effect-once，未使用 sleep 判定或 HTTP code alone。
+  - `P9-03`：`test_nhx1_subprocess_crash.py` 创建真实独立进程组、读取 READY barrier 后 SIGKILL、冷重启 recovery；与 pre-fix DB upgrade、old-pin/retry、cleanup/GC joins 一起运行。
+  - `P9-04`：当前 commit 全仓 pytest、ruff、git diff 静态检查和证据 manifest join 完成；第三轮本地审查未发现未解释 critical/high 工程缺口。T22-O 真实 model/binary/S16 owner attestation 仍缺，故不产生 full-close verdict。
+- **Phase 偏差（计划 vs 实际）**：
+  - `D-P9-01 (owner-gate)`：本地可验证项全部执行；T22-O 不是可由 fixture/测试替代的环境事实，标记 `implementation-complete-awaiting-live-verification`，不改为 `closed-with-deferred`。
+  - `D-P9-02 (existing compatibility)`：全仓初跑暴露 legacy denominator/public object/writer 架构回归，已分别回到 P4/P5/P7 owner 修复并重跑后继链；最终全仓 1010 项通过。
+- **阻塞与处理**：工程阻塞已清零；唯一阻塞是 T-O-419 要求的具名真实模型、binary、S16 owner sign-off。Phase 9 assurance 证据继续保留，final closure 等待 owner join。
+- **测试发现**：`uv run pytest -q` EXIT0，`1010 passed`，zero failed/skip/xfail；`uv run ruff check api intake src tests` EXIT0；`git diff --check` EXIT0；closed-set digest `938ff6ae740a13a89edf5d57188f77380b091923284efba7ad455a1f2e195fec`。
+- **后续 handoff**：只剩 final owner join：在 production profile 执行真实 10 strategy + 3 registered operation、L3/L4/S16 安全证据并具名签收；随后仅需重新执行 T22/T30 checker 与 closure join，不得补写未实测事实。
+
+| 工作项 | 状态 | PR / commit | 实际落点 | 备注 |
+|--------|------|-------------|----------|------|
+| `P9-01` | `✅ done` | `c3aa550` + `d843f00` | `generate_manifest.py`; `manifest.v1.json`; `test_nhx1_closed_set.py` | T-O-408..422；compiler-derived closed set |
+| `P9-02` | `✅ done` | `c3aa550` | `test_nhx1_race_soak.py` | deterministic 3-seed race, no sleep verdict |
+| `P9-03` | `✅ done` | `c3aa550` | `test_nhx1_subprocess_crash.py`; pre-fix upgrade joins | real process-group kill/restart |
+| `P9-04` | `🟡 partial` | `d843f00` | full pytest/ruff/diff; `test_nhx1_assurance_manifest.py` | engineering PASS; T22-O owner verification pending |
+
+| 时点 | 步骤 | 决策 / 产出 |
+|------|------|-------------|
+| `2026-08-31T07:39:33Z` | graph/race/crash EXIT | closed-set `888/27/21`; race/crash/upgrade joins PASS |
+| `2026-08-31T07:39:33Z` | full repository gate | `uv run pytest -q` → EXIT0 · `1010 passed` · zero failed/skip/xfail |
+| `2026-08-31T07:39:33Z` | static gate | ruff EXIT0; `git diff --check` EXIT0; no uncommitted code changes (docs evidence append only) |
+| `2026-08-31T07:39:33Z` | owner join | `NHX1-T22-O` absent; final closure state `implementation-complete-awaiting-live-verification` |

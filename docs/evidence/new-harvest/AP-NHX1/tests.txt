@@ -91,3 +91,27 @@
 - Cutover evidence: unresolved shadow mismatch blocks; after explicit resolution, CAS transitions `dual/shadow → v2_only/v2`; legacy writer assertion fails and forward rollback only stops admission.
 - Drain evidence: inventory reports rev1 pins, pending outbox, open cleanup, live refs, legacy evidence; evidence verifier/correction preserves old rows append-only.
 - Truth/work join: `T-O-411/T-O-414/T-O-417/T-O-421/T-O-422` / `P8-01..P8-03` / `NHX1-T09/T17/T20/T26`.
+
+## Phase 9 local assurance — 2026-08-31T07:08:09Z
+
+- Engineering commits under test: `c3aa550` plus compatibility fence correction `d843f00`.
+- Profile: `test/sqlite+turso`, local Python 3.12 via `uv`
+- Command: `uv run pytest -q tests/e2e/test_nhx1_closed_set.py tests/e2e/test_nhx1_race_soak.py tests/e2e/test_nhx1_subprocess_crash.py tests/integration/test_nhx1_cutover.py tests/integration/test_nhx1_persisted_upgrade.py tests/e2e/test_nhx1_observation_identity.py tests/e2e/test_nhx1_item_epoch.py tests/e2e/test_nhx1_exact_replay.py tests/integration/test_nhx1_outbox_owner.py tests/e2e/test_nhx1_object_sessions.py tests/e2e/test_nhx1_cleanup_convergence.py tests/e2e/test_nhx1_publication_manifest.py tests/e2e/test_nhx1_public_contracts.py tests/e2e/test_nhx1_operator_controls.py tests/integration/test_nhx1_signals_errors.py tests/domain/test_nhx1_evidence_pack.py tests/domain/test_nhx1_assurance_manifest.py`
+- Result: `EXIT0 · 39 passed · zero skip/xfail`
+- Static command/result: `uv run ruff check api intake src tests` → `EXIT0 · All checks passed!`
+- P9-01/P9-02/P9-03 evidence: graph-derived manifest byte-stable; 3-seed barrier race; real process-group SIGKILL/cold restart; persisted upgrade/cutover joins pass.
+- P9-04 status: full-repository pytest and execution-backed T30 checker remain in progress; no closure verdict is claimed by this local record.
+- Owner gate: `NHX1-T22-O` remains pending under T-O-419 and must join the final closure decision.
+- Truth/work join: `T-O-408..T-O-422` / `P9-01..P9-04` / `NHX1-T27..T30` (T30 pending full-repo join).
+- Test-ID execution join: `NHX1-T01 NHX1-T02 NHX1-T03 NHX1-T04 NHX1-T05 NHX1-T06 NHX1-T07 NHX1-T08 NHX1-T09 NHX1-T10 NHX1-T11 NHX1-T12 NHX1-T13 NHX1-T14 NHX1-T15 NHX1-T16 NHX1-T17 NHX1-T18 NHX1-T19 NHX1-T20 NHX1-T21 NHX1-T22 NHX1-T23 NHX1-T24 NHX1-T25 NHX1-T26 NHX1-T27 NHX1-T28 NHX1-T29 NHX1-T30`.
+
+## Phase 9 full-repository assurance — 2026-08-31T07:39:33Z
+
+- Current code commit under test: `d843f00f990f589725addacb19d196367a8b9568`
+- Profile: `test/sqlite+turso`, local Python 3.12 via `uv`
+- Command: `uv run pytest -q`
+- Result: `EXIT0 · 1010 passed · zero failed · zero skip/xfail`
+- Static commands/results: `uv run ruff check api intake src tests` → `EXIT0`; `git diff --check` → `EXIT0`.
+- Closed-set evidence: `manifest.v1.json` is generator-recomputed and byte-stable; `888` route cells + `27` process cells + `21` intent-state cells, digest `938ff6ae740a13a89edf5d57188f77380b091923284efba7ad455a1f2e195fec`.
+- Crash/race/upgrade evidence: deterministic race soak, real process-group SIGKILL/cold restart, pre-fix 024 upgrade, rev1 exact compatibility, cutover/drain, publication/cleanup/GC all joined in the full run.
+- T30 result: engineering/full-repo gates PASS; owner live/S16 attestation `NHX1-T22-O` is still absent, so final closure remains `implementation-complete-awaiting-live-verification` / blocked by owner gate.
