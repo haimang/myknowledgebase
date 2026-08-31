@@ -102,3 +102,21 @@
 - [x] `CROSS-NH-REVIEW` [跨阶段代码审查] 检查 NH1–NH9 contract/migration/runtime/public/retrieval/lifecycle 的跨阶段耦合、owner `T-O-390..407` 与 foundational truth 零漂移。`blocked-by: NH9-CLOSE`
 - [x] `CROSS-NH-TEST` [跨阶段测试与修复] 执行完整测试集、固定 capstone 文件、race/crash/security/compat/mega；持续测试↔修复直到无 in-scope 失败。`blocked-by: CROSS-NH-REVIEW`
 - [x] `CROSS-NH-CLOSE` [最终文档回填与提交] 输出 consolidated closure、核对九份 AP 日志/closure/evidence/commit 四元组、最终提交并报告。`blocked-by: CROSS-NH-TEST`
+
+## NHX1 — coherent debt retirement and governance
+
+> 执行基线：`docs/plan/new-harvest/AP-NHX1-coherent-debt-retirement-and-governance.md`
+> 真相层：`docs/eval/new-harvest/pre-NHX1-qna.md`（`T-O-408..422`，frozen）
+> 严格 DAG：`NHX1-P1 → NHX1-P2 → NHX1-P3 → NHX1-P4 → NHX1-P5 → NHX1-P6 → NHX1-P7 → NHX1-P8 → NHX1-P9 → NHX1-FINAL-CLOSE`
+> 阻塞纪律：任一 Phase 仅在前序 Phase 的工程 EXIT、证据四元组、执行日志与分簇 commit 全部完成后进入。`NHX1-T22-E` 可在 Phase 6 达到 `ready-for-owner-gate` 后把工程链交给 Phase 7；`NHX1-T22-O` 未具名签收时 Phase 9 join 与 final closure 保持 blocked，不得以 skip、stub 或 deferred 代替。
+
+- [-] `NHX1-P1` [代码制作/测试/日志/提交] Truth denominator、pre-fix/rev1 fixtures、honest harness、anti-fake-green executor（`P1-01..04`；`NHX1-T01/T02/T03/T30`）。`blocked-by: none`
+- [ ] `NHX1-P2` [代码制作/测试/日志/提交] Canonical schema、ports、registries，025+ expand-only（`P2-01..05`）。`blocked-by: NHX1-P1=PASS`
+- [ ] `NHX1-P3` [代码制作/测试/日志/提交] Intake identity、Observation/ItemEpoch、lifecycle（`P3-01..05`；`NHX1-T04..T08`）。`blocked-by: NHX1-P2=PASS`
+- [ ] `NHX1-P4` [代码制作/测试/日志/提交] Workflow rev2/rev1 compat、ProcessingBinding、Outcome/replay/outbox owner（`P4-01..06`；`NHX1-T09..T14`）。`blocked-by: NHX1-P3=PASS`
+- [ ] `NHX1-P5` [代码制作/测试/日志/提交] Object session/journal、evidence、CAS-first、publication snapshot、physical cleanup（`P5-01..06`；`NHX1-T15..T20`）。`blocked-by: NHX1-P4=PASS`
+- [ ] `NHX1-P6` [代码制作/测试/日志/提交] Deployment roles、capability manifest、readiness、production/security engineering gate（`P6-01..04`；`NHX1-T21/T22-E/T25`）。`blocked-by: NHX1-P5=PASS`
+- [ ] `NHX1-P7` [代码制作/测试/日志/提交] Public discovery/views、operator control、signals/errors（`P7-01..04`；`NHX1-T23..T25`）。`blocked-by: NHX1-P6 engineering EXIT PASS; NHX1-T22-O may remain pending`
+- [ ] `NHX1-P8` [代码制作/测试/日志/提交] Shadow/cutover、compat drain、retirement/forward rollback（`P8-01..03`；`NHX1-T26` join compat tests）。`blocked-by: NHX1-P7=PASS`
+- [ ] `NHX1-P9` [assurance/测试/review/日志/提交] Compiler-derived L1–L4、deterministic races、real subprocess crash、persisted upgrade、full repo/evidence/third review（`P9-01..04`；`NHX1-T27..T30`）。`blocked-by: NHX1-P8=PASS + NHX1-T22-O=PASS`
+- [ ] `NHX1-FINAL-CLOSE` [最终本地审查/静态检查/closure/提交] 使用 `.adocs/templates/closure.md` 生成并补全 NHX1 closure，回写最终收口分析与证据四元组。`blocked-by: NHX1-P9=PASS`
