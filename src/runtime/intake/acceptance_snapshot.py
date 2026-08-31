@@ -18,6 +18,7 @@ from src.runtime.intake.types import (
     _StageMaterial,
 )
 from src.services.events import DomainEventWriter
+from src.services.observation_reservations import ObservationReservationService
 
 
 class IntakeAcceptanceSnapshotMixin:
@@ -136,11 +137,15 @@ class IntakeAcceptanceSnapshotMixin:
                 )
                 if action is None:
                     raise MkbError("REGISTRY_NOT_FOUND", "Intake acceptance action is unavailable", 503)
-                existing_snap = await tx.fetchone(
-                    "SELECT intake_snapshot_uuid FROM mkb_intake_snapshots "
-                    "WHERE team_uuid=? AND intake_source_uuid=? AND observation_key=?",
-                    (command.team_uuid, state["intake_source_uuid"], state["normalized_external_key"]),
-                )
+                observation_key = str(state.get("observation_key") or state["normalized_external_key"])
+                observation_fingerprint = str(state.get("observation_fingerprint") or state["raw_digest"])
+                existing_snap = None
+                if state.get("observation_uuid") is None:
+                    existing_snap = await tx.fetchone(
+                        "SELECT intake_snapshot_uuid FROM mkb_intake_snapshots "
+                        "WHERE team_uuid=? AND intake_source_uuid=? AND observation_key=?",
+                        (command.team_uuid, state["intake_source_uuid"], observation_key),
+                    )
                 if existing_snap is not None:
                     state["intake_snapshot_uuid"] = existing_snap["intake_snapshot_uuid"]
                 else:
@@ -155,8 +160,8 @@ class IntakeAcceptanceSnapshotMixin:
                             command.team_uuid,
                             state["intake_snapshot_uuid"],
                             state["intake_source_uuid"],
-                            state["normalized_external_key"],
-                            state["raw_digest"],
+                            observation_key,
+                            observation_fingerprint,
                             state["candidate_root_digest"],
                             command.input_manifest_ref,
                             command.input_manifest_digest,
@@ -169,30 +174,63 @@ class IntakeAcceptanceSnapshotMixin:
                             state["raw_artifact_uuid"],
                         ),
                     )
+                    await ObservationReservationService().mark_accepted_tx(
+                        tx,
+                        team_uuid=command.team_uuid,
+                        execution_uuid=command.execution_uuid,
+                        snapshot_uuid=str(state["intake_snapshot_uuid"]),
+                    )
                 lifecycle = "deactivated" if state.get("require_human_review") else "active"
                 deactivated_at = now if lifecycle == "deactivated" else None
                 await tx.execute(
                     "INSERT OR IGNORE INTO mkb_intake_items "
                     "(team_uuid,intake_item_uuid,intake_source_uuid,normalized_external_key,lifecycle_state,latest_revision_uuid,"
                     "serving_revision_uuid,row_revision,created_at,updated_at,deactivated_at,payload_extra) "
-                    "VALUES (?,?,?,?,?,?,NULL,0,?,?,?,'{}')",
+                    "VALUES (?,?,?,?,?,NULL,NULL,0,?,?,?,'{}')",
                     (
                         command.team_uuid,
                         state["intake_item_uuid"],
                         state["intake_source_uuid"],
                         state["normalized_external_key"],
                         lifecycle,
-                        state["intake_revision_uuid"],
                         now,
                         now,
                         deactivated_at,
                     ),
                 )
-                await tx.execute(
-                    "UPDATE mkb_intake_items SET latest_revision_uuid=?,row_revision=row_revision+1,updated_at=? "
-                    "WHERE team_uuid=? AND intake_item_uuid=?",
-                    (state["intake_revision_uuid"], now, command.team_uuid, state["intake_item_uuid"]),
+                item_before = await tx.fetchone(
+                    "SELECT intake_item_uuid,lifecycle_state,latest_revision_uuid,serving_revision_uuid,row_revision "
+                    "FROM mkb_intake_items WHERE team_uuid=? AND intake_source_uuid=? AND normalized_external_key=?",
+                    (command.team_uuid, state["intake_source_uuid"], state["normalized_external_key"]),
                 )
+                if item_before is None or item_before["intake_item_uuid"] != state["intake_item_uuid"]:
+                    raise ConflictError("ITEM_EPOCH_CONFLICT", "Intake item identity was adopted by another observation")
+                expected_item_epoch = state.get("expected_item_epoch")
+                if expected_item_epoch is None:
+                    expected_item_epoch = int(item_before["row_revision"])
+                if int(item_before["row_revision"]) != int(expected_item_epoch):
+                    raise ConflictError("ITEM_EPOCH_CONFLICT", "Intake item changed before acceptance")
+                acceptance_disposition = (
+                    "no_change" if item_before["latest_revision_uuid"] == state["intake_revision_uuid"] else "changed"
+                )
+                item_epoch_before = int(item_before["row_revision"])
+                item_epoch_after = item_epoch_before
+                if acceptance_disposition == "changed":
+                    changed = await tx.execute(
+                        "UPDATE mkb_intake_items SET latest_revision_uuid=?,row_revision=row_revision+1,updated_at=? "
+                        "WHERE team_uuid=? AND intake_item_uuid=? AND row_revision=? "
+                        "AND lifecycle_state IN ('active','deactivated')",
+                        (
+                            state["intake_revision_uuid"],
+                            now,
+                            command.team_uuid,
+                            state["intake_item_uuid"],
+                            item_epoch_before,
+                        ),
+                    )
+                    if changed.rowcount != 1:
+                        raise ConflictError("ITEM_EPOCH_CONFLICT", "Intake item latest revision changed concurrently")
+                    item_epoch_after += 1
                 tx_initial_semantics = await self._initial_semantics_tx(tx, state)
                 fingerprint = self._semantic_fingerprint(tx_initial_semantics)
                 existing_rev = await tx.fetchone(
@@ -241,6 +279,61 @@ class IntakeAcceptanceSnapshotMixin:
                     raise ConflictError(
                         "Intake revision was adopted concurrently under the same fingerprint",
                         409,
+                    )
+                if state.get("observation_uuid") is not None:
+                    acceptance_fact = {
+                        "observation_uuid": state["observation_uuid"],
+                        "intake_snapshot_uuid": state["intake_snapshot_uuid"],
+                        "intake_item_uuid": state["intake_item_uuid"],
+                        "intake_revision_uuid": state["intake_revision_uuid"],
+                        "disposition": acceptance_disposition,
+                        "expected_item_epoch": item_epoch_before,
+                        "resulting_item_epoch": item_epoch_after,
+                    }
+                    await tx.execute(
+                        "INSERT INTO mkb_intake_acceptance_facts"
+                        "(acceptance_fact_uuid,team_uuid,observation_uuid,intake_snapshot_uuid,intake_item_uuid,"
+                        "intake_revision_uuid,disposition,expected_item_epoch,resulting_item_epoch,fact_digest,created_at,"
+                        "payload_extra) VALUES (?,?,?,?,?,?,?,?,?,?,?,'{}')",
+                        (
+                            uuid7(),
+                            command.team_uuid,
+                            state["observation_uuid"],
+                            state["intake_snapshot_uuid"],
+                            state["intake_item_uuid"],
+                            state["intake_revision_uuid"],
+                            acceptance_disposition,
+                            item_epoch_before,
+                            item_epoch_after,
+                            stable_digest(acceptance_fact),
+                            now,
+                        ),
+                    )
+                if acceptance_disposition == "changed":
+                    epoch_transition = {
+                        "intake_item_uuid": state["intake_item_uuid"],
+                        "epoch_before": item_epoch_before,
+                        "epoch_after": item_epoch_after,
+                        "mutation_kind": "accept_latest",
+                        "observation_uuid": state.get("observation_uuid"),
+                    }
+                    await tx.execute(
+                        "INSERT INTO mkb_item_epoch_transitions"
+                        "(transition_uuid,team_uuid,intake_item_uuid,epoch_before,epoch_after,mutation_kind,task_uuid,"
+                        "execution_uuid,observation_uuid,transition_digest,occurred_at,payload_extra) "
+                        "VALUES (?,?,?,?,?,'accept_latest',?,?,?,?,?,'{}')",
+                        (
+                            uuid7(),
+                            command.team_uuid,
+                            state["intake_item_uuid"],
+                            item_epoch_before,
+                            item_epoch_after,
+                            command.task_uuid,
+                            command.execution_uuid,
+                            state.get("observation_uuid"),
+                            stable_digest(epoch_transition),
+                            now,
+                        ),
                     )
                 for artifact_uuid, owner_snapshot, owner_revision, role, digest, size, handle, object_uuid in (
                     (
@@ -483,41 +576,49 @@ class IntakeAcceptanceSnapshotMixin:
                     process_uuid=command.process_uuid,
                     payload=event_payload,
                 )
-                await tx.execute(
-                    "INSERT INTO mkb_intake_item_transitions "
-                    "(transition_uuid,team_uuid,intake_item_uuid,action_key,action_version,before_lifecycle,after_lifecycle,"
-                    "before_latest_revision_uuid,after_latest_revision_uuid,before_serving_revision_uuid,after_serving_revision_uuid,"
-                    "item_revision_before,item_revision_after,causation_task_uuid,causation_execution_uuid,causation_process_uuid,"
-                    "proof_ref,proof_digest,transition_fence,occurred_at,payload_extra) "
-                    "VALUES (?,?,?,'accept_revision','v1','active','active',NULL,?,NULL,NULL,0,0,?,?,?,?,?,?,?,'{}')",
-                    (
-                        uuid7(),
-                        command.team_uuid,
-                        state["intake_item_uuid"],
-                        state["intake_revision_uuid"],
-                        command.task_uuid,
-                        command.execution_uuid,
-                        command.process_uuid,
-                        refs["proof_ref"],
-                        refs["proof_digest"],
-                        stable_digest({"process": command.process_uuid, "fence": command.fencing_generation}),
-                        now,
-                    ),
-                )
-                await events.write(
-                    tx,
-                    team_uuid=command.team_uuid,
-                    trace_uuid=command.trace_uuid,
-                    event_type="intake.item_transitioned",
-                    aggregate="intake",
-                    summary="Intake item accepted a new revision",
-                    task_uuid=command.task_uuid,
-                    execution_uuid=command.execution_uuid,
-                    process_uuid=command.process_uuid,
-                    payload=event_payload,
-                    status_before="active",
-                    status_after="active",
-                )
+                if acceptance_disposition == "changed":
+                    await tx.execute(
+                        "INSERT INTO mkb_intake_item_transitions "
+                        "(transition_uuid,team_uuid,intake_item_uuid,action_key,action_version,before_lifecycle,after_lifecycle,"
+                        "before_latest_revision_uuid,after_latest_revision_uuid,before_serving_revision_uuid,"
+                        "after_serving_revision_uuid,item_revision_before,item_revision_after,causation_task_uuid,"
+                        "causation_execution_uuid,causation_process_uuid,proof_ref,proof_digest,transition_fence,occurred_at,"
+                        "payload_extra) VALUES (?,?,?,'accept_revision','v1',?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'{}')",
+                        (
+                            uuid7(),
+                            command.team_uuid,
+                            state["intake_item_uuid"],
+                            item_before["lifecycle_state"],
+                            item_before["lifecycle_state"],
+                            item_before["latest_revision_uuid"],
+                            state["intake_revision_uuid"],
+                            item_before["serving_revision_uuid"],
+                            item_before["serving_revision_uuid"],
+                            item_epoch_before,
+                            item_epoch_after,
+                            command.task_uuid,
+                            command.execution_uuid,
+                            command.process_uuid,
+                            refs["proof_ref"],
+                            refs["proof_digest"],
+                            stable_digest({"process": command.process_uuid, "fence": command.fencing_generation}),
+                            now,
+                        ),
+                    )
+                    await events.write(
+                        tx,
+                        team_uuid=command.team_uuid,
+                        trace_uuid=command.trace_uuid,
+                        event_type="intake.item_transitioned",
+                        aggregate="intake",
+                        summary="Intake item accepted a new revision",
+                        task_uuid=command.task_uuid,
+                        execution_uuid=command.execution_uuid,
+                        process_uuid=command.process_uuid,
+                        payload=event_payload,
+                        status_before=item_before["lifecycle_state"],
+                        status_after=item_before["lifecycle_state"],
+                    )
 
             return material, {"admission_result": admission}, callback
 

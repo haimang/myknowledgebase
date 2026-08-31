@@ -33,6 +33,7 @@ from src.runtime.intake.types import (
     _StageMaterial,
     _verified_media_type,
 )
+from src.services.observation_reservations import ObservationReservationService
 
 
 class IntakeAcquisitionIngestMixin:
@@ -65,8 +66,19 @@ class IntakeAcquisitionIngestMixin:
             raise MkbError("SOURCE_KIND_INVALID", "Source kind is not registered", 422)
         if not isinstance(external_key, str) or not external_key.strip():
             raise MkbError("SOURCE_EXTERNAL_KEY_INVALID", "Source external_key is required", 422)
+        async with self._persistence.read_snapshot() as identity_tx:
+            admitted_observation = await ObservationReservationService.identity_for_execution_tx(
+                identity_tx,
+                team_uuid=command.team_uuid,
+                execution_uuid=command.execution_uuid,
+            )
         if source_kind == "registered_api":
-            return await self._acquire_registered_api_collection(command, descriptor, payload=payload)
+            return await self._acquire_registered_api_collection(
+                command,
+                descriptor,
+                payload=payload,
+                admitted_observation=admitted_observation,
+            )
         expected_capability = (
             "intake.acquire.http_browser"
             if command.step_key in {"acquire_browser", "acquire_browser_reacquire", "acquire_print"}
@@ -76,7 +88,16 @@ class IntakeAcquisitionIngestMixin:
             raise MkbError(
                 "ACQUISITION_CAPABILITY_MISMATCH", "Source kind does not match the bound acquisition capability", 409
             )
-        acquired = await self._acquire_content(command, descriptor)
+        try:
+            acquired = await self._acquire_content(command, descriptor)
+        except Exception as exc:
+            await ObservationReservationService().mark_failed_for_execution(
+                self._persistence,
+                team_uuid=command.team_uuid,
+                execution_uuid=command.execution_uuid,
+                error_code=exc.code if isinstance(exc, MkbError) else "ACQUISITION_FAILED",
+            )
+            raise
         if not acquired.is_binary and not acquired.raw_text.strip():
             raise MkbError("ACQUISITION_EMPTY", "Source acquisition returned no content", 422)
         now = utc_now()
@@ -126,15 +147,29 @@ class IntakeAcquisitionIngestMixin:
                 else None
             ),
         }
-        existing = await self._resolve_existing_intake_identity(
-            command.team_uuid, source_kind, next_state["normalized_external_key"]
-        )
-        if existing is not None:
-            next_state["intake_source_uuid"] = existing["intake_source_uuid"]
-            if existing.get("intake_item_uuid"):
-                next_state["intake_item_uuid"] = existing["intake_item_uuid"]
-            if existing.get("intake_snapshot_uuid"):
-                next_state["intake_snapshot_uuid"] = existing["intake_snapshot_uuid"]
+        if admitted_observation is not None:
+            next_state.update(
+                {
+                    "intake_source_uuid": admitted_observation["intake_source_uuid"],
+                    "observation_uuid": admitted_observation["observation_uuid"],
+                    "observation_key": admitted_observation["observation_key"],
+                    "observation_fingerprint": admitted_observation["observation_fingerprint"],
+                    "observation_attempt_generation": admitted_observation["current_attempt_generation"],
+                    "expected_item_epoch": admitted_observation["expected_item_epoch"],
+                }
+            )
+            if admitted_observation.get("intake_item_uuid"):
+                next_state["intake_item_uuid"] = admitted_observation["intake_item_uuid"]
+        else:
+            existing = await self._resolve_existing_intake_identity(
+                command.team_uuid, source_kind, next_state["normalized_external_key"]
+            )
+            if existing is not None:
+                next_state["intake_source_uuid"] = existing["intake_source_uuid"]
+                if existing.get("intake_item_uuid"):
+                    next_state["intake_item_uuid"] = existing["intake_item_uuid"]
+                if existing.get("intake_snapshot_uuid"):
+                    next_state["intake_snapshot_uuid"] = existing["intake_snapshot_uuid"]
         representation_kind = str(acquired.evidence.get("representation_kind") or "transferred")
         acquire_fact = prepare_representation_append(
             RepresentationObservation(
@@ -180,7 +215,6 @@ class IntakeAcquisitionIngestMixin:
         )
 
         async def callback(tx: UnitOfWork, refs: Mapping[str, str]) -> None:
-            del refs
             definition = await tx.fetchone(
                 "SELECT definition_digest FROM mkb_source_kind_definitions "
                 "WHERE source_kind=? AND definition_version='v1' AND status='active'",
@@ -188,15 +222,16 @@ class IntakeAcquisitionIngestMixin:
             )
             if definition is None:
                 raise MkbError("REGISTRY_NOT_FOUND", "Source kind definition is unavailable", 503)
-            existing = await self._resolve_existing_intake_identity_tx(
-                tx, command.team_uuid, source_kind, str(next_state["normalized_external_key"])
-            )
-            if existing is not None:
-                next_state["intake_source_uuid"] = existing["intake_source_uuid"]
-                if existing.get("intake_item_uuid"):
-                    next_state["intake_item_uuid"] = existing["intake_item_uuid"]
-                if existing.get("intake_snapshot_uuid"):
-                    next_state["intake_snapshot_uuid"] = existing["intake_snapshot_uuid"]
+            if admitted_observation is None:
+                existing = await self._resolve_existing_intake_identity_tx(
+                    tx, command.team_uuid, source_kind, str(next_state["normalized_external_key"])
+                )
+                if existing is not None:
+                    next_state["intake_source_uuid"] = existing["intake_source_uuid"]
+                    if existing.get("intake_item_uuid"):
+                        next_state["intake_item_uuid"] = existing["intake_item_uuid"]
+                    if existing.get("intake_snapshot_uuid"):
+                        next_state["intake_snapshot_uuid"] = existing["intake_snapshot_uuid"]
             await tx.execute(
                 "INSERT OR IGNORE INTO mkb_intake_sources "
                 "(team_uuid,intake_source_uuid,source_kind,source_kind_definition_version,source_kind_definition_digest,"
@@ -223,6 +258,13 @@ class IntakeAcquisitionIngestMixin:
             if stored is not None:
                 next_state["intake_source_uuid"] = stored["intake_source_uuid"]
             await append_representation_tx(tx, acquire_fact)
+            await ObservationReservationService().mark_acquired_tx(
+                tx,
+                team_uuid=command.team_uuid,
+                execution_uuid=command.execution_uuid,
+                artifact_ref=refs.get("output_manifest_ref"),
+                artifact_digest=refs.get("output_manifest_digest"),
+            )
 
         return material, {}, callback
 
@@ -286,6 +328,7 @@ class IntakeAcquisitionIngestMixin:
         descriptor: Mapping[str, Any],
         *,
         payload: Mapping[str, Any],
+        admitted_observation: Mapping[str, Any] | None = None,
     ) -> tuple[_StageMaterial, dict[str, Any], Callable[[UnitOfWork, Mapping[str, str]], Awaitable[None]]]:
         """Acquire an ordered typed API collection without flattening members.
 
@@ -396,6 +439,17 @@ class IntakeAcquisitionIngestMixin:
             "observed_at": now,
             "payload": dict(payload),
         }
+        if admitted_observation is not None:
+            next_state.update(
+                {
+                    "intake_source_uuid": admitted_observation["intake_source_uuid"],
+                    "observation_uuid": admitted_observation["observation_uuid"],
+                    "observation_key": admitted_observation["observation_key"],
+                    "observation_fingerprint": admitted_observation["observation_fingerprint"],
+                    "observation_attempt_generation": admitted_observation["current_attempt_generation"],
+                    "expected_item_epoch": admitted_observation["expected_item_epoch"],
+                }
+            )
         acquire_fact = prepare_representation_append(
             RepresentationObservation(
                 team_uuid=command.team_uuid,
@@ -437,22 +491,22 @@ class IntakeAcquisitionIngestMixin:
         )
 
         async def callback(tx: UnitOfWork, refs: Mapping[str, str]) -> None:
-            del refs
             definition = await tx.fetchone(
                 "SELECT definition_digest FROM mkb_source_kind_definitions "
                 "WHERE source_kind='registered_api' AND definition_version='v1' AND status='active'"
             )
             if definition is None:
                 raise MkbError("REGISTRY_NOT_FOUND", "Source kind definition is unavailable", 503)
-            existing = await self._resolve_existing_intake_identity_tx(
-                tx, command.team_uuid, "registered_api", str(next_state["normalized_external_key"])
-            )
-            if existing is not None:
-                next_state["intake_source_uuid"] = existing["intake_source_uuid"]
-                if existing.get("intake_item_uuid"):
-                    next_state["intake_item_uuid"] = existing["intake_item_uuid"]
-                if existing.get("intake_snapshot_uuid"):
-                    next_state["intake_snapshot_uuid"] = existing["intake_snapshot_uuid"]
+            if admitted_observation is None:
+                existing = await self._resolve_existing_intake_identity_tx(
+                    tx, command.team_uuid, "registered_api", str(next_state["normalized_external_key"])
+                )
+                if existing is not None:
+                    next_state["intake_source_uuid"] = existing["intake_source_uuid"]
+                    if existing.get("intake_item_uuid"):
+                        next_state["intake_item_uuid"] = existing["intake_item_uuid"]
+                    if existing.get("intake_snapshot_uuid"):
+                        next_state["intake_snapshot_uuid"] = existing["intake_snapshot_uuid"]
             await tx.execute(
                 "INSERT OR IGNORE INTO mkb_intake_sources "
                 "(team_uuid,intake_source_uuid,source_kind,source_kind_definition_version,source_kind_definition_digest,"
@@ -479,6 +533,13 @@ class IntakeAcquisitionIngestMixin:
             if stored is not None:
                 next_state["intake_source_uuid"] = stored["intake_source_uuid"]
             await append_representation_tx(tx, acquire_fact)
+            await ObservationReservationService().mark_acquired_tx(
+                tx,
+                team_uuid=command.team_uuid,
+                execution_uuid=command.execution_uuid,
+                artifact_ref=refs.get("output_manifest_ref"),
+                artifact_digest=refs.get("output_manifest_digest"),
+            )
 
         return material, {}, callback
 

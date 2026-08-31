@@ -19,6 +19,7 @@ from src.contracts.common.time import utc_now
 from src.contracts.runtime.models import ProcessCommand
 from src.contracts.storage.models import ObjectStat
 from src.persistence.ports import UnitOfWork
+from src.services.observation_reservations import ObservationReservationService
 
 
 def _json(value: Any) -> str:
@@ -218,6 +219,12 @@ class ScatterAcceptanceWriter:
                 command.execution_uuid,
                 acceptance.raw_artifact_uuid,
             ),
+        )
+        await ObservationReservationService().mark_accepted_tx(
+            tx,
+            team_uuid=command.team_uuid,
+            execution_uuid=command.execution_uuid,
+            snapshot_uuid=acceptance.intake_snapshot_uuid,
         )
         await tx.execute(
             "INSERT INTO mkb_intake_artifacts "

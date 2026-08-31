@@ -6,7 +6,7 @@ import json
 from collections.abc import Awaitable, Callable, Mapping
 from typing import Any
 
-from src.contracts.common.errors import MkbError
+from src.contracts.common.errors import ConflictError, MkbError
 from src.contracts.common.ids import canonical_json, stable_digest, uuid7
 from src.contracts.runtime.models import ProcessCommand
 from src.contracts.storage.models import ObjectHandle, ObjectStat, PromoteRequest
@@ -258,9 +258,20 @@ class IntakeIndexRebuildPlanMixin:
                     if (
                         item is None
                         or item["lifecycle_state"] != "active"
-                        or not item["serving_revision_uuid"]
+                        or item["latest_revision_uuid"] != revision_uuid
+                    ):
+                        raise ConflictError(
+                            "INDEX_REBUILD_TARGET_STALE",
+                            "A frozen index rebuild target changed before execution",
+                        )
+                    # An active Item whose latest revision is not currently
+                    # serving is a valid empty rebuild target (for example
+                    # immediately after explicit reactivation).  It has not
+                    # changed its frozen identity; retain the typed no-op
+                    # behavior while still failing any actual target drift.
+                    if (
+                        not item["serving_revision_uuid"]
                         or item["serving_revision_uuid"] != item["latest_revision_uuid"]
-                        or item["serving_revision_uuid"] != revision_uuid
                     ):
                         continue
                     pointers = await tx.fetchall(
@@ -461,4 +472,3 @@ class IntakeIndexRebuildPlanMixin:
                 or proof["actual_set_digest"] != actual_set
             ):
                 raise MkbError("INDEX_REBUILD_SOURCE_PROOF_INVALID", "Active vector set no longer matches its publication proof", 409)
-

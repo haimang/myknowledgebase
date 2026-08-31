@@ -2,19 +2,20 @@
 
 from __future__ import annotations
 
-import hashlib
 from typing import Any
 
 from src.contracts.api.models import (
     TaskCreateRequest,
 )
 from src.contracts.common.errors import ConflictError, MkbError, NotFoundError
-from src.contracts.common.ids import canonical_json, stable_digest, uuid7
+from src.contracts.common.ids import stable_digest, uuid7
 from src.contracts.common.time import utc_now
 from src.persistence.ports import PersistencePort, UnitOfWork
 from src.runtime.task.helpers import _json
 from src.services.config_snapshots import ConfigSnapshotService, PreparedExecutionInputs
 from src.services.events import DomainEventWriter
+from src.services.intake_lifecycle.admission_matrix import assert_intent_applicable
+from src.services.observation_reservations import ObservationAdmission, ObservationReservationService
 from src.services.teams import TeamService
 
 
@@ -94,8 +95,6 @@ class TaskCreateMixin:
                 str(getattr(source, "source_kind", "")),
                 getattr(source, "clean_strategy", None),
             )
-        if source is not None and getattr(source, "source_kind", None) == "registered_api":
-            await self._assert_registered_api_observation_free(request)
         if (
             source is not None
             and getattr(source, "source_kind", None) == "registered_api"
@@ -124,6 +123,33 @@ class TaskCreateMixin:
                 if existing["creation_fingerprint"] != fingerprint:
                     raise ConflictError("task-identity-conflict", "Task identity has a different creation fingerprint")
                 return self._view(existing, await self._open_gate(tx, request.team_uuid, request.task_uuid)), True
+            await self._assert_intent_target_current_tx(tx, request, prepared)
+            observation: ObservationAdmission | None = None
+            observation_service = ObservationReservationService()
+            if prepared is not None and observation_service.applies(request):
+                source_payload = getattr(request.payload, "source", None)
+                assert source_payload is not None
+                observation = await observation_service.resolve_tx(
+                    tx,
+                    request,
+                    source_descriptor_ref=prepared.input_manifest_ref,
+                    source_descriptor_digest=stable_digest(
+                        source_payload.model_dump(
+                            mode="json",
+                            exclude={
+                                "observation_key",
+                                "retry_failed_observation",
+                                "expected_observation_attempt_generation",
+                            },
+                        )
+                    ),
+                )
+                if observation.replay_task_uuid is not None:
+                    replayed = await self._get_row(tx, request.team_uuid, observation.replay_task_uuid)
+                    return self._view(
+                        replayed,
+                        await self._open_gate(tx, request.team_uuid, observation.replay_task_uuid),
+                    ), True
             try:
                 await tx.execute(
                     "INSERT INTO mkb_tasks "
@@ -221,6 +247,13 @@ class TaskCreateMixin:
                     else None
                 ),
             )
+            if observation is not None:
+                await observation_service.reserve_tx(
+                    tx,
+                    request,
+                    observation,
+                    execution_uuid=root_execution_uuid,
+                )
             if request.request_intent == "intake.rebuild" and prepared is not None:
                 await self._insert_atomic_rebuild_restart(
                     tx,
@@ -449,35 +482,50 @@ class TaskCreateMixin:
             ),
         )
 
-    async def _assert_registered_api_observation_free(self, request: TaskCreateRequest) -> None:
-        source = getattr(request.payload, "source", None)
-        if source is None:
+    @staticmethod
+    async def _assert_intent_target_current_tx(
+        tx: UnitOfWork,
+        request: TaskCreateRequest,
+        prepared: PreparedExecutionInputs | None,
+    ) -> None:
+        if prepared is None or request.request_intent == "intake.ingest":
             return
-        key = str(getattr(source, "external_key", "") or "").strip().casefold()
-        records = list(getattr(source, "records", []) or [])
-        records_digest = hashlib.sha256(canonical_json(records)).hexdigest()
-        observation_digest = stable_digest(
-            {"source_external_key": key, "records_digest": records_digest}
-        )
-        async with self.persistence.transaction() as tx:
-            row = await tx.fetchone(
-                "SELECT snap.observation_fingerprint FROM mkb_intake_sources AS s "
-                "LEFT JOIN mkb_intake_snapshots AS snap ON snap.team_uuid=s.team_uuid "
-                "AND snap.intake_source_uuid=s.intake_source_uuid AND snap.observation_key=? "
-                "WHERE s.team_uuid=? AND s.source_kind='registered_api' AND s.normalized_external_key=?",
-                (key, request.team_uuid, key),
-            )
-        if row is None or row["observation_fingerprint"] is None:
+        context = prepared.intent_context
+        if not isinstance(context, dict):
+            raise MkbError("INTAKE_TARGET_MISSING", "Intake command target is unavailable", 503)
+        if request.request_intent == "index.rebuild":
+            scope = context.get("scope")
+            targets = scope.get("targets") if isinstance(scope, dict) else None
+            if not isinstance(targets, list):
+                raise MkbError("INDEX_REBUILD_TARGET_INVALID", "Index rebuild target set is invalid", 503)
+            for target in targets:
+                if not isinstance(target, dict):
+                    raise MkbError("INDEX_REBUILD_TARGET_INVALID", "Index rebuild target set is invalid", 503)
+                item = await tx.fetchone(
+                    "SELECT lifecycle_state,latest_revision_uuid FROM mkb_intake_items "
+                    "WHERE team_uuid=? AND intake_item_uuid=?",
+                    (request.team_uuid, target.get("intake_item_uuid")),
+                )
+                if (
+                    item is None
+                    or item["lifecycle_state"] != "active"
+                    or item["latest_revision_uuid"] != target.get("intake_revision_uuid")
+                ):
+                    raise ConflictError("INDEX_REBUILD_TARGET_STALE", "Index rebuild target changed before admission")
             return
-        if row["observation_fingerprint"] == observation_digest:
-            raise ConflictError(
-                "INTAKE_OBSERVATION_REPLAY",
-                "Registered API observation already exists",
-            )
-        raise ConflictError(
-            "INTAKE_OBSERVATION_CONFLICT",
-            "Registered API observation already exists with a different digest",
+        target = context.get("target")
+        if not isinstance(target, dict):
+            raise MkbError("INTAKE_TARGET_MISSING", "Intake command target is unavailable", 503)
+        item = await tx.fetchone(
+            "SELECT lifecycle_state,row_revision,latest_revision_uuid FROM mkb_intake_items "
+            "WHERE team_uuid=? AND intake_item_uuid=?",
+            (request.team_uuid, target.get("intake_item_uuid")),
         )
+        if item is None:
+            raise ConflictError("INTAKE_TARGET_STALE", "Intake command target no longer exists")
+        if item["row_revision"] != target.get("item_revision"):
+            raise ConflictError("ITEM_EPOCH_CONFLICT", "Intake item changed before Task admission")
+        assert_intent_applicable(request.request_intent, str(item["lifecycle_state"]))
 
     async def _link_execution_object_refs(
         self,

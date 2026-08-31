@@ -42,6 +42,7 @@ class IntakeTargetResolver:
                 intake_item_uuid=payload.intake_item_uuid,
                 expected_revision_uuid=payload.expected_intake_revision_uuid,
                 require_clean_artifact=True,
+                require_active=True,
             )
 
     async def resolve_metadata_update(

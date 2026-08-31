@@ -35,6 +35,9 @@ def _semantic_text(value: str, field: str) -> str:
 
 
 class GenericSemanticSource(PayloadExtraModel):
+    observation_key: Annotated[str | None, Field(min_length=1, max_length=1024)] = None
+    retry_failed_observation: bool = False
+    expected_observation_attempt_generation: Annotated[int | None, Field(ge=1)] = None
     realm: Annotated[str, Field(min_length=1, max_length=256)]
     type: Annotated[str, Field(min_length=1, max_length=256)]
     channel: Annotated[str, Field(min_length=1, max_length=256)]
@@ -71,6 +74,15 @@ class GenericSemanticSource(PayloadExtraModel):
         if any(not item for item in normalized):
             raise ValueError("context_tags cannot contain blank values")
         return normalized
+
+    @model_validator(mode="after")
+    def validate_observation_retry(self) -> GenericSemanticSource:
+        if self.retry_failed_observation:
+            if self.observation_key is None or self.expected_observation_attempt_generation is None:
+                raise ValueError("failed observation retry requires an explicit key and expected attempt generation")
+        elif self.expected_observation_attempt_generation is not None:
+            raise ValueError("expected observation attempt generation is only valid for a typed retry")
+        return self
 
 
 _UTC_RFC3339 = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|\+00:00)$")
@@ -177,6 +189,9 @@ class HttpSourceDescriptor(GenericSemanticSource):
 
 class RegisteredApiSourceDescriptor(PayloadExtraModel):
     source_kind: Literal["registered_api"]
+    observation_key: Annotated[str | None, Field(min_length=1, max_length=1024)] = None
+    retry_failed_observation: bool = False
+    expected_observation_attempt_generation: Annotated[int | None, Field(ge=1)] = None
     external_key: Annotated[str, Field(min_length=1, max_length=1024)]
     connector_key: Annotated[str, Field(pattern=r"^[a-z][a-z0-9_.-]{0,127}$")]
     provider: Literal["chinatax", "domain", "realestate"]
@@ -233,6 +248,11 @@ class RegisteredApiSourceDescriptor(PayloadExtraModel):
             validated.append(dumped)
             keys.append(str(dumped[identity_field]).strip().casefold())
         self.records = validated
+        if self.retry_failed_observation:
+            if self.observation_key is None or self.expected_observation_attempt_generation is None:
+                raise ValueError("failed observation retry requires an explicit key and expected attempt generation")
+        elif self.expected_observation_attempt_generation is not None:
+            raise ValueError("expected observation attempt generation is only valid for a typed retry")
         if len(keys) != len(set(keys)):
             raise ValueError("registered_api records must have unique provider external keys")
         return self

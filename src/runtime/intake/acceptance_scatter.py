@@ -204,8 +204,10 @@ class IntakeAcceptanceScatterMixin:
                 change_set_uuid=state["change_set_uuid"],
                 raw_artifact_uuid=state["raw_artifact_uuid"],
                 source_kind="registered_api",
-                observation_key=state["normalized_external_key"],
-                observation_fingerprint=str(state.get("observation_digest") or state["raw_digest"]),
+                observation_key=str(state.get("observation_key") or state["normalized_external_key"]),
+                observation_fingerprint=str(
+                    state.get("observation_fingerprint") or state.get("observation_digest") or state["raw_digest"]
+                ),
                 raw_digest=state["raw_digest"],
                 candidate_root_digest=state["candidate_root_digest"],
                 observed_at=state["observed_at"],
