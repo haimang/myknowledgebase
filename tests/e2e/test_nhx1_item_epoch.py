@@ -71,6 +71,8 @@ def test_changed_and_no_change_observations_have_snapshot_facts_and_epoch_fence(
             internal_token=token,
             inference_probe_enabled=False,
             live_inference=False,
+            rate_limit_ip_per_min=10_000,
+            rate_limit_token_per_min=20_000,
         )
     )
     first_uuid, second_uuid, third_uuid = uuid7(), uuid7(), uuid7()

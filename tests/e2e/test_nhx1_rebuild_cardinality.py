@@ -53,6 +53,8 @@ def test_stale_frozen_target_fails_whole_rebuild_and_empty_scope_is_typed_noop(t
         internal_token=token,
         inference_probe_enabled=False,
         live_inference=False,
+        rate_limit_ip_per_min=10_000,
+        rate_limit_token_per_min=20_000,
     )
     app = create_app(settings)
     team_uuid, ingest_uuid = uuid7(), uuid7()

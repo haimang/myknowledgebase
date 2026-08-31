@@ -79,6 +79,8 @@ def test_failed_observation_retry_adds_attempt_without_new_source_or_snapshot(tm
             live_inference=False,
             egress_allow_private_default=False,
             egress_allow_http=True,
+            rate_limit_ip_per_min=10_000,
+            rate_limit_token_per_min=20_000,
         )
     )
     team_uuid, first_uuid, retry_uuid = uuid7(), uuid7(), uuid7()

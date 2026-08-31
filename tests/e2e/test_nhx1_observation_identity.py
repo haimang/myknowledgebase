@@ -172,6 +172,8 @@ def test_observation_reservation_replay_conflict_and_new_observation(tmp_path: P
             internal_token=token,
             inference_probe_enabled=False,
             live_inference=False,
+            rate_limit_ip_per_min=10_000,
+            rate_limit_token_per_min=20_000,
         )
     )
     first_uuid, replay_uuid, conflict_uuid, second_observation_uuid = (uuid7() for _ in range(4))
@@ -242,6 +244,8 @@ def test_concurrent_same_observation_has_one_task_winner(tmp_path: Path) -> None
             internal_token=token,
             inference_probe_enabled=False,
             live_inference=False,
+            rate_limit_ip_per_min=10_000,
+            rate_limit_token_per_min=20_000,
         )
     )
     task_ids = [uuid7(), uuid7()]
