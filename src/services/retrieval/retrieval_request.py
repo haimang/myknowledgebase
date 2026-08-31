@@ -95,7 +95,7 @@ class RetrievalRequestMixin:
 
     async def _search_with_query(self, query: _SearchInput, query_digest: str) -> dict[str, Any]:
         try:
-            async with self._persistence.transaction() as tx:
+            async with self._persistence.read_snapshot() as tx:
                 team = await tx.fetchone(
                     "SELECT status, deleted_at FROM mkb_teams WHERE team_uuid=?",
                     (query.team_uuid,),
@@ -114,7 +114,7 @@ class RetrievalRequestMixin:
             query_embedding = await self._embed_query(query, namespace, binding)
 
         try:
-            async with self._persistence.transaction() as tx:
+            async with self._persistence.read_snapshot() as tx:
                 rows = await self._fetch_candidate_rows(tx, namespace, query)
         except MkbError:
             raise

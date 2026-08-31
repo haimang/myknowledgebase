@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import sqlite3
 import struct
 from dataclasses import dataclass
 from pathlib import Path
@@ -280,17 +281,8 @@ async def test_body_access_reads_verified_logical_handle_and_parses_channels(env
 async def test_body_access_fails_closed_when_generation_ledger_digest_changes(environment: Environment) -> None:
     await _seed_generation(environment)
     connection = environment.persistence._connect()
-    connection.execute("UPDATE mkb_generation_artifacts SET content_digest=?", ("c" * 64,))
-    connection.commit()
-
-    with pytest.raises(MkbError) as error:
-        await environment.access.load_retrieval_body(
-            team_uuid=TEAM,
-            generation_artifact_uuid=GENERATION,
-            unit_id="g1:revenue",
-            channel="summary",
-        )
-    assert error.value.code == "RETRIEVE_BODY_INTEGRITY"
+    with pytest.raises(sqlite3.IntegrityError, match="identity is immutable"):
+        connection.execute("UPDATE mkb_generation_artifacts SET content_digest=?", ("c" * 64,))
 
 
 async def test_body_access_accepts_current_construct_stage_envelope(environment: Environment) -> None:

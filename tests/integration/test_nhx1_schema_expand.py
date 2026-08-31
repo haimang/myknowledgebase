@@ -120,7 +120,7 @@ async def test_prefx_024_database_migrates_forward_without_fabricating_history(t
             }
         assert before_selection == after_selection
         assert before_pending == after_pending
-        assert len(ledger) == 28 and ledger[-1]["migration_id"] == "028_nhx1_ops_contracts"
+        assert len(ledger) == 29 and ledger[-1]["migration_id"] == "029_nhx1_evidence_identity_guards"
         assert fabricated == {"observations": 0, "sessions": 0, "bindings": 0, "selection_v2": 0}
     finally:
         await persistence.close()

@@ -74,6 +74,10 @@ class RetrievalRankMixin:
             "item.deleted_at IS NULL",
             "item.serving_revision_uuid IS NOT NULL",
             "item.serving_revision_uuid=r.intake_revision_uuid",
+            "(publication_manifest.publication_manifest_uuid IS NULL OR EXISTS ("
+            "SELECT 1 FROM mkb_publication_manifest_members AS member "
+            "WHERE member.publication_manifest_uuid=publication_manifest.publication_manifest_uuid "
+            "AND member.team_uuid=r.team_uuid AND member.vector_record_uuid=r.vector_record_uuid))",
         ]
         params: list[Any] = [query.team_uuid, namespace["namespace_uuid"]]
 
@@ -132,6 +136,13 @@ class RetrievalRankMixin:
              AND p.namespace_uuid=r.namespace_uuid
             JOIN mkb_publication_proofs AS proof
               ON proof.proof_uuid=p.last_proof_uuid
+            LEFT JOIN mkb_publication_manifests AS publication_manifest
+              ON publication_manifest.proof_uuid=proof.proof_uuid
+             AND publication_manifest.team_uuid=proof.team_uuid
+             AND publication_manifest.intake_item_uuid=proof.intake_item_uuid
+             AND publication_manifest.intake_revision_uuid=proof.intake_revision_uuid
+             AND publication_manifest.namespace_uuid=proof.namespace_uuid
+             AND publication_manifest.index_generation=proof.index_generation
             JOIN mkb_intake_items AS item
               ON item.team_uuid=r.team_uuid AND item.intake_item_uuid=r.intake_item_uuid
             LEFT JOIN mkb_intake_sources AS source
@@ -399,6 +410,13 @@ class RetrievalRankMixin:
             "  ON p.team_uuid=r.team_uuid AND p.intake_item_uuid=r.intake_item_uuid "
             " AND p.namespace_uuid=r.namespace_uuid "
             "JOIN mkb_publication_proofs AS proof ON proof.proof_uuid=p.last_proof_uuid "
+            "LEFT JOIN mkb_publication_manifests AS publication_manifest "
+            "  ON publication_manifest.proof_uuid=proof.proof_uuid "
+            " AND publication_manifest.team_uuid=proof.team_uuid "
+            " AND publication_manifest.intake_item_uuid=proof.intake_item_uuid "
+            " AND publication_manifest.intake_revision_uuid=proof.intake_revision_uuid "
+            " AND publication_manifest.namespace_uuid=proof.namespace_uuid "
+            " AND publication_manifest.index_generation=proof.index_generation "
             "JOIN mkb_intake_items AS item "
             "  ON item.team_uuid=r.team_uuid AND item.intake_item_uuid=r.intake_item_uuid "
             "JOIN mkb_generation_artifacts AS generation "
@@ -435,10 +453,14 @@ class RetrievalRankMixin:
             "  AND generation.validation_disposition='full_valid' "
             "  AND item.lifecycle_state='active' AND item.deleted_at IS NULL "
             "  AND item.serving_revision_uuid IS NOT NULL "
-            "  AND item.serving_revision_uuid=r.intake_revision_uuid"
+            "  AND item.serving_revision_uuid=r.intake_revision_uuid "
+            "  AND (publication_manifest.publication_manifest_uuid IS NULL OR EXISTS ("
+            "SELECT 1 FROM mkb_publication_manifest_members AS member "
+            "WHERE member.publication_manifest_uuid=publication_manifest.publication_manifest_uuid "
+            "AND member.team_uuid=r.team_uuid AND member.vector_record_uuid=r.vector_record_uuid))"
         )
         try:
-            async with self._persistence.transaction() as tx:
+            async with self._persistence.read_snapshot() as tx:
                 rows = await tx.fetchall(sql, tuple(params))
         except MkbError:
             raise
@@ -479,7 +501,7 @@ class RetrievalRankMixin:
             + ")"
         )
         try:
-            async with self._persistence.transaction() as tx:
+            async with self._persistence.read_snapshot() as tx:
                 rows = await tx.fetchall(sql, tuple(params))
         except Exception as exc:
             raise MkbError(

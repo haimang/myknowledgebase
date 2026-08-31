@@ -44,8 +44,11 @@ class ObjectUploadLifecycleService:
         cutoff = self._timestamp(now - self._pending_ttl)
         async with self._persistence.transaction() as tx:
             rows = await tx.fetchall(
-                "SELECT reference_uuid FROM mkb_object_references WHERE purpose='upload_pending' "
-                "AND released_at IS NULL AND created_at<=? ORDER BY created_at,reference_uuid LIMIT ?",
+                "SELECT r.reference_uuid,r.upload_session_uuid FROM mkb_object_references r "
+                "LEFT JOIN mkb_object_upload_sessions s ON s.upload_session_uuid=r.upload_session_uuid "
+                "WHERE r.purpose='upload_pending' AND r.released_at IS NULL AND r.created_at<=? "
+                "AND (s.upload_session_uuid IS NULL OR s.state NOT IN ('reserved','consumed')) "
+                "ORDER BY r.created_at,r.reference_uuid LIMIT ?",
                 (cutoff, limit),
             )
             released = 0
@@ -55,6 +58,12 @@ class ObjectUploadLifecycleService:
                     (self._timestamp(now), row["reference_uuid"]),
                 )
                 released += int(result.rowcount)
+                if row.get("upload_session_uuid"):
+                    await tx.execute(
+                        "UPDATE mkb_object_upload_sessions SET state='expired',terminal_at=?,row_revision=row_revision+1 "
+                        "WHERE upload_session_uuid=? AND state IN ('receiving','prepared','promoted','committed')",
+                        (self._timestamp(now), row["upload_session_uuid"]),
+                    )
         reaper = getattr(self._storage, "reap_staging_before", None)
         reaped = 0 if not callable(reaper) else int(await reaper(now - self._staging_ttl))
         return ObjectUploadLifecycleResult(released_pending=released, reaped_staging=reaped)
@@ -80,6 +89,44 @@ class ObjectUploadLifecycleService:
                 (now, team_uuid, stored["stored_object_uuid"]),
             )
         return result.rowcount > 0
+
+    async def cancel_session(self, *, team_uuid: str, session_token: str) -> bool:
+        """Cancel one upload session; sibling sessions for the same bytes survive."""
+
+        now = self._timestamp(self._now())
+        async with self._persistence.transaction() as tx:
+            parts = session_token.split(":")
+            if len(parts) != 4 or parts[0] != "mkbsession" or parts[1] != "v1":
+                raise MkbError("OBJECT_SESSION_NOT_FOUND", "Upload session token is invalid", 404)
+            session = await tx.fetchone(
+                "SELECT * FROM mkb_object_upload_sessions WHERE team_uuid=? AND upload_session_uuid=?",
+                (team_uuid, parts[2]),
+            )
+            if session is None:
+                raise MkbError("OBJECT_SESSION_NOT_FOUND", "Upload session token is invalid", 404)
+            expected = ObjectUploadLifecycleService._session_token(team_uuid, session["idempotency_key"], session["upload_session_uuid"])
+            import hashlib
+
+            if expected != session_token or hashlib.sha256(session_token.encode()).hexdigest() != session["session_token_hash"]:
+                raise MkbError("OBJECT_SESSION_NOT_FOUND", "Upload session token is invalid", 404)
+            updated = await tx.execute(
+                "UPDATE mkb_object_upload_sessions SET state='cancelled',terminal_at=?,row_revision=row_revision+1 "
+                "WHERE upload_session_uuid=? AND state IN ('receiving','prepared','promoted','committed')",
+                (now, session["upload_session_uuid"]),
+            )
+            await tx.execute(
+                "UPDATE mkb_object_references SET released_at=? WHERE upload_session_uuid=? "
+                "AND purpose='upload_pending' AND released_at IS NULL",
+                (now, session["upload_session_uuid"]),
+            )
+        return updated.rowcount > 0
+
+    @staticmethod
+    def _session_token(team_uuid: str, idempotency_key: str, session_uuid: str) -> str:
+        import hashlib
+
+        suffix = hashlib.sha256(f"{team_uuid}:{idempotency_key}:{session_uuid}".encode()).hexdigest()[:32]
+        return f"mkbsession:v1:{session_uuid}:{suffix}"
 
     def _now(self) -> datetime:
         now = self._clock()

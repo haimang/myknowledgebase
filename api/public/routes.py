@@ -58,13 +58,14 @@ def _generation_artifact_path(generation_artifact_uuid: str) -> str:
     return validate_external_uuid(generation_artifact_uuid, field="generation_artifact_uuid")
 
 
-def _public_object_view(stat, disposition: str) -> PublicObjectView:
+def _public_object_view(stat, disposition: str, *, session_token: str | None = None) -> PublicObjectView:
     return PublicObjectView(
         handle=stat.handle.value,
         digest=stat.sha256,
         size_bytes=stat.size_bytes,
         media_type=stat.media_type,
         disposition=disposition,
+        session_token=session_token,
     )
 
 
@@ -132,16 +133,17 @@ async def upload_object(
         chunks=request.stream(),
         media_type=_upload_media_type(request),
         expected_sha256=_expected_upload_digest(request),
+        idempotency_key=request.headers.get("idempotency-key"),
     )
-    view = _public_object_view(record.stat, "pending")
+    view = _public_object_view(record.stat, "pending", session_token=record.session_token)
     return Response(
-        content=view.model_dump_json(),
+        content=view.model_dump_json(exclude_none=True),
         media_type="application/json",
         status_code=200 if record.replay else 201,
     )
 
 
-@router.get("/teams/{team_uuid}/objects:stat", response_model=PublicObjectView)
+@router.get("/teams/{team_uuid}/objects:stat", response_model=PublicObjectView, response_model_exclude_none=True)
 async def stat_object(
     request: Request,
     team_uuid: str,
@@ -152,11 +154,12 @@ async def stat_object(
     status = await request.app.state.container.object_upload.stat(
         team_uuid=_team_path(team_uuid),
         handle=_object_handle_query(handle),
+        session_token=request.headers.get("x-mkb-session-token"),
     )
     return _public_object_view(status.stat, status.disposition)
 
 
-@router.post("/teams/{team_uuid}/objects:cancel", response_model=PublicObjectView)
+@router.post("/teams/{team_uuid}/objects:cancel", response_model=PublicObjectView, response_model_exclude_none=True)
 async def cancel_object(
     request: Request,
     team_uuid: str,
@@ -166,9 +169,20 @@ async def cancel_object(
     del token
     team_uuid = _team_path(team_uuid)
     handle = _object_handle_query(body.handle)
-    await request.app.state.container.object_upload_lifecycle.cancel(team_uuid=team_uuid, handle=handle)
-    status = await request.app.state.container.object_upload.stat(team_uuid=team_uuid, handle=handle)
-    return _public_object_view(status.stat, status.disposition)
+    if body.session_token is not None:
+        await request.app.state.container.object_upload_lifecycle.cancel_session(
+            team_uuid=team_uuid,
+            session_token=body.session_token,
+        )
+        status = await request.app.state.container.object_upload.stat(
+            team_uuid=team_uuid,
+            handle=handle,
+            session_token=body.session_token,
+        )
+    else:
+        await request.app.state.container.object_upload_lifecycle.cancel(team_uuid=team_uuid, handle=handle)
+        status = await request.app.state.container.object_upload.stat(team_uuid=team_uuid, handle=handle)
+    return _public_object_view(status.stat, status.disposition, session_token=body.session_token)
 
 
 @router.get("/teams")

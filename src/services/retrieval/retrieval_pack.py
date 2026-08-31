@@ -40,7 +40,7 @@ class RetrievalPackMixin:
         if not pairs:
             return {}
         try:
-            async with self._persistence.transaction() as tx:
+            async with self._persistence.read_snapshot() as tx:
                 rows = await self._fetch_candidate_rows(
                     tx,
                     namespace,
@@ -195,7 +195,7 @@ class RetrievalPackMixin:
         if not targets or self._inflation_max_roots == 0:
             return
         try:
-            async with self._persistence.transaction() as tx:
+            async with self._persistence.read_snapshot() as tx:
                 rows = await self._fetch_candidate_rows(
                     tx,
                     namespace,

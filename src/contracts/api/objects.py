@@ -15,10 +15,12 @@ class PublicObjectView(StrictModel):
     size_bytes: Annotated[int, Field(ge=0)]
     media_type: Annotated[str | None, Field(max_length=255)] = None
     disposition: Literal["pending", "ingested", "expired", "tombstoned"]
+    session_token: Annotated[str, Field(pattern=r"^mkbsession:v1:[-A-Za-z0-9._~:]{16,512}$")] | None = None
 
 
 class ObjectCancelRequest(StrictModel):
     handle: Annotated[str, Field(pattern=r"^mkbobj:v1:[a-zA-Z0-9._:-]+$")]
+    session_token: Annotated[str, Field(pattern=r"^mkbsession:v1:[-A-Za-z0-9._~:]{16,512}$")] | None = None
 
 
 __all__ = ["ObjectCancelRequest", "PublicObjectView"]

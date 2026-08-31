@@ -108,8 +108,8 @@ async def test_prefx_024_database_migrates_forward(tmp_path: Path) -> None:
         async with persistence.read_snapshot() as tx:
             ledger = await tx.fetchall("SELECT migration_id FROM mkb_schema_migrations ORDER BY migration_id")
             tables = await tx.fetchall("SELECT name FROM sqlite_master WHERE type='table'")
-        assert len(ledger) == 28
-        assert ledger[-1]["migration_id"] == "028_nhx1_ops_contracts"
+        assert len(ledger) == 29
+        assert ledger[-1]["migration_id"] == "029_nhx1_evidence_identity_guards"
         assert "mkb_intake_observations" in {row["name"] for row in tables}
         assert "mkb_publication_manifests" in {row["name"] for row in tables}
     finally:

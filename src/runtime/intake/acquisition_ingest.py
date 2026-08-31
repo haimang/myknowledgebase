@@ -13,7 +13,7 @@ from src.contracts.intake.representation import RepresentationObservation
 from src.contracts.intake.semantics import generic_semantic_authority
 from src.contracts.runtime.models import ProcessCommand
 from src.contracts.storage.handles import digest_from_handle
-from src.contracts.storage.models import ObjectHandle
+from src.contracts.storage.models import ObjectHandle, PromoteRequest
 from src.persistence.ports import UnitOfWork
 from src.runtime.http_acquisition import HttpAcquisitionResult, redacted_url_identity
 from src.runtime.intake.representation_history import (
@@ -100,6 +100,13 @@ class IntakeAcquisitionIngestMixin:
                 error_code=exc.code if isinstance(exc, MkbError) else "ACQUISITION_FAILED",
             )
             raise
+        raw_cas = None
+        if callable(getattr(self._storage, "promote", None)):
+            raw_bytes = acquired.raw_text.encode("latin-1" if acquired.is_binary else "utf-8")
+            raw_cas = await self._storage.promote(
+                raw_bytes,
+                PromoteRequest(team_uuid=command.team_uuid, purpose="process_io", media_type=acquired.media_type),
+            )
         if not acquired.is_binary and not acquired.raw_text.strip():
             raise MkbError("ACQUISITION_EMPTY", "Source acquisition returned no content", 422)
         now = utc_now()
@@ -149,6 +156,15 @@ class IntakeAcquisitionIngestMixin:
                 else None
             ),
         }
+        if raw_cas is not None:
+            next_state.update(
+                {
+                    "raw_cas_handle": raw_cas.handle.value,
+                    "raw_cas_digest": raw_cas.sha256,
+                    "raw_cas_size": raw_cas.size_bytes,
+            "raw_cas_media_type": raw_cas.media_type,
+                }
+            )
         if admitted_observation is not None:
             next_state.update(
                 {
@@ -382,6 +398,12 @@ class IntakeAcquisitionIngestMixin:
         collection_bytes = canonical_json(records)
         raw_digest = _digest_bytes(collection_bytes)
         collection_byte_count = len(collection_bytes)
+        raw_cas = None
+        if callable(getattr(self._storage, "promote", None)):
+            raw_cas = await self._storage.promote(
+                collection_bytes,
+                PromoteRequest(team_uuid=command.team_uuid, purpose="process_io", media_type="application/json"),
+            )
         observation_digest = stable_digest(
             {
                 "source_external_key": root_external_key.casefold(),
@@ -408,6 +430,15 @@ class IntakeAcquisitionIngestMixin:
             "budget_verdict": "within_registered_api_member_budget",
             "representation_kind": "transferred",
         }
+        if raw_cas is not None:
+            acquisition_evidence.update(
+                {
+                    "raw_cas_handle": raw_cas.handle.value,
+                    "raw_cas_digest": raw_cas.sha256,
+                    "raw_cas_size": raw_cas.size_bytes,
+                    "raw_cas_media_type": raw_cas.media_type,
+                }
+            )
         next_state = {
             "request_intent": "intake.ingest",
             "operation_mode": "scatter_root",
@@ -441,6 +472,14 @@ class IntakeAcquisitionIngestMixin:
             "observed_at": now,
             "payload": dict(payload),
         }
+        if raw_cas is not None:
+            next_state.update(
+                {
+                    "collection_cas_handle": raw_cas.handle.value,
+                    "collection_cas_digest": raw_cas.sha256,
+                    "collection_cas_size": raw_cas.size_bytes,
+                }
+            )
         if admitted_observation is not None:
             next_state.update(
                 {
@@ -856,6 +895,10 @@ class IntakeAcquisitionIngestMixin:
             "intake_item_uuid": None if item is None else item.get("intake_item_uuid"),
             "intake_revision_uuid": None if item is None else item.get("latest_revision_uuid"),
             "raw_artifact_uuid": artifact["intake_artifact_uuid"],
+            "raw_cas_handle": artifact["logical_handle"],
+            "raw_cas_digest": artifact["content_digest"],
+            "raw_cas_size": artifact["size_bytes"],
+            "raw_cas_media_type": artifact.get("media_type"),
             "candidate_set_uuid": uuid7(),
             "clean_artifact_uuid": uuid7(),
             "raw_text": acquired.raw_text,
@@ -1074,6 +1117,14 @@ class IntakeAcquisitionIngestMixin:
                 "text": decoded,
             }
         )
+        if callable(getattr(self._storage, "promote", None)):
+            decoded_cas = await self._storage.promote(
+                decoded.encode("utf-8"),
+                PromoteRequest(team_uuid=command.team_uuid, purpose="process_io", media_type="text/plain"),
+            )
+            next_state["decoded_cas_handle"] = decoded_cas.handle.value
+            next_state["decoded_cas_digest"] = decoded_cas.sha256
+            next_state["decoded_cas_size"] = decoded_cas.size_bytes
         next_state["decode_evidence"] = decode_evidence
         text_layer = str(decode_evidence.get("text_layer") or "not_applicable")
         decode_fact = prepare_representation_append(

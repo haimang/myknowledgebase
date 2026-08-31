@@ -181,12 +181,26 @@ class ObjectGcService:
                     (team_uuid, digest),
                 )
             if live is None:
+                tombstoned = await self._persistence_row_tombstoned(team_uuid, digest)
+                if tombstoned:
+                    destroy = getattr(self._storage, "destroy_quarantined", None)
+                    if callable(destroy):
+                        await destroy(team_uuid, ObjectHandle(value=f"mkbobj:v1:{team_uuid}:{digest}"))
                 continue
             handle = ObjectHandle(value=f"mkbobj:v1:{team_uuid}:{digest}")
             restore = getattr(self._storage, "restore_quarantined", None)
             if callable(restore) and await restore(team_uuid, handle):
                 restored += 1
         return restored
+
+    async def _persistence_row_tombstoned(self, team_uuid: str, digest: str) -> bool:
+        async with self._persistence.read_snapshot() as tx:
+            row = await tx.fetchone(
+                "SELECT tombstoned_at FROM mkb_stored_objects WHERE team_uuid=? AND content_digest=? "
+                "ORDER BY created_at DESC LIMIT 1",
+                (team_uuid, digest),
+            )
+        return row is not None and row["tombstoned_at"] is not None
 
     async def scan_once(self, *, limit: int = 100) -> ObjectGcScanResult:
         """Run one bounded scan, leaving every uncertainty catalogued/live."""

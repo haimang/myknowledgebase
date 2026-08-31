@@ -120,6 +120,52 @@ class IntakeVectorPublishCommitMixin:
                         now,
                     ),
                 )
+                item_row = await tx.fetchone(
+                    "SELECT row_revision FROM mkb_intake_items WHERE team_uuid=? AND intake_item_uuid=?",
+                    (command.team_uuid, state["intake_item_uuid"]),
+                )
+                if item_row is None:
+                    raise MkbError("PUBLICATION_ITEM_MISSING", "Publication item disappeared before manifest commit", 409)
+                manifest_uuid = uuid7()
+                member_set = sorted((row["vector_record_uuid"], row["content_digest"]) for row in fetched)
+                record_set_digest = stable_digest(member_set)
+                manifest_digest = stable_digest(
+                    {
+                        "proof_uuid": state["publication_proof_uuid"],
+                        "team_uuid": command.team_uuid,
+                        "item_epoch": item_row["row_revision"],
+                        "member_set": member_set,
+                    }
+                )
+                await tx.execute(
+                    "INSERT INTO mkb_publication_manifests"
+                    "(publication_manifest_uuid,team_uuid,proof_uuid,intake_item_uuid,intake_revision_uuid,item_epoch,"
+                    "generation_artifact_uuid,namespace_uuid,index_generation,record_count,record_set_digest,manifest_digest,"
+                    "formula_version,published_at,payload_extra) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,? ,?,'{}')",
+                    (
+                        manifest_uuid,
+                        command.team_uuid,
+                        state["publication_proof_uuid"],
+                        state["intake_item_uuid"],
+                        state["intake_revision_uuid"],
+                        item_row["row_revision"],
+                        state["dual_channel_artifact_uuid"],
+                        state["namespace_uuid"],
+                        state["index_generation"],
+                        len(member_set),
+                        record_set_digest,
+                        manifest_digest,
+                        "publication.v2",
+                        now,
+                    ),
+                )
+                for ordinal, (vector_record_uuid, member_digest) in enumerate(member_set):
+                    await tx.execute(
+                        "INSERT INTO mkb_publication_manifest_members"
+                        "(publication_manifest_uuid,team_uuid,vector_record_uuid,member_ordinal,member_digest,payload_extra) "
+                        "VALUES (?,?,?,?,?,'{}')",
+                        (manifest_uuid, command.team_uuid, vector_record_uuid, ordinal, member_digest),
+                    )
                 pointer = await tx.fetchone(
                     "SELECT active_index_generation,pointer_row_revision FROM mkb_index_active_pointers "
                     "WHERE team_uuid=? AND intake_item_uuid=? AND namespace_uuid=?",

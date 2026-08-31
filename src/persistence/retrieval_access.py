@@ -133,7 +133,7 @@ class ArtifactRetrievalAccess(IntakeEligibilityPort, RetrievalBodyPort):
             return set()
 
         approved: set[str] = set()
-        async with self._persistence.transaction() as tx:
+        async with self._persistence.read_snapshot() as tx:
             for start in range(0, len(requested), self._candidate_chunk_size):
                 chunk = requested[start : start + self._candidate_chunk_size]
                 placeholders = ",".join("(?,?,?)" for _ in chunk)
@@ -191,7 +191,7 @@ class ArtifactRetrievalAccess(IntakeEligibilityPort, RetrievalBodyPort):
         cache_key = (team_uuid, generation_artifact_uuid)
         units = None if cache is None else cache.get(cache_key)
         if units is None:
-            async with self._persistence.transaction() as tx:
+            async with self._persistence.read_snapshot() as tx:
                 artifact = await tx.fetchone(
                     "SELECT generation_artifact_uuid,logical_handle,media_type,size_bytes,content_digest "
                     "FROM mkb_generation_artifacts "

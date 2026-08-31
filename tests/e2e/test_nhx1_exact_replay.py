@@ -17,7 +17,7 @@ from tests.local_runtime import local_mock_settings
 class _CountingHttpFetcher:
     def __init__(self) -> None:
         self.calls: list[str] = []
-        self.body = "frozen upstream bytes"
+        self.body = "<article><h1>Frozen title</h1><p>frozen upstream bytes</p></article>"
 
     async def acquire(self, url: str) -> str:
         self.calls.append(url)
@@ -122,7 +122,7 @@ def test_http_full_retry_uses_frozen_artifact_and_zero_refetch(tmp_path: Path) -
                 return int(task["row_revision"]) + 1
 
         expected_revision = client.portal.call(fail_original)
-        fetcher.body = "changed upstream bytes must not be observed"
+        fetcher.body = "<article><h1>Changed title</h1><p>changed upstream bytes must not be observed</p></article>"
         retry = client.post(
             f"/v1/teams/{team_uuid}/tasks/{task_uuid}:retry",
             headers=headers,

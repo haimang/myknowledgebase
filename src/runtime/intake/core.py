@@ -296,6 +296,38 @@ class IntakeCoreMixin:
         state = dict(decoded["state"])
         state.setdefault("predecessor_ref", command.input_manifest_ref)
         state.setdefault("predecessor_digest", command.input_manifest_digest)
+        for text_key, handle_key, digest_key, size_key in (
+            ("raw_text", "raw_cas_handle", "raw_cas_digest", "raw_cas_size"),
+            ("decoded_text", "decoded_cas_handle", "decoded_cas_digest", "decoded_cas_size"),
+            ("clean_text", "clean_cas_handle", "clean_cas_digest", "clean_cas_size"),
+        ):
+            if text_key in state or not isinstance(state.get(handle_key), str):
+                continue
+            body = await self._storage.read_verified(command.team_uuid, ObjectHandle(value=state[handle_key]))
+            if (
+                isinstance(state.get(size_key), int)
+                and len(body) != state[size_key]
+                or isinstance(state.get(digest_key), str)
+                and _digest_bytes(body) != state[digest_key]
+            ):
+                raise MkbError("STAGE_CAS_INTEGRITY", "Stage CAS reference failed its digest/size fence", 409)
+            state[text_key] = body.decode("latin-1" if text_key == "raw_text" and state.get("raw_binary_transport") else "utf-8")
+        collection_handle = state.get("collection_cas_handle")
+        if isinstance(collection_handle, str) and isinstance(state.get("collection_members"), list):
+            collection_body = await self._storage.read_verified(command.team_uuid, ObjectHandle(value=collection_handle))
+            records = json.loads(collection_body)
+            members = state["collection_members"]
+            if isinstance(records, list) and len(records) == len(members):
+                for member, record in zip(members, records, strict=True):
+                    if isinstance(member, dict) and "raw_record" not in member:
+                        member["raw_record"] = record
+        for member in state.get("collection_members", []):
+            if not isinstance(member, dict) or "clean_text" in member:
+                continue
+            handle = member.get("clean_cas_handle")
+            if isinstance(handle, str):
+                body = await self._storage.read_verified(command.team_uuid, ObjectHandle(value=handle))
+                member["clean_text"] = body.decode("utf-8")
         return state
 
     @staticmethod
@@ -424,10 +456,29 @@ class IntakeCoreMixin:
 
     @staticmethod
     def _envelope_state(process_key: str, state: Mapping[str, Any]) -> dict[str, Any]:
-        """Late serving stages keep receipts/handles/digests, not source bodies."""
+        """Persist CAS coordinates, never document bodies, in stage envelopes."""
 
+        safe = IntakeCoreMixin._redact_stage_mapping(state)
+        if isinstance(safe.get("collection_members"), list) and safe.get("collection_cas_handle"):
+            sanitized_members: list[dict[str, Any]] = []
+            for member in safe["collection_members"]:
+                if not isinstance(member, dict):
+                    continue
+                copy = dict(member)
+                copy.pop("raw_record", None)
+                if copy.get("clean_cas_handle"):
+                    copy.pop("clean_text", None)
+                sanitized_members.append(copy)
+            safe["collection_members"] = sanitized_members
+        for body_key, handle_key in (
+            ("raw_text", "raw_cas_handle"),
+            ("decoded_text", "decoded_cas_handle"),
+            ("clean_text", "clean_cas_handle"),
+        ):
+            if handle_key in safe:
+                safe.pop(body_key, None)
         if process_key not in {"lsrag.vectorize", "index.validate_publication", "index.rebuild"}:
-            return dict(state)
+            return safe
         drop = {
             "raw_text",
             "clean_text",
@@ -437,7 +488,42 @@ class IntakeCoreMixin:
             "layered_content_candidate",
             "accepted_layered_candidate",
         }
-        return {key: value for key, value in state.items() if key not in drop}
+        return {key: value for key, value in safe.items() if key not in drop}
+
+    @staticmethod
+    def _redact_stage_mapping(value: Mapping[str, Any]) -> dict[str, Any]:
+        forbidden = {
+            "api_key",
+            "authorization",
+            "cookie",
+            "credential",
+            "password",
+            "secret",
+            "token",
+            "private_key",
+            "absolute_path",
+            "filesystem_path",
+        }
+
+        def clean(item: Any, key: str | None = None) -> Any:
+            if key is not None and any(marker in key.casefold() for marker in forbidden):
+                return None
+            if isinstance(item, Mapping):
+                result: dict[str, Any] = {}
+                for child_key, child_value in item.items():
+                    child_name = str(child_key)
+                    if any(marker in child_name.casefold() for marker in forbidden):
+                        continue
+                    result[child_name] = clean(child_value, child_name)
+                return result
+            if isinstance(item, list):
+                return [clean(child) for child in item]
+            if isinstance(item, tuple):
+                return [clean(child) for child in item]
+            return item
+
+        result = clean(dict(value))
+        return result if isinstance(result, dict) else {}
 
     async def _passthrough(
         self, command: ProcessCommand, state: dict[str, Any]

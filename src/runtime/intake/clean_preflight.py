@@ -20,6 +20,7 @@ from src.contracts.intake.strategies import (
     resolve_clean_strategy,
 )
 from src.contracts.runtime.models import ProcessCommand
+from src.contracts.storage.models import PromoteRequest
 from src.persistence.ports import UnitOfWork
 from src.runtime.inference.claude_cli import ClaudeCliCleanLanguageModel
 from src.runtime.intake.types import (
@@ -115,6 +116,14 @@ class IntakeCleanPreflightMixin:
         next_state = dict(state)
         next_state["clean_text"] = result.text
         next_state["clean_digest"] = stable_digest({"text": result.text})
+        if callable(getattr(self._storage, "promote", None)):
+            clean_cas = await self._storage.promote(
+                result.text.encode("utf-8"),
+                PromoteRequest(team_uuid=command.team_uuid, purpose="process_io", media_type="text/plain"),
+            )
+            next_state["clean_cas_handle"] = clean_cas.handle.value
+            next_state["clean_cas_digest"] = clean_cas.sha256
+            next_state["clean_cas_size"] = clean_cas.size_bytes
         next_state["clean_evidence"] = {
             "clean_capability": result.capability,
             "clean_strategy": strategy,
@@ -297,6 +306,14 @@ class IntakeCleanPreflightMixin:
             member["filter_meta"] = item.filter_meta
             member["context_meta"] = item.context_meta
             member["semantic_tuples"] = list(item.semantic_tuples)
+            if callable(getattr(self._storage, "promote", None)):
+                clean_cas = await self._storage.promote(
+                    item.clean_text.encode("utf-8"),
+                    PromoteRequest(team_uuid=command.team_uuid, purpose="process_io", media_type="text/plain"),
+                )
+                member["clean_cas_handle"] = clean_cas.handle.value
+                member["clean_cas_digest"] = clean_cas.sha256
+                member["clean_cas_size"] = clean_cas.size_bytes
             clean_members.append(member)
         candidate_root_digest = stable_digest(
             {
