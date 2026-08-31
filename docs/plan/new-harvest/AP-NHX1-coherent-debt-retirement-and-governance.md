@@ -1544,3 +1544,32 @@ NHX1 coherent debt retirement（单阶段 / 串行DAG）
 |------|------|-------------|
 | `2026-08-31T05:40:40Z` | Phase 7 EXIT | commit `f90289d02a993d882fc098a0497d0281cd00609e` + fixed 13-file pytest command + `44 passed` + profile `test/sqlite+turso` |
 | `2026-08-31T05:40:40Z` | static gate | commit `f90289d02a993d882fc098a0497d0281cd00609e` + `uv run ruff check api intake src tests` + EXIT0 + profile `local` |
+
+### 11.11 Phase 8 — Cutover / compat drain / retirement
+
+> **执行时间**：`2026-08-31T05:50:08Z`
+> **代码改动统计**：`6 文件；2 个新建 service；schema bump 0`
+
+- **实际执行摘要**：
+  - `P8-01`：新增 `Nhx1CutoverService`，以 `mkb_nhx1_cutover_state` 持久化 `legacy → dual/shadow → v2_only/v2`；unresolved shadow mismatch 或 stale row revision 均阻断，cutover 可重复读取。
+  - `P8-02`：新增 `EvidenceVerificationService`，legacy evidence 追加 verified/invalid/unverifiable verdict，correction 使用独立 append-only assertion；旧 rev1/manifest 保留 reader 解释，不原地改写。
+  - `P8-03`：提供 rev1 pin、pending outbox、restart、live ref、open cleanup、legacy evidence、shadow mismatch inventory；retirement 仅在 v2 cutover 且 inventory zero 时允许；forward rollback 仅停 admission，禁止恢复 old writer。
+  - operator internal surface 暴露 cutover status/inventory/begin-shadow/cutover/stop-admission typed endpoints，均继承 S16 internal token/network guard。
+- **Phase 偏差（计划 vs 实际）**：
+  - `D-P8-01 (drain-observation)`：本地 fixture 没有 production zero-use inventory，因此未执行 destructive contract/删除；retirement API 对非零 inventory 显式 409，旧 reader/manifest 保留。
+  - `D-P8-02 (rollback)`：rollback drill 在本地以 `stop_admission` forward-only 状态转换验证；未恢复 legacy writer，也未改写 v2 evidence。
+- **阻塞与处理**：无工程 blocker；T22-O 仍 pending，Phase 9 assurance/final closure 必须 join 真实 owner attestation。
+- **测试发现**：Phase 8 固定 EXIT `32 passed`；`uv run ruff check api intake src tests` EXIT0；shadow mismatch gate、cutover CAS、legacy writer disable、inventory、evidence correction 与 prior Phase regression 全部通过。
+- **后续 handoff**：Phase 9 只从当前 compiled graph/capability/error/intent registry 生成 closed set，执行 race/crash/old DB/full repo；不得在 assurance 测试中新增功能或放宽 owner gate。
+
+| 工作项 | 状态 | PR / commit | 实际落点 | 备注 |
+|--------|------|-------------|----------|------|
+| `P8-01` | `✅ done` | `5e775f7` | `nhx1_cutover.py`; internal cutover routes; `test_nhx1_cutover.py` | T-O-411/414；shadow/CAS/v2-only |
+| `P8-02` | `✅ done` | `5e775f7` | `evidence_verification.py`; correction test | T-O-414；legacy reader + append correction |
+| `P8-03` | `✅ done` | `5e775f7` | cutover inventory/retirement/rollback APIs; regression suite | T-O-417/422；zero-use gate, forward rollback |
+
+| 时点 | 步骤 | 决策 / 产出 |
+|------|------|-------------|
+| `2026-08-31T05:50:08Z` | Phase 8 EXIT | commit `5e775f7d59cfc538b368ec1606e42647207c1a52` + fixed 12-file pytest command + `32 passed` + profile `test/sqlite+turso` |
+| `2026-08-31T05:50:08Z` | cutover gate | unresolved mismatch → 503; resolved mismatch → v2-only; legacy writer → typed 409 |
+| `2026-08-31T05:50:08Z` | rollback gate | admission stop committed; legacy writer revival not callable |

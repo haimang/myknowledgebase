@@ -1,0 +1,28 @@
+{
+  "shadow": {
+    "unresolved_mismatch_gate": "blocks",
+    "resolved_mismatch_gate": "zero"
+  },
+  "cutover": {
+    "writer_before": "dual",
+    "reader_before": "shadow",
+    "writer_after": "v2_only",
+    "reader_after": "v2",
+    "old_writer_after": "disabled"
+  },
+  "rollback": {
+    "mode": "stop_admission_and_forward_fix",
+    "legacy_writer_revival": "forbidden"
+  },
+  "inventory": {
+    "rev1_pins": "counted",
+    "pending_outbox": "counted",
+    "open_cleanup_jobs": "counted",
+    "live_object_refs": "counted",
+    "legacy_evidence": "reader_retained"
+  },
+  "evidence_verification": {
+    "legacy_invalid": "verdict_preserved",
+    "correction": "append_only"
+  }
+}

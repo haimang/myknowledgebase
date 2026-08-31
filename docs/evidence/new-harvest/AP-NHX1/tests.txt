@@ -80,3 +80,14 @@
 - Control evidence: direct operator service requeue/replay preserves receipt and predecessor; HTTP operator routes fail closed from non-internal TestClient peers; process/execution/cleanup projections are redacted.
 - Signal/error evidence: 10 signal definitions durably bootstrapped with checked-in runbook; metric↔alert validation zero orphan; v2 UPPER_SNAKE definitions and two legacy aliases resolve deterministically.
 - Truth/work join: `T-O-415/T-O-418/T-O-422` / `P7-01..P7-04` / `NHX1-T23..T25`.
+
+## Phase 8 — 2026-08-31T05:50:08Z
+
+- Commit under test: `5e775f7d59cfc538b368ec1606e42647207c1a52`
+- Profile: `test/sqlite+turso`, local Python 3.12 via `uv`
+- Command: `uv run pytest -q tests/integration/test_nhx1_cutover.py tests/integration/test_nhx1_persisted_upgrade.py tests/integration/test_nhx1_schema_expand.py tests/integration/test_nhx1_evidence_plane.py tests/unit/test_workflow_revision_compatibility.py tests/unit/test_workflow_registry.py tests/integration/test_nhx1_outbox_owner.py tests/e2e/test_nhx1_cleanup_convergence.py tests/e2e/test_nhx1_object_sessions.py tests/e2e/test_nhx1_publication_manifest.py tests/e2e/test_nhx1_public_contracts.py tests/e2e/test_nh8_api_item_intents.py`
+- Result: `EXIT0 · 32 passed · zero skip/xfail`
+- Static command/result: `uv run ruff check api intake src tests` → `EXIT0 · All checks passed!`
+- Cutover evidence: unresolved shadow mismatch blocks; after explicit resolution, CAS transitions `dual/shadow → v2_only/v2`; legacy writer assertion fails and forward rollback only stops admission.
+- Drain evidence: inventory reports rev1 pins, pending outbox, open cleanup, live refs, legacy evidence; evidence verifier/correction preserves old rows append-only.
+- Truth/work join: `T-O-411/T-O-414/T-O-417/T-O-421/T-O-422` / `P8-01..P8-03` / `NHX1-T09/T17/T20/T26`.
