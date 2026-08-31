@@ -5,7 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Literal
 
-from pydantic import Field, SecretStr, field_validator
+from pydantic import Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -25,6 +25,13 @@ class Settings(BaseSettings):
     trusted_proxy_cidrs: str = ""
     max_request_bytes: int = Field(default=1_048_576, ge=1024, le=64 * 1024 * 1024)
     native_vector_required: bool = True
+    # A deployment role controls process ownership, not the workflow
+    # execution_role stored on an Execution.  ``all`` is an explicit small
+    # deployment composition and remains the backwards-compatible default.
+    deployment_role: Literal["api", "workflow_worker", "maintenance", "all"] = "all"
+    runtime_profile: Literal["test", "dev", "prod"] = "dev"
+    worker_capability_allowlist: str = ""
+    supervisor_failure_threshold: int = Field(default=3, ge=1, le=100)
     # Retrieval scan profile.  It is never evidence that the engine has ANN.
     vector_backend: Literal["deterministic_exact", "native_ann"] = "deterministic_exact"
     prompt_root_path: Path | None = None
@@ -117,6 +124,17 @@ class Settings(BaseSettings):
     obs_retention_interval_seconds: int = Field(default=60 * 60, ge=1, le=24 * 60 * 60)
     obs_retention_batch_size: int = Field(default=1_000, ge=1, le=10_000)
 
+    @model_validator(mode="after")
+    def validate_runtime_profile(self) -> Settings:
+        if self.runtime_profile == "prod":
+            if self.ns1_cli_mode != "subprocess":
+                raise ValueError("production profile requires the subprocess NS1 supply")
+            if not self.runtime_supply_readiness_required:
+                raise ValueError("production profile requires runtime supply readiness")
+            if not self.multimodal_enabled:
+                raise ValueError("production profile requires pinned multimodal supply")
+        return self
+
     @field_validator("multimodal_model_key", "multimodal_model_version")
     @classmethod
     def reject_floating_multimodal_identity(cls, value: str) -> str:
@@ -161,3 +179,9 @@ class Settings(BaseSettings):
         # Preserve configured order but remove duplicates; the two-active cap is
         # checked by ActiveTokenSet, where the trust policy actually lives.
         return tuple(dict.fromkeys(item.strip() for item in items if item.strip()))
+
+    @property
+    def worker_capabilities(self) -> tuple[str, ...]:
+        """Parse a bounded allowlist used by workflow-worker claim filtering."""
+
+        return tuple(dict.fromkeys(item.strip() for item in self.worker_capability_allowlist.split(",") if item.strip()))

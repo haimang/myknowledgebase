@@ -40,11 +40,13 @@ from src.runtime.intake_pipeline import IntakePipeline
 from src.runtime.metrics import MetricRegistry, default_metrics
 from src.runtime.object_gc import ObjectGcScanner, ObjectGcSchedule
 from src.runtime.object_upload import ObjectUploadLifecycleScanner, ObjectUploadLifecycleSchedule
+from src.runtime.roles import DeploymentRole, role_spec
 from src.runtime.security import ActiveTokenSet, EgressPolicy, FixedWindowRateLimiter, SecretResolver, safe_request_id
 from src.runtime.supply.browser import HardenedBrowserRuntime
 from src.runtime.supply.deterministic_ocr import IsolatedDeterministicOcr
 from src.runtime.supply.pdf_parser import IsolatedPdfParser
 from src.runtime.task_service import TaskService
+from src.runtime.workflow.capability_registry import DEFAULT_PROCESS_CAPABILITY_REGISTRY, ProcessCapabilityRegistry
 from src.runtime.workflow.dispatch import DispatchCaps
 from src.runtime.workflow_engine import WorkflowRuntime, WorkflowWorker
 from src.runtime.workflow_supervisor import WorkflowSupervisor
@@ -52,6 +54,7 @@ from src.services.artifacts import OutcomeArtifactCommitter
 from src.services.billing import DefaultBillingService
 from src.services.config_snapshots import ConfigSnapshotService
 from src.services.events import DomainEventWriter, SecurityAuditWriter
+from src.services.governance_registry import GovernanceRegistryService
 from src.services.index_retirement import IndexGenerationRetirementService
 from src.services.intake_lifecycle import IntakeLifecycleService
 from src.services.object_gc import ObjectGcService
@@ -89,6 +92,8 @@ class Container:
     storage: LocalObjectStore
     registry: RegistryService
     workflows: WorkflowRegistryService
+    governance: GovernanceRegistryService
+    capability_registry: ProcessCapabilityRegistry
     config_snapshots: ConfigSnapshotService
     tokens: ActiveTokenSet
     rate_limiter: FixedWindowRateLimiter
@@ -220,7 +225,10 @@ async def _probe(container: Container) -> dict[str, bool]:
         "supply_ocr_deterministic": False,
         "supply_s11_multimodal": False,
     }
-    if container.settings.runtime_supply_readiness_required:
+    supply_required = container.settings.runtime_supply_readiness_required and role_spec(
+        container.settings.deployment_role
+    ).owns_workflow_claims
+    if supply_required:
 
         async def safe(callable_probe) -> bool:  # type: ignore[no-untyped-def]
             if not callable(callable_probe):
@@ -251,6 +259,10 @@ async def _probe(container: Container) -> dict[str, bool]:
             safe(multimodal_probe),
         )
         supplies = dict(zip(supplies, values, strict=True))
+    supervisor = getattr(container, "workflow_supervisor", None)
+    supervisor_ok = True
+    if role_spec(container.settings.deployment_role).owns_workflow_claims and supervisor is not None:
+        supervisor_ok = int(getattr(supervisor, "consecutive_failures", 0)) < container.settings.supervisor_failure_threshold
     return {
         **persistence,
         "registry_bootstrap": registry_ok,
@@ -258,17 +270,24 @@ async def _probe(container: Container) -> dict[str, bool]:
         "inference_binding": inference_ok,
         "obs_tables": obs_tables,
         "sec_token_loaded": container.tokens.loaded,
+        "workflow_supervisor": supervisor_ok,
         **supplies,
     }
 
 
 def _health_required(settings: Settings) -> tuple[str, ...]:
-    if not settings.runtime_supply_readiness_required:
-        return HealthAggregator.BASE_REQUIRED
+    spec = role_spec(settings.deployment_role)
+    required = list(HealthAggregator.BASE_REQUIRED)
+    if not spec.owns_workflow_claims:
+        required.remove("workflow_supervisor")
+        # API and maintenance processes do not claim model-bound work.
+        required.remove("inference_binding")
+    if not (settings.runtime_supply_readiness_required and spec.owns_workflow_claims):
+        return tuple(required)
     supply = list(HealthAggregator.SUPPLY_REQUIRED)
     if not settings.multimodal_enabled:
         supply = [name for name in supply if name != "supply_s11_multimodal"]
-    return (*HealthAggregator.BASE_REQUIRED, *supply)
+    return (*required, *supply)
 
 
 def create_container(settings: Settings | None = None) -> Container:
@@ -283,7 +302,9 @@ def create_container(settings: Settings | None = None) -> Container:
     )
     storage = LocalObjectStore(settings.resolved_object_root, max_object_bytes=settings.object_max_bytes)
     registry = RegistryService(persistence, settings.prompt_root)
-    workflows = WorkflowRegistryService(persistence)
+    capability_registry = DEFAULT_PROCESS_CAPABILITY_REGISTRY
+    workflows = WorkflowRegistryService(persistence, capability_registry)
+    governance = GovernanceRegistryService(persistence, capability_registry)
     tokens = ActiveTokenSet(settings.active_tokens)
     rate_limiter = FixedWindowRateLimiter(
         ip_limit=settings.rate_limit_ip_per_min,
@@ -419,9 +440,33 @@ def create_container(settings: Settings | None = None) -> Container:
         except MkbError:
             browser_runtime = None
 
+    role = role_spec(settings.deployment_role)
+    if role.owns_workflow_claims:
+        supply_inventory = None
+        if settings.runtime_supply_readiness_required:
+            supply_inventory = {
+                "pdf.parse": pdf_parser is not None,
+                "browser.render": browser_runtime is not None,
+                "browser.print_pdf": browser_runtime is not None,
+                "ocr.deterministic": deterministic_ocr is not None,
+                "s11.multimodal": clean_llm is not None,
+            }
+        claimable_process_keys = capability_registry.claimable_process_keys(
+            DeploymentRole(settings.deployment_role), available_supplies=supply_inventory
+        )
+        if settings.worker_capabilities:
+            unknown = sorted(set(settings.worker_capabilities) - {item.process_key for item in capability_registry.manifests})
+            if unknown:
+                raise ValueError(f"worker_capability_allowlist contains unknown process keys: {unknown}")
+            claimable_process_keys = frozenset(set(claimable_process_keys) & set(settings.worker_capabilities))
+    else:
+        claimable_process_keys = frozenset()
+
     async def workflow_claim_readiness() -> bool:
         """Fence workers on the same complete readiness closure as admission."""
 
+        if not role.owns_workflow_claims:
+            return False
         return (await container.health.ready())["status"] == "ready"
 
     workflow_runtime = WorkflowRuntime(
@@ -446,6 +491,7 @@ def create_container(settings: Settings | None = None) -> Container:
         cleanup_recovery_window_seconds=settings.workflow_cleanup_recovery_window_seconds,
         metrics=metrics,
         representation_facts=PersistenceRepresentationFactReader(),
+        claimable_process_keys=claimable_process_keys,
     )
     # S09 retirement intent creation is part of a successful pointer cutover,
     # so construct it before the pipeline rather than only for the scanner.
@@ -538,6 +584,8 @@ def create_container(settings: Settings | None = None) -> Container:
         storage=storage,
         registry=registry,
         workflows=workflows,
+        governance=governance,
+        capability_registry=capability_registry,
         config_snapshots=config_snapshots,
         tokens=tokens,
         rate_limiter=rate_limiter,
@@ -599,12 +647,22 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     except MkbError:
         container.health.bootstrap_failures += 1
         container.metrics.increment("mkb_repair_applied_total", 1, outcome="fail")
+    try:
+        await container.governance.bootstrap()
+    except MkbError:
+        container.health.bootstrap_failures += 1
+        container.metrics.increment("mkb_repair_applied_total", 1, outcome="fail")
     await container.storage.readiness()
     stop = asyncio.Event()
-    worker_task = asyncio.create_task(container.workflow_supervisor.run(stop), name="mkb-workflow-supervisor")
+    role = role_spec(container.settings.deployment_role)
+    worker_task = (
+        asyncio.create_task(container.workflow_supervisor.run(stop), name="mkb-workflow-supervisor")
+        if role.owns_workflow_claims
+        else None
+    )
     gc_task = (
         asyncio.create_task(container.object_gc_scanner.run_forever(stop), name="mkb-object-gc")
-        if container.settings.object_gc_enabled
+        if role.owns_maintenance and container.settings.object_gc_enabled
         else None
     )
     upload_lifecycle_task = (
@@ -612,7 +670,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             container.object_upload_lifecycle_scanner.run_forever(stop),
             name="mkb-object-upload-lifecycle",
         )
-        if container.settings.object_gc_enabled
+        if role.owns_maintenance and container.settings.object_gc_enabled
         else None
     )
     index_retirement_task = (
@@ -620,16 +678,20 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             container.index_retirement_scanner.run_forever(stop),
             name="mkb-index-generation-retirement",
         )
-        if container.settings.index_retirement_enabled
+        if role.owns_maintenance and container.settings.index_retirement_enabled
         else None
     )
-    retention_task = asyncio.create_task(
-        _run_retention_loop(
-            container.observability_retention,
-            stop,
-            interval_seconds=container.settings.obs_retention_interval_seconds,
-        ),
-        name="mkb-observability-retention",
+    retention_task = (
+        asyncio.create_task(
+            _run_retention_loop(
+                container.observability_retention,
+                stop,
+                interval_seconds=container.settings.obs_retention_interval_seconds,
+            ),
+            name="mkb-observability-retention",
+        )
+        if role.owns_retention
+        else None
     )
     try:
         yield
@@ -700,8 +762,17 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @app.get("/ready", tags=["probes"])
     async def ready(request: Request) -> JSONResponse:
-        result = await request.app.state.container.health.ready()
-        return JSONResponse(status_code=200 if result["status"] == "ready" else 503, content=result)
+        container: Container = request.app.state.container
+        result = await container.health.ready()
+        deployment = role_spec(container.settings.deployment_role)
+        content = {
+            **result,
+            "deployment_role": deployment.role.value,
+            "owned_loops": deployment.loop_names,
+            "capability_manifest_digest": container.capability_registry.definition_digest,
+            "claimable_process_keys": tuple(sorted(container.workflow_runtime.claimable_process_keys or ())),
+        }
+        return JSONResponse(status_code=200 if result["status"] == "ready" else 503, content=content)
 
     @app.get("/metrics", tags=["operations"])
     async def metrics(request: Request) -> PlainTextResponse:

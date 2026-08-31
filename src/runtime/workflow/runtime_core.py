@@ -66,6 +66,7 @@ class WorkflowCoreMixin:
         cleanup_recovery_window_seconds: int = 60,
         metrics: Any | None = None,
         representation_facts: RepresentationFactReader | None = None,
+        claimable_process_keys: frozenset[str] | None = None,
     ) -> None:
         if default_max_retries < 0 or default_max_recoveries < 0:
             raise ValueError("retry and recovery limits must be non-negative")
@@ -90,6 +91,10 @@ class WorkflowCoreMixin:
         self.cleanup_recovery_window_seconds = cleanup_recovery_window_seconds
         self.metrics = metrics
         self.representation_facts = representation_facts
+        # ``None`` preserves focused/unit compositions; the application
+        # always passes an explicit role-derived set, including an empty set
+        # for API/maintenance processes that are not worker claimers.
+        self.claimable_process_keys = claimable_process_keys
         active_definitions = (definition, *additional_definitions)
         self._active_workflow_keys = {candidate.workflow_key for candidate in active_definitions}
         if len(self._active_workflow_keys) != len(active_definitions):
@@ -352,6 +357,13 @@ class WorkflowCoreMixin:
         expires_at = _add_seconds(now, lease_seconds)
         claim_token = secrets.token_urlsafe(32)
         claim_token_hash = stable_digest({"claim_token": claim_token})
+        claim_filter = ""
+        claim_keys: tuple[str, ...] = ()
+        if self.claimable_process_keys is not None:
+            claim_keys = tuple(sorted(self.claimable_process_keys))
+            if not claim_keys:
+                return None
+            claim_filter = " AND p.process_key IN (" + ",".join("?" for _ in claim_keys) + ")"
         async with self.persistence.transaction() as tx:
             for _ in range(64):
                 expired = await tx.fetchone(
@@ -363,8 +375,9 @@ class WorkflowCoreMixin:
                     "JOIN mkb_tasks AS t ON t.team_uuid=p.team_uuid AND t.task_uuid=p.task_uuid "
                     "WHERE p.status='ready' AND p.deadline_at IS NOT NULL AND p.deadline_at < ? "
                     "AND e.status IN ('ready','running') AND t.status IN ('queued','running') "
-                    "LIMIT 1",
-                    (now,),
+                    + claim_filter
+                    + " LIMIT 1",
+                    (now, *claim_keys),
                 )
                 if expired is not None:
                     await self._fail_expired_ready_tx(tx, expired)
@@ -393,9 +406,10 @@ class WorkflowCoreMixin:
                         "WHERE p.status='ready' AND p.available_at<=? AND p.dispatch_admitted = 1 "
                         "AND p.dispatch_pool = 'embed' "
                         "AND e.status IN ('ready','running') AND t.status IN ('queued','running') "
-                        "ORDER BY p.available_at ASC, p.created_at ASC, p.process_uuid ASC "
+                        + claim_filter
+                        + " ORDER BY p.available_at ASC, p.created_at ASC, p.process_uuid ASC "
                         "LIMIT 1",
-                        (now,),
+                        (now, *claim_keys),
                     )
                 other_candidate = await tx.fetchone(
                     "SELECT p.*, e.trace_uuid, e.status AS execution_status, e.domain_binding_digest,"
@@ -412,13 +426,14 @@ class WorkflowCoreMixin:
                     "  OR (p.dispatch_pool = 'non-interactive' AND ? = 1)"
                     ") "
                     "AND e.status IN ('ready','running') AND t.status IN ('queued','running') "
-                    "ORDER BY "
+                    + claim_filter
+                    + " ORDER BY "
                     "  p.priority_rank DESC,"
                     "  p.available_at ASC,"
                     "  CASE WHEN p.deadline_at IS NULL THEN 1 ELSE 0 END, p.deadline_at ASC,"
                     "  p.created_at ASC, p.process_uuid ASC "
                     "LIMIT 1",
-                    (now, local_can_run, ni_can_run),
+                    (now, local_can_run, ni_can_run, *claim_keys),
                 )
                 if embed_candidate is not None and other_candidate is not None:
                     embed_key = (

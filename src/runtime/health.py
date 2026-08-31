@@ -23,6 +23,7 @@ class HealthAggregator:
         "inference_binding",
         "obs_tables",
         "sec_token_loaded",
+        "workflow_supervisor",
     )
     SUPPLY_REQUIRED = (
         "supply_pdf_parse",

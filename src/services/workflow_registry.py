@@ -22,6 +22,7 @@ from src.contracts.workflow.models import (
     canonical_workflow_manifest,
 )
 from src.persistence.ports import PersistencePort, UnitOfWork
+from src.runtime.workflow.capability_registry import ProcessCapabilityRegistry
 from src.workflows.builtin_lsrag import (
     BUILTIN_WORKFLOWS as BUILTIN_SINGLE_WORKFLOWS,
 )
@@ -59,8 +60,17 @@ class WorkflowIdentity:
 class WorkflowRegistryService:
     """Internal-only S03 registry writer and deterministic resolver."""
 
-    def __init__(self, persistence: PersistencePort) -> None:
+    def __init__(
+        self,
+        persistence: PersistencePort,
+        capability_registry: ProcessCapabilityRegistry | None = None,
+    ) -> None:
         self.persistence = persistence
+        # Focused graph/unit compositions may intentionally register a local
+        # synthetic process.  The application composition passes the
+        # code-owned registry and enables the closed-set validation; keeping
+        # the optional mode preserves those isolated contract tests.
+        self.capability_registry = capability_registry
 
     async def bootstrap(self) -> None:
         for definition in BUILTIN_WORKFLOWS:
@@ -152,6 +162,13 @@ class WorkflowRegistryService:
     async def register(self, definition: WorkflowDefinition) -> WorkflowIdentity:
         """Atomically register a graph or verify the immutable prior revision."""
 
+        if self.capability_registry is not None:
+            try:
+                self.capability_registry.validate_workflow(definition)
+            except MkbError:
+                raise
+            except Exception as exc:
+                raise MkbError("CAPABILITY_UNKNOWN", "Workflow references an unregistered Process capability", 503) from exc
         canonical = canonical_workflow_manifest(definition)
         registration_fingerprint = stable_digest(canonical)
         compiled_digest = stable_digest(

@@ -28,6 +28,7 @@ _READINESS_COMPONENTS = frozenset(
         "inference_binding",
         "obs_tables",
         "sec_token_loaded",
+        "workflow_supervisor",
         "supply_pdf_parse",
         "supply_browser_render",
         "supply_browser_print_pdf",

@@ -6,11 +6,20 @@ from src.contracts.common.errors import MkbError
 from src.contracts.common.time import utc_now
 from src.contracts.governance import ERROR_DEFINITIONS, OUTBOX_KIND_DEFINITIONS
 from src.persistence.ports import PersistencePort, UnitOfWork
+from src.runtime.workflow.capability_registry import (
+    DEFAULT_PROCESS_CAPABILITY_REGISTRY,
+    ProcessCapabilityRegistry,
+)
 
 
 class GovernanceRegistryService:
-    def __init__(self, persistence: PersistencePort) -> None:
+    def __init__(
+        self,
+        persistence: PersistencePort,
+        capabilities: ProcessCapabilityRegistry | None = None,
+    ) -> None:
         self.persistence = persistence
+        self.capabilities = capabilities or DEFAULT_PROCESS_CAPABILITY_REGISTRY
 
     async def bootstrap(self) -> None:
         async with self.persistence.transaction() as tx:
@@ -18,6 +27,7 @@ class GovernanceRegistryService:
                 await self._register_outbox(tx, definition)
             for definition in ERROR_DEFINITIONS.values():
                 await self._register_error(tx, definition)
+        await self.capabilities.bootstrap(self.persistence)
 
     async def readiness(self) -> bool:
         async with self.persistence.read_snapshot() as tx:
@@ -33,6 +43,7 @@ class GovernanceRegistryService:
             and {(row["error_code"], row["definition_digest"]) for row in errors}
             == {(definition.code, definition.definition_digest) for definition in ERROR_DEFINITIONS.values()}
             and {(row["legacy_code"], row["canonical_error_code"]) for row in aliases} == expected_aliases
+            and await self.capabilities.readiness(self.persistence)
         )
 
     @staticmethod
