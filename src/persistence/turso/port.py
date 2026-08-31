@@ -148,6 +148,18 @@ class TursoPersistence:
             async with immediate_transaction(connection, discard=self._discard_connection):
                 yield TursoUnitOfWork(connection)
 
+    @asynccontextmanager
+    async def read_snapshot(self) -> AsyncIterator[TursoUnitOfWork]:
+        """Expose a driver-neutral snapshot on the serialized adapter handle."""
+
+        async with self._write_lock:
+            connection = self._connect()
+            await asyncio.to_thread(connection.execute, "BEGIN")
+            try:
+                yield TursoUnitOfWork(connection)
+            finally:
+                await asyncio.to_thread(connection.rollback)
+
     def _probe_cw_scratch(self) -> bool:
         if self._cw_probe_cache is not None:
             return self._cw_probe_cache
@@ -221,6 +233,5 @@ class TursoPersistence:
             close = getattr(connection, "close", None)
             if close is not None:
                 await asyncio.to_thread(close)
-
 
 

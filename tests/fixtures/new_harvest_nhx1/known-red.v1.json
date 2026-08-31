@@ -1,0 +1,9 @@
+{
+  "captured_at_utc": "2026-08-31T00:00:00Z",
+  "expected_exception": "src.contracts.common.errors.ConflictError",
+  "failure_signature": "stale-process-fence",
+  "node_id": "tests/unit/test_ns6_phase2.py::test_stale_fencing_fail_does_not_kill_new_generation",
+  "phase_to_turn_green": "Phase 4 / P4-03 / NHX1-T11",
+  "source_commit": "ba099ee305577cca2281a669afbca364111f200b",
+  "status": "known-red-captured"
+}

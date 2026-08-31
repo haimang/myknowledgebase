@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import sqlite3
 import time
 from pathlib import Path
 
@@ -45,7 +44,8 @@ def test_human_review_gate_is_task_scoped_idempotent_and_resumes(tmp_path: Path)
     team_uuid, task_uuid, trace_uuid = uuid7(), uuid7(), uuid7()
     headers = {"Authorization": f"Bearer {token}"}
 
-    with TestClient(create_app(settings), raise_server_exceptions=True) as client:
+    app = create_app(settings)
+    with TestClient(app, raise_server_exceptions=True) as client:
         assert (
             client.post(
                 "/v1/teams",
@@ -117,44 +117,45 @@ def test_human_review_gate_is_task_scoped_idempotent_and_resumes(tmp_path: Path)
         # durable Gate target must still bind the exact accepted Intake and
         # predecessor preflight evidence.  In particular, no route-derived
         # placeholder may stand in for a clean Artifact or output ref.
-        connection = sqlite3.connect(settings.resolved_database_path)
-        connection.row_factory = sqlite3.Row
-        try:
-            target_row = connection.execute(
-                "SELECT * FROM mkb_execution_gate_targets WHERE gate_uuid=?", (gate["gate_uuid"],)
-            ).fetchone()
-            assert target_row is not None
-            target = json.loads(target_row["review_target_json"])
-            intake_refs = json.loads(target_row["intake_refs_json"])
-            assert target["intake_refs"] == intake_refs
-            assert target["intake_refs"]["intake_item_uuid"]
-            assert target["intake_refs"]["intake_revision_uuid"]
-            assert target["intake_refs"]["intake_snapshot_uuid"]
-            assert target["intake_refs"]["candidate_set_uuid"]
-            assert target["accept_process"]["process_uuid"]
-            assert target["accept_process"]["fencing_generation"] >= 0
-            assert target["preflight_outcome"]["process_uuid"]
-            assert target["preflight_outcome"]["check_set_digest"]
-            assert target["preflight_outcome"]["output_manifest_ref"] == target_row["preflight_outcome_ref"]
-            assert "placeholder" not in target_row["clean_artifact_digest"]
-            assert not target_row["preflight_outcome_ref"].startswith("mkbworkflow:")
+        async def inspect() -> tuple[dict[str, object] | None, dict[str, object] | None, dict[str, object] | None]:
+            async with app.state.container.persistence.read_snapshot() as tx:
+                target_row = await tx.fetchone(
+                    "SELECT * FROM mkb_execution_gate_targets WHERE gate_uuid=?", (gate["gate_uuid"],)
+                )
+                assert target_row is not None
+                target = json.loads(target_row["review_target_json"])
+                preflight = await tx.fetchone(
+                    "SELECT output_manifest_ref,output_manifest_digest,status FROM mkb_processes WHERE process_uuid=?",
+                    (target["preflight_outcome"]["process_uuid"],),
+                )
+                clean_artifact = await tx.fetchone(
+                    "SELECT content_digest,owner_revision_uuid FROM mkb_intake_artifacts WHERE intake_artifact_uuid=?",
+                    (target["clean_artifact"]["intake_artifact_uuid"],),
+                )
+            return target_row, preflight, clean_artifact
 
-            preflight = connection.execute(
-                "SELECT output_manifest_ref,output_manifest_digest,status FROM mkb_processes WHERE process_uuid=?",
-                (target["preflight_outcome"]["process_uuid"],),
-            ).fetchone()
-            clean_artifact = connection.execute(
-                "SELECT content_digest,owner_revision_uuid FROM mkb_intake_artifacts WHERE intake_artifact_uuid=?",
-                (target["clean_artifact"]["intake_artifact_uuid"],),
-            ).fetchone()
-            assert preflight is not None and preflight["status"] == "succeeded"
-            assert preflight["output_manifest_ref"] == target_row["preflight_outcome_ref"]
-            assert preflight["output_manifest_digest"] == target["preflight_outcome"]["output_manifest_digest"]
-            assert clean_artifact is not None
-            assert clean_artifact["content_digest"] == target_row["clean_artifact_digest"]
-            assert clean_artifact["owner_revision_uuid"] == target["intake_refs"]["intake_revision_uuid"]
-        finally:
-            connection.close()
+        target_row, preflight, clean_artifact = client.portal.call(inspect)
+        assert target_row is not None
+        target = json.loads(target_row["review_target_json"])
+        intake_refs = json.loads(target_row["intake_refs_json"])
+        assert target["intake_refs"] == intake_refs
+        assert target["intake_refs"]["intake_item_uuid"]
+        assert target["intake_refs"]["intake_revision_uuid"]
+        assert target["intake_refs"]["intake_snapshot_uuid"]
+        assert target["intake_refs"]["candidate_set_uuid"]
+        assert target["accept_process"]["process_uuid"]
+        assert target["accept_process"]["fencing_generation"] >= 0
+        assert target["preflight_outcome"]["process_uuid"]
+        assert target["preflight_outcome"]["check_set_digest"]
+        assert target["preflight_outcome"]["output_manifest_ref"] == target_row["preflight_outcome_ref"]
+        assert "placeholder" not in target_row["clean_artifact_digest"]
+        assert not target_row["preflight_outcome_ref"].startswith("mkbworkflow:")
+        assert preflight is not None and preflight["status"] == "succeeded"
+        assert preflight["output_manifest_ref"] == target_row["preflight_outcome_ref"]
+        assert preflight["output_manifest_digest"] == target["preflight_outcome"]["output_manifest_digest"]
+        assert clean_artifact is not None
+        assert clean_artifact["content_digest"] == target_row["clean_artifact_digest"]
+        assert clean_artifact["owner_revision_uuid"] == target["intake_refs"]["intake_revision_uuid"]
 
         decision_body = {
             "expected_gate_revision": gate["revision"],

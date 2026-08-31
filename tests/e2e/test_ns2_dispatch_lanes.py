@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import sqlite3
 import time
 from pathlib import Path
 
@@ -67,29 +66,29 @@ def _task_body(team_uuid: str, task_uuid: str, *, priority: str, key: str) -> di
 
 
 def _wait_for_generate_rows(
-    database_path: Path,
+    app,
+    client: TestClient,
     team_uuid: str,
     task_uuid: str,
     *,
     expect_admit: bool,
     timeout: float = 8.0,
-) -> list[sqlite3.Row]:
+) -> list[dict[str, object]]:
     deadline = time.monotonic() + timeout
-    last: list[sqlite3.Row] = []
+    last: list[dict[str, object]] = []
     while time.monotonic() < deadline:
-        with sqlite3.connect(database_path) as connection:
-            connection.row_factory = sqlite3.Row
-            last = list(
-                connection.execute(
+        async def inspect() -> list[dict[str, object]]:
+            async with app.state.container.persistence.read_snapshot() as tx:
+                return await tx.fetchall(
                     "SELECT process_key, dispatch_pool, dispatch_admitted, status "
                     "FROM mkb_processes WHERE team_uuid=? AND task_uuid=? "
                     "AND process_key IN ('lsrag.construct','lsrag.structurize','lsrag.transcribe_markdown') "
                     "ORDER BY created_at",
                     (team_uuid, task_uuid),
                 )
-            )
-            if last and (not expect_admit or any(row["dispatch_admitted"] == 1 for row in last)):
-                return last
+        last = client.portal.call(inspect)
+        if last and (not expect_admit or any(row["dispatch_admitted"] == 1 for row in last)):
+            return last
         time.sleep(0.05)
     raise AssertionError(f"generate processes not ready for {task_uuid}: {[dict(row) for row in last]}")
 
@@ -124,7 +123,8 @@ def test_four_priority_lanes_are_visible_on_process_rows(tmp_path: Path) -> None
 
         for priority, task_uuid in lanes.items():
             rows = _wait_for_generate_rows(
-                settings.resolved_database_path,
+                app,
+                client,
                 team_uuid,
                 task_uuid,
                 expect_admit=priority != "low",
@@ -137,15 +137,14 @@ def test_four_priority_lanes_are_visible_on_process_rows(tmp_path: Path) -> None
                 assert "non-interactive" not in pools
                 assert all(row["dispatch_admitted"] == 0 for row in rows)
 
-    # NS2-T62: offline vectorize is unpooled and must not occupy embed
-    with sqlite3.connect(settings.resolved_database_path) as connection:
-        connection.row_factory = sqlite3.Row
-        vectorize = list(
-            connection.execute(
-                "SELECT dispatch_pool, dispatch_admitted FROM mkb_processes "
-                "WHERE team_uuid=? AND process_key='lsrag.vectorize'",
-                (team_uuid,),
-            )
-        )
+        # NS2-T62: offline vectorize is unpooled and must not occupy embed.
+        async def inspect_vectorize() -> list[dict[str, object]]:
+            async with app.state.container.persistence.read_snapshot() as tx:
+                return await tx.fetchall(
+                    "SELECT dispatch_pool, dispatch_admitted FROM mkb_processes "
+                    "WHERE team_uuid=? AND process_key='lsrag.vectorize'",
+                    (team_uuid,),
+                )
+        vectorize = client.portal.call(inspect_vectorize)
         for row in vectorize:
             assert row["dispatch_pool"] is None

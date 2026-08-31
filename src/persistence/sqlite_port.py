@@ -102,6 +102,18 @@ class SqlitePersistence:
             async with immediate_transaction(connection, discard=self._discard_connection):
                 yield SqliteUnitOfWork(connection)
 
+    @asynccontextmanager
+    async def read_snapshot(self) -> AsyncIterator[SqliteUnitOfWork]:
+        """Expose one adapter-owned, consistent read without a write BEGIN."""
+
+        async with self._write_lock:
+            connection = self._connect()
+            await asyncio.to_thread(connection.execute, "BEGIN")
+            try:
+                yield SqliteUnitOfWork(connection)
+            finally:
+                await asyncio.to_thread(connection.rollback)
+
     def _open_probe_connection(self) -> sqlite3.Connection:
         connection = sqlite3.connect(self.database_path, check_same_thread=False, isolation_level=None)
         connection.row_factory = sqlite3.Row

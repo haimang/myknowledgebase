@@ -17,7 +17,20 @@ class UnitOfWork(Protocol):
 
 
 @runtime_checkable
-class PersistencePort(Protocol):
+class PersistenceInspectorPort(Protocol):
+    """Adapter-aware, read-only inspection boundary.
+
+    Tests, retrieval, and diagnostics use this context instead of opening the
+    adapter's backing path with a concrete driver.  The returned UoW exposes
+    only portable query operations; adapter identity and transaction details
+    remain private to the implementation.
+    """
+
+    def read_snapshot(self) -> AbstractAsyncContextManager[UnitOfWork]: ...
+
+
+@runtime_checkable
+class PersistencePort(PersistenceInspectorPort, Protocol):
     def transaction(self) -> AbstractAsyncContextManager[UnitOfWork]: ...
 
     async def readiness(self) -> dict[str, bool]: ...

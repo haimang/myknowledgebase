@@ -5,7 +5,6 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
-import sqlite3
 import time
 from pathlib import Path
 
@@ -102,22 +101,25 @@ def test_inline_ingress_is_staged_before_task_audit_and_execution_manifest(tmp_p
             time.sleep(0.02)
         assert task["status"] == "succeeded", task
 
-    with sqlite3.connect(tmp_path / "mkb.sqlite3") as connection:
-        connection.row_factory = sqlite3.Row
-        audit = connection.execute(
-            "SELECT strict_payload_json FROM mkb_task_audits WHERE team_uuid=? AND task_uuid=?",
-            (team_uuid, task_uuid),
-        ).fetchone()
-        root = connection.execute(
-            "SELECT execution_uuid,manifest_ref FROM mkb_executions "
-            "WHERE team_uuid=? AND task_uuid=? AND execution_role='root'",
-            (team_uuid, task_uuid),
-        ).fetchone()
-        ingress_refs = connection.execute(
-            "SELECT COUNT(*) AS count FROM mkb_object_references "
-            "WHERE team_uuid=? AND owner_kind='execution_inline_ingress'",
-            (team_uuid,),
-        ).fetchone()
+        async def inspect() -> tuple[dict[str, object] | None, dict[str, object] | None, dict[str, object] | None]:
+            async with app.state.container.persistence.read_snapshot() as tx:
+                audit = await tx.fetchone(
+                    "SELECT strict_payload_json FROM mkb_task_audits WHERE team_uuid=? AND task_uuid=?",
+                    (team_uuid, task_uuid),
+                )
+                root = await tx.fetchone(
+                    "SELECT execution_uuid,manifest_ref FROM mkb_executions "
+                    "WHERE team_uuid=? AND task_uuid=? AND execution_role='root'",
+                    (team_uuid, task_uuid),
+                )
+                ingress_refs = await tx.fetchone(
+                    "SELECT COUNT(*) AS count FROM mkb_object_references "
+                    "WHERE team_uuid=? AND owner_kind='execution_inline_ingress'",
+                    (team_uuid,),
+                )
+            return audit, root, ingress_refs
+
+        audit, root, ingress_refs = client.portal.call(inspect)
 
     assert audit is not None and root is not None and ingress_refs is not None
     audit_json = audit["strict_payload_json"]

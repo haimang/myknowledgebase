@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import sqlite3
 import time
 from pathlib import Path
 
@@ -112,22 +111,23 @@ def test_stub_pipeline_runs_generic_and_markdown_journeys(tmp_path: Path) -> Non
             terminal = _wait_for_terminal(client, team_uuid, task_uuid, headers)
             assert terminal["status"] == "succeeded", terminal
 
-    with sqlite3.connect(settings.resolved_database_path) as connection:
-        connection.row_factory = sqlite3.Row
-        for task_uuid, markdown in ((generic_task_uuid, False), (markdown_task_uuid, True)):
-            steps = [
-                row["step_key"]
-                for row in connection.execute(
+        async def inspect(task_uuid: str) -> tuple[list[dict[str, object]], dict[str, object] | None]:
+            async with app.state.container.persistence.read_snapshot() as tx:
+                steps = await tx.fetchall(
                     "SELECT step_key FROM mkb_processes WHERE team_uuid=? AND task_uuid=? ORDER BY created_at",
                     (team_uuid, task_uuid),
                 )
-            ]
+                projection_row = await tx.fetchone(
+                    "SELECT logical_handle FROM mkb_generation_artifacts "
+                    "WHERE team_uuid=? AND task_uuid=? AND artifact_type='retrieval_block_projection'",
+                    (team_uuid, task_uuid),
+                )
+            return steps, projection_row
+
+        for task_uuid, markdown in ((generic_task_uuid, False), (markdown_task_uuid, True)):
+            step_rows, projection_row = client.portal.call(inspect, task_uuid)
+            steps = [row["step_key"] for row in step_rows]
             assert ("transcribe_markdown" in steps) is markdown
-            projection_row = connection.execute(
-                "SELECT logical_handle FROM mkb_generation_artifacts "
-                "WHERE team_uuid=? AND task_uuid=? AND artifact_type='retrieval_block_projection'",
-                (team_uuid, task_uuid),
-            ).fetchone()
             assert projection_row is not None
             projection = json.loads(
                 _object_bytes(settings.resolved_object_root, team_uuid, projection_row["logical_handle"])

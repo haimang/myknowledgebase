@@ -1,0 +1,839 @@
+{
+  "action_plan": "docs/plan/new-harvest/AP-NHX1-coherent-debt-retirement-and-governance.md",
+  "classification_counts": {
+    "absorbed_deferred": 17,
+    "design_guard": 1,
+    "partial_delivery": 18,
+    "stale_rejected_guard": 1,
+    "true_bug": 15
+  },
+  "coverage_digest": "325f05f6a8263bce7a87771e73d1a8d7ef62f3bca36805181240b99f5060ce07",
+  "findings": [
+    {
+      "classification": "true_bug",
+      "execution_objective": "不同Observation不压旧Snapshot，ChangeSet无悬挂",
+      "owner_work_item": "P3-02",
+      "primary_test_id": "NHX1-T05",
+      "supporting_test_ids": [],
+      "supporting_work_items": [],
+      "vf_id": "VF1"
+    },
+    {
+      "classification": "true_bug",
+      "execution_objective": "latest head由ItemEpoch CAS，零LWW",
+      "owner_work_item": "P3-02",
+      "primary_test_id": "NHX1-T05",
+      "supporting_test_ids": [],
+      "supporting_work_items": [],
+      "vf_id": "VF2"
+    },
+    {
+      "classification": "partial_delivery",
+      "execution_objective": "reservation+Task同UoW，并发单winner",
+      "owner_work_item": "P3-01",
+      "primary_test_id": "NHX1-T04",
+      "supporting_test_ids": [],
+      "supporting_work_items": [],
+      "vf_id": "VF3"
+    },
+    {
+      "classification": "partial_delivery",
+      "execution_objective": "failed Observation有typed retry出口",
+      "owner_work_item": "P3-03",
+      "primary_test_id": "NHX1-T06",
+      "supporting_test_ids": [],
+      "supporting_work_items": [],
+      "vf_id": "VF4"
+    },
+    {
+      "classification": "true_bug",
+      "execution_objective": "scatter先stable identity后freeze envelope",
+      "owner_work_item": "P3-03",
+      "primary_test_id": "NHX1-T06",
+      "supporting_test_ids": [],
+      "supporting_work_items": [],
+      "vf_id": "VF5"
+    },
+    {
+      "classification": "partial_delivery",
+      "execution_objective": "full retry零HTTP refetch",
+      "owner_work_item": "P4-05",
+      "primary_test_id": "NHX1-T13",
+      "supporting_test_ids": [],
+      "supporting_work_items": [],
+      "vf_id": "VF6"
+    },
+    {
+      "classification": "true_bug",
+      "execution_objective": "typed metadata context exact复制",
+      "owner_work_item": "P4-05",
+      "primary_test_id": "NHX1-T13",
+      "supporting_test_ids": [],
+      "supporting_work_items": [],
+      "vf_id": "VF7"
+    },
+    {
+      "classification": "true_bug",
+      "execution_objective": "deleted同keyadmission 409零Task",
+      "owner_work_item": "P3-04",
+      "primary_test_id": "NHX1-T07",
+      "supporting_test_ids": [],
+      "supporting_work_items": [],
+      "vf_id": "VF8"
+    },
+    {
+      "classification": "partial_delivery",
+      "execution_objective": "deactivated ingest拒绝、transition真实",
+      "owner_work_item": "P3-04",
+      "primary_test_id": "NHX1-T07",
+      "supporting_test_ids": [],
+      "supporting_work_items": [],
+      "vf_id": "VF9"
+    },
+    {
+      "classification": "true_bug",
+      "execution_objective": "late callback受ItemEpoch fence",
+      "owner_work_item": "P3-04",
+      "primary_test_id": "NHX1-T07",
+      "supporting_test_ids": [],
+      "supporting_work_items": [],
+      "vf_id": "VF10"
+    },
+    {
+      "classification": "partial_delivery",
+      "execution_objective": "7×3非法格零Task/Process",
+      "owner_work_item": "P3-04",
+      "primary_test_id": "NHX1-T07",
+      "supporting_test_ids": [],
+      "supporting_work_items": [],
+      "vf_id": "VF11"
+    },
+    {
+      "classification": "partial_delivery",
+      "execution_objective": "rebuild无silent skip，empty才noop",
+      "owner_work_item": "P3-05",
+      "primary_test_id": "NHX1-T08",
+      "supporting_test_ids": [],
+      "supporting_work_items": [],
+      "vf_id": "VF12"
+    },
+    {
+      "classification": "true_bug",
+      "execution_objective": "terminal Execution拒绝迟到Outcome/推进",
+      "owner_work_item": "P4-03",
+      "primary_test_id": "NHX1-T11",
+      "supporting_test_ids": [],
+      "supporting_work_items": [],
+      "vf_id": "VF13"
+    },
+    {
+      "classification": "absorbed_deferred",
+      "execution_objective": "cancel first-wins，queued/cancelling不投failed",
+      "owner_work_item": "P3-04",
+      "primary_test_id": "NHX1-T07",
+      "supporting_test_ids": [
+        "NHX1-T11"
+      ],
+      "supporting_work_items": [
+        "P4-03"
+      ],
+      "vf_id": "VF14"
+    },
+    {
+      "classification": "true_bug",
+      "execution_objective": "domain mismatch终结，route可达性前置",
+      "owner_work_item": "P4-03",
+      "primary_test_id": "NHX1-T11",
+      "supporting_test_ids": [
+        "NHX1-T12"
+      ],
+      "supporting_work_items": [
+        "P4-04"
+      ],
+      "vf_id": "VF15"
+    },
+    {
+      "classification": "true_bug",
+      "execution_objective": "current-hop执法，删除整图guard误杀",
+      "owner_work_item": "P4-04",
+      "primary_test_id": "NHX1-T12",
+      "supporting_test_ids": [],
+      "supporting_work_items": [],
+      "vf_id": "VF16"
+    },
+    {
+      "classification": "true_bug",
+      "execution_objective": "rev1 exact+rev2，升级不503",
+      "owner_work_item": "P4-01",
+      "primary_test_id": "NHX1-T09",
+      "supporting_test_ids": [
+        "NHX1-T26"
+      ],
+      "supporting_work_items": [
+        "P8-02"
+      ],
+      "vf_id": "VF17"
+    },
+    {
+      "classification": "true_bug",
+      "execution_objective": "selection使用真实fact digest",
+      "owner_work_item": "P4-02",
+      "primary_test_id": "NHX1-T10",
+      "supporting_test_ids": [
+        "NHX1-T17"
+      ],
+      "supporting_work_items": [
+        "P5-03"
+      ],
+      "vf_id": "VF18"
+    },
+    {
+      "classification": "partial_delivery",
+      "execution_objective": "evidence identity不可SQL改写",
+      "owner_work_item": "P5-03",
+      "primary_test_id": "NHX1-T17",
+      "supporting_test_ids": [],
+      "supporting_work_items": [],
+      "vf_id": "VF19"
+    },
+    {
+      "classification": "partial_delivery",
+      "execution_objective": "registered operation与clean strategy分账",
+      "owner_work_item": "P4-02",
+      "primary_test_id": "NHX1-T10",
+      "supporting_test_ids": [],
+      "supporting_work_items": [],
+      "vf_id": "VF20"
+    },
+    {
+      "classification": "partial_delivery",
+      "execution_objective": "path/formula versioned，legacy可解释",
+      "owner_work_item": "P4-01",
+      "primary_test_id": "NHX1-T09",
+      "supporting_test_ids": [
+        "NHX1-T17"
+      ],
+      "supporting_work_items": [
+        "P5-03"
+      ],
+      "vf_id": "VF21"
+    },
+    {
+      "classification": "partial_delivery",
+      "execution_objective": "hold按session cancel/consume",
+      "owner_work_item": "P5-01",
+      "primary_test_id": "NHX1-T15",
+      "supporting_test_ids": [],
+      "supporting_work_items": [],
+      "vf_id": "VF22"
+    },
+    {
+      "classification": "partial_delivery",
+      "execution_objective": "pre-catalog final CAS有journal/reconcile",
+      "owner_work_item": "P5-02",
+      "primary_test_id": "NHX1-T16",
+      "supporting_test_ids": [],
+      "supporting_work_items": [],
+      "vf_id": "VF23"
+    },
+    {
+      "classification": "partial_delivery",
+      "execution_objective": "tombstoned quarantine冷启destroy",
+      "owner_work_item": "P5-02",
+      "primary_test_id": "NHX1-T16",
+      "supporting_test_ids": [],
+      "supporting_work_items": [],
+      "vf_id": "VF24"
+    },
+    {
+      "classification": "absorbed_deferred",
+      "execution_objective": "artifact/source/generation/vector物理收敛",
+      "owner_work_item": "P5-06",
+      "primary_test_id": "NHX1-T20",
+      "supporting_test_ids": [],
+      "supporting_work_items": [],
+      "vf_id": "VF25"
+    },
+    {
+      "classification": "partial_delivery",
+      "execution_objective": "local object仅合法session/business ref",
+      "owner_work_item": "P5-01",
+      "primary_test_id": "NHX1-T15",
+      "supporting_test_ids": [],
+      "supporting_work_items": [],
+      "vf_id": "VF26"
+    },
+    {
+      "classification": "design_guard",
+      "execution_objective": "未占用pending可TTL，reserved Task不可TTL",
+      "owner_work_item": "P5-01",
+      "primary_test_id": "NHX1-T15",
+      "supporting_test_ids": [],
+      "supporting_work_items": [],
+      "vf_id": "VF27"
+    },
+    {
+      "classification": "true_bug",
+      "execution_objective": "nested拒密+CAS-first stage，零正文泄漏",
+      "owner_work_item": "P5-04",
+      "primary_test_id": "NHX1-T18",
+      "supporting_test_ids": [],
+      "supporting_work_items": [],
+      "vf_id": "VF28"
+    },
+    {
+      "classification": "absorbed_deferred",
+      "execution_objective": "CW required画像真实进入role readiness",
+      "owner_work_item": "P6-03",
+      "primary_test_id": "NHX1-T21",
+      "supporting_test_ids": [],
+      "supporting_work_items": [],
+      "vf_id": "VF29"
+    },
+    {
+      "classification": "absorbed_deferred",
+      "execution_objective": "真10+3+owner gate，stub不得close",
+      "owner_work_item": "P6-04",
+      "primary_test_id": "NHX1-T22",
+      "supporting_test_ids": [
+        "NHX1-T30"
+      ],
+      "supporting_work_items": [
+        "P9-04"
+      ],
+      "vf_id": "VF30"
+    },
+    {
+      "classification": "true_bug",
+      "execution_objective": "no-sandbox守卫钉actual args",
+      "owner_work_item": "P6-04",
+      "primary_test_id": "NHX1-T22",
+      "supporting_test_ids": [],
+      "supporting_work_items": [],
+      "vf_id": "VF31"
+    },
+    {
+      "classification": "absorbed_deferred",
+      "execution_objective": "supply manifest决定claim/readiness",
+      "owner_work_item": "P6-02",
+      "primary_test_id": "NHX1-T21",
+      "supporting_test_ids": [
+        "NHX1-T22"
+      ],
+      "supporting_work_items": [
+        "P6-03"
+      ],
+      "vf_id": "VF32"
+    },
+    {
+      "classification": "absorbed_deferred",
+      "execution_objective": "capability manifest+只读目录，仍禁选图",
+      "owner_work_item": "P6-02",
+      "primary_test_id": "NHX1-T21",
+      "supporting_test_ids": [
+        "NHX1-T23"
+      ],
+      "supporting_work_items": [
+        "P7-01"
+      ],
+      "vf_id": "VF33"
+    },
+    {
+      "classification": "partial_delivery",
+      "execution_objective": "Task投影kind/mode/policy/actual/item/observation",
+      "owner_work_item": "P7-01",
+      "primary_test_id": "NHX1-T23",
+      "supporting_test_ids": [],
+      "supporting_work_items": [],
+      "vf_id": "VF34"
+    },
+    {
+      "classification": "absorbed_deferred",
+      "execution_objective": "Item/Namespace lists与source filter/cold-start",
+      "owner_work_item": "P7-02",
+      "primary_test_id": "NHX1-T23",
+      "supporting_test_ids": [],
+      "supporting_work_items": [],
+      "vf_id": "VF35"
+    },
+    {
+      "classification": "true_bug",
+      "execution_objective": "single item从root outcome投影",
+      "owner_work_item": "P7-02",
+      "primary_test_id": "NHX1-T23",
+      "supporting_test_ids": [],
+      "supporting_work_items": [],
+      "vf_id": "VF36"
+    },
+    {
+      "classification": "absorbed_deferred",
+      "execution_objective": "waiting保六态但有phase/reason",
+      "owner_work_item": "P7-02",
+      "primary_test_id": "NHX1-T23",
+      "supporting_test_ids": [],
+      "supporting_work_items": [],
+      "vf_id": "VF37"
+    },
+    {
+      "classification": "partial_delivery",
+      "execution_objective": "public error+operator Process/Stage/Fact debug",
+      "owner_work_item": "P7-03",
+      "primary_test_id": "NHX1-T24",
+      "supporting_test_ids": [],
+      "supporting_work_items": [],
+      "vf_id": "VF38"
+    },
+    {
+      "classification": "absorbed_deferred",
+      "execution_objective": "DiagnosticSink生产接线与读取",
+      "owner_work_item": "P7-04",
+      "primary_test_id": "NHX1-T25",
+      "supporting_test_ids": [],
+      "supporting_work_items": [],
+      "vf_id": "VF39"
+    },
+    {
+      "classification": "absorbed_deferred",
+      "execution_objective": "metric/alert emitter-runbook零孤儿",
+      "owner_work_item": "P7-04",
+      "primary_test_id": "NHX1-T25",
+      "supporting_test_ids": [],
+      "supporting_work_items": [],
+      "vf_id": "VF40"
+    },
+    {
+      "classification": "absorbed_deferred",
+      "execution_objective": "admission/TTL/cancel/repair低敏signals",
+      "owner_work_item": "P7-04",
+      "primary_test_id": "NHX1-T25",
+      "supporting_test_ids": [],
+      "supporting_work_items": [],
+      "vf_id": "VF41"
+    },
+    {
+      "classification": "absorbed_deferred",
+      "execution_objective": "supervisor failures进ready/diag/alert",
+      "owner_work_item": "P6-03",
+      "primary_test_id": "NHX1-T21",
+      "supporting_test_ids": [
+        "NHX1-T25"
+      ],
+      "supporting_work_items": [
+        "P7-04"
+      ],
+      "vf_id": "VF42"
+    },
+    {
+      "classification": "partial_delivery",
+      "execution_objective": "dead终结owner+typed requeue/repair/restart/stop",
+      "owner_work_item": "P4-06",
+      "primary_test_id": "NHX1-T14",
+      "supporting_test_ids": [
+        "NHX1-T24"
+      ],
+      "supporting_work_items": [
+        "P7-03"
+      ],
+      "vf_id": "VF43"
+    },
+    {
+      "classification": "absorbed_deferred",
+      "execution_objective": "mutation receipt区分applied/replayed/noop",
+      "owner_work_item": "P7-03",
+      "primary_test_id": "NHX1-T24",
+      "supporting_test_ids": [],
+      "supporting_work_items": [],
+      "vf_id": "VF44"
+    },
+    {
+      "classification": "partial_delivery",
+      "execution_objective": "lifecycle/rebuild/metadata disposition与metric正确",
+      "owner_work_item": "P7-04",
+      "primary_test_id": "NHX1-T25",
+      "supporting_test_ids": [],
+      "supporting_work_items": [],
+      "vf_id": "VF45"
+    },
+    {
+      "classification": "absorbed_deferred",
+      "execution_objective": "noop/exhausted_zero可读",
+      "owner_work_item": "P7-02",
+      "primary_test_id": "NHX1-T23",
+      "supporting_test_ids": [],
+      "supporting_work_items": [],
+      "vf_id": "VF46"
+    },
+    {
+      "classification": "absorbed_deferred",
+      "execution_objective": "stale fence业务回滚+独立diagnostic",
+      "owner_work_item": "P4-03",
+      "primary_test_id": "NHX1-T11",
+      "supporting_test_ids": [
+        "NHX1-T25"
+      ],
+      "supporting_work_items": [
+        "P7-04"
+      ],
+      "vf_id": "VF47"
+    },
+    {
+      "classification": "absorbed_deferred",
+      "execution_objective": "leaf-worker成为显式deployment role",
+      "owner_work_item": "P6-01",
+      "primary_test_id": "NHX1-T21",
+      "supporting_test_ids": [],
+      "supporting_work_items": [],
+      "vf_id": "VF48"
+    },
+    {
+      "classification": "true_bug",
+      "execution_objective": "修红测+真实process crash/legal edge",
+      "owner_work_item": "P1-03",
+      "primary_test_id": "NHX1-T03",
+      "supporting_test_ids": [
+        "NHX1-T29"
+      ],
+      "supporting_work_items": [
+        "P9-03"
+      ],
+      "vf_id": "VF49"
+    },
+    {
+      "classification": "partial_delivery",
+      "execution_objective": "第一轮名义fix均有专项反例/证据",
+      "owner_work_item": "P1-01",
+      "primary_test_id": "NHX1-T01",
+      "supporting_test_ids": [
+        "NHX1-T30"
+      ],
+      "supporting_work_items": [
+        "P9-04"
+      ],
+      "vf_id": "VF50"
+    },
+    {
+      "classification": "absorbed_deferred",
+      "execution_objective": "v2 error registry+legacy alias结束双轨",
+      "owner_work_item": "P7-04",
+      "primary_test_id": "NHX1-T25",
+      "supporting_test_ids": [],
+      "supporting_work_items": [],
+      "vf_id": "VF51"
+    },
+    {
+      "classification": "stale_rejected_guard",
+      "execution_objective": "保留request body stream cap回归，不做错误修复",
+      "owner_work_item": "P9-04",
+      "primary_test_id": "NHX1-T30",
+      "supporting_test_ids": [],
+      "supporting_work_items": [],
+      "vf_id": "VF52"
+    }
+  ],
+  "historical_deferred": [
+    {
+      "disposition": "acquire/decode/clean正文改CAS refs",
+      "historical_id": "NH-VF3.r",
+      "owner_work_items": [
+        "P5-04"
+      ],
+      "test_ids": [
+        "NHX1-T18"
+      ]
+    },
+    {
+      "disposition": "publication manifest+read snapshot",
+      "historical_id": "NH-VF4.r",
+      "owner_work_items": [
+        "P5-05"
+      ],
+      "test_ids": [
+        "NHX1-T19"
+      ]
+    },
+    {
+      "disposition": "7×3与rebuild cardinality闭合",
+      "historical_id": "NH-VF9.r",
+      "owner_work_items": [
+        "P3-04",
+        "P3-05"
+      ],
+      "test_ids": [
+        "NHX1-T07",
+        "NHX1-T08"
+      ]
+    },
+    {
+      "disposition": "attempt与exact full replay分账",
+      "historical_id": "NH-VF10",
+      "owner_work_items": [
+        "P3-03",
+        "P4-05"
+      ],
+      "test_ids": [
+        "NHX1-T06",
+        "NHX1-T13"
+      ]
+    },
+    {
+      "disposition": "session promotion journal消除orphan",
+      "historical_id": "NH-VF13 / NH-VF38",
+      "owner_work_items": [
+        "P5-01",
+        "P5-02"
+      ],
+      "test_ids": [
+        "NHX1-T15",
+        "NHX1-T16"
+      ]
+    },
+    {
+      "disposition": "真模型/binary/security owner gate",
+      "historical_id": "NH-VF14.r / S16",
+      "owner_work_items": [
+        "P6-04"
+      ],
+      "test_ids": [
+        "NHX1-T22"
+      ]
+    },
+    {
+      "disposition": "rev2+old pin retirement",
+      "historical_id": "NH-VF21 / NH-VF39",
+      "owner_work_items": [
+        "P4-01",
+        "P8-02"
+      ],
+      "test_ids": [
+        "NHX1-T09",
+        "NHX1-T26"
+      ]
+    },
+    {
+      "disposition": "process-group kill+lease cold recovery",
+      "historical_id": "NH-VF27.r",
+      "owner_work_items": [
+        "P6-04",
+        "P9-03"
+      ],
+      "test_ids": [
+        "NHX1-T22",
+        "NHX1-T29"
+      ]
+    },
+    {
+      "disposition": "current full repo无排除硬闸",
+      "historical_id": "NH-VF29",
+      "owner_work_items": [
+        "P9-04"
+      ],
+      "test_ids": [
+        "NHX1-T30"
+      ]
+    },
+    {
+      "disposition": "删除无writer的building/retiring形状",
+      "historical_id": "NH-VF36",
+      "owner_work_items": [
+        "P8-03"
+      ],
+      "test_ids": [
+        "NHX1-T26"
+      ]
+    },
+    {
+      "disposition": "typed conflict+诚实single-writer profile",
+      "historical_id": "NH-VF37",
+      "owner_work_items": [
+        "P6-03",
+        "P7-04"
+      ],
+      "test_ids": [
+        "NHX1-T21",
+        "NHX1-T25"
+      ]
+    },
+    {
+      "disposition": "执行型evidence checker/测试治理",
+      "historical_id": "NH-VF41.r / NH-VF42",
+      "owner_work_items": [
+        "P1-04",
+        "P9-04"
+      ],
+      "test_ids": [
+        "NHX1-T01",
+        "NHX1-T30"
+      ]
+    },
+    {
+      "disposition": "adapter-aware harness，去sqlite3-on-Turso",
+      "historical_id": "NS1-V11/NS2-O7/NS5-VF86/NS6-VF86",
+      "owner_work_items": [
+        "P1-03"
+      ],
+      "test_ids": [
+        "NHX1-T03",
+        "NHX1-T30"
+      ]
+    },
+    {
+      "disposition": "generation→vector→retrieval L4 mega",
+      "historical_id": "NS5-T60",
+      "owner_work_items": [
+        "P9-01",
+        "P9-04"
+      ],
+      "test_ids": [
+        "NHX1-T27",
+        "NHX1-T30"
+      ]
+    },
+    {
+      "disposition": "PDF/model/browser/OCR/Vision production profile",
+      "historical_id": "NS5-VF30.r/37.r/97 + NS6-VF97",
+      "owner_work_items": [
+        "P6-04"
+      ],
+      "test_ids": [
+        "NHX1-T22"
+      ]
+    },
+    {
+      "disposition": "object directory/CAS orphan reconciliation",
+      "historical_id": "NS5-VF66.r/NS6-VF25.r",
+      "owner_work_items": [
+        "P5-02"
+      ],
+      "test_ids": [
+        "NHX1-T16"
+      ]
+    },
+    {
+      "disposition": "raw/clean envelope authority分离",
+      "historical_id": "NS5-VF36",
+      "owner_work_items": [
+        "P5-04"
+      ],
+      "test_ids": [
+        "NHX1-T18"
+      ]
+    },
+    {
+      "disposition": "heartbeat/fence后bounded pool并发",
+      "historical_id": "NS5/NS6-VF62",
+      "owner_work_items": [
+        "P6-04"
+      ],
+      "test_ids": [
+        "NHX1-T22",
+        "NHX1-T28"
+      ]
+    },
+    {
+      "disposition": "CW profile/adapter证据",
+      "historical_id": "NS5-VF91.r",
+      "owner_work_items": [
+        "P6-03"
+      ],
+      "test_ids": [
+        "NHX1-T21",
+        "NHX1-T30"
+      ]
+    },
+    {
+      "disposition": "process-tree termination",
+      "historical_id": "NS6-VF11.r",
+      "owner_work_items": [
+        "P6-04",
+        "P9-03"
+      ],
+      "test_ids": [
+        "NHX1-T22",
+        "NHX1-T29"
+      ]
+    },
+    {
+      "disposition": "retrieval read snapshot",
+      "historical_id": "NS6-VF20",
+      "owner_work_items": [
+        "P2-05",
+        "P5-05"
+      ],
+      "test_ids": [
+        "NHX1-T19"
+      ]
+    },
+    {
+      "disposition": "全schema evidence/projection inventory",
+      "historical_id": "NS6-VF4.r",
+      "owner_work_items": [
+        "P1-01",
+        "P2-03"
+      ],
+      "test_ids": [
+        "NHX1-T01",
+        "NHX1-T17"
+      ]
+    },
+    {
+      "disposition": "replay/adoption统一法",
+      "historical_id": "NS6-VF15.r",
+      "owner_work_items": [
+        "P3-02",
+        "P4-05"
+      ],
+      "test_ids": [
+        "NHX1-T05",
+        "NHX1-T13"
+      ]
+    },
+    {
+      "disposition": "bounded diagnostic queue/drop signal",
+      "historical_id": "NS6-VF36.r",
+      "owner_work_items": [
+        "P7-04"
+      ],
+      "test_ids": [
+        "NHX1-T25"
+      ]
+    },
+    {
+      "disposition": "真子进程barrier替代BEGIN sleep门",
+      "historical_id": "NS6-T01-hotfix",
+      "owner_work_items": [
+        "P9-03"
+      ],
+      "test_ids": [
+        "NHX1-T29"
+      ]
+    },
+    {
+      "disposition": "继续OOS，不进closure",
+      "historical_id": "experiment",
+      "owner_work_items": [],
+      "test_ids": [
+        "NHX1-T30"
+      ]
+    }
+  ],
+  "schema_version": "mkb.nhx1-coverage.v1",
+  "source_commit": "ba099ee305577cca2281a669afbca364111f200b",
+  "truth_ids": [
+    "T-O-408",
+    "T-O-409",
+    "T-O-410",
+    "T-O-411",
+    "T-O-412",
+    "T-O-413",
+    "T-O-414",
+    "T-O-415",
+    "T-O-416",
+    "T-O-417",
+    "T-O-418",
+    "T-O-419",
+    "T-O-420",
+    "T-O-421",
+    "T-O-422"
+  ],
+  "truth_source": "docs/eval/new-harvest/pre-NHX1-qna.md"
+}
