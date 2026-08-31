@@ -1,0 +1,14 @@
+{
+  "adapter_parity": "sqlite=turso",
+  "fresh_schema_table_count": 90,
+  "legacy_rows_fabricated": 0,
+  "migrations": [
+    {"id": "025_nhx1_observation_item_epoch", "sha256": "2296ec2ea628ed126afb9d06d8cc2c9632ff2d1103275181e4a64cfc8e37141c"},
+    {"id": "026_nhx1_object_sessions_cleanup", "sha256": "0884dcb0ff16771951266deb711491cfd41739fb3e1d14e24af04cdeec0afa3c"},
+    {"id": "027_nhx1_evidence_v2", "sha256": "8860ea55a07d21ac849755386e5245fe2fca782a363ed7bb1cb7bddfaa000f7a"},
+    {"id": "028_nhx1_ops_contracts", "sha256": "ef12363ee9debbd181d3fd9aaacce5f537ba0e39bfccad7ddea5201061f1c064"}
+  ],
+  "old_migration_path_diff": [],
+  "pre_fix_database": "tests/fixtures/new_harvest_nhx1/pre-fix-024.db",
+  "repeat_migrate": "no-op"
+}

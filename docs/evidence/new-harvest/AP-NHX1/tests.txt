@@ -11,3 +11,13 @@
 - Known RED command: `uv run pytest -q tests/unit/test_ns6_phase2.py::test_stale_fencing_fail_does_not_kill_new_generation`
 - Known RED result: `expected EXIT1 · ConflictError(stale-process-fence)`; original “new generation remains running” assertion retained; owner fix `P4-03/NHX1-T11`.
 - Truth/work join: `T-O-408..422` / `P1-01..P1-04` / `NHX1-T01,T02,T03,T30`.
+
+## Phase 2 — 2026-08-31T02:07:52Z
+
+- Commit under test: `c9874cadfaf0bd96a71475b5eb359ee987d2fce1`
+- Profile: `test/sqlite+turso`, local Python 3.12 via `uv`
+- Command: `uv run pytest -q tests/integration/test_nhx1_persisted_upgrade.py tests/integration/test_nhx1_schema_expand.py tests/unit/test_dispatch_ddl.py tests/unit/test_d04_write_paths.py tests/unit/test_ns4_migration_013.py tests/unit/test_ns6_phase4.py tests/unit/test_turso_driver.py tests/integration/test_nh4_upload_uow.py tests/integration/test_nh3_s05_migration.py tests/integration/test_r3_turso_evidence_ready.py tests/domain/test_architecture.py tests/domain/test_nhx1_truth_and_coverage.py tests/domain/test_nhx1_harness_integrity.py`
+- Result: `EXIT0 · 65 passed`
+- Static command/result: `uv run ruff check api intake src tests` → `EXIT0 · All checks passed!`
+- Immutable history guard: diff for `001` and `018–024` is empty; migration fixture legacy selection/pending before-after dicts equal.
+- Truth/work join: `T-O-408/409/412/413/414/417/418/422` / `P2-01..P2-05` / schema-side subsets of `NHX1-T02/T04/T05/T10/T14/T15/T17/T19/T20/T24/T25/T26`.

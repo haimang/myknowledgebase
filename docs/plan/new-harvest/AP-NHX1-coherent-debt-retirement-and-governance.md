@@ -1348,3 +1348,34 @@ NHX1 coherent debt retirement（单阶段 / 串行DAG）
 ### 11.3 Phase 1 文档状态
 
 `draft → executing（2026-08-31）`。Phase 1 工程 EXIT 完成；residual `stale-process-fence` 不是本 Phase 假绿或 deferred，严格 handoff → `Phase 4 / P4-03 / NHX1-T11`。
+
+### 11.4 Phase 2 — Canonical schema / ports / registries
+
+> 执行时间：`2026-08-31T02:07:52Z`
+> 代码改动统计：`10 文件；4 migration bump（025–028）；28 个 additive table/ledger shape，既有 001/018–024 零改动`
+
+- **实际执行摘要**：
+  - `P2-01`：新增 Observation/Attempt/Snapshot link/acceptance fact 与单一 ItemEpoch transition authority；Task/Execution 仅加 nullable v2 coordinates，不 backfill 假事实。
+  - `P2-02`：新增 ObjectUploadSession、promotion journal、deletion/cleanup job 与 exact session ref coordinate；legacy upload pending 保持原 bytes/owner 并无伪 session。
+  - `P2-03`：新增 typed ProcessingBinding、selection assertion v2、verification/correction、publication manifest/member；新 evidence 表 14 个 append-only trigger 生效，legacy selected-output 不 UPDATE。
+  - `P2-04`：outbox 增 owner/generation/criticality/budget/predecessor；新增 CommandReceipt、capability/error/alias/signal durable projection与 code-owned registry bootstrap。
+  - `P2-05`：`read_snapshot()` 已在 P1 建立；本 Phase 增 durable migration cursor、shadow mismatch/cutover state 与 idempotent resume service。
+- **Phase 偏差（计划 vs 实际）**：
+  - `D-P2-01 (substrate-fit)`：Snapshot↔Observation 使用 additive link table而非重建 `mkb_intake_snapshots` 加强制 FK，避免修改001或在旧行上伪造 observation；新 writer 在P3只写 link。
+  - `D-P2-02 (ordering)`：error/outbox code-owned definition在P2投影，实际 public error enforcement与dead-owner transition仍严格留在P7/P4。
+- **阻塞与处理**：expanded `unit+integration+domain` 回归仅命中 P1 已登记的 stale-fence known RED；无新增失败。该 RED 不由P2修改期待，继续交P4。
+- **测试发现**：固定 Phase-2 EXIT `65 passed`；SQLite/Turso parity、非空024升级、重复migrate、冷启cursor resume、shadow mismatch阻断、append-only/invalid-state攻击均绿；ruff全绿。
+- **后续 handoff**：Phase 3 只能消费025的Observation/ItemEpoch contract；不得修改025–028 checksum或提前启用P4/P5/P7 writer。
+
+| 工作项 | 状态 | PR / commit | 实际落点 | 备注 |
+|--------|------|-------------|----------|------|
+| `P2-01` | `✅ done` | `2ccfebb` | `025_nhx1_observation_item_epoch.sql` | T-O-408/409；legacy count零伪造 |
+| `P2-02` | `✅ done` | `2ccfebb` | `026_nhx1_object_sessions_cleanup.sql` | T-O-413/417；session/ref/job分账 |
+| `P2-03` | `✅ done` | `2ccfebb` | `027_nhx1_evidence_v2.sql` | T-O-412/414；v2 append-only、legacy bytes不变 |
+| `P2-04` | `✅ done` | `2ccfebb` + `c9874ca` | `028_nhx1_ops_contracts.sql`；`governance.py`；`governance_registry.py` | T-O-418/422；registry digest fence |
+| `P2-05` | `✅ done` | `c9874ca` | `nhx1_migration.py`；`test_nhx1_schema_expand.py` | cursor/revision/mismatch durable，adapter parity |
+
+| 时点 | 步骤 | 决策 / 产出 |
+|------|------|-------------|
+| `2026-08-31T02:07:52Z` | Phase 2 EXIT | commit `c9874cadfaf0bd96a71475b5eb359ee987d2fce1` + fixed 13-file pytest command + `65 passed` + profile `sqlite+turso` |
+| `2026-08-31T02:07:52Z` | static/checksum gate | commit `c9874cadfaf0bd96a71475b5eb359ee987d2fce1` + ruff EXIT0 + 001/018–024 path diff empty + profile `local` |

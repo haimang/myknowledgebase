@@ -1,0 +1,7 @@
+{
+  "append_only_trigger_count": 14,
+  "cold_resume": {"cursor": "row-100", "processed_count": 100, "status_after_mismatch": "blocked"},
+  "legacy_after_expand": {"observations": 0, "sessions": 0, "processing_bindings": 0, "selection_v2": 0},
+  "registry_projection": {"error_definitions": 8, "error_aliases": 2, "outbox_kinds": 5},
+  "shadow_unresolved_after_injection": 1
+}
