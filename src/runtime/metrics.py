@@ -246,6 +246,11 @@ class MetricRegistry:
         if definition is None or definition.kind != kind or definition.labels != frozenset(labels):
             raise ValueError("metric is not part of the static S15 catalogue")
 
+    def has_definition(self, name: str) -> bool:
+        """Expose a read-only catalog membership check to signal validation."""
+
+        return name in self._definitions
+
     def set(self, name: str, value: float, **labels: str) -> None:
         self._write(name, value, labels, replace=True)
 

@@ -150,7 +150,7 @@ class WorkflowOutboxMixin:
                 {"outbox_id": outbox_id, "expected_generation": expected_generation, "idempotency_key": idempotency_key}
             )
             prior_receipt = await tx.fetchone(
-                "SELECT command_receipt_uuid,disposition,result_ref FROM mkb_command_receipts "
+                "SELECT command_receipt_uuid,disposition,result_ref,decided_at FROM mkb_command_receipts "
                 "WHERE team_uuid=? AND command_kind='outbox.requeue' AND target_uuid=? AND idempotency_key=?",
                 (row["team_uuid"], outbox_id, idempotency_key),
             )
@@ -159,6 +159,7 @@ class WorkflowOutboxMixin:
                     "disposition": "replayed",
                     "command_receipt_uuid": prior_receipt["command_receipt_uuid"],
                     "outbox_id": prior_receipt["result_ref"],
+                    "decided_at": prior_receipt["decided_at"],
                 }
             new_id = uuid7()
             now = utc_now()
@@ -209,7 +210,12 @@ class WorkflowOutboxMixin:
                     now,
                 ),
             )
-        return {"disposition": "applied", "command_receipt_uuid": receipt_uuid, "outbox_id": new_id}
+        return {
+            "disposition": "applied",
+            "command_receipt_uuid": receipt_uuid,
+            "outbox_id": new_id,
+            "decided_at": now,
+        }
 
 
     async def _consume_vectorize_construct_intent(self, delivery: OutboxDelivery) -> None:

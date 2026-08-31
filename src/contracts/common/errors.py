@@ -77,6 +77,28 @@ class MkbError(Exception):
     details: dict[str, Any] | None = None
     trace_uuid: str | None = None
 
+    @property
+    def canonical_code(self) -> str:
+        """Return the v2 registry code while preserving the v1 wire alias."""
+
+        try:
+            from src.contracts.governance import resolve_error_definition
+
+            return resolve_error_definition(self.code).code
+        except (KeyError, TypeError, ValueError):
+            return self.code
+
+    @property
+    def retryable(self) -> bool | None:
+        """Expose registered retryability without guessing for legacy codes."""
+
+        try:
+            from src.contracts.governance import resolve_error_definition
+
+            return resolve_error_definition(self.code).retryable
+        except (KeyError, TypeError, ValueError):
+            return None
+
     def as_dict(self, request_id: str | None = None, *, trace_uuid: str | None = None) -> dict[str, Any]:
         error: dict[str, Any] = {"code": self.code[:128], "message": _safe_text(self.message)[:512]}
         if self.details:

@@ -81,6 +81,17 @@ class TaskViewsMixin:
             "error": error,
             "action_required": action_required,
             "deleted_at": row["deleted_at"] if deleted else None,
+            "source_kind": row.get("source_kind"),
+            "observation_uuid": row.get("observation_uuid"),
+            "observation_key": row.get("observation_key"),
+            "workflow_revision_uuid": row.get("workflow_revision_uuid"),
+            "actual_binding": row.get("actual_binding"),
+            "intake_snapshot_uuid": row.get("intake_snapshot_uuid"),
+            "intake_item_uuid": row.get("intake_item_uuid"),
+            "intake_revision_uuid": row.get("intake_revision_uuid"),
+            "phase": row.get("phase"),
+            "waiting_reason": row.get("waiting_reason"),
+            "retryable": bool(row.get("retryable", False)),
             "counts": {
                 "total": row["cnt_total"],
                 "required": row["cnt_required"],
@@ -113,6 +124,69 @@ class TaskViewsMixin:
         if row is None:
             raise NotFoundError("task-not-found", "Task was not found")
         return row
+
+    async def _enrich_view_tx(self, tx: UnitOfWork, view: dict[str, Any]) -> dict[str, Any]:
+        """Attach safe identity/phase coordinates from the current root."""
+
+        team_uuid = view["team_uuid"]
+        task_uuid = view["task_uuid"]
+        root = await tx.fetchone(
+            "SELECT * FROM mkb_executions WHERE team_uuid=? AND task_uuid=? AND generation=? "
+            "AND parent_execution_uuid IS NULL AND root_execution_uuid=execution_uuid",
+            (team_uuid, task_uuid, view["current_generation"]),
+        )
+        if root is None:
+            return view
+        view["workflow_revision_uuid"] = root.get("workflow_revision_uuid")
+        view["intake_snapshot_uuid"] = root.get("intake_snapshot_uuid")
+        view["phase"] = root.get("phase_key")
+        view["waiting_reason"] = root.get("waiting_reason")
+        observation_uuid = root.get("observation_uuid") or view.get("observation_uuid")
+        view["observation_uuid"] = observation_uuid
+        if observation_uuid:
+            observation = await tx.fetchone(
+                "SELECT observation_key FROM mkb_intake_observations WHERE team_uuid=? AND observation_uuid=?",
+                (team_uuid, observation_uuid),
+            )
+            if observation is not None:
+                view["observation_key"] = observation["observation_key"]
+            fact = await tx.fetchone(
+                "SELECT intake_item_uuid,intake_revision_uuid,intake_snapshot_uuid,disposition "
+                "FROM mkb_intake_acceptance_facts WHERE team_uuid=? AND observation_uuid=?",
+                (team_uuid, observation_uuid),
+            )
+            if fact is not None:
+                view["intake_item_uuid"] = fact["intake_item_uuid"]
+                view["intake_revision_uuid"] = fact["intake_revision_uuid"]
+                view["intake_snapshot_uuid"] = fact["intake_snapshot_uuid"]
+        if view.get("intake_item_uuid") is None and root.get("target_kind") == "intake_item":
+            view["intake_item_uuid"] = root.get("target_uuid")
+        binding_state = root.get("actual_binding_state")
+        if binding_state is not None:
+            view["actual_binding"] = {
+                "state": str(binding_state),
+                "digest": root.get("actual_binding_digest") or "",
+            }
+        process = await tx.fetchone(
+            "SELECT last_failure_retryability FROM mkb_processes WHERE team_uuid=? AND execution_uuid=? "
+            "ORDER BY updated_at DESC,process_uuid DESC LIMIT 1",
+            (team_uuid, root["execution_uuid"]),
+        )
+        if process is not None and process.get("last_failure_retryability") is not None:
+            view["retryable"] = bool(process["last_failure_retryability"])
+        try:
+            audit = await tx.fetchone(
+                "SELECT strict_payload_json FROM mkb_task_audits WHERE team_uuid=? AND task_uuid=?",
+                (team_uuid, task_uuid),
+            )
+            if audit is not None:
+                payload = json.loads(audit["strict_payload_json"] or "{}")
+                source = payload.get("payload", {}).get("source") if isinstance(payload, dict) else None
+                if isinstance(source, dict) and isinstance(source.get("source_kind"), str):
+                    view["source_kind"] = source["source_kind"]
+        except (TypeError, ValueError, json.JSONDecodeError):
+            pass
+        return view
 
 
     @staticmethod

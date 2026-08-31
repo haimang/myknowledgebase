@@ -50,7 +50,13 @@ async def project_task_status_tx(
 
     if result_disposition is not None and result_disposition != "exhausted_zero":
         raise MkbError("TASK_DISPOSITION_UNSUPPORTED", "Task result disposition is not registered", 409)
-    if target == TaskStatus.SUCCEEDED and not proof_ref and result_disposition != "exhausted_zero":
+    proofless_lifecycle = row["request_intent"] in {
+        "intake.update_metadata",
+        "intake.deactivate",
+        "intake.reactivate",
+        "intake.delete",
+    }
+    if target == TaskStatus.SUCCEEDED and not proof_ref and result_disposition != "exhausted_zero" and not proofless_lifecycle:
         raise MkbError("task-proof-missing", "Task cannot succeed without a durable publication proof", 409)
 
     status = row["status"]

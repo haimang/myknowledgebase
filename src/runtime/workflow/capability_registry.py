@@ -205,12 +205,13 @@ class ProcessCapabilityRegistry:
                 "process_key": manifest.process_key,
                 "contract_version": manifest.contract_version,
                 "definition_digest": manifest.definition_digest,
-                "deployment_roles": manifest.deployment_roles,
-                "supply_requirements": manifest.supply_requirements,
+                "handler_key": manifest.handler_key,
+                "deployment_roles": list(manifest.deployment_roles),
+                "supply_requirements": list(manifest.supply_requirements),
                 "available": all(available_supplies.get(key, False) for key in manifest.supply_requirements),
-                "missing_supplies": tuple(
+                "missing_supplies": [
                     key for key in manifest.supply_requirements if not available_supplies.get(key, False)
-                ),
+                ],
             }
             for manifest in self.manifests
         )

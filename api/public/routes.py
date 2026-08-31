@@ -16,13 +16,20 @@ from src.contracts.api.generation import (
     GenerationArtifactView,
 )
 from src.contracts.api.models import (
+    CapabilityCatalogView,
+    CatalogView,
     ExpectedRevisionRequest,
     GateDecisionRequest,
+    IntakeItemListView,
+    NamespaceListView,
     RetryRequest,
     TaskCreateRequest,
+    TaskListView,
     TaskPatchRequest,
+    TaskView,
     TeamCreateRequest,
     TeamPatchRequest,
+    WorkflowCatalogView,
     parse_retrieval_request,
 )
 from src.contracts.api.objects import ObjectCancelRequest, PublicObjectView
@@ -32,6 +39,85 @@ from src.contracts.storage.models import ObjectHandle
 from src.services.generation_read import GenerationArtifactReadService
 
 router = APIRouter(prefix="/v1", tags=["tasks"])
+
+
+@router.get("/catalog", response_model=CatalogView, tags=["catalog"])
+async def catalog(request: Request, token: BusinessToken) -> CatalogView:
+    """Discover registered capabilities without exposing a graph selector."""
+
+    del token
+    container = request.app.state.container
+    supplies = {
+        "pdf.parse": container.pdf_parser is not None,
+        "browser.render": container.browser_runtime is not None,
+        "browser.print_pdf": container.browser_runtime is not None,
+        "ocr.deterministic": container.deterministic_ocr is not None,
+        "s11.multimodal": container.clean_llm is not None,
+    }
+    return await container.workflow_catalog.catalog(role=container.settings.deployment_role, available_supplies=supplies)
+
+
+@router.get("/workflows", response_model=list[WorkflowCatalogView], tags=["catalog"])
+async def list_workflows(request: Request, token: BusinessToken) -> list[WorkflowCatalogView]:
+    del token
+    return await request.app.state.container.workflow_catalog.workflows()
+
+
+@router.get("/capabilities", response_model=list[CapabilityCatalogView], tags=["catalog"])
+async def list_capabilities(request: Request, token: BusinessToken) -> list[CapabilityCatalogView]:
+    del token
+    container = request.app.state.container
+    supplies = {
+        "pdf.parse": container.pdf_parser is not None,
+        "browser.render": container.browser_runtime is not None,
+        "browser.print_pdf": container.browser_runtime is not None,
+        "ocr.deterministic": container.deterministic_ocr is not None,
+        "s11.multimodal": container.clean_llm is not None,
+    }
+    return [
+        CapabilityCatalogView.model_validate(item)
+        for item in container.capability_registry.availability(supplies)
+    ]
+
+
+@router.get("/teams/{team_uuid}/intake-items", response_model=IntakeItemListView, tags=["catalog"])
+async def list_intake_items(
+    request: Request,
+    team_uuid: str,
+    token: BusinessToken,
+    source_kind: str | None = None,
+    external_key: str | None = None,
+    lifecycle_state: str | None = None,
+    limit: int = 50,
+    cursor: str | None = None,
+) -> dict[str, object]:
+    del token
+    items, next_cursor = await request.app.state.container.workflow_catalog.items(
+        _team_path(team_uuid),
+        source_kind=source_kind,
+        external_key=external_key,
+        lifecycle_state=lifecycle_state,
+        limit=limit,
+        cursor=cursor,
+    )
+    return {"items": items, "next_cursor": next_cursor}
+
+
+@router.get("/teams/{team_uuid}/namespaces", response_model=NamespaceListView, tags=["catalog"])
+async def list_namespaces(
+    request: Request,
+    team_uuid: str,
+    token: BusinessToken,
+    status: str | None = "active",
+    namespace_key: str | None = None,
+    limit: int = 50,
+    cursor: str | None = None,
+) -> dict[str, object]:
+    del token
+    items, next_cursor = await request.app.state.container.workflow_catalog.namespaces(
+        _team_path(team_uuid), status=status, namespace_key=namespace_key, limit=limit, cursor=cursor
+    )
+    return {"items": items, "next_cursor": next_cursor}
 
 
 def _team_path(team_uuid: str) -> str:
@@ -263,7 +349,7 @@ async def create_task(
     )
 
 
-@router.get("/teams/{team_uuid}/tasks")
+@router.get("/teams/{team_uuid}/tasks", response_model=TaskListView)
 async def list_tasks(
     request: Request,
     team_uuid: str,
@@ -296,8 +382,8 @@ async def list_tasks(
     return {"items": items, "next_cursor": next_cursor}
 
 
-@router.get("/teams/{team_uuid}/tasks/{task_uuid}")
-async def get_task(request: Request, team_uuid: str, task_uuid: str, token: BusinessToken) -> dict[str, object]:
+@router.get("/teams/{team_uuid}/tasks/{task_uuid}", response_model=TaskView)
+async def get_task(request: Request, team_uuid: str, task_uuid: str, token: BusinessToken) -> TaskView:
     del token
     return await request.app.state.container.tasks.get(_team_path(team_uuid), _task_path(task_uuid))
 

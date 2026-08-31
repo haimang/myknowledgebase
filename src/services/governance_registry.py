@@ -6,6 +6,7 @@ from src.contracts.common.errors import MkbError
 from src.contracts.common.time import utc_now
 from src.contracts.governance import ERROR_DEFINITIONS, OUTBOX_KIND_DEFINITIONS
 from src.persistence.ports import PersistencePort, UnitOfWork
+from src.runtime.signals import DEFAULT_SIGNAL_REGISTRY, OperationalSignalRegistry
 from src.runtime.workflow.capability_registry import (
     DEFAULT_PROCESS_CAPABILITY_REGISTRY,
     ProcessCapabilityRegistry,
@@ -17,9 +18,11 @@ class GovernanceRegistryService:
         self,
         persistence: PersistencePort,
         capabilities: ProcessCapabilityRegistry | None = None,
+        signals: OperationalSignalRegistry | None = None,
     ) -> None:
         self.persistence = persistence
         self.capabilities = capabilities or DEFAULT_PROCESS_CAPABILITY_REGISTRY
+        self.signals = signals or DEFAULT_SIGNAL_REGISTRY
 
     async def bootstrap(self) -> None:
         async with self.persistence.transaction() as tx:
@@ -28,6 +31,7 @@ class GovernanceRegistryService:
             for definition in ERROR_DEFINITIONS.values():
                 await self._register_error(tx, definition)
         await self.capabilities.bootstrap(self.persistence)
+        await self._bootstrap_signals()
 
     async def readiness(self) -> bool:
         async with self.persistence.read_snapshot() as tx:
@@ -44,7 +48,43 @@ class GovernanceRegistryService:
             == {(definition.code, definition.definition_digest) for definition in ERROR_DEFINITIONS.values()}
             and {(row["legacy_code"], row["canonical_error_code"]) for row in aliases} == expected_aliases
             and await self.capabilities.readiness(self.persistence)
+            and await self._signals_readiness()
         )
+
+    async def _bootstrap_signals(self) -> None:
+        async with self.persistence.transaction() as tx:
+            for definition in self.signals.definitions:
+                existing = await tx.fetchone(
+                    "SELECT definition_digest FROM mkb_operational_signal_definitions WHERE signal_key=?",
+                    (definition.signal_key,),
+                )
+                if existing is not None:
+                    if existing["definition_digest"] != definition.definition_digest:
+                        raise MkbError("REGISTRY_DIGEST_MISMATCH", "Operational signal definition conflicts", 503)
+                    continue
+                await tx.execute(
+                    "INSERT INTO mkb_operational_signal_definitions(signal_key,definition_version,definition_digest,"
+                    "severity,emitter_key,metric_name,alert_id,runbook_ref,owner_component,registered_at) "
+                    "VALUES (?,?,?,?,?,?,?,?,?,?)",
+                    (
+                        definition.signal_key,
+                        definition.definition_version,
+                        definition.definition_digest,
+                        definition.severity,
+                        definition.emitter_key,
+                        definition.metric_name,
+                        definition.alert_id,
+                        definition.runbook_ref,
+                        definition.owner_component,
+                        utc_now(),
+                    ),
+                )
+
+    async def _signals_readiness(self) -> bool:
+        async with self.persistence.read_snapshot() as tx:
+            rows = await tx.fetchall("SELECT signal_key,definition_digest FROM mkb_operational_signal_definitions")
+        expected = {(item.signal_key, item.definition_digest) for item in self.signals.definitions}
+        return {(row["signal_key"], row["definition_digest"]) for row in rows} == expected
 
     @staticmethod
     async def _register_outbox(tx: UnitOfWork, definition) -> None:

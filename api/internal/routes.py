@@ -6,12 +6,185 @@ from fastapi import APIRouter, Depends, Request
 
 from api.dependencies import OperatorToken, require_operator_token
 from api.internal.prompts import PromptCatalogPatch, PromptCatalogWrite
+from src.contracts.api.models import (
+    CleanupJobDebugView,
+    CleanupResumeRequest,
+    CommandReceiptView,
+    ExecutionDebugView,
+    GenerationControlRequest,
+    OutboxRequeueRequest,
+    ProcessDebugView,
+)
+from src.contracts.common.errors import MkbError
 from src.contracts.common.ids import validate_external_uuid
 
 # Keep the router-level guard even while the bounded v1 operator surface is
 # empty.  Any future read/repair endpoint therefore inherits token plus
 # internal-network admission instead of accidentally becoming public.
 router = APIRouter(prefix="/internal", tags=["internal"], dependencies=[Depends(require_operator_token)])
+
+
+@router.get("/teams/{team_uuid}/processes/{process_uuid}", response_model=ProcessDebugView)
+async def process_debug(request: Request, team_uuid: str, process_uuid: str, token: OperatorToken) -> ProcessDebugView:
+    del token
+    return await request.app.state.container.operator_control.process(
+        validate_external_uuid(team_uuid, field="team_uuid"),
+        validate_external_uuid(process_uuid, field="process_uuid"),
+    )
+
+
+@router.get("/teams/{team_uuid}/executions/{execution_uuid}", response_model=ExecutionDebugView)
+async def execution_debug(request: Request, team_uuid: str, execution_uuid: str, token: OperatorToken) -> ExecutionDebugView:
+    del token
+    return await request.app.state.container.operator_control.execution(
+        validate_external_uuid(team_uuid, field="team_uuid"),
+        validate_external_uuid(execution_uuid, field="execution_uuid"),
+    )
+
+
+@router.get("/teams/{team_uuid}/cleanup/{cleanup_job_uuid}", response_model=CleanupJobDebugView)
+async def cleanup_debug(request: Request, team_uuid: str, cleanup_job_uuid: str, token: OperatorToken) -> CleanupJobDebugView:
+    del token
+    return await request.app.state.container.operator_control.cleanup(
+        validate_external_uuid(team_uuid, field="team_uuid"),
+        validate_external_uuid(cleanup_job_uuid, field="cleanup_job_uuid"),
+    )
+
+
+@router.post(
+    "/teams/{team_uuid}/outbox/{outbox_id}:requeue",
+    response_model=CommandReceiptView,
+)
+async def requeue_outbox(
+    request: Request,
+    team_uuid: str,
+    outbox_id: str,
+    body: OutboxRequeueRequest,
+    token: OperatorToken,
+) -> CommandReceiptView:
+    del token
+    if not outbox_id or len(outbox_id) > 256:
+        raise MkbError("OUTBOX_ID_INVALID", "Outbox identifier is invalid", 422)
+    result = await request.app.state.container.operator_control.requeue_outbox(
+        validate_external_uuid(team_uuid, field="team_uuid"),
+        outbox_id,
+        expected_generation=body.expected_generation,
+        idempotency_key=body.idempotency_key,
+    )
+    return CommandReceiptView.model_validate(
+        {
+            "command_receipt_uuid": result["command_receipt_uuid"],
+            "command_kind": "outbox.requeue",
+            "target_kind": "outbox",
+            "target_uuid": outbox_id,
+            "disposition": result["disposition"],
+            "expected_generation": body.expected_generation,
+            "observed_generation": body.expected_generation,
+            "result_ref": result.get("outbox_id"),
+            "outbox_id": result.get("outbox_id"),
+            "decided_at": result.get("decided_at"),
+        }
+    )
+
+
+@router.post(
+    "/teams/{team_uuid}/cleanup/{cleanup_job_uuid}:resume",
+    response_model=CommandReceiptView,
+)
+async def resume_cleanup(
+    request: Request,
+    team_uuid: str,
+    cleanup_job_uuid: str,
+    body: CleanupResumeRequest,
+    token: OperatorToken,
+) -> CommandReceiptView:
+    del token
+    result = await request.app.state.container.operator_control.resume_cleanup(
+        validate_external_uuid(team_uuid, field="team_uuid"),
+        validate_external_uuid(cleanup_job_uuid, field="cleanup_job_uuid"),
+        expected_revision=body.expected_revision,
+        idempotency_key=body.idempotency_key,
+    )
+    return CommandReceiptView.model_validate(
+        {
+            "command_receipt_uuid": result["command_receipt_uuid"],
+            "command_kind": "cleanup.resume",
+            "target_kind": "cleanup_job",
+            "target_uuid": cleanup_job_uuid,
+            "disposition": result["disposition"],
+            "expected_generation": body.expected_revision,
+            "observed_generation": body.expected_revision,
+            "result_ref": cleanup_job_uuid,
+            "cleanup_job_uuid": cleanup_job_uuid,
+            "decided_at": result.get("decided_at"),
+        }
+    )
+
+
+@router.post(
+    "/teams/{team_uuid}/executions/{execution_uuid}:stop",
+    response_model=CommandReceiptView,
+)
+async def stop_execution(
+    request: Request,
+    team_uuid: str,
+    execution_uuid: str,
+    body: GenerationControlRequest,
+    token: OperatorToken,
+) -> CommandReceiptView:
+    del token
+    result = await request.app.state.container.operator_control.stop_execution(
+        validate_external_uuid(team_uuid, field="team_uuid"),
+        validate_external_uuid(execution_uuid, field="execution_uuid"),
+        expected_generation=body.expected_generation,
+        idempotency_key=body.idempotency_key,
+    )
+    return CommandReceiptView.model_validate(
+        {
+            "command_receipt_uuid": result["command_receipt_uuid"],
+            "command_kind": "execution.stop",
+            "target_kind": "execution",
+            "target_uuid": execution_uuid,
+            "disposition": result["disposition"],
+            "expected_generation": body.expected_generation,
+            "observed_generation": body.expected_generation,
+            "result_ref": execution_uuid,
+            "decided_at": result.get("decided_at"),
+        }
+    )
+
+
+@router.post(
+    "/teams/{team_uuid}/processes/{process_uuid}:restart",
+    response_model=CommandReceiptView,
+)
+async def restart_process(
+    request: Request,
+    team_uuid: str,
+    process_uuid: str,
+    body: GenerationControlRequest,
+    token: OperatorToken,
+) -> CommandReceiptView:
+    del token
+    result = await request.app.state.container.operator_control.restart_process(
+        validate_external_uuid(team_uuid, field="team_uuid"),
+        validate_external_uuid(process_uuid, field="process_uuid"),
+        expected_generation=body.expected_generation,
+        idempotency_key=body.idempotency_key,
+    )
+    return CommandReceiptView.model_validate(
+        {
+            "command_receipt_uuid": result["command_receipt_uuid"],
+            "command_kind": "process.restart",
+            "target_kind": "process",
+            "target_uuid": process_uuid,
+            "disposition": result["disposition"],
+            "expected_generation": body.expected_generation,
+            "observed_generation": body.expected_generation + 1,
+            "result_ref": result.get("result_ref"),
+            "decided_at": result.get("decided_at"),
+        }
+    )
 
 
 @router.get("/prompts")

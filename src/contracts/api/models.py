@@ -14,7 +14,6 @@ from src.contracts.common.models import (
     ErrorEnvelope,
     PayloadExtraModel,
     StrictModel,
-    TaskStatus,
     assert_safe_public_data,
 )
 from src.contracts.common.time import normalize_rfc3339
@@ -663,7 +662,7 @@ class TaskView(StrictModel):
     trace_uuid: str
     schema_version: str
     request_intent: str
-    status: TaskStatus
+    status: Literal["queued", "running", "cancelling", "succeeded", "failed", "cancelled"]
     revision: int
     current_generation: int
     title: str | None = None
@@ -679,7 +678,208 @@ class TaskView(StrictModel):
     result_disposition: str | None = None
     error: dict[str, str] | None = None
     action_required: dict[str, Any] | None = None
+    deleted_at: str | None = None
+    counts: dict[str, int]
+    source_kind: str | None = None
+    observation_uuid: str | None = None
+    observation_key: str | None = None
+    workflow_revision_uuid: str | None = None
+    actual_binding: dict[str, str] | None = None
+    intake_snapshot_uuid: str | None = None
+    intake_item_uuid: str | None = None
+    intake_revision_uuid: str | None = None
+    phase: str | None = None
+    waiting_reason: str | None = None
+    retryable: bool = False
     links: dict[str, str]
+
+
+class CapabilityCatalogView(StrictModel):
+    process_key: str
+    contract_version: str
+    definition_digest: str
+    handler_key: str
+    deployment_roles: list[str]
+    supply_requirements: list[str]
+    available: bool
+    missing_supplies: list[str]
+
+
+class WorkflowCatalogView(StrictModel):
+    workflow_key: str
+    workflow_uuid: str
+    workflow_revision_uuid: str
+    revision_number: int
+    purpose_key: str
+    execution_role: str
+    compiled_digest: str
+    required_process_keys: list[str]
+    availability: str
+
+
+class SourceKindCatalogView(StrictModel):
+    source_kind: str
+    definition_version: str
+    definition_digest: str
+    cardinality: str
+    acquisition_capabilities: list[str]
+    decode_capabilities: list[str]
+    clean_capabilities: list[str]
+
+
+class CatalogView(StrictModel):
+    schema_version: Literal["mkb.catalog.v1"] = "mkb.catalog.v1"
+    deployment_role: str
+    capability_manifest_digest: str
+    workflows: list[WorkflowCatalogView]
+    capabilities: list[CapabilityCatalogView]
+    source_kinds: list[SourceKindCatalogView]
+
+
+class TaskListView(StrictModel):
+    items: list[TaskView]
+    next_cursor: str | None = None
+
+
+class CommandReceiptView(StrictModel):
+    command_receipt_uuid: str
+    command_kind: str
+    target_kind: str
+    target_uuid: str
+    disposition: Literal["applied", "replayed", "noop", "rejected"]
+    expected_generation: int | None = None
+    observed_generation: int | None = None
+    retryable: bool = False
+    error_code: str | None = None
+    result_ref: str | None = None
+    outbox_id: str | None = None
+    cleanup_job_uuid: str | None = None
+    decided_at: str
+
+
+class OutboxRequeueRequest(StrictModel):
+    expected_generation: int = Field(ge=1)
+    idempotency_key: str = Field(min_length=1, max_length=256)
+
+
+class CleanupResumeRequest(StrictModel):
+    expected_revision: int = Field(ge=0)
+    idempotency_key: str = Field(min_length=1, max_length=256)
+
+
+class GenerationControlRequest(StrictModel):
+    expected_generation: int = Field(ge=0)
+    idempotency_key: str = Field(min_length=1, max_length=256)
+
+
+class ProcessDebugView(StrictModel):
+    process_uuid: str
+    team_uuid: str
+    execution_uuid: str
+    task_uuid: str
+    step_key: str
+    process_key: str
+    process_contract_version: str
+    status: str
+    row_revision: int
+    fencing_generation: int
+    lease_owner: str | None = None
+    delivery_count: int
+    retry_count: int
+    max_retries: int
+    error_class: str | None = None
+    error_code: str | None = None
+    failure_disposition: str | None = None
+    created_at: str
+    started_at: str | None = None
+    completed_at: str | None = None
+    updated_at: str
+    proof_ref: str | None = None
+    proof_digest: str | None = None
+
+
+class ExecutionDebugView(StrictModel):
+    execution_uuid: str
+    team_uuid: str
+    task_uuid: str
+    generation: int
+    execution_role: str
+    target_kind: str
+    target_uuid: str | None = None
+    status: str
+    workflow_uuid: str
+    workflow_revision_uuid: str
+    compiled_digest: str
+    actual_binding_state: str | None = None
+    actual_binding_digest: str | None = None
+    phase_key: str | None = None
+    waiting_reason: str | None = None
+    current_process_uuid: str | None = None
+    total_process_count: int
+    active_process_count: int
+    succeeded_process_count: int
+    failed_process_count: int
+    cancelled_process_count: int
+    result_ref: str | None = None
+    publication_proof_ref: str | None = None
+    final_error_code: str | None = None
+    created_at: str
+    started_at: str | None = None
+    completed_at: str | None = None
+    updated_at: str
+
+
+class CleanupStepDebugView(StrictModel):
+    substrate_kind: str
+    state: str
+    proof_uuid: str | None = None
+    blocked_reason: str | None = None
+
+
+class CleanupJobDebugView(StrictModel):
+    cleanup_job_uuid: str
+    intent_uuid: str
+    team_uuid: str
+    intake_item_uuid: str
+    item_epoch: int
+    required_substrate_set_digest: str
+    retention_until: str
+    state: str
+    blocked_reason: str | None = None
+    created_at: str
+    updated_at: str
+    steps: list[CleanupStepDebugView]
+
+
+class NamespaceView(StrictModel):
+    namespace_uuid: str
+    namespace_key: str
+    model_key: str
+    model_version: str
+    dimension: int
+    status: str
+
+
+class IntakeItemView(StrictModel):
+    intake_item_uuid: str
+    external_key: str
+    source_kind: str
+    lifecycle_state: str
+    row_revision: int
+    latest_revision_uuid: str | None = None
+    serving_revision_uuid: str | None = None
+    created_at: str
+    updated_at: str
+
+
+class IntakeItemListView(StrictModel):
+    items: list[IntakeItemView]
+    next_cursor: str | None = None
+
+
+class NamespaceListView(StrictModel):
+    items: list[NamespaceView]
+    next_cursor: str | None = None
 
 
 class PageEnvelope(StrictModel):
@@ -696,6 +896,22 @@ __all__ = [
     "TaskCreateRequest",
     "TaskPatchRequest",
     "TaskView",
+    "TaskListView",
+    "IntakeItemListView",
+    "NamespaceListView",
+    "CapabilityCatalogView",
+    "WorkflowCatalogView",
+    "SourceKindCatalogView",
+    "CatalogView",
+    "CommandReceiptView",
+    "OutboxRequeueRequest",
+    "CleanupResumeRequest",
+    "ProcessDebugView",
+    "ExecutionDebugView",
+    "CleanupStepDebugView",
+    "CleanupJobDebugView",
+    "NamespaceView",
+    "IntakeItemView",
     "TeamCreateRequest",
     "TeamPatchRequest",
 ]

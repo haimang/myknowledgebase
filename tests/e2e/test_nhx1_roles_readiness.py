@@ -62,7 +62,7 @@ def test_capability_manifest_is_closed_and_supply_aware() -> None:
     availability = registry.availability({"browser.render": True, "browser.print_pdf": False})
     browser_status = next(item for item in availability if item["process_key"] == browser.process_key)
     assert browser_status["available"] is False
-    assert browser_status["missing_supplies"] == ("browser.print_pdf",)
+    assert browser_status["missing_supplies"] == ["browser.print_pdf"]
 
 
 def test_role_health_required_sets_do_not_claim_worker_components(tmp_path: Path) -> None:

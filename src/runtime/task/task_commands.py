@@ -25,9 +25,11 @@ class TaskCommandsMixin:
         async with self.persistence.transaction() as tx:
             row = await self._get_row(tx, team_uuid, task_uuid)
             gate = await self._open_gate(tx, team_uuid, task_uuid)
+            view = self._view(row, gate)
+            await self._enrich_view_tx(tx, view)
         if row["deleted_at"] and not include_deleted:
             self._require_public_visibility(row)
-        return self._view(row, gate)
+        return view
 
 
     async def list(
@@ -132,7 +134,11 @@ class TaskCommandsMixin:
             if more and page
             else None
         )
-        return [self._view(row) for row in page], next_cursor
+        async with self.persistence.read_snapshot() as tx:
+            views = [self._view(row) for row in page]
+            for view in views:
+                await self._enrich_view_tx(tx, view)
+        return views, next_cursor
 
 
     async def patch(self, team_uuid: str, task_uuid: str, request: TaskPatchRequest) -> dict[str, Any]:

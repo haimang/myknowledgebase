@@ -42,6 +42,7 @@ from src.runtime.object_gc import ObjectGcScanner, ObjectGcSchedule
 from src.runtime.object_upload import ObjectUploadLifecycleScanner, ObjectUploadLifecycleSchedule
 from src.runtime.roles import DeploymentRole, role_spec
 from src.runtime.security import ActiveTokenSet, EgressPolicy, FixedWindowRateLimiter, SecretResolver, safe_request_id
+from src.runtime.signals import DEFAULT_SIGNAL_REGISTRY, OperationalSignalRegistry
 from src.runtime.supply.browser import HardenedBrowserRuntime
 from src.runtime.supply.deterministic_ocr import IsolatedDeterministicOcr
 from src.runtime.supply.pdf_parser import IsolatedPdfParser
@@ -52,6 +53,7 @@ from src.runtime.workflow_engine import WorkflowRuntime, WorkflowWorker
 from src.runtime.workflow_supervisor import WorkflowSupervisor
 from src.services.artifacts import OutcomeArtifactCommitter
 from src.services.billing import DefaultBillingService
+from src.services.cleanup_jobs import CleanupJobService
 from src.services.config_snapshots import ConfigSnapshotService
 from src.services.events import DomainEventWriter, SecurityAuditWriter
 from src.services.governance_registry import GovernanceRegistryService
@@ -66,9 +68,11 @@ from src.services.observability import (
     ObservabilityRetentionService,
     RetentionPolicy,
 )
+from src.services.operator_control import OperatorControlService
 from src.services.registry import RegistryService, default_enabled_inference_bindings
 from src.services.retrieval import RetrievalService
 from src.services.teams import TeamService
+from src.services.workflow_catalog import WorkflowCatalogService
 from src.services.workflow_registry import WorkflowRegistryService
 from src.storage.local_store import LocalObjectStore
 from src.workflows.builtin_lsrag import (
@@ -94,6 +98,10 @@ class Container:
     workflows: WorkflowRegistryService
     governance: GovernanceRegistryService
     capability_registry: ProcessCapabilityRegistry
+    workflow_catalog: WorkflowCatalogService
+    signal_registry: OperationalSignalRegistry
+    cleanup_jobs: CleanupJobService
+    operator_control: OperatorControlService
     config_snapshots: ConfigSnapshotService
     tokens: ActiveTokenSet
     rate_limiter: FixedWindowRateLimiter
@@ -261,7 +269,11 @@ async def _probe(container: Container) -> dict[str, bool]:
         supplies = dict(zip(supplies, values, strict=True))
     supervisor = getattr(container, "workflow_supervisor", None)
     supervisor_ok = True
-    if role_spec(container.settings.deployment_role).owns_workflow_claims and supervisor is not None:
+    # The explicitly split worker role is the hard claim/readiness owner.  A
+    # small ``all`` deployment keeps its API/control plane available while a
+    # best-effort maintenance/repair pass reports its own diagnostics; the
+    # worker claim closure still consults health before leasing Process rows.
+    if container.settings.deployment_role == DeploymentRole.WORKFLOW_WORKER.value and supervisor is not None:
         supervisor_ok = int(getattr(supervisor, "consecutive_failures", 0)) < container.settings.supervisor_failure_threshold
     return {
         **persistence,
@@ -305,6 +317,8 @@ def create_container(settings: Settings | None = None) -> Container:
     capability_registry = DEFAULT_PROCESS_CAPABILITY_REGISTRY
     workflows = WorkflowRegistryService(persistence, capability_registry)
     governance = GovernanceRegistryService(persistence, capability_registry)
+    signal_registry = DEFAULT_SIGNAL_REGISTRY
+    workflow_catalog = WorkflowCatalogService(persistence, workflows, capability_registry)
     tokens = ActiveTokenSet(settings.active_tokens)
     rate_limiter = FixedWindowRateLimiter(
         ip_limit=settings.rate_limit_ip_per_min,
@@ -545,6 +559,11 @@ def create_container(settings: Settings | None = None) -> Container:
         pending_ttl=timedelta(seconds=settings.object_upload_pending_ttl_seconds),
         staging_ttl=timedelta(seconds=settings.object_staging_ttl_seconds),
     )
+    cleanup_jobs = CleanupJobService(
+        persistence,
+        retention=timedelta(seconds=settings.object_gc_grace_seconds),
+    )
+    operator_control = OperatorControlService(persistence, workflow_runtime, cleanup_jobs)
     object_upload_lifecycle_scanner = ObjectUploadLifecycleScanner(
         object_upload_lifecycle,
         ObjectUploadLifecycleSchedule(
@@ -586,6 +605,10 @@ def create_container(settings: Settings | None = None) -> Container:
         workflows=workflows,
         governance=governance,
         capability_registry=capability_registry,
+        workflow_catalog=workflow_catalog,
+        signal_registry=signal_registry,
+        cleanup_jobs=cleanup_jobs,
+        operator_control=operator_control,
         config_snapshots=config_snapshots,
         tokens=tokens,
         rate_limiter=rate_limiter,
@@ -764,6 +787,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     async def ready(request: Request) -> JSONResponse:
         container: Container = request.app.state.container
         result = await container.health.ready()
+        if result["status"] != "ready":
+            container.signal_registry.emit(container.metrics, "readiness.false")
         deployment = role_spec(container.settings.deployment_role)
         content = {
             **result,
