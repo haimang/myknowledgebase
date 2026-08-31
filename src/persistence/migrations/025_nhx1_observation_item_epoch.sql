@@ -124,10 +124,17 @@ CREATE TABLE mkb_intake_acceptance_facts (
   created_at TEXT NOT NULL,
   payload_extra TEXT NOT NULL DEFAULT '{}',
   UNIQUE (observation_uuid),
-  CHECK ((disposition = 'observed_not_adopted') OR
-         (intake_item_uuid IS NOT NULL AND intake_revision_uuid IS NOT NULL
-          AND expected_item_epoch IS NOT NULL AND resulting_item_epoch IS NOT NULL
-          AND resulting_item_epoch = expected_item_epoch + 1)),
+  CHECK ((disposition = 'observed_not_adopted'
+          AND intake_item_uuid IS NULL AND intake_revision_uuid IS NULL
+          AND expected_item_epoch IS NULL AND resulting_item_epoch IS NULL)
+         OR
+         (disposition = 'changed'
+          AND intake_item_uuid IS NOT NULL AND intake_revision_uuid IS NOT NULL
+          AND expected_item_epoch IS NOT NULL AND resulting_item_epoch = expected_item_epoch + 1)
+         OR
+         (disposition = 'no_change'
+          AND intake_item_uuid IS NOT NULL AND intake_revision_uuid IS NOT NULL
+          AND expected_item_epoch IS NOT NULL AND resulting_item_epoch = expected_item_epoch)),
   FOREIGN KEY (team_uuid, observation_uuid)
     REFERENCES mkb_intake_observations(team_uuid, observation_uuid),
   FOREIGN KEY (team_uuid, intake_snapshot_uuid)

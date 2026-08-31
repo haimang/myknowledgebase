@@ -141,6 +141,12 @@ async def test_schema_constraints_and_append_only_triggers_reject_attacks(tmp_pa
                 "verdict,reason_code,verifier_key,verifier_version,checked_at) VALUES (?,?,?,?,?,?,?,?,?)",
                 ("verification", "team", "selected_output", "legacy", "legacy_unverifiable", "legacy", "nhx1", "v1", NOW),
             )
+            acceptance_table = await tx.fetchone(
+                "SELECT sql FROM sqlite_master WHERE type='table' AND name='mkb_intake_acceptance_facts'"
+            )
+            assert acceptance_table is not None
+            assert "resulting_item_epoch = expected_item_epoch + 1" in acceptance_table["sql"]
+            assert "resulting_item_epoch = expected_item_epoch" in acceptance_table["sql"]
         with pytest.raises(sqlite3.IntegrityError, match="append-only"):
             async with persistence.transaction() as tx:
                 await tx.execute(
