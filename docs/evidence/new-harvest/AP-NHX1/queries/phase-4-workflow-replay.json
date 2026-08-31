@@ -1,0 +1,7 @@
+{
+  "kind_family": {"active_revision": 2, "compatibility_revision": 1, "graphs": 3},
+  "processing_binding": {"clean_strategy_cells": 10, "registered_api_cells": 3, "fact_digest_separate_from_manifest": true},
+  "terminal_outcome": {"late_outcome": "fenced", "new_generation_survives": true, "domain_conflict": "terminal_failed"},
+  "exact_retry": {"frozen_snapshot_count": 1, "external_http_calls": 1, "retry_external_calls": 0},
+  "outbox": {"critical_dead_owner": "failed", "advisory_dead_owner": "unchanged", "requeue_predecessor": true}
+}

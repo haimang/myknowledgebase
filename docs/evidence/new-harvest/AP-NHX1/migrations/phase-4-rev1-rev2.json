@@ -1,0 +1,8 @@
+{
+  "legacy_manifest": "src/workflows/kind_family_v1_manifest.json",
+  "legacy_manifest_source_commit": "ba099ee305577cca2281a669afbca364111f200b",
+  "legacy_manifest_digest": "52798265e341051005dabadb164c99265607eb55b4ca2123d797f57c37e989e9",
+  "active_revision": 2,
+  "persisted_revision_1_mutated": false,
+  "new_task_selector": "revision-2-registry-coordinate"
+}

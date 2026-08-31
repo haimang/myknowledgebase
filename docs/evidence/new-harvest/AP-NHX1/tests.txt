@@ -37,3 +37,12 @@
 - Result: `EXIT0 · 38 passed`
 - Static command/result: `uv run ruff check api intake src tests` → `EXIT0 · All checks passed!`
 - Truth/work join: `T-O-408/T-O-409/T-O-410/T-O-421` / `P3-01..P3-05` / `NHX1-T04..T08`.
+
+## Phase 4 — 2026-08-31T03:34:15Z
+
+- Commit under test: `386f829bfdf9754dca4a5024cbbb08357fb41c6c`
+- Profile: `test/sqlite+turso`, local Python 3.12 via `uv`
+- Command: `uv run pytest -q tests/unit/test_nhx1_workflow_revision_compatibility.py tests/integration/test_nhx1_processing_binding.py tests/e2e/test_nhx1_terminal_outcome.py tests/e2e/test_nhx1_exact_replay.py tests/integration/test_nhx1_outbox_owner.py tests/integration/test_nh3_declared_reacquire.py tests/integration/test_nh1_s05_seal_cas.py tests/integration/test_nh3_fact_history_uow.py tests/unit/test_workflow_revision_compatibility.py tests/unit/test_workflow_registry.py tests/unit/test_ns6_phase2.py`
+- Result: `EXIT0 · 40 passed`
+- Static command/result: `uv run ruff check api intake src tests` → `EXIT0 · All checks passed!`
+- Truth/work join: `T-O-410/T-O-411/T-O-412/T-O-422` / `P4-01..P4-06` / `NHX1-T09..T14`.

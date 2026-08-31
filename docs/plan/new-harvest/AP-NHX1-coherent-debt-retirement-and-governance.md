@@ -1418,3 +1418,36 @@ NHX1 coherent debt retirement（单阶段 / 串行DAG）
 |------|------|-------------|
 | `2026-08-31T02:56:34Z` | Phase 3 EXIT | commit `b6769e10222bc9329d470adda50604e085b64cbd` + fixed 10-file pytest command + `38 passed` + profile `test/sqlite+turso` |
 | `2026-08-31T02:56:34Z` | static gate | commit `6da19ea`/`b6769e1` + `uv run ruff check api intake src tests` + EXIT0 + profile `local` |
+
+### 11.7 Phase 4 — Workflow revision / replay / Outcome
+
+> 执行时间：`2026-08-31T03:34:15Z`
+> 代码改动统计：`28 文件；rev1 frozen manifest 3 graphs；rev2 activation；typed binding/selection、Outcome fence、exact retry、outbox owner/requeue；schema bump 0`
+
+- **实际执行摘要**：
+  - `P4-01`：kind-family 当前定义统一升 immutable revision 2；ba099ee rev1 canonical/compiled manifest 作为独立 compatibility loader，persisted rev1 可在 rev2 active 时物化。
+  - `P4-02`：10 clean strategy 与 3 provider operation 使用 `ProcessingBinding` typed union；seal assertion 写 family/key/version/digest；selected-output 读取 RepresentationFact.digest，和 manifest digest 分离。
+  - `P4-03`：terminal Execution/Process 对迟到或不同 Outcome fail-closed；materialization 检查 Execution CAS rowcount；stale failure 不得杀新 generation；worker 将 domain conflict 终结为 typed failure。
+  - `P4-04`：reacquire guard 只按当前 `decode_web_static` hop 判断，去除全图 plan guard 误杀；既有 declared/undeclared edge regression 保留。
+  - `P4-05`：full Task retry 仅接受已 accepted Observation 的 verified raw artifact；新 Execution 复用 observation/snapshot/graph/manifest/context；HTTP external call count 保持 0；无 frozen input API 409。
+  - `P4-06`：outbox 写入 owner/generation/criticality/budget/dead code；critical dead 同事务终结 Execution/Task；advisory 不误杀；requeue 新 delivery 保留 `retry_of_outbox_id` 与 CommandReceipt。
+- **Phase 偏差（计划 vs 实际）**：
+  - `D-P4-01 (compat substrate)`：未改写 001/018–024 或 persisted rev1，采用 checked-in `src/workflows/kind_family_v1_manifest.json`；现有 workflow key 保持 wire 兼容，仅 revision coordinate 由 registry 管理。
+  - `D-P4-02 (fallback evidence)`：旧 synthetic runtime fixtures 没有 RepresentationFact 时保留显式 legacy-derived digest 兼容路径；生产有 fact 时强制 v2 selection assertion，未把 fallback 宣称为 verified fact。
+- **阻塞与处理**：Phase 1 known stale-fence node 已在本 Phase 修绿，原“新 generation remains running”断言保留；无 skip/xfail/degraded。
+- **测试发现**：Phase 4 固定 EXIT `40 passed`；全 repo `ruff` EXIT0；rev1/rev2、binding/fact digest、terminal fence/domain failure、declared route、exact replay、outbox owner/dead/requeue 均绿。
+- **后续 handoff**：Phase 5 允许消费 ProcessingBinding/evidence v2 与 outbox owner，但不得原地 UPDATE legacy evidence/rev1；object session/journal、CAS-first 和 cleanup 才能推进 physical convergence。
+
+| 工作项 | 状态 | PR / commit | 实际落点 | 备注 |
+|--------|------|-------------|----------|------|
+| `P4-01` | `✅ done` | `386f829` | `kind_family.py`；`kind_family_v1_compat.py`；`kind_family_v1_manifest.json` | T-O-411；rev1 exact + rev2 active |
+| `P4-02` | `✅ done` | `386f829` | `actual_s05.py`；`runtime_materialize.py`；`governance.py` | T-O-412/414；10+3 typed union、fact digest |
+| `P4-03` | `✅ done` | `386f829` | `runtime_outcome.py`；`worker.py`；`runtime_materialize.py` | T-O-410/422；terminal/domain/stale fence |
+| `P4-04` | `✅ done` | `386f829` | `runtime_materialize.py`；`test_nh3_declared_reacquire.py` | T-O-411/412；current-hop reachability |
+| `P4-05` | `✅ done` | `386f829` | `task_commands.py`；`acquisition_ingest.py`；`acceptance_snapshot.py`；`test_nhx1_exact_replay.py` | T-O-410；zero refetch |
+| `P4-06` | `✅ done` | `386f829` | `runtime_core.py`；`runtime_outbox.py`；lifecycle/scatter enqueue writers；`test_nhx1_outbox_owner.py` | T-O-422；owner terminal/requeue lineage |
+
+| 时点 | 步骤 | 决策 / 产出 |
+|------|------|-------------|
+| `2026-08-31T03:34:15Z` | Phase 4 EXIT | commit `386f829bfdf9754dca4a5024cbbb08357fb41c6c` + fixed 11-file pytest command + `40 passed` + profile `test/sqlite+turso` |
+| `2026-08-31T03:34:15Z` | static gate | commit `386f829bfdf9754dca4a5024cbbb08357fb41c6c` + `uv run ruff check api intake src tests` + EXIT0 + profile `local` |
