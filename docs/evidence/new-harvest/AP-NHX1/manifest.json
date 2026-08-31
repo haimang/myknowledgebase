@@ -1,7 +1,7 @@
 {
   "action_plan": "docs/plan/new-harvest/AP-NHX1-coherent-debt-retirement-and-governance.md",
   "coverage_digest": "325f05f6a8263bce7a87771e73d1a8d7ef62f3bca36805181240b99f5060ce07",
-  "current_phase": 6,
+  "current_phase": 8,
   "evidence_schema_version": "mkb.nhx1-evidence.v1",
   "phase_sequence": [
     {"phase": 1, "status": "verified", "code_commit": "000e1be8707580c6c4ab984fc17e721a29a53c9a"},
@@ -10,8 +10,8 @@
     {"phase": 4, "status": "verified", "code_commit": "386f829bfdf9754dca4a5024cbbb08357fb41c6c"},
     {"phase": 5, "status": "verified", "code_commit": "ff104a9"},
     {"phase": 6, "status": "ready_for_owner_gate", "code_commit": "d4ea697"},
-    {"phase": 7, "status": "in_progress"},
-    {"phase": 8, "status": "blocked_by_phase_7"},
+    {"phase": 7, "status": "verified", "code_commit": "f90289d"},
+    {"phase": 8, "status": "in_progress"},
     {"phase": 9, "status": "blocked_by_phase_8_and_t22_o"}
   ],
   "pre_fix_database_sha256": "de069bfda49ebd5efaf134350b006cc4c65e39b91749aeaf731a61eeb260eef8",

@@ -1,0 +1,27 @@
+{
+  "public_catalog": {
+    "workflow_keys_are_read_only": true,
+    "capability_process_count": 27,
+    "source_kinds": 4,
+    "response_models": "strict"
+  },
+  "public_projection": {
+    "task_fields": ["observation_uuid", "workflow_revision_uuid", "actual_binding", "phase", "waiting_reason", "retryable"],
+    "item_list": "team_scoped_cursor",
+    "namespace_list": "team_scoped_cursor",
+    "cold_start_without_sql": true
+  },
+  "operator_control": {
+    "process_execution_reads": "redacted_bounded",
+    "outbox_requeue": "generation_fenced_receipt",
+    "process_restart": "new_fencing_generation",
+    "execution_stop": "cancellation_tree_owner",
+    "cleanup_resume": "row_revision_fenced"
+  },
+  "signals": {
+    "definitions": 10,
+    "metric_alert_runbook_orphans": 0,
+    "legacy_error_aliases": 2,
+    "unknown_error_alias": "rejected"
+  }
+}

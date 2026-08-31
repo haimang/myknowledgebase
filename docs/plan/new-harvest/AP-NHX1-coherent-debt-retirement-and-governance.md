@@ -1514,3 +1514,33 @@ NHX1 coherent debt retirement（单阶段 / 串行DAG）
 | `2026-08-31T04:58:17Z` | Phase 6 engineering EXIT | commit `d4ea6978e345d4bef2cd8c65cc989612c38cf2d6` + fixed 16-file pytest command + `61 passed` + profile `test/sqlite+turso` |
 | `2026-08-31T04:58:17Z` | T22-E gate | missing-supply/production-stub negative checks PASS；state `ready-for-owner-gate` |
 | `2026-08-31T04:58:17Z` | T22-O gate | real model/binary/S16 owner attestation absent；state `pending`，must join Phase 9 final |
+
+### 11.10 Phase 7 — Discovery / control / observability / errors
+
+> **执行时间**：`2026-08-31T05:40:40Z`
+> **代码改动统计**：`20 文件；5 个新建（catalog/control/signals/runbook/tests）；schema bump 0`
+
+- **实际执行摘要**：
+  - `P7-01`：新增 public `/v1/catalog`、`/v1/workflows`、`/v1/capabilities`，只读投影四 source kind、active workflow revision、27 process capability 与 availability；Task create 继续拒绝 workflow/process/branch selector；Task response 采用 strict `TaskView`。
+  - `P7-02`：Task view 追加 observation/actual/revision/phase/waiting/retryability 坐标；新增 team-scoped cursor-bound `/intake-items` 与 `/namespaces` 列表，cold-start 可只经 API 获得 namespace/item 视图。
+  - `P7-03`：新增 bounded operator Process/Execution/Cleanup read；`outbox.requeue`、`process.restart`、`execution.stop`、`cleanup.resume` 均要求 internal token/network、expected generation/row revision、idempotency 与 `CommandReceipt`，不提供任意 SQL/raw payload。
+  - `P7-04`：新增 10 项 code-owned operational signal catalog 与 checked-in runbook；durable governance projection、metric/alert/runbook 双向检查、`MkbError.canonical_code/retryable` v2 解析与 legacy alias 兼容完成。
+- **Phase 偏差（计划 vs 实际）**：
+  - `D-P7-01 (strict-wire)`：将新增读面分成 Catalog/Task/Item/Namespace/Operator 独立 strict models；既有历史 endpoint 仍保留兼容 dict 投影，未擅自重写全部既有 public wire。
+  - `D-P7-02 (operator-network)`：本地 TestClient 不伪造 internal peer，因此 HTTP operator route 的负向证据验证 `SEC_INTERNAL_NETWORK_DENIED`；generation-fenced mutation 在同一 app portal 直接验证 service owner，未将 403 误报为 command PASS。
+  - `D-P7-03 (all-role repair)`：`all` 组合保留 API/read/control availability；split `workflow_worker` 才把 supervisor failure threshold 纳入硬 claim readiness，避免既有 all 单体的历史 proofless lifecycle repair 诊断自锁。
+- **阻塞与处理**：无工程 blocker；T22-O 外部 owner gate 继续 pending，不影响 P7 engineering EXIT，但仍阻断 P9/final closure。
+- **测试发现**：Phase 7 固定 EXIT `44 passed`；`uv run ruff check api intake src tests` EXIT0；catalog strict contract、Task projection、cold-start lists、operator fence/receipt、signals/error aliases 与历史 lifecycle/retrieval/observability 回归均通过。
+- **后续 handoff**：Phase 8 只允许消费 public/operator/error/capability authority，执行 shadow/cutover/drain/retirement；任何 old writer disable 必须以 inventory zero + retention 证据驱动，不能在 P8 改写 v2 evidence 或恢复 legacy writer。
+
+| 工作项 | 状态 | PR / commit | 实际落点 | 备注 |
+|--------|------|-------------|----------|------|
+| `P7-01` | `✅ done` | `f90289d` | `workflow_catalog.py`; public catalog routes; strict catalog models; `test_nhx1_public_contracts.py` | T-O-415；safe discovery/no selector |
+| `P7-02` | `✅ done` | `f90289d` | Task enrichment; item/namespace cursor services/routes; public contract test | T-O-415；cold-start API views |
+| `P7-03` | `✅ done` | `f90289d` | `operator_control.py`; internal routes; control models; operator tests | T-O-415/422；CAS/receipt/redaction |
+| `P7-04` | `✅ done` | `f90289d` | `signals.py`; governance projection; runbook; signal/error tests | T-O-418/419；zero orphan catalog |
+
+| 时点 | 步骤 | 决策 / 产出 |
+|------|------|-------------|
+| `2026-08-31T05:40:40Z` | Phase 7 EXIT | commit `f90289d02a993d882fc098a0497d0281cd00609e` + fixed 13-file pytest command + `44 passed` + profile `test/sqlite+turso` |
+| `2026-08-31T05:40:40Z` | static gate | commit `f90289d02a993d882fc098a0497d0281cd00609e` + `uv run ruff check api intake src tests` + EXIT0 + profile `local` |

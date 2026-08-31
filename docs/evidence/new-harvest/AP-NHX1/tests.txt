@@ -68,3 +68,15 @@
 - Security evidence: existing NH6 browser/parser/OCR/backpressure suite passed, including non-root/no-sandbox, redirect egress checks, parser network denial, and bounded-pool zero downstream calls.
 - Owner gate: `NHX1-T22-E = ready-for-owner-gate`; `NHX1-T22-O = pending` because no real model/binary/S16 named attestation was supplied. This is a truthful external gate, not a test waiver.
 - Truth/work join: `T-O-415/T-O-416/T-O-418/T-O-419/T-O-422` / `P6-01..P6-04` / `NHX1-T21/T22-E/T25`.
+
+## Phase 7 — 2026-08-31T05:40:40Z
+
+- Commit under test: `f90289d02a993d882fc098a0497d0281cd00609e`
+- Profile: `test/sqlite+turso`, local Python 3.12 via `uv`
+- Command: `uv run pytest -q tests/e2e/test_nhx1_public_contracts.py tests/e2e/test_nhx1_operator_controls.py tests/integration/test_nhx1_signals_errors.py tests/unit/test_observability.py tests/unit/test_observability_contracts.py tests/unit/test_readiness_composition.py tests/unit/test_task_projections.py tests/unit/test_retrieval_api_validation.py tests/e2e/test_nh1_retrieval_namespace.py tests/e2e/test_nh8_api_item_intents.py tests/e2e/test_nh5_facet_retrieval.py tests/e2e/test_nh5_metadata_semantic_refresh.py tests/e2e/test_inline_ingress_staging.py`
+- Result: `EXIT0 · 44 passed · zero skip/xfail`
+- Static command/result: `uv run ruff check api intake src tests` → `EXIT0 · All checks passed!`
+- OpenAPI evidence: new catalog, strict Task/Item/Namespace, Process/Execution/Cleanup debug, requeue/restart/stop/resume routes expose typed response models; selector/raw payload remains rejected.
+- Control evidence: direct operator service requeue/replay preserves receipt and predecessor; HTTP operator routes fail closed from non-internal TestClient peers; process/execution/cleanup projections are redacted.
+- Signal/error evidence: 10 signal definitions durably bootstrapped with checked-in runbook; metric↔alert validation zero orphan; v2 UPPER_SNAKE definitions and two legacy aliases resolve deterministically.
+- Truth/work join: `T-O-415/T-O-418/T-O-422` / `P7-01..P7-04` / `NHX1-T23..T25`.
