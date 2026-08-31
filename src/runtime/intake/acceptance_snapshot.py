@@ -51,6 +51,54 @@ class IntakeAcceptanceSnapshotMixin:
             )
             if any(not state.get(key) for key in required):
                 raise MkbError("PIPELINE_INPUT_INVALID", "Accepted snapshot is missing immutable intake coordinates", 422)
+            if state.get("full_retry"):
+                async with self._persistence.read_snapshot() as replay_tx:
+                    replay = await replay_tx.fetchone(
+                        "SELECT o.state,o.accepted_snapshot_uuid,m.intake_item_uuid,m.observed_revision_uuid AS intake_revision_uuid "
+                        "FROM mkb_intake_observations o "
+                        "JOIN mkb_intake_snapshots s ON s.team_uuid=o.team_uuid "
+                        "AND s.intake_snapshot_uuid=o.accepted_snapshot_uuid "
+                        "JOIN mkb_intake_snapshot_memberships m ON m.team_uuid=s.team_uuid "
+                        "AND m.intake_snapshot_uuid=s.intake_snapshot_uuid AND m.member_ordinal=0 "
+                        "WHERE o.team_uuid=? AND o.observation_uuid=?",
+                        (command.team_uuid, state.get("observation_uuid")),
+                    )
+                if replay is None or replay["state"] != "accepted" or not replay["accepted_snapshot_uuid"]:
+                    raise MkbError("FULL_REPLAY_INPUT_UNAVAILABLE", "Full retry accepted Observation is unavailable", 409)
+                replay_state = dict(state)
+                replay_state.update(
+                    {
+                        "intake_snapshot_uuid": replay["accepted_snapshot_uuid"],
+                        "intake_item_uuid": replay["intake_item_uuid"],
+                        "intake_revision_uuid": replay["intake_revision_uuid"],
+                        "accepted_at": utc_now(),
+                    }
+                )
+                material = self._material(
+                    command,
+                    replay_state,
+                    {
+                        "accepted_intake_revision": {
+                            "intake_item_uuid": replay["intake_item_uuid"],
+                            "intake_revision_uuid": replay["intake_revision_uuid"],
+                            "intake_snapshot_uuid": replay["accepted_snapshot_uuid"],
+                            "admission_result": "auto_admitted",
+                            "replay": "exact_frozen_observation",
+                        }
+                    },
+                )
+
+                async def replay_callback(tx: UnitOfWork, refs: Mapping[str, str]) -> None:
+                    del refs
+                    row = await tx.fetchone(
+                        "SELECT state,accepted_snapshot_uuid FROM mkb_intake_observations "
+                        "WHERE team_uuid=? AND observation_uuid=?",
+                        (command.team_uuid, state.get("observation_uuid")),
+                    )
+                    if row is None or row["state"] != "accepted" or row["accepted_snapshot_uuid"] != replay["accepted_snapshot_uuid"]:
+                        raise MkbError("FULL_REPLAY_INPUT_UNAVAILABLE", "Frozen Observation changed during retry", 409)
+
+                return material, {"admission_result": "auto_admitted"}, replay_callback
             next_state = dict(state)
             next_state["accepted_at"] = utc_now()
             raw_text = str(state.get("raw_text") or "")

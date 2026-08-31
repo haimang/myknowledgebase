@@ -239,7 +239,10 @@ def _compose(
     return WorkflowDefinition(
         schema_version="mkb.workflow-definition.v1",
         workflow_key=workflow_key,
-        revision_number=1,
+        # NHX1 keeps the ba099ee graph as an exact rev1 compatibility
+        # definition.  Any canonical/route change in this family therefore
+        # activates a new immutable revision instead of drifting rev1.
+        revision_number=2,
         domain_key="ls_rag",
         purpose_key="intake.ingest",
         execution_role=WorkflowExecutionRole.SINGLE_ROOT,

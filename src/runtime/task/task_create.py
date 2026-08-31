@@ -10,6 +10,7 @@ from src.contracts.api.models import (
 from src.contracts.common.errors import ConflictError, MkbError, NotFoundError
 from src.contracts.common.ids import stable_digest, uuid7
 from src.contracts.common.time import utc_now
+from src.contracts.governance import OUTBOX_KIND_DEFINITIONS
 from src.persistence.ports import PersistencePort, UnitOfWork
 from src.runtime.task.helpers import _json
 from src.services.config_snapshots import ConfigSnapshotService, PreparedExecutionInputs
@@ -587,11 +588,22 @@ class TaskCreateMixin:
         payload: dict[str, Any],
         dedupe_key: str,
     ) -> None:
+        definition = OUTBOX_KIND_DEFINITIONS.get(kind)
+        if definition is None:
+            raise MkbError("OUTBOX_KIND_UNREGISTERED", "Outbox kind is not registered", 503)
         now = utc_now()
+        owner_uuid = payload.get("execution_uuid") or payload.get("task_uuid")
+        owner_kind = "execution" if payload.get("execution_uuid") else "task" if payload.get("task_uuid") else "system"
+        owner_generation = payload.get("generation") or payload.get("fencing_generation") or 0
         payload_json = _json(payload)
         await tx.execute(
             "INSERT OR IGNORE INTO mkb_outbox "
-            "(outbox_id,team_uuid,kind,payload_json,payload_digest,dedupe_key,status,available_at,created_at,updated_at,payload_extra) "
-            "VALUES (?,?,?,?,?,?,'pending',?,?,?,'{}')",
-            (uuid7(), team_uuid, kind, payload_json, stable_digest(payload), dedupe_key, now, now, now),
+            "(outbox_id,team_uuid,kind,payload_json,payload_digest,dedupe_key,status,available_at,created_at,updated_at,"
+            "owner_kind,owner_uuid,owner_generation,delivery_generation,criticality,attempt_budget,dead_error_code,payload_extra) "
+            "VALUES (?,?,?,?,?,?,'pending',?,?,?,?,?,?,1,?,?,?, '{}')",
+            (
+                uuid7(), team_uuid, kind, payload_json, stable_digest(payload), dedupe_key,
+                now, now, now, owner_kind, owner_uuid, owner_generation,
+                definition.criticality.value, definition.attempt_budget, definition.dead_error_code,
+            ),
         )

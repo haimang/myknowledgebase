@@ -38,6 +38,7 @@ exclude = ["context*", "tests*"]
 [tool.setuptools.package-data]
 "src.persistence" = ["migrations/*.sql"]
 "src.contracts.lsrag" = ["*.json"]
+"src.workflows" = ["*.json"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

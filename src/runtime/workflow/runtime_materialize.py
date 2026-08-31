@@ -80,9 +80,10 @@ class WorkflowMaterializeMixin:
                     and guard.expected_value == "absent"
                 )
 
-            # T-O-402 is http-only. Presence of the typed guard on the plan,
-            # not a leftover route at this step, is the kind-graph capability.
-            plan_declares_reacquire = any(
+            # Reacquire is a current-hop capability. A guard declared on a
+            # later hop must not reject a route whose current candidates omit
+            # that edge.
+            plan_declares_reacquire = source_step_key == "decode_web_static" and any(
                 guard.predicate_type == "representation_main_text_presence"
                 and guard.expected_value == "absent"
                 for guard in plan.guards
@@ -294,6 +295,11 @@ class WorkflowMaterializeMixin:
                     source_process=source_process,
                     route_digest=decision["digest"],
                     error_code=terminal_error,
+                    result_disposition=(
+                        "exhausted_zero"
+                        if route_context.get("operation_mode") == "index_rebuild_noop"
+                        else None
+                    ),
                 )
                 changed = True
             elif target.step_kind is WorkflowStepKind.PROCESS:
@@ -471,7 +477,7 @@ class WorkflowMaterializeMixin:
         )
         if existing is None:
             raise MkbError("process-materialization-missing", "Process insert did not create a durable Process", 500)
-        await tx.execute(
+        execution_updated = await tx.execute(
             "UPDATE mkb_executions SET status='ready',phase_key=?,waiting_reason=NULL,waiting_ref=NULL,next_wake_at=NULL,"
             "current_process_uuid=?,row_revision=row_revision+1,updated_at=? "
             "WHERE execution_uuid=? AND status NOT IN ('succeeded','failed','cancelled','cancelling')",
@@ -482,6 +488,11 @@ class WorkflowMaterializeMixin:
                 execution["execution_uuid"],
             ),
         )
+        if execution_updated.rowcount != 1:
+            raise ConflictError(
+                "PROCESS_MATERIALIZATION_EXECUTION_FENCE",
+                "Execution changed before its Process could be materialized",
+            )
         await self._enqueue_tx(
             tx,
             execution["team_uuid"],
@@ -872,6 +883,22 @@ class WorkflowMaterializeMixin:
         selected = candidates[0]
         version = step.control_version or ""
         source_process = selected["source_process"]
+        representation_fact = await tx.fetchone(
+            "SELECT representation_fact_uuid,fact_digest FROM mkb_representation_facts "
+            "WHERE execution_uuid=? ORDER BY created_at DESC,representation_fact_uuid DESC LIMIT 1",
+            (current["execution_uuid"],),
+        )
+        representation_fact_digest = (
+            str(representation_fact["fact_digest"])
+            if representation_fact is not None
+            else stable_digest(
+                {
+                    "legacy_representation_fact": True,
+                    "execution_uuid": current["execution_uuid"],
+                    "candidate_output_digest": selected["output_manifest_digest"],
+                }
+            )
+        )
         material = {
             "execution_uuid": current["execution_uuid"],
             "control_step_key": step.step_key,
@@ -881,7 +908,7 @@ class WorkflowMaterializeMixin:
             "accepted_outcome_digest": None if source_process is None else source_process["accepted_outcome_digest"],
             "output_manifest_ref": selected["output_manifest_ref"],
             "output_manifest_digest": selected["output_manifest_digest"],
-            "representation_fact_digest": selected["output_manifest_digest"],
+            "representation_fact_digest": representation_fact_digest,
             "route_decision_digest": route_digest,
             "fallback_used": selected["fallback_used"],
         }
@@ -936,6 +963,29 @@ class WorkflowMaterializeMixin:
                     "selection_digest": selection_digest,
                     "fallback_used": selected["fallback_used"],
                 },
+            )
+        if representation_fact is not None:
+            await tx.execute(
+                "INSERT OR IGNORE INTO mkb_selection_assertions_v2"
+                "(selection_assertion_uuid,team_uuid,execution_uuid,control_step_key,assertion_generation,"
+                "selected_source_process_uuid,representation_fact_uuid,representation_fact_digest,output_manifest_ref,"
+                "output_manifest_digest,route_decision_digest,selection_digest,formula_version,asserted_at,payload_extra) "
+                "VALUES (?,?,?,?,1,?,?,?,?,?,?,?,?,?,'{}')",
+                (
+                    stable_digest({"execution_uuid": current["execution_uuid"], "control": step.step_key})[:32],
+                    current["team_uuid"],
+                    current["execution_uuid"],
+                    step.step_key,
+                    material["selected_source_process_uuid"],
+                    representation_fact["representation_fact_uuid"],
+                    representation_fact_digest,
+                    selected["output_manifest_ref"],
+                    selected["output_manifest_digest"],
+                    route_digest,
+                    selection_digest,
+                    version or "selected-output.v2",
+                    now,
+                ),
             )
         decision = self._route_decision(
             plan=plan,

@@ -94,6 +94,24 @@ class ConflictError(MkbError):
         super().__init__(code, message, 409, details)
 
 
+_FENCE_CONFLICT_CODES = frozenset(
+    {
+        "stale-process-fence",
+        "stale-process-outcome",
+        "process-not-running",
+        "execution-cancelling",
+        "TERMINAL_OUTCOME_FENCED",
+        "outcome-digest-invalid",
+    }
+)
+
+
+def is_fence_conflict(error: ConflictError) -> bool:
+    """Distinguish stale ownership from a domain conflict that must terminate."""
+
+    return error.code in _FENCE_CONFLICT_CODES or error.code.endswith("_FENCE")
+
+
 class NotFoundError(MkbError):
     def __init__(self, code: str, message: str = "Resource was not found") -> None:
         super().__init__(code, message, 404)

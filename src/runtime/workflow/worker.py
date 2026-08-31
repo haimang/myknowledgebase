@@ -7,7 +7,7 @@ import logging
 from contextlib import suppress
 from typing import Literal
 
-from src.contracts.common.errors import ConflictError, MkbError
+from src.contracts.common.errors import ConflictError, MkbError, is_fence_conflict
 from src.contracts.runtime.models import ProcessCommand, ProcessOutcome
 from src.runtime.workflow.helpers import canonical_outcome_digest
 from src.runtime.workflow.runtime import WorkflowRuntime
@@ -101,11 +101,21 @@ class WorkflowWorker:
                 self._discard_pending(claim.command)
             try:
                 await self.runtime.accept_outcome(outcome)
-            except ConflictError:
+            except ConflictError as exc:
                 # These are the durable stale/lease/status fences.  A worker must
                 # never submit a different failure Outcome over a competing owner.
+                if is_fence_conflict(exc):
+                    self._discard_pending(claim.command)
+                    raise
                 self._discard_pending(claim.command)
-                raise
+                await self.runtime.accept_outcome(
+                    self._failure_outcome(
+                        claim.command,
+                        disposition="failed",
+                        error_code=exc.code,
+                        error_message=exc.message,
+                    )
+                )
             except MkbError as exc:
                 # A typed callback/committer rejection aborted its success UoW, so
                 # the Process is still running at this exact claim fence.  Submit

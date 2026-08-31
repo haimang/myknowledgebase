@@ -9,6 +9,7 @@ from typing import Any
 from src.contracts.common.errors import ConflictError, MkbError, NotFoundError
 from src.contracts.common.ids import stable_digest, uuid7
 from src.contracts.common.time import utc_now
+from src.contracts.governance import OUTBOX_KIND_DEFINITIONS
 from src.persistence.ports import PersistencePort, UnitOfWork
 from src.services.events import DomainEventWriter
 from src.services.intake_lifecycle.models import (
@@ -333,8 +334,9 @@ class LifecycleApplyMixin:
         now = utc_now()
         await tx.execute(
             "INSERT OR IGNORE INTO mkb_outbox "
-            "(outbox_id,team_uuid,kind,payload_json,payload_digest,dedupe_key,status,available_at,created_at,updated_at,payload_extra) "
-            "VALUES (?,?,'wake_execution',?,?,?,?,?,?,?,'{}')",
+            "(outbox_id,team_uuid,kind,payload_json,payload_digest,dedupe_key,status,available_at,created_at,updated_at,"
+            "owner_kind,owner_uuid,owner_generation,delivery_generation,criticality,attempt_budget,dead_error_code,payload_extra) "
+            "VALUES (?,?,'wake_execution',?,?,?,?,?,?,?,?,?,?,1,?,?,?, '{}')",
             (
                 uuid7(),
                 team_uuid,
@@ -345,6 +347,12 @@ class LifecycleApplyMixin:
                 now,
                 now,
                 now,
+                "execution",
+                execution_uuid,
+                0,
+                OUTBOX_KIND_DEFINITIONS["wake_execution"].criticality.value,
+                OUTBOX_KIND_DEFINITIONS["wake_execution"].attempt_budget,
+                OUTBOX_KIND_DEFINITIONS["wake_execution"].dead_error_code,
             ),
         )
 

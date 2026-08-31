@@ -14,6 +14,7 @@ from typing import Any
 from src.contracts.common.errors import MkbError
 from src.contracts.common.ids import canonical_json, stable_digest, uuid7
 from src.contracts.common.time import utc_now
+from src.contracts.governance import OUTBOX_KIND_DEFINITIONS
 from src.contracts.inference.models import InferenceBinding, InvocationContext, TextGenerateRequest
 from src.contracts.lsrag.cuts import CUTS_SCHEMA_VERSION
 from src.contracts.runtime.models import ProcessCommand
@@ -1910,10 +1911,12 @@ class IntakeGenerationConstructMixin:
                 "content_full_recipe_version": "content_full.v1",
             }
             now = utc_now()
+            outbox_definition = OUTBOX_KIND_DEFINITIONS["vectorize_construct"]
             await tx.execute(
                 "INSERT OR IGNORE INTO mkb_outbox "
-                "(outbox_id,team_uuid,kind,payload_json,payload_digest,dedupe_key,status,available_at,created_at,updated_at,payload_extra) "
-                "VALUES (?,?,?,?,?,?,'pending',?,?,?,'{}')",
+                "(outbox_id,team_uuid,kind,payload_json,payload_digest,dedupe_key,status,available_at,created_at,updated_at,"
+                "owner_kind,owner_uuid,owner_generation,delivery_generation,criticality,attempt_budget,dead_error_code,payload_extra) "
+                "VALUES (?,?,?,?,?,?,'pending',?,?,?,?,?,?,1,?,?,?, '{}')",
                 (
                     uuid7(),
                     command.team_uuid,
@@ -1924,6 +1927,12 @@ class IntakeGenerationConstructMixin:
                     now,
                     now,
                     now,
+                    "execution",
+                    command.execution_uuid,
+                    0,
+                    outbox_definition.criticality.value,
+                    outbox_definition.attempt_budget,
+                    outbox_definition.dead_error_code,
                 ),
             )
 

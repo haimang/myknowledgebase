@@ -72,6 +72,8 @@ class IntakeAcquisitionIngestMixin:
                 team_uuid=command.team_uuid,
                 execution_uuid=command.execution_uuid,
             )
+        if admitted_observation is not None and self._is_full_retry(admitted_observation):
+            return await self._acquire_frozen_observation(command, state, admitted_observation, descriptor)
         if source_kind == "registered_api":
             return await self._acquire_registered_api_collection(
                 command,
@@ -760,6 +762,155 @@ class IntakeAcquisitionIngestMixin:
                 ),
             },
         )
+
+    @staticmethod
+    def _is_full_retry(identity: Mapping[str, Any]) -> bool:
+        raw = identity.get("execution_payload_extra")
+        if isinstance(raw, str):
+            try:
+                import json
+
+                raw = json.loads(raw)
+            except (TypeError, ValueError, json.JSONDecodeError):
+                return False
+        return isinstance(raw, dict) and raw.get("full_retry") is True
+
+    async def _acquire_frozen_observation(
+        self,
+        command: ProcessCommand,
+        state: Mapping[str, Any],
+        identity: Mapping[str, Any],
+        descriptor: Mapping[str, Any],
+    ) -> tuple[_StageMaterial, dict[str, Any], Callable[[UnitOfWork, Mapping[str, str]], Awaitable[None]]]:
+        """Resume a full retry from the accepted raw artifact, never the source."""
+
+        snapshot_uuid = identity.get("intake_snapshot_uuid")
+        if not isinstance(snapshot_uuid, str) or not snapshot_uuid:
+            async with self._persistence.read_snapshot() as tx:
+                observation = await tx.fetchone(
+                    "SELECT accepted_snapshot_uuid FROM mkb_intake_observations "
+                    "WHERE team_uuid=? AND observation_uuid=? AND state='accepted'",
+                    (command.team_uuid, identity["observation_uuid"]),
+                )
+            snapshot_uuid = None if observation is None else observation.get("accepted_snapshot_uuid")
+        if not isinstance(snapshot_uuid, str) or not snapshot_uuid:
+            raise MkbError(
+                "FULL_REPLAY_INPUT_UNAVAILABLE",
+                "Full retry requires a durably accepted Observation artifact",
+                409,
+            )
+        async with self._persistence.read_snapshot() as tx:
+            artifact = await tx.fetchone(
+                "SELECT intake_artifact_uuid,logical_handle,content_digest,size_bytes,media_type "
+                "FROM mkb_intake_artifacts WHERE team_uuid=? AND owner_snapshot_uuid=? "
+                "AND artifact_role='raw_acquisition' ORDER BY created_at ASC LIMIT 1",
+                (command.team_uuid, snapshot_uuid),
+            )
+            item = await tx.fetchone(
+                "SELECT intake_item_uuid,latest_revision_uuid,row_revision,lifecycle_state "
+                "FROM mkb_intake_items WHERE team_uuid=? AND intake_source_uuid=? "
+                "AND normalized_external_key=?",
+                (command.team_uuid, identity["intake_source_uuid"], str(descriptor.get("external_key", "")).casefold()),
+            )
+        if artifact is None:
+            raise MkbError("FULL_REPLAY_INPUT_UNAVAILABLE", "Frozen raw artifact is unavailable", 409)
+        data = await self._storage.read_verified(command.team_uuid, ObjectHandle(value=artifact["logical_handle"]))
+        if len(data) != int(artifact["size_bytes"]) or _digest_bytes(data) != artifact["content_digest"]:
+            raise MkbError("FULL_REPLAY_INPUT_UNAVAILABLE", "Frozen raw artifact failed its digest fence", 409)
+        acquired = self._representation_from_bytes(
+            data,
+            declared_media_type=artifact.get("media_type"),
+            capability={
+                "inline_payload": "intake.acquire.inline",
+                "local_object": "intake.acquire.local_object",
+                "http_resource": "intake.acquire.http_static",
+                "registered_api": "intake.acquire.registered_api",
+            }.get(str(descriptor.get("source_kind")), "intake.acquire.inline"),
+            source_kind=str(descriptor.get("source_kind") or "inline_payload"),
+            mode="frozen_replay",
+            extra_evidence={
+                "source_artifact_uuid": artifact["intake_artifact_uuid"],
+                "request_url_identity": redacted_url_identity(str(descriptor.get("url") or "frozen")),
+                "final_url_identity": redacted_url_identity(str(descriptor.get("url") or "frozen")),
+                "transport_profile": "frozen-observation.v1",
+            },
+        )
+        raw_digest = stable_digest({"media_type": acquired.media_type, "text": acquired.raw_text})
+        next_state = {
+            "request_intent": "intake.ingest",
+            "full_retry": True,
+            "team_uuid": command.team_uuid,
+            "task_uuid": command.task_uuid,
+            "trace_uuid": command.trace_uuid,
+            "source": dict(descriptor),
+            "source_kind": descriptor.get("source_kind"),
+            "external_key": descriptor.get("external_key"),
+            "normalized_external_key": str(descriptor.get("external_key", "")).casefold(),
+            "observation_uuid": identity["observation_uuid"],
+            "observation_key": identity["observation_key"],
+            "observation_fingerprint": identity["observation_fingerprint"],
+            "observation_attempt_generation": identity["current_attempt_generation"],
+            "expected_item_epoch": identity.get("expected_item_epoch"),
+            "intake_source_uuid": identity["intake_source_uuid"],
+            "intake_snapshot_uuid": snapshot_uuid,
+            "intake_item_uuid": None if item is None else item.get("intake_item_uuid"),
+            "intake_revision_uuid": None if item is None else item.get("latest_revision_uuid"),
+            "raw_artifact_uuid": artifact["intake_artifact_uuid"],
+            "candidate_set_uuid": uuid7(),
+            "clean_artifact_uuid": uuid7(),
+            "raw_text": acquired.raw_text,
+            "raw_binary_transport": acquired.is_binary,
+            "raw_digest": raw_digest,
+            "raw_byte_digest": acquired.evidence["raw_byte_digest"],
+            "raw_byte_size": acquired.evidence["raw_byte_size"],
+            "declared_media_type": acquired.evidence["declared_media_type"],
+            "detected_media_type": acquired.evidence["detected_media_type"],
+            "media_type": acquired.media_type,
+            "acquisition_capability": acquired.evidence["acquisition_capability"],
+            "acquisition_evidence": acquired.evidence,
+            "observed_at": utc_now(),
+            "payload": state.get("payload") or {},
+        }
+        acquire_fact = prepare_representation_append(
+            RepresentationObservation(
+                team_uuid=command.team_uuid,
+                execution_uuid=command.execution_uuid,
+                process_uuid=command.process_uuid,
+                step_key=command.step_key or command.process_key,
+                fact_kind="acquire",
+                capability={
+                    "inline_payload": "intake.acquire.inline",
+                    "local_object": "intake.acquire.local_object",
+                    "http_resource": "intake.acquire.http_static",
+                    "registered_api": "intake.acquire.registered_api",
+                }.get(str(descriptor.get("source_kind")), "intake.acquire.inline"),
+                representation_kind="frozen_replay",
+                declared_media_type=acquired.evidence.get("declared_media_type"),
+                detected_media_type=acquired.evidence.get("detected_media_type"),
+                verified_media_type=acquired.media_type,
+                raw_byte_digest=acquired.evidence["raw_byte_digest"],
+                raw_byte_size=acquired.evidence["raw_byte_size"],
+                text_layer="unknown",
+                main_text_presence="unknown",
+                canonicalizer_key="frozen-observation-artifact",
+                canonicalizer_version="v1",
+                observer_key="full-replay",
+                observer_version="v1",
+                profile_identity="frozen-observation.v1",
+            )
+        )
+        next_state["representation_fact"] = acquire_fact.reference
+        material = self._material(
+            command,
+            next_state,
+            {"acquisition_evidence": {"mode": "frozen_observation_replay", "artifact_uuid": artifact["intake_artifact_uuid"]}},
+        )
+
+        async def callback(tx: UnitOfWork, refs: Mapping[str, str]) -> None:
+            del refs
+            await append_representation_tx(tx, acquire_fact)
+
+        return material, {}, callback
 
     async def _live_local_object(self, team_uuid: str, handle: ObjectHandle) -> dict[str, Any]:
         digest = digest_from_handle(team_uuid, handle)

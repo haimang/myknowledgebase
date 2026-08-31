@@ -8,6 +8,7 @@ from typing import Any, Literal
 from src.contracts.common.errors import ConflictError, MkbError
 from src.contracts.common.ids import stable_digest
 from src.contracts.common.time import utc_now
+from src.contracts.governance import ProcessingBinding, ProcessingBindingFamily
 from src.persistence.ports import UnitOfWork
 
 ActualBindingState = Literal["legacy_unverifiable", "unsealed", "sealed"]
@@ -85,6 +86,23 @@ async def seal_actual_binding_tx(
             "clean_strategy": clean_strategy,
         }
     )
+    if clean_process_key == "clean.map.registered_api":
+        binding = ProcessingBinding(
+            family=ProcessingBindingFamily.REGISTERED_API_OPERATION,
+            key="registered_api",
+            definition_version="v1",
+            definition_digest=stable_digest({"registry": "registered_provider_operations", "version": "v1"}),
+        )
+    else:
+        from src.contracts.intake.strategies import resolve_clean_strategy
+
+        strategy = resolve_clean_strategy(clean_strategy)
+        binding = ProcessingBinding(
+            family=ProcessingBindingFamily.CLEAN_STRATEGY,
+            key=clean_strategy,
+            definition_version=strategy.definition_version,
+            definition_digest=strategy.definition_digest,
+        )
     row = await tx.fetchone(
         "SELECT actual_binding_digest,actual_binding_state,seal_generation,actual_selected_route_digest,"
         "actual_clean_step_key,actual_clean_process_key,actual_clean_strategy "
@@ -126,6 +144,26 @@ async def seal_actual_binding_tx(
     )
     if updated.rowcount != 1:
         raise ConflictError("ACTUAL_S05_SEAL_CONFLICT", "Actual S05 seal lost its compare-and-swap fence")
+    await tx.execute(
+        "INSERT INTO mkb_processing_binding_assertions"
+        "(binding_assertion_uuid,team_uuid,execution_uuid,binding_family,binding_key,definition_version,"
+        "definition_digest,selected_process_key,selected_route_digest,assertion_digest,formula_version,seal_generation,"
+        "asserted_at,payload_extra) "
+        "SELECT ?,team_uuid,execution_uuid,?,?,?,?,?,?,?,'selection.v2',seal_generation,?,'{}' "
+        "FROM mkb_executions WHERE execution_uuid=?",
+        (
+            stable_digest({"execution_uuid": execution_uuid, "binding": binding.key})[:32],
+            binding.family.value,
+            binding.key,
+            binding.definition_version,
+            binding.definition_digest,
+            clean_process_key,
+            selected_route_digest,
+            stable_digest({"actual_binding_digest": actual_digest, "binding": binding.key}),
+            now,
+            execution_uuid,
+        ),
+    )
     sealed = await tx.fetchone(
         "SELECT actual_binding_digest,actual_binding_state,seal_generation,actual_selected_route_digest,"
         "actual_clean_step_key,actual_clean_process_key,actual_clean_strategy "

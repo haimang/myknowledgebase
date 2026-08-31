@@ -83,7 +83,11 @@ class IntakeIndexRebuildPlanMixin:
                     refs=refs,
                 )
 
-            return material, {}, callback
+            return material, {
+                "operation_mode": next_state["operation_mode"],
+                "target_count": len(scope["targets"]),
+                "rebuild_count": len(plans),
+            }, callback
 
 
     async def _promote_rebuilt_projections(

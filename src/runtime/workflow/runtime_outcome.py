@@ -58,6 +58,11 @@ class WorkflowOutcomeMixin:
             if process["status"] != ProcessStatus.RUNNING.value:
                 raise ConflictError("process-not-running", "Process must be running to accept an outcome")
             execution = await self._execution(tx, process["execution_uuid"])
+            if execution["status"] in _TERMINAL_EXECUTION_STATUSES:
+                raise ConflictError(
+                    "TERMINAL_OUTCOME_FENCED",
+                    "A terminal Execution cannot accept a new Process outcome",
+                )
             if execution["status"] == ExecutionStatus.CANCELLING.value:
                 raise ConflictError("execution-cancelling", "Cancellation fenced this process outcome")
 
@@ -415,6 +420,12 @@ class WorkflowOutcomeMixin:
     ) -> None:
         plan = await self._assert_execution_binding(tx, execution)
         typed = await self._typed_route_context_tx(tx, execution)
+        if isinstance(route_context.get("operation_mode"), str):
+            typed["operation_mode"] = route_context["operation_mode"]
+        if isinstance(route_context.get("target_count"), int):
+            typed["target_count"] = route_context["target_count"]
+        if isinstance(route_context.get("rebuild_count"), int):
+            typed["rebuild_count"] = route_context["rebuild_count"]
         if "gate_action" in route_context:
             typed["gate_action"] = route_context["gate_action"]
         decision = self._route_decision(
@@ -517,6 +528,14 @@ class WorkflowOutcomeMixin:
             ),
         )
         if updated.rowcount != 1:
+            current = await tx.fetchone(
+                "SELECT fencing_generation,status FROM mkb_processes WHERE process_uuid=?",
+                (process["process_uuid"],),
+            )
+            if current is None or current["fencing_generation"] != process["fencing_generation"]:
+                # A newer owner has already fenced this failure attempt.  The
+                # stale worker must not kill or rewrite that generation.
+                return
             raise ConflictError(
                 "stale-process-fence",
                 "Process failure could not be written against the claimed fencing generation",

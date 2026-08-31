@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from src.contracts.common.errors import MkbError
+from src.contracts.common.errors import ConflictError, MkbError
 from src.contracts.common.ids import stable_digest, uuid7
 from src.contracts.common.time import utc_now
 from src.persistence.ports import UnitOfWork
@@ -126,6 +126,90 @@ class WorkflowOutboxMixin:
             raise
         await self._complete_outbox(delivery.outbox_id, delivery.lease_owner)
         return True
+
+    async def requeue_dead_outbox(
+        self,
+        outbox_id: str,
+        *,
+        expected_generation: int,
+        idempotency_key: str,
+    ) -> dict[str, Any]:
+        """Create a new delivery generation while retaining the dead predecessor."""
+
+        if not idempotency_key or len(idempotency_key) > 256:
+            raise MkbError("COMMAND_IDEMPOTENCY_INVALID", "Outbox requeue idempotency key is invalid", 422)
+        async with self.persistence.transaction() as tx:
+            row = await tx.fetchone("SELECT * FROM mkb_outbox WHERE outbox_id=?", (outbox_id,))
+            if row is None:
+                raise MkbError("OUTBOX_NOT_FOUND", "Outbox delivery was not found", 404)
+            if row["status"] != "dead":
+                raise MkbError("OUTBOX_REQUEUE_STATE_INVALID", "Only a dead delivery can be requeued", 409)
+            if int(row.get("delivery_generation") or 1) != expected_generation:
+                raise ConflictError("COMMAND_FENCE_CONFLICT", "Outbox delivery generation is stale")
+            receipt_fingerprint = stable_digest(
+                {"outbox_id": outbox_id, "expected_generation": expected_generation, "idempotency_key": idempotency_key}
+            )
+            prior_receipt = await tx.fetchone(
+                "SELECT command_receipt_uuid,disposition,result_ref FROM mkb_command_receipts "
+                "WHERE team_uuid=? AND command_kind='outbox.requeue' AND target_uuid=? AND idempotency_key=?",
+                (row["team_uuid"], outbox_id, idempotency_key),
+            )
+            if prior_receipt is not None:
+                return {
+                    "disposition": "replayed",
+                    "command_receipt_uuid": prior_receipt["command_receipt_uuid"],
+                    "outbox_id": prior_receipt["result_ref"],
+                }
+            new_id = uuid7()
+            now = utc_now()
+            new_generation = int(row.get("delivery_generation") or 1) + 1
+            await tx.execute(
+                "INSERT INTO mkb_outbox(outbox_id,team_uuid,kind,topic,payload_json,payload_digest,dedupe_key,status,"
+                "attempts,available_at,owner_kind,owner_uuid,owner_generation,delivery_generation,criticality,"
+                "attempt_budget,dead_error_code,retry_of_outbox_id,created_at,updated_at,payload_extra) "
+                "VALUES (?,?,?,?,?,?,?,'pending',0,?,?,?,?,?,?,?, ?,?,?,?,'{}')",
+                (
+                    new_id,
+                    row["team_uuid"],
+                    row["kind"],
+                    row.get("topic"),
+                    row["payload_json"],
+                    row["payload_digest"],
+                    f"requeue:{outbox_id}:{new_generation}",
+                    now,
+                    row.get("owner_kind"),
+                    row.get("owner_uuid"),
+                    row.get("owner_generation"),
+                    new_generation,
+                    row.get("criticality") or "critical",
+                    row.get("attempt_budget") or 8,
+                    row.get("dead_error_code") or "OUTBOX_CRITICAL_DEAD",
+                    outbox_id,
+                    now,
+                    now,
+                ),
+            )
+            receipt_uuid = uuid7()
+            await tx.execute(
+                "INSERT INTO mkb_command_receipts(command_receipt_uuid,team_uuid,command_kind,target_kind,target_uuid,"
+                "idempotency_key,command_fingerprint,expected_generation,observed_generation,disposition,result_ref,"
+                "decided_at,first_applied_at) VALUES (?,?,?,?,?,?,?,?,?,'applied',?,?,?)",
+                (
+                    receipt_uuid,
+                    row["team_uuid"],
+                    "outbox.requeue",
+                    "outbox",
+                    outbox_id,
+                    idempotency_key,
+                    receipt_fingerprint,
+                    expected_generation,
+                    int(row.get("delivery_generation") or 1),
+                    new_id,
+                    now,
+                    now,
+                ),
+            )
+        return {"disposition": "applied", "command_receipt_uuid": receipt_uuid, "outbox_id": new_id}
 
 
     async def _consume_vectorize_construct_intent(self, delivery: OutboxDelivery) -> None:
@@ -351,7 +435,7 @@ class WorkflowOutboxMixin:
             if updated.rowcount != 1:
                 return
             row = await tx.fetchone(
-                "SELECT team_uuid,kind,payload_json FROM mkb_outbox WHERE outbox_id=?", (outbox_id,)
+                "SELECT * FROM mkb_outbox WHERE outbox_id=?", (outbox_id,)
             )
             if row is not None:
                 await self._record_outbox_dead_tx(tx, row, error=_safe_outbox_error(error))
@@ -390,6 +474,40 @@ class WorkflowOutboxMixin:
             severity="error",
             status_after="dead",
         )
+        if row.get("criticality", "critical") == "critical":
+            owner_uuid = row.get("owner_uuid")
+            owner_generation = row.get("owner_generation")
+            dead_code = str(row.get("dead_error_code") or "OUTBOX_CRITICAL_DEAD")
+            if isinstance(owner_uuid, str) and owner_uuid:
+                execution = await tx.fetchone(
+                    "SELECT * FROM mkb_executions WHERE execution_uuid=?",
+                    (owner_uuid,),
+                )
+                if execution is not None and execution["status"] not in {"succeeded", "failed", "cancelled"}:
+                    generation_clause = "" if not isinstance(owner_generation, int) or owner_generation <= 0 else " AND generation=?"
+                    completed_at = utc_now()
+                    params: tuple[Any, ...] = (dead_code, _safe_outbox_error(error), completed_at, completed_at, owner_uuid)
+                    if generation_clause:
+                        params += (owner_generation,)
+                    updated = await tx.execute(
+                        "UPDATE mkb_executions SET status='failed',final_error_code=?,final_error_message=?,"
+                        "completed_at=?,updated_at=?,row_revision=row_revision+1 WHERE execution_uuid=?"
+                        + (" AND generation=?" if generation_clause else ""),
+                        params,
+                    )
+                    if updated.rowcount:
+                        current = await tx.fetchone(
+                            "SELECT * FROM mkb_executions WHERE execution_uuid=?", (owner_uuid,)
+                        )
+                        if current is not None:
+                            await self._project_root_task_tx(
+                                tx,
+                                current,
+                                "failed",
+                                None,
+                                dead_code,
+                                "Required workflow delivery reached its retry budget",
+                            )
         metrics = getattr(self, "metrics", None)
         if metrics is not None:
             kind = str(row.get("kind") or "wake_process")
@@ -411,13 +529,13 @@ class WorkflowOutboxMixin:
     async def _release_outbox(self, outbox_id: str, lease_owner: str, error: str) -> None:
         now = utc_now()
         async with self.persistence.transaction() as tx:
-            row = await tx.fetchone("SELECT attempts FROM mkb_outbox WHERE outbox_id=?", (outbox_id,))
+            row = await tx.fetchone("SELECT attempts,attempt_budget FROM mkb_outbox WHERE outbox_id=?", (outbox_id,))
             if row is None:
                 return
-            status = "dead" if row["attempts"] >= 8 else "pending"
+            status = "dead" if row["attempts"] >= int(row.get("attempt_budget") or 8) else "pending"
             safe_error = _safe_outbox_error(error)
             meta = await tx.fetchone(
-                "SELECT team_uuid,kind,payload_json FROM mkb_outbox WHERE outbox_id=?", (outbox_id,)
+                "SELECT * FROM mkb_outbox WHERE outbox_id=?", (outbox_id,)
             )
             released = await tx.execute(
                 "UPDATE mkb_outbox SET status=?,lease_owner=NULL,lease_expires_at=NULL,last_error=?,available_at=?,updated_at=? "

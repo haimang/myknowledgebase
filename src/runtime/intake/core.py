@@ -133,7 +133,7 @@ class IntakeCoreMixin:
 
         try:
             state = await self._load_state(command)
-            material, _route_extra, callback = await self._material_for(command, state)
+            material, route_extra, callback = await self._material_for(command, state)
             refs: dict[str, str] = {}
 
             async def commit(tx: UnitOfWork) -> None:
@@ -168,7 +168,7 @@ class IntakeCoreMixin:
                 proof_digest=staged.proof_digest,
                 # Route facts live on Task / CandidateSet / transitions.
                 # Outcome extra must never be the admission/intent SSOT.
-                payload_extra={},
+                payload_extra=dict(route_extra),
             )
             return provisional.model_copy(update={"outcome_digest": canonical_outcome_digest(provisional)})
         except MkbError as exc:

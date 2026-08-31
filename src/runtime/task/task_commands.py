@@ -266,8 +266,28 @@ class TaskCommandsMixin:
             previous = await tx.fetchone("SELECT * FROM mkb_executions WHERE execution_uuid=?", (prior_root,))
             if previous is None:
                 raise MkbError("execution-missing", "Task current execution is missing", 503)
+            if self.config_snapshots is not None:
+                frozen_observation = await tx.fetchone(
+                    "SELECT state,accepted_snapshot_uuid FROM mkb_intake_observations "
+                    "WHERE team_uuid=? AND observation_uuid=?",
+                    (team_uuid, previous.get("observation_uuid")),
+                )
+                if frozen_observation is None or frozen_observation["state"] != "accepted" or not frozen_observation[
+                    "accepted_snapshot_uuid"
+                ]:
+                    raise ConflictError(
+                        "FULL_REPLAY_INPUT_UNAVAILABLE",
+                        "Full retry requires a verified frozen Observation input",
+                    )
             restart_uuid = uuid7()
             now = utc_now()
+            previous_extra = previous.get("payload_extra")
+            if isinstance(previous_extra, str):
+                try:
+                    previous_extra = json.loads(previous_extra)
+                except (TypeError, ValueError, json.JSONDecodeError):
+                    previous_extra = {}
+            previous_extra = previous_extra if isinstance(previous_extra, dict) else {}
             await tx.execute(
                 "INSERT INTO mkb_task_restarts "
                 "(restart_uuid,team_uuid,restart_scope,source_task_uuid,source_generation,source_root_execution_uuid,"
@@ -315,6 +335,23 @@ class TaskCommandsMixin:
                 manifest_digest=previous["manifest_digest"],
                 execution_role=previous["execution_role"],
                 retry_of_execution_uuid=prior_root,
+                payload_extra={
+                    "full_retry": True,
+                    "retry_of_execution_uuid": prior_root,
+                    "metadata_disposition": previous_extra.get("metadata_disposition"),
+                },
+            )
+            await tx.execute(
+                "UPDATE mkb_executions SET observation_uuid=?,observation_attempt_generation=?,expected_item_epoch=?,"
+                "intake_snapshot_uuid=?,intake_snapshot_digest=? WHERE execution_uuid=?",
+                (
+                    previous.get("observation_uuid"),
+                    previous.get("observation_attempt_generation"),
+                    previous.get("expected_item_epoch"),
+                    previous.get("intake_snapshot_uuid"),
+                    previous.get("intake_snapshot_digest"),
+                    root_execution_uuid,
+                ),
             )
             if self.config_snapshots is not None:
                 await self._link_execution_object_refs(

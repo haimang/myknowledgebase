@@ -279,7 +279,8 @@ class ObservationReservationService:
     ) -> dict[str, Any] | None:
         return await tx.fetchone(
             "SELECT o.observation_uuid,o.observation_key,o.observation_fingerprint,o.current_attempt_generation,"
-            "o.intake_source_uuid,e.expected_item_epoch,i.intake_item_uuid,i.lifecycle_state,i.row_revision AS item_epoch "
+            "o.intake_source_uuid,e.expected_item_epoch,e.intake_snapshot_uuid,e.payload_extra AS execution_payload_extra,"
+            "i.intake_item_uuid,i.lifecycle_state,i.row_revision AS item_epoch "
             "FROM mkb_executions e "
             "JOIN mkb_intake_observations o ON o.team_uuid=e.team_uuid AND o.observation_uuid=e.observation_uuid "
             "JOIN mkb_intake_sources s ON s.team_uuid=o.team_uuid AND s.intake_source_uuid=o.intake_source_uuid "

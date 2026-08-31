@@ -35,6 +35,20 @@ class ProcessingBindingFamily(StrEnum):
     REGISTERED_API_OPERATION = "registered_api_operation"
 
 
+@dataclass(frozen=True, slots=True)
+class ProcessingBinding:
+    """Typed union for the ten clean strategies and three API operations."""
+
+    family: ProcessingBindingFamily
+    key: str
+    definition_version: str
+    definition_digest: str
+
+    def __post_init__(self) -> None:
+        if not self.key or not self.definition_version or not re.fullmatch(r"[0-9a-f]{64}", self.definition_digest):
+            raise ValueError("processing binding coordinates are invalid")
+
+
 class EvidenceVerdict(StrEnum):
     VERIFIED = "verified"
     INVALID = "invalid"
