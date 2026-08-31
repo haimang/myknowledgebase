@@ -1,0 +1,32 @@
+{
+  "upload_session": {
+    "explicit_idempotency_replay": "same_session_same_token",
+    "same_bytes_distinct_commands": "independent_sessions",
+    "cross_team_token": "not_found",
+    "reserved_ttl": "held"
+  },
+  "promotion_gc": {
+    "promotion_journal_terminal": "catalog_committed",
+    "quarantine_tombstone_reconcile": "destroyed",
+    "catalog_bytes": "digest_verified"
+  },
+  "evidence": {
+    "legacy_verdict": "legacy_unverifiable",
+    "correction": "append_only",
+    "identity_update_delete": "integrity_error"
+  },
+  "stage_security": {
+    "raw_clean_records": "cas_handles_only",
+    "nested_secret_and_body": "redacted"
+  },
+  "publication": {
+    "manifest_members": "ordered_exact_set",
+    "retrieval_toc_tou": "fail_closed"
+  },
+  "cleanup": {
+    "substrates": 5,
+    "hold": "blocked",
+    "released_refs": "zero_after_completion",
+    "proofs": "terminal_per_substrate"
+  }
+}

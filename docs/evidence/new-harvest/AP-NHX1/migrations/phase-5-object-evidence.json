@@ -1,0 +1,13 @@
+{
+  "migration_id": "029_nhx1_evidence_identity_guards",
+  "sha256": "4a6d9a55cfb2c4dc1f89208ddba3682e9aa9d0d325c061d2ff0cdabd4abd6ed9",
+  "mode": "forward_only",
+  "tables_or_triggers": [
+    "ck_nhx1_generation_artifact_identity",
+    "ck_nhx1_intake_artifact_identity",
+    "ck_nhx1_generation_artifact_no_delete",
+    "ck_nhx1_intake_artifact_no_delete"
+  ],
+  "historical_rows_updated": 0,
+  "rollback": "stop_admission_and_forward_fix"
+}

@@ -1451,3 +1451,36 @@ NHX1 coherent debt retirement（单阶段 / 串行DAG）
 |------|------|-------------|
 | `2026-08-31T03:34:15Z` | Phase 4 EXIT | commit `386f829bfdf9754dca4a5024cbbb08357fb41c6c` + fixed 11-file pytest command + `40 passed` + profile `test/sqlite+turso` |
 | `2026-08-31T03:34:15Z` | static gate | commit `386f829bfdf9754dca4a5024cbbb08357fb41c6c` + `uv run ruff check api intake src tests` + EXIT0 + profile `local` |
+
+### 11.8 Phase 5 — Object / evidence / physical convergence
+
+> **执行时间**：`2026-08-31T04:38:50Z`
+> **代码改动统计**：`25 文件；8 个新建；migration 029；对象会话/推广日志/evidence/manifest/cleanup/GC 与 CAS-first 读写收口`
+
+- **实际执行摘要**：
+  - `P5-01`：显式 `Idempotency-Key` 绑定 team-scoped opaque `ObjectUploadSession` token；同命令 replay 返回同 token，同 bytes 的不同命令保持独立 session；legacy 无 key 保留旧 digest replay 和 pending hold 兼容；reserve/consume/cancel/stat 均按精确 session CAS。
+  - `P5-02`：上传 session 与 promotion journal 持久化 promoted/catalog-committed 状态；quarantine reconcile 仅在 catalog tombstone 后物理销毁，避免 live bytes 被扫描器误删。
+  - `P5-03`：migration `029_nhx1_evidence_identity_guards` 为 generation/intake artifact identity 与 delete 加 SQL 不可变/append-only 触发器；legacy verification 保留 verdict，correction 追加独立事实。
+  - `P5-04`：raw/decoded/clean/collection 在执行时按 CAS handle hydration，envelope/stage/audit 递归移除正文、secret、path 与 URL；不把 sentinel body 复制进 durable projection。
+  - `P5-05`：vector publish 写 ordered publication manifest/member set；retrieval 走 `read_snapshot()` 并在 manifest 存在时严格 membership 验证，TOCTOU 篡改 fail-closed。
+  - `P5-06`：新增五 substrate cleanup job/step/proof executor，按 reference-first 释放；hold 进入 typed blocked，retention 后各 substrate 产生 terminal proof，再交 object GC。
+- **Phase 偏差（计划 vs 实际）**：
+  - `D-P5-01 (legacy-compat)`：显式 session 语义只对带 `Idempotency-Key` 的新命令公开；无 key 的 NH4 调用保留 digest replay 与每调用 pending hold，避免破坏既有客户端，同时不把 legacy handle 误充 session token。
+  - `D-P5-02 (schema-expand)`：artifact identity 保护以新增 migration `029` 实现，未修改 `001` 或 `018–024` 历史 DDL/checksum；legacy evidence 只新增 verifier/correction 行。
+- **阻塞与处理**：Phase 5 首轮兼容回归发现旧 NH4 并发无 key 期望 `[200,201]`；按 T-O-413 将无 key 兼容路径恢复为 deterministic digest replay，并为第二调用保留独立 pending hold，随后目标回归通过。无 skip/xfail/degraded。
+- **测试发现**：Phase 5 固定 EXIT `92 passed`；`uv run ruff check api intake src tests` EXIT0；对象会话、crash/GC、evidence SQL attack、CAS redline、publication TOCTOU、cleanup hold/convergence 与 NH4/NH5/NH6/NH7 回归均通过。
+- **后续 handoff**：Phase 6 只消费已稳定的 session/evidence/manifest/cleanup owner；新增 role/capability/readiness 必须保持 API claim、worker claim、maintenance GC 的 ownership 分离，并将真实 10+3/S16 gate 标记为 owner-pending，不得用 stub 替代。
+
+| 工作项 | 状态 | PR / commit | 实际落点 | 备注 |
+|--------|------|-------------|----------|------|
+| `P5-01` | `✅ done` | `ff104a9` | `object_upload.py`; `object_upload_ttl.py`; `objects.py`; public routes; `test_nhx1_object_sessions.py` | T-O-413；session replay/isolation/reserve/consume |
+| `P5-02` | `✅ done` | `ff104a9` | promotion journal migration; `object_gc.py`; `test_nhx1_object_crash_recovery.py` | T-O-413/417；tombstone-gated physical destroy |
+| `P5-03` | `✅ done` | `ff104a9` | migration `029`; `test_nhx1_evidence_plane.py`; retrieval identity guard | T-O-414；legacy verdict/correction and SQL fence |
+| `P5-04` | `✅ done` | `ff104a9` | `core.py`; `acquisition_ingest.py`; `clean_preflight.py`; `test_nhx1_stage_secret_redlines.py` | T-O-414/415；CAS-first recursive redaction |
+| `P5-05` | `✅ done` | `ff104a9` | `vector_publish_commit.py`; retrieval ports/rank/pack/request; `test_nhx1_publication_manifest.py` | T-O-414/415；manifest membership/read snapshot |
+| `P5-06` | `✅ done` | `ff104a9` | `cleanup_jobs.py`; cleanup/GC tests | T-O-417/421；holds, proofs, retention convergence |
+
+| 时点 | 步骤 | 决策 / 产出 |
+|------|------|-------------|
+| `2026-08-31T04:38:50Z` | Phase 5 EXIT | commit `ff104a9` + fixed 25-file pytest command + `92 passed` + profile `test/sqlite+turso` |
+| `2026-08-31T04:38:50Z` | static gate | commit `ff104a9` + `uv run ruff check api intake src tests` + EXIT0 + profile `local` |

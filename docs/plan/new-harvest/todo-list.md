@@ -114,8 +114,8 @@
 - [x] `NHX1-P2` [代码制作/测试/日志/提交] Canonical schema、ports、registries，025+ expand-only（`P2-01..05`）。`blocked-by: NHX1-P1=PASS` · evidence `c9874ca / 65 passed / 2026-08-31T02:07:52Z`
 - [x] `NHX1-P3` [代码制作/测试/日志/提交] Intake identity、Observation/ItemEpoch、lifecycle（`P3-01..05`；`NHX1-T04..T08`）。`blocked-by: NHX1-P2=PASS` · evidence `b6769e1 / 38 passed / 2026-08-31T02:56:34Z`
 - [x] `NHX1-P4` [代码制作/测试/日志/提交] Workflow rev2/rev1 compat、ProcessingBinding、Outcome/replay/outbox owner（`P4-01..06`；`NHX1-T09..T14`）。`blocked-by: NHX1-P3=PASS` · evidence `386f829 / 40 passed / 2026-08-31T03:34:15Z`
-- [-] `NHX1-P5` [代码制作/测试/日志/提交] Object session/journal、evidence、CAS-first、publication snapshot、physical cleanup（`P5-01..06`；`NHX1-T15..T20`）。`blocked-by: NHX1-P4=PASS`
-- [ ] `NHX1-P6` [代码制作/测试/日志/提交] Deployment roles、capability manifest、readiness、production/security engineering gate（`P6-01..04`；`NHX1-T21/T22-E/T25`）。`blocked-by: NHX1-P5=PASS`
+- [x] `NHX1-P5` [代码制作/测试/日志/提交] Object session/journal、evidence、CAS-first、publication snapshot、physical cleanup（`P5-01..06`；`NHX1-T15..T20`）。`blocked-by: NHX1-P4=PASS` · evidence `ff104a9 / 92 passed / 2026-08-31T04:38:50Z`
+- [-] `NHX1-P6` [代码制作/测试/日志/提交] Deployment roles、capability manifest、readiness、production/security engineering gate（`P6-01..04`；`NHX1-T21/T22-E/T25`）。`blocked-by: NHX1-P5=PASS`
 - [ ] `NHX1-P7` [代码制作/测试/日志/提交] Public discovery/views、operator control、signals/errors（`P7-01..04`；`NHX1-T23..T25`）。`blocked-by: NHX1-P6 engineering EXIT PASS; NHX1-T22-O may remain pending`
 - [ ] `NHX1-P8` [代码制作/测试/日志/提交] Shadow/cutover、compat drain、retirement/forward rollback（`P8-01..03`；`NHX1-T26` join compat tests）。`blocked-by: NHX1-P7=PASS`
 - [ ] `NHX1-P9` [assurance/测试/review/日志/提交] Compiler-derived L1–L4、deterministic races、real subprocess crash、persisted upgrade、full repo/evidence/third review（`P9-01..04`；`NHX1-T27..T30`）。`blocked-by: NHX1-P8=PASS + NHX1-T22-O=PASS`

@@ -46,3 +46,13 @@
 - Result: `EXIT0 · 40 passed`
 - Static command/result: `uv run ruff check api intake src tests` → `EXIT0 · All checks passed!`
 - Truth/work join: `T-O-410/T-O-411/T-O-412/T-O-422` / `P4-01..P4-06` / `NHX1-T09..T14`.
+
+## Phase 5 — 2026-08-31T04:38:50Z
+
+- Commit under test: `ff104a9`
+- Profile: `test/sqlite+turso`, local Python 3.12 via `uv`
+- Command: `uv run pytest -q tests/integration/test_nhx1_evidence_plane.py tests/integration/test_nhx1_persisted_upgrade.py tests/integration/test_nhx1_schema_expand.py tests/unit/test_retrieval_access.py tests/unit/test_retrieval_service.py tests/e2e/test_nhx1_object_sessions.py tests/e2e/test_nhx1_stage_secret_redlines.py tests/e2e/test_nhx1_publication_manifest.py tests/e2e/test_nhx1_cleanup_convergence.py tests/e2e/test_nhx1_object_crash_recovery.py tests/e2e/test_nh4_public_upload.py tests/e2e/test_nh4_upload_replay_race.py tests/unit/test_nh4_upload_ttl_gc.py tests/e2e/test_inline_ingress_staging.py tests/e2e/test_new_harvest_runtime_security.py tests/e2e/test_nh5_facet_retrieval.py tests/e2e/test_nh5_metadata_semantic_refresh.py tests/e2e/test_nh7_empty_clean_zero_vector.py tests/e2e/test_nh7_failure_zero_vector.py tests/e2e/test_nh7_multimodal_lanes.py tests/e2e/test_nh7_pdf_text_retrieval.py tests/e2e/test_nh7_print_pdf_retrieval.py tests/e2e/test_nh7_browser_dom_retrieval.py tests/e2e/test_nh7_inline_static_retrieval.py tests/e2e/test_nh6_readiness.py`
+- Result: `EXIT0 · 92 passed · zero skip/xfail`
+- Static command/result: `uv run ruff check api intake src tests` → `EXIT0 · All checks passed!`
+- Migration evidence: `029_nhx1_evidence_identity_guards`, SHA-256 `4a6d9a55cfb2c4dc1f89208ddba3682e9aa9d0d325c061d2ff0cdabd4abd6ed9`; prior `001`/`018–024` checksums unchanged.
+- Truth/work join: `T-O-413/T-O-414/T-O-415/T-O-417/T-O-420/T-O-421` / `P5-01..P5-06` / `NHX1-T15..T20`.
