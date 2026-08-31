@@ -706,7 +706,7 @@ class CapabilityCatalogView(StrictModel):
 
 
 class WorkflowCatalogView(StrictModel):
-    workflow_key: str
+    workflow_id: str = Field(alias="workflow_key")
     workflow_uuid: str
     workflow_revision_uuid: str
     revision_number: int

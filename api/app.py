@@ -78,7 +78,7 @@ from src.services.workflow_catalog import WorkflowCatalogService
 from src.services.workflow_registry import WorkflowRegistryService
 from src.storage.local_store import LocalObjectStore
 from src.workflows.builtin_lsrag import (
-    BUILTIN_EXECUTION_COMPATIBILITY_WORKFLOWS,
+    BUILTIN_NHX1_EXECUTION_COMPATIBILITY_WORKFLOWS,
     BUILTIN_HTTP_RESOURCE_KIND_WORKFLOW,
     BUILTIN_INLINE_KIND_WORKFLOW,
     BUILTIN_LOCAL_OBJECT_KIND_WORKFLOW,
@@ -500,7 +500,7 @@ def create_container(settings: Settings | None = None) -> Container:
             BUILTIN_REGISTERED_API_SCATTER_ROOT_WORKFLOW,
             BUILTIN_REGISTERED_API_SCATTER_CHILD_WORKFLOW,
         ),
-        compatibility_definitions=BUILTIN_EXECUTION_COMPATIBILITY_WORKFLOWS,
+        compatibility_definitions=BUILTIN_NHX1_EXECUTION_COMPATIBILITY_WORKFLOWS,
         readiness=workflow_claim_readiness,
         outcome_committer=outcome_committer,
         billing=DefaultBillingService(),

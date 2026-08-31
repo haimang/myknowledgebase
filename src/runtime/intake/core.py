@@ -131,6 +131,10 @@ class IntakeCoreMixin:
     async def run(self, command: ProcessCommand) -> ProcessOutcome:
         """Run one Process with no direct Task/Execution/Process mutation."""
 
+        # The stage callback is intentionally a no-op projection with
+        # ``payload_extra={}``; route/owner state lives only in the durable
+        # outcome transaction below.
+
         try:
             state = await self._load_state(command)
             material, route_extra, callback = await self._material_for(command, state)

@@ -8,7 +8,6 @@ from typing import Any
 from src.contracts.common.errors import ConflictError, MkbError
 from src.contracts.common.ids import stable_digest
 from src.contracts.common.time import utc_now
-from src.persistence.nhx1_migration import Nhx1MigrationService
 from src.persistence.ports import PersistencePort
 
 
@@ -27,7 +26,6 @@ class Nhx1CutoverService:
 
     def __init__(self, persistence: PersistencePort) -> None:
         self._persistence = persistence
-        self._migration = Nhx1MigrationService(persistence)
 
     async def ensure_state(self, cutover_key: str = "nhx1") -> CutoverState:
         now = utc_now()

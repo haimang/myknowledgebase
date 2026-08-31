@@ -15,6 +15,11 @@ class PublicObjectView(StrictModel):
     size_bytes: Annotated[int, Field(ge=0)]
     media_type: Annotated[str | None, Field(max_length=255)] = None
     disposition: Literal["pending", "ingested", "expired", "tombstoned"]
+
+
+class PublicObjectUploadView(PublicObjectView):
+    """Upload response extension; stat remains the historical closed view."""
+
     session_token: Annotated[str, Field(pattern=r"^mkbsession:v1:[-A-Za-z0-9._~:]{16,512}$")] | None = None
 
 
@@ -23,4 +28,4 @@ class ObjectCancelRequest(StrictModel):
     session_token: Annotated[str, Field(pattern=r"^mkbsession:v1:[-A-Za-z0-9._~:]{16,512}$")] | None = None
 
 
-__all__ = ["ObjectCancelRequest", "PublicObjectView"]
+__all__ = ["ObjectCancelRequest", "PublicObjectUploadView", "PublicObjectView"]

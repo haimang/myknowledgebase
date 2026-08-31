@@ -29,10 +29,9 @@ from src.contracts.api.models import (
     TaskView,
     TeamCreateRequest,
     TeamPatchRequest,
-    WorkflowCatalogView,
     parse_retrieval_request,
 )
-from src.contracts.api.objects import ObjectCancelRequest, PublicObjectView
+from src.contracts.api.objects import ObjectCancelRequest, PublicObjectUploadView, PublicObjectView
 from src.contracts.common.errors import MkbError
 from src.contracts.common.ids import validate_external_uuid
 from src.contracts.storage.models import ObjectHandle
@@ -55,12 +54,6 @@ async def catalog(request: Request, token: BusinessToken) -> CatalogView:
         "s11.multimodal": container.clean_llm is not None,
     }
     return await container.workflow_catalog.catalog(role=container.settings.deployment_role, available_supplies=supplies)
-
-
-@router.get("/workflows", response_model=list[WorkflowCatalogView], tags=["catalog"])
-async def list_workflows(request: Request, token: BusinessToken) -> list[WorkflowCatalogView]:
-    del token
-    return await request.app.state.container.workflow_catalog.workflows()
 
 
 @router.get("/capabilities", response_model=list[CapabilityCatalogView], tags=["catalog"])
@@ -145,7 +138,8 @@ def _generation_artifact_path(generation_artifact_uuid: str) -> str:
 
 
 def _public_object_view(stat, disposition: str, *, session_token: str | None = None) -> PublicObjectView:
-    return PublicObjectView(
+    model = PublicObjectUploadView if session_token is not None else PublicObjectView
+    return model(
         handle=stat.handle.value,
         digest=stat.sha256,
         size_bytes=stat.size_bytes,
@@ -204,7 +198,7 @@ async def create_team(request: Request, body: TeamCreateRequest, token: Business
     )
 
 
-@router.post("/teams/{team_uuid}/objects:upload", response_model=PublicObjectView, status_code=201)
+@router.post("/teams/{team_uuid}/objects:upload", response_model=PublicObjectUploadView, status_code=201)
 async def upload_object(
     request: Request,
     team_uuid: str,
@@ -245,7 +239,7 @@ async def stat_object(
     return _public_object_view(status.stat, status.disposition)
 
 
-@router.post("/teams/{team_uuid}/objects:cancel", response_model=PublicObjectView, response_model_exclude_none=True)
+@router.post("/teams/{team_uuid}/objects:cancel", response_model=PublicObjectUploadView, response_model_exclude_none=True)
 async def cancel_object(
     request: Request,
     team_uuid: str,
