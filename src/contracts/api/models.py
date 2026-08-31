@@ -772,6 +772,29 @@ class GenerationControlRequest(StrictModel):
     idempotency_key: str = Field(min_length=1, max_length=256)
 
 
+class CutoverRevisionRequest(StrictModel):
+    expected_revision: int = Field(ge=0)
+
+
+class CutoverStateView(StrictModel):
+    cutover_key: str
+    writer_mode: str
+    reader_mode: str
+    admission_enabled: bool
+    expected_migration_revision: int
+    row_revision: int
+
+
+class CutoverInventoryView(StrictModel):
+    rev1_pins: int
+    pending_outbox: int
+    open_restarts: int
+    live_object_refs: int
+    open_cleanup_jobs: int
+    legacy_evidence: int
+    unresolved_shadow: int
+
+
 class ProcessDebugView(StrictModel):
     process_uuid: str
     team_uuid: str
@@ -906,6 +929,10 @@ __all__ = [
     "CommandReceiptView",
     "OutboxRequeueRequest",
     "CleanupResumeRequest",
+    "GenerationControlRequest",
+    "CutoverRevisionRequest",
+    "CutoverStateView",
+    "CutoverInventoryView",
     "ProcessDebugView",
     "ExecutionDebugView",
     "CleanupStepDebugView",

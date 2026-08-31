@@ -10,6 +10,9 @@ from src.contracts.api.models import (
     CleanupJobDebugView,
     CleanupResumeRequest,
     CommandReceiptView,
+    CutoverInventoryView,
+    CutoverRevisionRequest,
+    CutoverStateView,
     ExecutionDebugView,
     GenerationControlRequest,
     OutboxRequeueRequest,
@@ -22,6 +25,55 @@ from src.contracts.common.ids import validate_external_uuid
 # empty.  Any future read/repair endpoint therefore inherits token plus
 # internal-network admission instead of accidentally becoming public.
 router = APIRouter(prefix="/internal", tags=["internal"], dependencies=[Depends(require_operator_token)])
+
+
+def _cutover_view(state: object) -> CutoverStateView:
+    return CutoverStateView.model_validate(
+        {
+            "cutover_key": state.cutover_key,
+            "writer_mode": state.writer_mode,
+            "reader_mode": state.reader_mode,
+            "admission_enabled": state.admission_enabled,
+            "expected_migration_revision": state.expected_migration_revision,
+            "row_revision": state.row_revision,
+        }
+    )
+
+
+@router.get("/nhx1/cutover", response_model=CutoverStateView)
+async def cutover_status(request: Request, token: OperatorToken) -> CutoverStateView:
+    del token
+    return _cutover_view(await request.app.state.container.cutover.ensure_state())
+
+
+@router.get("/nhx1/cutover/inventory", response_model=CutoverInventoryView)
+async def cutover_inventory(request: Request, token: OperatorToken) -> CutoverInventoryView:
+    del token
+    return CutoverInventoryView.model_validate(await request.app.state.container.cutover.inventory())
+
+
+@router.post("/nhx1/cutover:begin-shadow", response_model=CutoverStateView)
+async def cutover_begin_shadow(request: Request, token: OperatorToken) -> CutoverStateView:
+    del token
+    return _cutover_view(await request.app.state.container.cutover.begin_shadow())
+
+
+@router.post("/nhx1/cutover", response_model=CutoverStateView)
+async def cutover_activate(
+    request: Request, body: CutoverRevisionRequest, token: OperatorToken
+) -> CutoverStateView:
+    del token
+    return _cutover_view(await request.app.state.container.cutover.cutover(expected_revision=body.expected_revision))
+
+
+@router.post("/nhx1/cutover:stop-admission", response_model=CutoverStateView)
+async def cutover_stop_admission(
+    request: Request, body: CutoverRevisionRequest, token: OperatorToken
+) -> CutoverStateView:
+    del token
+    return _cutover_view(
+        await request.app.state.container.cutover.stop_admission(expected_revision=body.expected_revision)
+    )
 
 
 @router.get("/teams/{team_uuid}/processes/{process_uuid}", response_model=ProcessDebugView)

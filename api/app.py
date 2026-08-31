@@ -56,9 +56,11 @@ from src.services.billing import DefaultBillingService
 from src.services.cleanup_jobs import CleanupJobService
 from src.services.config_snapshots import ConfigSnapshotService
 from src.services.events import DomainEventWriter, SecurityAuditWriter
+from src.services.evidence_verification import EvidenceVerificationService
 from src.services.governance_registry import GovernanceRegistryService
 from src.services.index_retirement import IndexGenerationRetirementService
 from src.services.intake_lifecycle import IntakeLifecycleService
+from src.services.nhx1_cutover import Nhx1CutoverService
 from src.services.object_gc import ObjectGcService
 from src.services.object_upload import ObjectUploadService
 from src.services.object_upload_ttl import ObjectUploadLifecycleService
@@ -102,6 +104,8 @@ class Container:
     signal_registry: OperationalSignalRegistry
     cleanup_jobs: CleanupJobService
     operator_control: OperatorControlService
+    cutover: Nhx1CutoverService
+    evidence_verification: EvidenceVerificationService
     config_snapshots: ConfigSnapshotService
     tokens: ActiveTokenSet
     rate_limiter: FixedWindowRateLimiter
@@ -564,6 +568,8 @@ def create_container(settings: Settings | None = None) -> Container:
         retention=timedelta(seconds=settings.object_gc_grace_seconds),
     )
     operator_control = OperatorControlService(persistence, workflow_runtime, cleanup_jobs)
+    cutover = Nhx1CutoverService(persistence)
+    evidence_verification = EvidenceVerificationService(persistence)
     object_upload_lifecycle_scanner = ObjectUploadLifecycleScanner(
         object_upload_lifecycle,
         ObjectUploadLifecycleSchedule(
@@ -609,6 +615,8 @@ def create_container(settings: Settings | None = None) -> Container:
         signal_registry=signal_registry,
         cleanup_jobs=cleanup_jobs,
         operator_control=operator_control,
+        cutover=cutover,
+        evidence_verification=evidence_verification,
         config_snapshots=config_snapshots,
         tokens=tokens,
         rate_limiter=rate_limiter,
@@ -672,6 +680,11 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         container.metrics.increment("mkb_repair_applied_total", 1, outcome="fail")
     try:
         await container.governance.bootstrap()
+    except MkbError:
+        container.health.bootstrap_failures += 1
+        container.metrics.increment("mkb_repair_applied_total", 1, outcome="fail")
+    try:
+        await container.cutover.ensure_state()
     except MkbError:
         container.health.bootstrap_failures += 1
         container.metrics.increment("mkb_repair_applied_total", 1, outcome="fail")
