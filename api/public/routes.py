@@ -139,14 +139,16 @@ def _generation_artifact_path(generation_artifact_uuid: str) -> str:
 
 def _public_object_view(stat, disposition: str, *, session_token: str | None = None) -> PublicObjectView:
     model = PublicObjectUploadView if session_token is not None else PublicObjectView
-    return model(
-        handle=stat.handle.value,
-        digest=stat.sha256,
-        size_bytes=stat.size_bytes,
-        media_type=stat.media_type,
-        disposition=disposition,
-        session_token=session_token,
-    )
+    values: dict[str, object] = {
+        "handle": stat.handle.value,
+        "digest": stat.sha256,
+        "size_bytes": stat.size_bytes,
+        "media_type": stat.media_type,
+        "disposition": disposition,
+    }
+    if session_token is not None:
+        values["session_token"] = session_token
+    return model(**values)
 
 
 def _object_handle_query(value: str) -> ObjectHandle:

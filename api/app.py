@@ -78,10 +78,10 @@ from src.services.workflow_catalog import WorkflowCatalogService
 from src.services.workflow_registry import WorkflowRegistryService
 from src.storage.local_store import LocalObjectStore
 from src.workflows.builtin_lsrag import (
-    BUILTIN_NHX1_EXECUTION_COMPATIBILITY_WORKFLOWS,
     BUILTIN_HTTP_RESOURCE_KIND_WORKFLOW,
     BUILTIN_INLINE_KIND_WORKFLOW,
     BUILTIN_LOCAL_OBJECT_KIND_WORKFLOW,
+    BUILTIN_NHX1_EXECUTION_COMPATIBILITY_WORKFLOWS,
     BUILTIN_SINGLE_INTAKE_LSRAG_WORKFLOW,
     BUILTIN_SOURCE_PROFILE_WORKFLOWS,
 )
