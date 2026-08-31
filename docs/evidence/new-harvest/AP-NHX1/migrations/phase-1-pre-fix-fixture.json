@@ -1,0 +1,9 @@
+{
+  "database": "tests/fixtures/new_harvest_nhx1/pre-fix-024.db",
+  "database_sha256": "de069bfda49ebd5efaf134350b006cc4c65e39b91749aeaf731a61eeb260eef8",
+  "last_migration": "024_nh_review_invariants",
+  "migration_count": 24,
+  "non_empty_legacy_shapes": ["workflow revision 1 graphs", "failed execution", "selected-output v1", "upload_pending object reference"],
+  "rev1_manifest_digest": "52798265e341051005dabadb164c99265607eb55b4ca2123d797f57c37e989e9",
+  "source_commit": "ba099ee305577cca2281a669afbca364111f200b"
+}

@@ -1,0 +1,13 @@
+# NHX1 execution evidence (append-only)
+
+## Phase 1 — 2026-08-31T01:49:46Z
+
+- Commit under test: `000e1be8707580c6c4ab984fc17e721a29a53c9a`
+- Profile: `test/sqlite+turso`, local Python 3.12 via `uv`
+- Command: `uv run pytest -q tests/domain/test_nhx1_truth_and_coverage.py tests/domain/test_nhx1_harness_integrity.py tests/domain/test_nhx1_evidence_pack.py tests/integration/test_nhx1_persisted_upgrade.py tests/e2e/test_inline_ingress_staging.py tests/e2e/test_ns1_pipeline.py tests/e2e/test_human_review_gate.py tests/e2e/test_ns2_dispatch_lanes.py`
+- Result: `EXIT0 · 17 passed`
+- Static command: `uv run ruff check api intake src tests`
+- Static result: `EXIT0 · All checks passed!`
+- Known RED command: `uv run pytest -q tests/unit/test_ns6_phase2.py::test_stale_fencing_fail_does_not_kill_new_generation`
+- Known RED result: `expected EXIT1 · ConflictError(stale-process-fence)`; original “new generation remains running” assertion retained; owner fix `P4-03/NHX1-T11`.
+- Truth/work join: `T-O-408..422` / `P1-01..P1-04` / `NHX1-T01,T02,T03,T30`.

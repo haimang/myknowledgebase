@@ -25,7 +25,7 @@
 > - HEAD `ba099ee305577cca2281a669afbca364111f200b` 的代码/DDL/OpenAPI实测；§7内置锚区为本AP直接grounding真源
 > 关联 reference-anchor:
 > - 见 §7 内置 Reference-Anchor；安全威胁模型另指 `docs/baseline/domain-truth/S16-security-trust-boundary.md:438-465`
-> 文档状态: `draft`
+> 文档状态: `executing`
 > 计划 ID: `NHX1-P1-01..P9-04`；测试 ID: `NHX1-T01..NHX1-T30`
 
 **执行硬纪律**：这是一个 `NHX1` 阶段、九个严格串行 Phase 的行动计划。依赖链只有
@@ -1309,3 +1309,42 @@ NHX1 coherent debt retirement（单阶段 / 串行DAG）
 | `v0.1` | `2026-08-31` | `GPT` | 消费Q28–Q42/T-O-408..422，收敛为单一NHX1九Phase串行DAG；定义P1-01..P9-04、NHX1-T01..NHX1-T30、逐测试详细规格/假绿探针、风险与DoD |
 
 > 执行日志 §11 仅在文档状态进入 `executed` 时按 `.adocs/templates/code-execution-log.md` append；draft阶段不伪造执行结果。
+
+---
+
+## 11. 执行日志回填（append-only）
+
+> 执行者：`Codex`
+> 执行时间：`2026-08-31`
+> 文档状态：`draft → executing`
+> 当前代码改动统计：`Phase 1：12 个生产/测试文件修改，11 个文本 fixture/tool 新建，1 个 binary DB fixture 新建；schema bump 0`
+
+- **实际执行摘要**：Phase 1 已按 `P1-01..P1-04` 完成 denominator、pre-fix/rev1 fixture、adapter-aware harness 与 execution-backed evidence checker；后继 Phase 尚未施工。
+- **Phase 偏差（计划 vs 实际）**：
+  - `D-P1-01 (substrate-fit)`：P1 先落 `PersistenceInspectorPort.read_snapshot()`，以便四个既有 e2e 在同一 adapter handle 上读取；P2 将沿同一 contract 扩展 migration/shadow 语义，未切业务 writer。
+  - `D-P1-02 (fixture-shape)`：rev1 manifest 冻结三份 kind-family canonical definition；pre-fix DB 另含真实 registry graph、legacy selected-output v1、legacy upload-pending 与 failed Execution，避免空库/当前 builder 假绿。
+- **阻塞与处理**：
+  - `P1-03` 指定 stale-fence node 在基线与当前 Phase 1 commit 均稳定 RED，failure signature 为 `ConflictError/stale-process-fence`；按计划登记到 `known-red.v1.json`，保持原状态断言，交 `P4-03/NHX1-T11` 修绿。
+- **测试发现**：Phase 1 EXIT 固定命令 `17 passed`；全仓 ruff `All checks passed`；known RED 为预期 `1 failed`，无 skip/xfail/degraded。
+- **后续 handoff**：仅解锁 Phase 2 expand-only schema/ports；001/018–024 checksum、rev1 manifest 与 legacy evidence bytes 为只读基线。
+
+### 11.1 Phase 1 — Truth denominator / fixtures / harness
+
+| 工作项 | 状态 | PR / commit | 实际落点 | 备注 |
+|--------|------|-------------|----------|------|
+| `P1-01` | `✅ done` | `9542f50` | `tests/fixtures/new_harvest_nhx1/coverage.v1.json`；`tests/domain/test_nhx1_truth_and_coverage.py` | 52 VF、50 debt、2 guards、15 Truth 与历史 deferred 双向可重算；digest `325f05f6…` |
+| `P1-02` | `✅ done` | `9542f50` + `000e1be` | `rev1-manifest.json`；`pre-fix-024.db`；`test_nhx1_persisted_upgrade.py` | fixture SHA-256 `de069bfd…`；24 migrations；三 rev1 graph + 非空 legacy rows |
+| `P1-03` | `✅ done` | `9542f50` | `src/persistence/ports.py`；SQLite/Turso adapters；四个 e2e | e2e raw `sqlite3.connect` 扫描零违规；known RED 如实登记，未宣称 bug 已修 |
+| `P1-04` | `✅ done` | `9542f50` | `tests/nhx1_evidence.py`；`tests/domain/test_nhx1_evidence_pack.py` | 实际执行命令并校验 full SHA/UTC/profile/digest/layer；假 PASS/SHA/skip/xfail/降层均 RED |
+
+### 11.2 Phase 1 证据四元组与时序
+
+| 时点 | 步骤 | 决策 / 产出 |
+|------|------|-------------|
+| `2026-08-31T01:49:46Z` | `NHX1-T01/T02/T03/T30 Phase-1 subset` | commit `000e1be8707580c6c4ab984fc17e721a29a53c9a` + 固定 pytest command + `17 passed` + profile `test/sqlite+turso` |
+| `2026-08-31T01:49:46Z` | static gate | commit `000e1be8707580c6c4ab984fc17e721a29a53c9a` + `uv run ruff check api intake src tests` + EXIT0 + profile `local` |
+| `2026-08-31T01:50:35Z` | 修前 RED 保真 | commit `000e1be8707580c6c4ab984fc17e721a29a53c9a` + original stale-fence node + expected EXIT1/`stale-process-fence` + `T-O-422/P4-03` handoff |
+
+### 11.3 Phase 1 文档状态
+
+`draft → executing（2026-08-31）`。Phase 1 工程 EXIT 完成；residual `stale-process-fence` 不是本 Phase 假绿或 deferred，严格 handoff → `Phase 4 / P4-03 / NHX1-T11`。

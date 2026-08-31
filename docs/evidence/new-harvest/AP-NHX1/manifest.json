@@ -1,0 +1,25 @@
+{
+  "action_plan": "docs/plan/new-harvest/AP-NHX1-coherent-debt-retirement-and-governance.md",
+  "coverage_digest": "325f05f6a8263bce7a87771e73d1a8d7ef62f3bca36805181240b99f5060ce07",
+  "current_phase": 2,
+  "evidence_schema_version": "mkb.nhx1-evidence.v1",
+  "phase_sequence": [
+    {"phase": 1, "status": "verified", "code_commit": "000e1be8707580c6c4ab984fc17e721a29a53c9a"},
+    {"phase": 2, "status": "in_progress"},
+    {"phase": 3, "status": "blocked_by_phase_2"},
+    {"phase": 4, "status": "blocked_by_phase_3"},
+    {"phase": 5, "status": "blocked_by_phase_4"},
+    {"phase": 6, "status": "blocked_by_phase_5"},
+    {"phase": 7, "status": "blocked_by_phase_6"},
+    {"phase": 8, "status": "blocked_by_phase_7"},
+    {"phase": 9, "status": "blocked_by_phase_8_and_t22_o"}
+  ],
+  "pre_fix_database_sha256": "de069bfda49ebd5efaf134350b006cc4c65e39b91749aeaf731a61eeb260eef8",
+  "rev1_manifest_digest": "52798265e341051005dabadb164c99265607eb55b4ca2123d797f57c37e989e9",
+  "test_ids": [
+    "NHX1-T01", "NHX1-T02", "NHX1-T03", "NHX1-T04", "NHX1-T05", "NHX1-T06", "NHX1-T07", "NHX1-T08", "NHX1-T09", "NHX1-T10",
+    "NHX1-T11", "NHX1-T12", "NHX1-T13", "NHX1-T14", "NHX1-T15", "NHX1-T16", "NHX1-T17", "NHX1-T18", "NHX1-T19", "NHX1-T20",
+    "NHX1-T21", "NHX1-T22", "NHX1-T23", "NHX1-T24", "NHX1-T25", "NHX1-T26", "NHX1-T27", "NHX1-T28", "NHX1-T29", "NHX1-T30"
+  ],
+  "truth_ids": ["T-O-408", "T-O-409", "T-O-410", "T-O-411", "T-O-412", "T-O-413", "T-O-414", "T-O-415", "T-O-416", "T-O-417", "T-O-418", "T-O-419", "T-O-420", "T-O-421", "T-O-422"]
+}

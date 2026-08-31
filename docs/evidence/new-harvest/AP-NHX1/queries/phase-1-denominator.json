@@ -1,0 +1,13 @@
+{
+  "classification_counts": {
+    "absorbed_deferred": 17,
+    "design_guard": 1,
+    "partial_delivery": 18,
+    "stale_rejected_guard": 1,
+    "true_bug": 15
+  },
+  "coverage_digest": "325f05f6a8263bce7a87771e73d1a8d7ef62f3bca36805181240b99f5060ce07",
+  "historical_deferred_count": 26,
+  "truth_count": 15,
+  "vf_count": 52
+}

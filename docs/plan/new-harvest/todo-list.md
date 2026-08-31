@@ -110,8 +110,8 @@
 > 严格 DAG：`NHX1-P1 → NHX1-P2 → NHX1-P3 → NHX1-P4 → NHX1-P5 → NHX1-P6 → NHX1-P7 → NHX1-P8 → NHX1-P9 → NHX1-FINAL-CLOSE`
 > 阻塞纪律：任一 Phase 仅在前序 Phase 的工程 EXIT、证据四元组、执行日志与分簇 commit 全部完成后进入。`NHX1-T22-E` 可在 Phase 6 达到 `ready-for-owner-gate` 后把工程链交给 Phase 7；`NHX1-T22-O` 未具名签收时 Phase 9 join 与 final closure 保持 blocked，不得以 skip、stub 或 deferred 代替。
 
-- [-] `NHX1-P1` [代码制作/测试/日志/提交] Truth denominator、pre-fix/rev1 fixtures、honest harness、anti-fake-green executor（`P1-01..04`；`NHX1-T01/T02/T03/T30`）。`blocked-by: none`
-- [ ] `NHX1-P2` [代码制作/测试/日志/提交] Canonical schema、ports、registries，025+ expand-only（`P2-01..05`）。`blocked-by: NHX1-P1=PASS`
+- [x] `NHX1-P1` [代码制作/测试/日志/提交] Truth denominator、pre-fix/rev1 fixtures、honest harness、anti-fake-green executor（`P1-01..04`；`NHX1-T01/T02/T03/T30`）。`blocked-by: none` · evidence `000e1be / 17 passed / 2026-08-31T01:49:46Z`
+- [-] `NHX1-P2` [代码制作/测试/日志/提交] Canonical schema、ports、registries，025+ expand-only（`P2-01..05`）。`blocked-by: NHX1-P1=PASS`
 - [ ] `NHX1-P3` [代码制作/测试/日志/提交] Intake identity、Observation/ItemEpoch、lifecycle（`P3-01..05`；`NHX1-T04..T08`）。`blocked-by: NHX1-P2=PASS`
 - [ ] `NHX1-P4` [代码制作/测试/日志/提交] Workflow rev2/rev1 compat、ProcessingBinding、Outcome/replay/outbox owner（`P4-01..06`；`NHX1-T09..T14`）。`blocked-by: NHX1-P3=PASS`
 - [ ] `NHX1-P5` [代码制作/测试/日志/提交] Object session/journal、evidence、CAS-first、publication snapshot、physical cleanup（`P5-01..06`；`NHX1-T15..T20`）。`blocked-by: NHX1-P4=PASS`
