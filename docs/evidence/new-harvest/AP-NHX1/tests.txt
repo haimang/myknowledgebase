@@ -28,3 +28,12 @@
 - Clean detached-worktree command: Phase-2 fixed list without the unrelated R3 external-copy evidence node.
 - Result: `EXIT0 · 64 passed · zero skip/xfail`; ruff `EXIT0`.
 - The first clean-worktree diagnostic observed `test_r3_turso_evidence_ready.py` skip because its repository-external `R2` copy was absent. This node is not counted; `test_empty_database_expand_has_sqlite_turso_parity` remains the Phase-2 Turso gate.
+
+## Phase 3 — 2026-08-31T02:56:34Z
+
+- Commit under test: `b6769e10222bc9329d470adda50604e085b64cbd`
+- Profile: `test/sqlite+turso`, local Python 3.12 via `uv`
+- Command: `uv run pytest -q tests/unit/test_nhx1_intent_state_matrix.py tests/e2e/test_nhx1_observation_identity.py tests/e2e/test_nhx1_item_epoch.py tests/e2e/test_nhx1_scatter_retry.py tests/e2e/test_nhx1_rebuild_cardinality.py tests/e2e/test_intake_identity_replay.py tests/e2e/test_registered_api_scatter.py tests/e2e/test_nh8_api_item_intents.py tests/e2e/test_intake_reactivate.py tests/e2e/test_nh4_upload_then_ingest.py`
+- Result: `EXIT0 · 38 passed`
+- Static command/result: `uv run ruff check api intake src tests` → `EXIT0 · All checks passed!`
+- Truth/work join: `T-O-408/T-O-409/T-O-410/T-O-421` / `P3-01..P3-05` / `NHX1-T04..T08`.

@@ -112,8 +112,8 @@
 
 - [x] `NHX1-P1` [代码制作/测试/日志/提交] Truth denominator、pre-fix/rev1 fixtures、honest harness、anti-fake-green executor（`P1-01..04`；`NHX1-T01/T02/T03/T30`）。`blocked-by: none` · evidence `000e1be / 17 passed / 2026-08-31T01:49:46Z`
 - [x] `NHX1-P2` [代码制作/测试/日志/提交] Canonical schema、ports、registries，025+ expand-only（`P2-01..05`）。`blocked-by: NHX1-P1=PASS` · evidence `c9874ca / 65 passed / 2026-08-31T02:07:52Z`
-- [-] `NHX1-P3` [代码制作/测试/日志/提交] Intake identity、Observation/ItemEpoch、lifecycle（`P3-01..05`；`NHX1-T04..T08`）。`blocked-by: NHX1-P2=PASS`
-- [ ] `NHX1-P4` [代码制作/测试/日志/提交] Workflow rev2/rev1 compat、ProcessingBinding、Outcome/replay/outbox owner（`P4-01..06`；`NHX1-T09..T14`）。`blocked-by: NHX1-P3=PASS`
+- [x] `NHX1-P3` [代码制作/测试/日志/提交] Intake identity、Observation/ItemEpoch、lifecycle（`P3-01..05`；`NHX1-T04..T08`）。`blocked-by: NHX1-P2=PASS` · evidence `b6769e1 / 38 passed / 2026-08-31T02:56:34Z`
+- [-] `NHX1-P4` [代码制作/测试/日志/提交] Workflow rev2/rev1 compat、ProcessingBinding、Outcome/replay/outbox owner（`P4-01..06`；`NHX1-T09..T14`）。`blocked-by: NHX1-P3=PASS`
 - [ ] `NHX1-P5` [代码制作/测试/日志/提交] Object session/journal、evidence、CAS-first、publication snapshot、physical cleanup（`P5-01..06`；`NHX1-T15..T20`）。`blocked-by: NHX1-P4=PASS`
 - [ ] `NHX1-P6` [代码制作/测试/日志/提交] Deployment roles、capability manifest、readiness、production/security engineering gate（`P6-01..04`；`NHX1-T21/T22-E/T25`）。`blocked-by: NHX1-P5=PASS`
 - [ ] `NHX1-P7` [代码制作/测试/日志/提交] Public discovery/views、operator control、signals/errors（`P7-01..04`；`NHX1-T23..T25`）。`blocked-by: NHX1-P6 engineering EXIT PASS; NHX1-T22-O may remain pending`

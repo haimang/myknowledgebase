@@ -1387,3 +1387,34 @@ NHX1 coherent debt retirement（单阶段 / 串行DAG）
 - **证据**：commit `2908e8f`；clean detached worktree；固定 Phase-2 command `64 passed`、零 skip/xfail；ruff EXIT0；修订后 025 SHA-256 `6b947f86e8752788091e1d2a0138f155d761a5b60682a416a4e514cbba76f601`。
 - **环境差异**：第一次 clean-worktree 扩大命令中的历史 `test_r3_turso_evidence_ready.py` 因仓库外 `R2` copy 不存在而 skip；它不是P2分母，最终固定命令移除该R3环境证据节点，并保留本Phase自有 SQLite/Turso parity node，最终证据零skip。
 - **DAG 恢复**：修正后的 P2 EXIT 重新PASS，Phase 3 恢复 `in_progress`。
+
+### 11.6 Phase 3 — Intake identity / ItemEpoch / lifecycle
+
+> 执行时间：`2026-08-31T02:56:34Z`
+> 代码改动统计：`15 个文件；ObservationReservation/admission matrix 新增；Task/ingest/acceptance/scatter/rebuild writer 收紧；schema bump 0`
+
+- **实际执行摘要**：
+  - `P3-01`：v2 显式 observation key；SourceIdentity 与 ObservationReservation 分账；Task/root/Attempt 在同一 UoW；same key exact replay 复用原 Task，异 fingerprint 稳定 409，并发双建单 winner。
+  - `P3-02`：每次 Observation 使用新 Snapshot；same semantic content 复用 Revision 并追加 `no_change` fact；changed content 以现有 `row_revision` 作为唯一 ItemEpoch CAS；acceptance/scatter 写 durable link/fact/epoch transition。
+  - `P3-03`：acquire 前读取 durable Source/Observation 坐标，失败采集转 `failed` attempt；typed retry 只新增 attempt generation，未新建 Source/Snapshot。
+  - `P3-04`：7 intent × 3 lifecycle matrix 在 admission 闸前执行；deactivated/deleted ingest、deleted key 与 stale callback fail-closed。
+  - `P3-05`：rebuild scope 保持 frozen target；实际 identity/latest drift 整体失败；active-but-not-serving/reactivate 维持可解释 typed no-op，非初始空集伪装。
+- **Phase 偏差（计划 vs 实际）**：
+  - `D-P3-01 (substrate-fit)`：对尚未存在 Item 的并行 Observation 不采用“按最新 UUID LWW”；acceptance 等待 durable item 后按 expected epoch/revision fingerprint 判定，避免 UUID 漂移和静默覆盖。
+  - `D-P3-02 (compat)`：existing `index.rebuild` 在 reactivate 后 serving pointer withdrawn 的场景保留 success/no-op 兼容；只有 frozen `latest`/lifecycle identity drift 才整体失败。
+- **阻塞与处理**：无新增 blocker；P1 known stale-fence RED 仍仅交 P4，不在 P3 吞掉 `ConflictError`。
+- **测试发现**：Phase 3 固定 EXIT `38 passed`；`ruff check api intake src tests` EXIT0；旧 identity/scatter/NH8 lifecycle 回归均通过；没有 skip/xfail。
+- **后续 handoff**：Phase 4 消费 `observation_uuid/current_attempt_generation/expected_item_epoch`，负责 terminal Outcome、rev2/old pin、exact replay 与 outbox owner；不得在 P4 重建另一套 identity counter。
+
+| 工作项 | 状态 | PR / commit | 实际落点 | 备注 |
+|--------|------|-------------|----------|------|
+| `P3-01` | `✅ done` | `6da19ea` | `observation_reservations.py`；`task_create.py`；`test_nhx1_observation_identity.py` | T-O-408；单 winner/replay/409 |
+| `P3-02` | `✅ done` | `6da19ea` | `acceptance_snapshot.py`；`acceptance_scatter.py`；`test_nhx1_item_epoch.py` | T-O-409；changed/no_change facts 与 epoch CAS |
+| `P3-03` | `✅ done` | `6da19ea` + `b6769e1` | `acquisition_ingest.py`；`test_nhx1_scatter_retry.py` | T-O-408/410；同 Source + attempts 1→2 |
+| `P3-04` | `✅ done` | `6da19ea` | `admission_matrix.py`；`targets.py`；`test_nhx1_intent_state_matrix.py` | T-O-409/421；21 cells |
+| `P3-05` | `✅ done` | `6da19ea` + `b6769e1` | `index_rebuild_plan.py`；`test_nhx1_rebuild_cardinality.py` | T-O-409；stale whole-fail/no-op distinction |
+
+| 时点 | 步骤 | 决策 / 产出 |
+|------|------|-------------|
+| `2026-08-31T02:56:34Z` | Phase 3 EXIT | commit `b6769e10222bc9329d470adda50604e085b64cbd` + fixed 10-file pytest command + `38 passed` + profile `test/sqlite+turso` |
+| `2026-08-31T02:56:34Z` | static gate | commit `6da19ea`/`b6769e1` + `uv run ruff check api intake src tests` + EXIT0 + profile `local` |

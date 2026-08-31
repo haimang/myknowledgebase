@@ -1,0 +1,8 @@
+{
+  "admission_matrix": {"intents": 7, "lifecycle_states": 3, "cells": 21},
+  "observation_concurrency": {"same_key_winner_statuses": [200, 201], "observations": 1, "tasks": 1},
+  "same_content_observations": {"snapshots": 2, "facts": ["changed", "no_change"], "revision_count": 1},
+  "failed_retry": {"sources": 1, "observations": 1, "attempt_generations": [1, 2], "snapshots": 0},
+  "item_epoch": "single row_revision CAS; stale callback rowcount=0",
+  "deleted_key": "admission 409 / zero new Task"
+}
