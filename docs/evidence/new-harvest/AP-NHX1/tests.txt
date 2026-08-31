@@ -21,3 +21,10 @@
 - Static command/result: `uv run ruff check api intake src tests` → `EXIT0 · All checks passed!`
 - Immutable history guard: diff for `001` and `018–024` is empty; migration fixture legacy selection/pending before-after dicts equal.
 - Truth/work join: `T-O-408/409/412/413/414/417/418/422` / `P2-01..P2-05` / schema-side subsets of `NHX1-T02/T04/T05/T10/T14/T15/T17/T19/T20/T24/T25/T26`.
+
+### Phase 2 reopened correction — 2026-08-31
+
+- Superseding commit under test: `2908e8f` (`no_change` keeps the same ItemEpoch; `changed` increments exactly once).
+- Clean detached-worktree command: Phase-2 fixed list without the unrelated R3 external-copy evidence node.
+- Result: `EXIT0 · 64 passed · zero skip/xfail`; ruff `EXIT0`.
+- The first clean-worktree diagnostic observed `test_r3_turso_evidence_ready.py` skip because its repository-external `R2` copy was absent. This node is not counted; `test_empty_database_expand_has_sqlite_turso_parity` remains the Phase-2 Turso gate.

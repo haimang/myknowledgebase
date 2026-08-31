@@ -1379,3 +1379,11 @@ NHX1 coherent debt retirement（单阶段 / 串行DAG）
 |------|------|-------------|
 | `2026-08-31T02:07:52Z` | Phase 2 EXIT | commit `c9874cadfaf0bd96a71475b5eb359ee987d2fce1` + fixed 13-file pytest command + `65 passed` + profile `sqlite+turso` |
 | `2026-08-31T02:07:52Z` | static/checksum gate | commit `c9874cadfaf0bd96a71475b5eb359ee987d2fce1` + ruff EXIT0 + 001/018–024 path diff empty + profile `local` |
+
+### 11.5 Phase 2 reopen correction — no-change ItemEpoch law
+
+- **发现时点**：Phase 3 acceptance writer 首次消费 `mkb_intake_acceptance_facts` 时发现 025 把 `no_change` 错误约束为 epoch+1。
+- **处置**：按 DAG 回退重开 P2；未进入 live 的 025 CHECK 修为三条互斥公式：`changed → +1`、`no_change → same epoch`、`observed_not_adopted → no Item coordinates`。没有通过绕过 fact writer、虚增 epoch 或修改测试期待处理。
+- **证据**：commit `2908e8f`；clean detached worktree；固定 Phase-2 command `64 passed`、零 skip/xfail；ruff EXIT0；修订后 025 SHA-256 `6b947f86e8752788091e1d2a0138f155d761a5b60682a416a4e514cbba76f601`。
+- **环境差异**：第一次 clean-worktree 扩大命令中的历史 `test_r3_turso_evidence_ready.py` 因仓库外 `R2` copy 不存在而 skip；它不是P2分母，最终固定命令移除该R3环境证据节点，并保留本Phase自有 SQLite/Turso parity node，最终证据零skip。
+- **DAG 恢复**：修正后的 P2 EXIT 重新PASS，Phase 3 恢复 `in_progress`。
