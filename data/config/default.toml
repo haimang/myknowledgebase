@@ -14,6 +14,17 @@ embed_model = "LifetimeMistake/Qwen3-VL-Embedding-2B-NVFP4"
 generate_model = "unsloth/Qwen3.8-27B-NVFP4"
 # Global facade gate is the final failsafe (max_in_flight >= 12); orchestrator three pools are the SSOT.
 
+[generation]
+# Qwen remains the local embedding supply; generation uses the NS1 CLI plan.
+local_enabled = false
+model_capacity_priority_gate_enabled = true
+provider_plan = "claude,agy,cursor-agent,grok"
+primary_model = "minimax-m3"
+cli_max_concurrency = 8
+claude_concurrency = 3
+agy_concurrency = 2
+fallback_concurrency = 3
+
 [storage]
 max_object_bytes = 268435456
 upload_pending_ttl_seconds = 86400
