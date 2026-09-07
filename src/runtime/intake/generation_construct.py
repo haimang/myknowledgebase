@@ -134,6 +134,18 @@ class IntakeGenerationConstructMixin:
     """Structurize/construct stages and reconstruct contracts."""
 
     @staticmethod
+    def _cli_provider_plan(state: Mapping[str, Any] | None) -> tuple[str, ...] | None:
+        raw = state.get("generation_provider_plan") if isinstance(state, Mapping) else None
+        if isinstance(raw, list | tuple) and all(isinstance(item, str) and item for item in raw):
+            return tuple(raw)
+        return None
+
+    @staticmethod
+    def _cli_primary_model(state: Mapping[str, Any] | None) -> str | None:
+        raw = state.get("generation_primary_model") if isinstance(state, Mapping) else None
+        return raw if isinstance(raw, str) and raw else None
+
+    @staticmethod
     def _has_frozen_prompt_selection(state: Mapping[str, Any] | None, role: str) -> bool:
         if state is None:
             return False
@@ -400,7 +412,7 @@ class IntakeGenerationConstructMixin:
         return {
             "invocation_uuid": uuid7(),
             "inference_invocation_uuid": uuid7(),
-            "invocation_ordinal": 0,
+            "invocation_ordinal": int(receipt.get("attempt_ordinal") or 0),
             "process_attempt": command.fencing_generation,
             "capability_key": capability_key,
             "stage_key": stage_key,
@@ -408,13 +420,23 @@ class IntakeGenerationConstructMixin:
             "output_digest": receipt.get("output_digest"),
             "status": "succeeded",
             "adapter_kind": adapter_kind,
+            "model_key": receipt.get("model"),
+            "provider": receipt.get("provider") or "claude",
+            "fallback_from": receipt.get("fallback_from"),
+            "fallback_reason": receipt.get("fallback_reason"),
             "prompt_key": receipt.get("prompt_relative_path"),
             "prompt_version": receipt.get("prompt_version"),
             "prompt_digest": receipt.get("prompt_sha256"),
             "schema_key": "lsrag.layered_content.default" if receipt.get("schema_relative_path") else None,
             "schema_version": "v1" if receipt.get("schema_relative_path") else None,
             "request_digest": stable_digest(
-                {"transport": "claude_cli", "role": receipt.get("role"), "input_digest": input_digest}
+                {
+                    "transport": "claude_cli",
+                    "provider": receipt.get("provider") or "claude",
+                    "model": receipt.get("model"),
+                    "role": receipt.get("role"),
+                    "input_digest": input_digest,
+                }
             ),
             "input_tokens": usage.get("input_tokens") if isinstance(usage, Mapping) else None,
             "output_tokens": usage.get("output_tokens") if isinstance(usage, Mapping) else None,
@@ -537,6 +559,10 @@ class IntakeGenerationConstructMixin:
             combined_usage: dict[str, int] = {"input_tokens": 0, "output_tokens": 0, "total_tokens": 0}
             last_session_id = None
             last_exit_code = 0
+            last_provider = "claude"
+            last_model: str | None = None
+            last_attempt_ordinal = 0
+            last_fallback_reason: str | None = None
 
             for chunk in chunks:
                 chunk_result = await cli.run(
@@ -546,6 +572,8 @@ class IntakeGenerationConstructMixin:
                         json_schema=schema,
                         role="json",
                         granularity_set=profile,
+                        model=self._cli_primary_model(state),
+                        provider_plan=self._cli_provider_plan(state),
                     )
                 )
                 if not isinstance(chunk_result.structured_output, Mapping):
@@ -563,6 +591,10 @@ class IntakeGenerationConstructMixin:
                             combined_usage[k] += val
                 last_session_id = chunk_result.session_id
                 last_exit_code = chunk_result.exit_code
+                last_provider = chunk_result.provider
+                last_model = chunk_result.model
+                last_attempt_ordinal = chunk_result.attempt_ordinal
+                last_fallback_reason = chunk_result.fallback_reason
 
             candidate = {
                 "schema_version": "mkb.b-json-cuts.v1",
@@ -582,6 +614,10 @@ class IntakeGenerationConstructMixin:
                 "usage": combined_usage,
                 "exit_code": last_exit_code,
                 "output_digest": stable_digest(candidate),
+                "provider": last_provider,
+                "model": last_model,
+                "attempt_ordinal": last_attempt_ordinal,
+                "fallback_reason": last_fallback_reason,
             }
             return candidate, receipt
 
@@ -592,6 +628,8 @@ class IntakeGenerationConstructMixin:
                 json_schema=schema,
                 role="json",
                 granularity_set=profile,
+                model=self._cli_primary_model(state),
+                provider_plan=self._cli_provider_plan(state),
             )
         )
         if not isinstance(result.structured_output, Mapping):
@@ -611,6 +649,11 @@ class IntakeGenerationConstructMixin:
             "usage": None if result.usage is None else dict(result.usage),
             "exit_code": result.exit_code,
             "output_digest": stable_digest(candidate),
+            "provider": result.provider,
+            "model": result.model,
+            "attempt_ordinal": result.attempt_ordinal,
+            "fallback_from": result.fallback_from,
+            "fallback_reason": result.fallback_reason,
         }
         return candidate, receipt
 
@@ -645,6 +688,8 @@ class IntakeGenerationConstructMixin:
                 json_schema=schema,
                 role="summarizer",
                 granularity_set=profile,
+                model=self._cli_primary_model(state),
+                provider_plan=self._cli_provider_plan(state),
             )
         )
         if not isinstance(result.structured_output, Mapping):
@@ -665,6 +710,11 @@ class IntakeGenerationConstructMixin:
             "usage": None if result.usage is None else dict(result.usage),
             "exit_code": result.exit_code,
             "output_digest": stable_digest(completed),
+            "provider": result.provider,
+            "model": result.model,
+            "attempt_ordinal": result.attempt_ordinal,
+            "fallback_from": result.fallback_from,
+            "fallback_reason": result.fallback_reason,
         }
         return completed, receipt
 
@@ -777,6 +827,8 @@ class IntakeGenerationConstructMixin:
                     user_prompt=clean,
                     system_prompt_file=prompt_path,
                     role="markdown",
+                    model=self._cli_primary_model(state),
+                    provider_plan=self._cli_provider_plan(state),
                 )
             )
             markdown = result.text.strip()
@@ -793,6 +845,11 @@ class IntakeGenerationConstructMixin:
                 "usage": None if result.usage is None else dict(result.usage),
                 "exit_code": result.exit_code,
                 "output_digest": stable_digest({"text": markdown}),
+                "provider": result.provider,
+                "model": result.model,
+                "attempt_ordinal": result.attempt_ordinal,
+                "fallback_from": result.fallback_from,
+                "fallback_reason": result.fallback_reason,
                 "compression_channel": "non-interactive",
             }
         next_state = dict(state)

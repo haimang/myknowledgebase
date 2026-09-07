@@ -13,6 +13,7 @@ from src.contracts.common.time import utc_now
 from src.contracts.governance import OUTBOX_KIND_DEFINITIONS
 from src.persistence.ports import PersistencePort, UnitOfWork
 from src.runtime.task.helpers import _json
+from src.runtime.task.model_capacity import assert_model_capacity_allowed
 from src.services.config_snapshots import ConfigSnapshotService, PreparedExecutionInputs
 from src.services.events import DomainEventWriter
 from src.services.intake_lifecycle.admission_matrix import assert_intent_applicable
@@ -56,6 +57,7 @@ class TaskCreateMixin:
         teams: TeamService,
         events: DomainEventWriter,
         config_snapshots: ConfigSnapshotService | None = None,
+        metrics: Any | None = None,
     ) -> None:
         self.persistence = persistence
         self.teams = teams
@@ -65,6 +67,34 @@ class TaskCreateMixin:
         # dependency, making public Execution admission object-backed and
         # registry-bound rather than a floating alias.
         self.config_snapshots = config_snapshots
+        self.metrics = metrics
+
+    async def _record_model_capacity_denial(
+        self,
+        request: TaskCreateRequest,
+        caller_token_fingerprint: str,
+    ) -> None:
+        metrics = getattr(self, "metrics", None)
+        if metrics is not None:
+            metrics.increment("mkb_model_capacity_denied_total", intent=request.request_intent)
+        audit = getattr(self.config_snapshots, "security_audit", None)
+        if audit is None:
+            return
+        async with self.persistence.transaction() as tx:
+            await audit.write_denied(
+                tx,
+                action="model.capacity_admission",
+                denial_code="MODEL_AT_CAPACITY",
+                summary="Model-generating request rejected by temporary capacity policy",
+                http_status=429,
+                actor_fingerprint=caller_token_fingerprint,
+                actor_kind="internal_token",
+                team_uuid=request.team_uuid,
+                trace_uuid=request.trace_uuid,
+                target_kind="task",
+                target_uuid=request.task_uuid,
+                payload={"priority": request.priority, "request_intent": request.request_intent},
+            )
 
 
     async def create(self, request: TaskCreateRequest, caller_token_fingerprint: str) -> tuple[dict[str, Any], bool]:
@@ -88,6 +118,16 @@ class TaskCreateMixin:
                 return self._view(existing, await self._open_gate(tx, request.team_uuid, request.task_uuid)), True
         now = utc_now()
         self._assert_future_deadline(request.deadline_at, received_at=now)
+        try:
+            assert_model_capacity_allowed(
+                priority=request.priority,
+                request_intent=request.request_intent,
+                config_snapshots=self.config_snapshots,
+            )
+        except MkbError as exc:
+            if exc.code == "MODEL_AT_CAPACITY":
+                await self._record_model_capacity_denial(request, caller_token_fingerprint)
+            raise
         source = getattr(request.payload, "source", None)
         if request.request_intent == "intake.ingest" and source is not None:
             from src.contracts.intake.strategies import assert_clean_strategy_applicable

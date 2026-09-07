@@ -89,7 +89,15 @@ async def write_pending_generation_evidence_tx(tx: Any, process: dict[str, Any])
                     invocation.get("output_tokens"),
                     invocation.get("total_tokens"),
                     now,
-                    json.dumps({"capability_key": invocation.get("capability_key")}, ensure_ascii=False),
+                    json.dumps(
+                        {
+                            "capability_key": invocation.get("capability_key"),
+                            "provider": invocation.get("provider"),
+                            "fallback_from": invocation.get("fallback_from"),
+                            "fallback_reason": invocation.get("fallback_reason"),
+                        },
+                        ensure_ascii=False,
+                    ),
                     status,
                     stage_key,
                     invocation.get("error_code"),

@@ -27,7 +27,8 @@ from src.runtime.config import Settings
 from src.runtime.health import HealthAggregator
 from src.runtime.http_acquisition import HttpAcquirer
 from src.runtime.index_retirement import IndexGenerationRetirementScanner, IndexGenerationRetirementSchedule
-from src.runtime.inference.claude_cli import DeterministicNs1Stub, SubprocessClaudeCli
+from src.runtime.inference.agent_router import AgentCliRouter, SubprocessAgentCli
+from src.runtime.inference.claude_cli import DeterministicNs1Stub
 from src.runtime.inference.facade import ConcurrencyGate, InferenceFacade
 from src.runtime.inference.multimodal import (
     ObjectStoreMediaResolver,
@@ -227,6 +228,8 @@ async def _probe(container: Container) -> dict[str, bool]:
             # a generic transport ping cannot prove the model/adapter/supply
             # identity is usable for future work.
             bindings = await container.registry.active_inference_bindings()
+            if not container.settings.generation_local_enabled:
+                bindings = tuple(binding for binding in bindings if binding.capability_key == "embed")
             inference_ok = all([await container.inference.probe_binding(binding) for binding in bindings])
         except Exception:
             inference_ok = False
@@ -301,7 +304,7 @@ def _health_required(settings: Settings) -> tuple[str, ...]:
     if not (settings.runtime_supply_readiness_required and spec.owns_workflow_claims):
         return tuple(required)
     supply = list(HealthAggregator.SUPPLY_REQUIRED)
-    if not settings.multimodal_enabled:
+    if not settings.multimodal_enabled or not settings.generation_local_enabled:
         supply = [name for name in supply if name != "supply_s11_multimodal"]
     return (*required, *supply)
 
@@ -356,7 +359,7 @@ def create_container(settings: Settings | None = None) -> Container:
             )
             for binding in (
                 *enabled_bindings,
-                *((multimodal_binding,) if settings.multimodal_enabled else ()),
+                *((multimodal_binding,) if settings.multimodal_enabled and settings.generation_local_enabled else ()),
             )
         ]
     )
@@ -396,7 +399,7 @@ def create_container(settings: Settings | None = None) -> Container:
             text_binding=text_binding,
             multimodal_binding=multimodal_binding,
         )
-        if settings.multimodal_enabled
+        if settings.multimodal_enabled and settings.generation_local_enabled
         else None
     )
     deterministic_ocr: IsolatedDeterministicOcr | None = None
@@ -409,7 +412,7 @@ def create_container(settings: Settings | None = None) -> Container:
         except MkbError:
             deterministic_ocr = None
     config_snapshots = ConfigSnapshotService(persistence, storage, workflows, settings, security_audit=security_audit)
-    tasks = TaskService(persistence, teams, events, config_snapshots)
+    tasks = TaskService(persistence, teams, events, config_snapshots, metrics=metrics)
     retrieval_access = ArtifactRetrievalAccess(persistence, storage)
     retrieval = RetrievalService(
         persistence,
@@ -506,10 +509,12 @@ def create_container(settings: Settings | None = None) -> Container:
         billing=DefaultBillingService(),
         dispatch_caps=dispatch_caps,
         live_inference=settings.live_inference,
+        local_generation_enabled=settings.generation_local_enabled,
         cleanup_recovery_window_seconds=settings.workflow_cleanup_recovery_window_seconds,
         metrics=metrics,
         representation_facts=PersistenceRepresentationFactReader(),
         claimable_process_keys=claimable_process_keys,
+        model_capacity_priority_gate_enabled=settings.model_capacity_priority_gate_enabled,
     )
     # S09 retirement intent creation is part of a successful pointer cutover,
     # so construct it before the pipeline rather than only for the scanner.
@@ -521,7 +526,31 @@ def create_container(settings: Settings | None = None) -> Container:
     if settings.ns1_cli_mode == "stub":
         ns1_cli = DeterministicNs1Stub(concurrency_gate=inference_gate)
     elif settings.ns1_cli_mode == "subprocess":
-        ns1_cli = SubprocessClaudeCli(executable=settings.ns1_cli_executable, concurrency_gate=inference_gate)
+        provider_executables = {
+            "claude": settings.ns1_cli_executable,
+            "agy": settings.ns1_agy_executable,
+            "cursor-agent": settings.ns1_cursor_agent_executable,
+            "grok": settings.ns1_grok_executable,
+        }
+        ns1_cli = AgentCliRouter(
+            {
+                provider: SubprocessAgentCli(
+                    provider=provider,
+                    executable=provider_executables[provider],
+                    model=settings.ns1_primary_model if provider == "claude" else None,
+                )
+                for provider in settings.ns1_providers
+            },
+            primary_model=settings.ns1_primary_model,
+            provider_plan=settings.ns1_providers,
+            max_concurrency=settings.ns1_cli_max_concurrency,
+            provider_limits={
+                "claude": settings.ns1_claude_concurrency,
+                "agy": settings.ns1_agy_concurrency,
+                "cursor-agent": settings.ns1_fallback_concurrency,
+                "grok": settings.ns1_fallback_concurrency,
+            },
+        )
     diagnostic_sidecar = None
     if settings.persistence_backend == "turso":
         from src.persistence.turso.sidecar import TursoDiagnosticSidecar
@@ -540,7 +569,8 @@ def create_container(settings: Settings | None = None) -> Container:
             deterministic_ocr=deterministic_ocr,
             inference=inference,
             claude_cli=ns1_cli,
-            live_inference=settings.live_inference,
+            live_inference=settings.live_inference and settings.generation_local_enabled,
+            generation_local_enabled=settings.generation_local_enabled,
             acquisition_max_response_bytes=settings.acquisition_max_response_bytes,
             print_max_response_bytes=settings.browser_print_max_bytes,
             pdf_parser=pdf_parser,

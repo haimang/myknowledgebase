@@ -132,6 +132,7 @@ _ERROR_DEFINITIONS = {
         ErrorDefinition(
             "FULL_REPLAY_INPUT_UNAVAILABLE", "conflict", 409, False, "Frozen replay input is unavailable"
         ),
+        ErrorDefinition("MODEL_AT_CAPACITY", "dependency", 429, True, "model at capacity"),
         ErrorDefinition("OBJECT_SESSION_CONFLICT", "conflict", 409, False, "Upload session conflicts"),
         ErrorDefinition(
             "LEGACY_EVIDENCE_UNVERIFIABLE", "integrity", 409, False, "Legacy evidence cannot be verified"

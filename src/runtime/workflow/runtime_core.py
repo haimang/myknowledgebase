@@ -26,6 +26,7 @@ from src.runtime.workflow.constants import (
     _TERMINAL_EXECUTION_STATUSES,
 )
 from src.runtime.workflow.dispatch import (
+    GENERATE_PROCESS_KEYS,
     OVER_BUDGET_PROCESS_KEYS,
     DispatchCaps,
     choose_pool,
@@ -60,6 +61,7 @@ class WorkflowCoreMixin:
         billing: BillingPort | None = None,
         dispatch_caps: DispatchCaps | None = None,
         live_inference: bool = True,
+        local_generation_enabled: bool | None = None,
         default_max_retries: int = 3,
         default_max_recoveries: int = 3,
         retry_delay_seconds: int = 1,
@@ -67,6 +69,7 @@ class WorkflowCoreMixin:
         metrics: Any | None = None,
         representation_facts: RepresentationFactReader | None = None,
         claimable_process_keys: frozenset[str] | None = None,
+        model_capacity_priority_gate_enabled: bool = False,
     ) -> None:
         if default_max_retries < 0 or default_max_recoveries < 0:
             raise ValueError("retry and recovery limits must be non-negative")
@@ -81,6 +84,9 @@ class WorkflowCoreMixin:
         self.billing = billing or DefaultBillingService()
         self.dispatch_caps = dispatch_caps or DispatchCaps()
         self.live_inference = live_inference
+        self.local_generation_enabled = (
+            live_inference if local_generation_enabled is None else local_generation_enabled
+        )
         self.default_max_retries = default_max_retries
         self.default_max_recoveries = default_max_recoveries
         self.retry_delay_seconds = retry_delay_seconds
@@ -95,6 +101,7 @@ class WorkflowCoreMixin:
         # always passes an explicit role-derived set, including an empty set
         # for API/maintenance processes that are not worker claimers.
         self.claimable_process_keys = claimable_process_keys
+        self.model_capacity_priority_gate_enabled = model_capacity_priority_gate_enabled
         active_definitions = (definition, *additional_definitions)
         self._active_workflow_keys = {candidate.workflow_key for candidate in active_definitions}
         if len(self._active_workflow_keys) != len(active_definitions):
@@ -241,6 +248,21 @@ class WorkflowCoreMixin:
     async def _admit_waiting_processes_tx(self, tx: UnitOfWork, now: str) -> None:
         """Admit queued processes into pools within capacity limits (T-O-353 / T-O-355 / T-O-356)."""
 
+        if self.model_capacity_priority_gate_enabled:
+            # A policy switch may be enabled while lower-priority Processes
+            # are already sitting in an admitted queue.  Release only their
+            # scheduler reservation; durable Task/Process history remains
+            # intact and can be resumed when the switch is lifted.
+            await tx.execute(
+                "UPDATE mkb_processes SET dispatch_admitted=0,dispatch_pool=NULL,"
+                "dispatch_enqueued_at=NULL,updated_at=? "
+                "WHERE status='ready' AND dispatch_admitted=1 AND priority_rank IN (?,?) "
+                "AND process_key IN ("
+                + ",".join("?" for _ in GENERATE_PROCESS_KEYS)
+                + ")",
+                (now, 100, 200, *sorted(GENERATE_PROCESS_KEYS)),
+            )
+
         occupancies = await get_pool_occupancies(tx)
         local_queued = occupancies["local-inference"].queued
         ni_queued = occupancies["non-interactive"].queued
@@ -305,6 +327,8 @@ class WorkflowCoreMixin:
 
         for row, _kind, facts in generates:
             priority = row["priority"] or "normal"
+            if self.model_capacity_priority_gate_enabled and priority in {"low", "normal"}:
+                continue
             over_budget = (
                 row["process_key"] in OVER_BUDGET_PROCESS_KEYS
                 and facts["source_chars"] > caps.local_char_budget
@@ -314,7 +338,7 @@ class WorkflowCoreMixin:
                 "generate",
                 local_queued=local_queued,
                 ni_queued=ni_queued,
-                local_available=self.live_inference,
+                local_available=self.live_inference and self.local_generation_enabled,
                 ni_quota=billing.has_quota("non-interactive"),
                 over_budget=over_budget,
                 explicit_channel=facts["explicit_channel"],

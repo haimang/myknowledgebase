@@ -46,12 +46,27 @@ class Settings(BaseSettings):
     inference_secret_file: Path | None = None
     inference_probe_enabled: bool = False
     live_inference: bool = False
-    # NS1 A/B.md/B.json/C transport. Independent of live_inference, which only
-    # selects the embed/vectorize facade. ``disabled`` keeps the legacy S11
-    # structured_generate fallback for tests that inject a local fixture.
-    # Compression (C) can independently choose Claude ``-p`` or Spark generate.
+    # Embedding and generation are separate policy axes. ``live_inference``
+    # remains the Qwen/local-vLLM embedding switch; this flag controls whether
+    # new generation Processes may enter the local-vLLM pool.
+    generation_local_enabled: bool = True
+    # NS1 A/B.md/B.json/C transport. ``disabled`` keeps focused compositions
+    # that inject their own local fixture independent of the application CLI.
     ns1_cli_mode: Literal["disabled", "stub", "subprocess"] = "stub"
     ns1_cli_executable: str = "claude"
+    ns1_provider_plan: str = "claude,agy,cursor-agent,grok"
+    ns1_primary_model: str = "minimax-m3"
+    ns1_agy_executable: str = "agy"
+    ns1_cursor_agent_executable: str = "cursor-agent"
+    ns1_grok_executable: str = "grok"
+    ns1_cli_max_concurrency: int = Field(default=8, ge=1, le=64)
+    ns1_claude_concurrency: int = Field(default=3, ge=1, le=64)
+    ns1_agy_concurrency: int = Field(default=2, ge=1, le=64)
+    ns1_fallback_concurrency: int = Field(default=3, ge=1, le=64)
+    # When enabled, model-bearing normal/low public requests are rejected
+    # before durable Task facts are written.  Development/test profiles can
+    # leave the switch off while preserving the production policy explicitly.
+    model_capacity_priority_gate_enabled: bool = False
     inference_generate_timeout_seconds: float = Field(default=180, ge=1, le=3600)
     multimodal_enabled: bool = False
     multimodal_model_key: str = Field(default="Qwen/Qwen2.5-VL-7B-Instruct", min_length=1, max_length=256)
@@ -126,13 +141,21 @@ class Settings(BaseSettings):
 
     @model_validator(mode="after")
     def validate_runtime_profile(self) -> Settings:
+        if not self.ns1_providers:
+            raise ValueError("ns1_provider_plan must not be empty")
+        if not self.ns1_primary_model.strip():
+            raise ValueError("ns1_primary_model must be non-empty")
         if self.runtime_profile == "prod":
             if self.ns1_cli_mode != "subprocess":
                 raise ValueError("production profile requires the subprocess NS1 supply")
             if not self.runtime_supply_readiness_required:
                 raise ValueError("production profile requires runtime supply readiness")
-            if not self.multimodal_enabled:
+            if self.generation_local_enabled and not self.multimodal_enabled:
                 raise ValueError("production profile requires pinned multimodal supply")
+            if self.generation_local_enabled:
+                raise ValueError("production profile requires local generation to be disabled")
+            if not self.model_capacity_priority_gate_enabled:
+                raise ValueError("production profile requires the model capacity priority gate")
         return self
 
     @field_validator("multimodal_model_key", "multimodal_model_version")
@@ -185,3 +208,13 @@ class Settings(BaseSettings):
         """Parse a bounded allowlist used by workflow-worker claim filtering."""
 
         return tuple(dict.fromkeys(item.strip() for item in self.worker_capability_allowlist.split(",") if item.strip()))
+
+    @property
+    def ns1_providers(self) -> tuple[str, ...]:
+        """Return the validated closed provider order for new generation work."""
+
+        values = tuple(dict.fromkeys(item.strip() for item in self.ns1_provider_plan.split(",") if item.strip()))
+        allowed = {"claude", "agy", "cursor-agent", "grok"}
+        if not values or any(item not in allowed for item in values) or "claude" not in values:
+            raise ValueError("ns1_provider_plan must contain claude, agy, cursor-agent, and/or grok")
+        return values

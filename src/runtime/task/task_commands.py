@@ -16,6 +16,7 @@ from src.contracts.common.models import TaskStatus
 from src.contracts.common.time import normalize_rfc3339, utc_now
 from src.persistence.ports import UnitOfWork
 from src.runtime.task.helpers import _decode_task_list_cursor, _encode_task_list_cursor, _json
+from src.runtime.task.model_capacity import assert_model_capacity_allowed, task_row_is_model_bearing
 
 
 class TaskCommandsMixin:
@@ -161,6 +162,11 @@ class TaskCommandsMixin:
                         "task-priority-locked",
                         "Task priority is immutable after Process materialization",
                     )
+                assert_model_capacity_allowed(
+                    priority=request.priority,
+                    request_intent=row.get("request_intent"),
+                    config_snapshots=self.config_snapshots,
+                )
             title = request.title if request.title is not None else row["title"]
             description = request.description if request.description is not None else row["description"]
             priority = request.priority if request.priority is not None else row["priority"]
@@ -266,6 +272,12 @@ class TaskCommandsMixin:
                 raise ConflictError("task-active", "An active Task cannot be retried")
             if row["status"] == "succeeded":
                 raise ConflictError("retry-not-allowed", "Succeeded Task must be rebuilt as a new Task")
+            if task_row_is_model_bearing(row):
+                assert_model_capacity_allowed(
+                    priority=row.get("priority"),
+                    request_intent=row.get("request_intent"),
+                    config_snapshots=self.config_snapshots,
+                )
             prior_root = row["current_root_execution_uuid"]
             target_generation = row["current_generation"] + 1
             root_execution_uuid = uuid7()

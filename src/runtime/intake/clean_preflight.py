@@ -60,11 +60,19 @@ class IntakeCleanPreflightMixin:
         bound = resolve_bound_clean_strategy(step_key=command.step_key, process_key=command.process_key)
         strategy = bound.strategy_key.value
         prompt = await self._clean_prompt_material(command, strategy, state=state)
-        llm = self._clean_language_model()
         cli_clean_supported = command.process_key not in {"clean.ocr.local", "clean.extract.vision"}
         channel = None
         if command.dispatch_pool in {"local-inference", "non-interactive"}:
             channel = command.dispatch_pool
+        # When the temporary policy explicitly disables local generation,
+        # non-interactive work must not be diverted to an injected Qwen clean
+        # model.  Development compositions that keep local generation enabled
+        # retain their established multimodal clean capability.
+        llm = (
+            None
+            if channel == "non-interactive" and not getattr(self, "_generation_local_enabled", True)
+            else self._clean_language_model()
+        )
         if channel == "local-inference" and llm is None:
             raise MkbError(
                 "COMPRESSION_CHANNEL_UNAVAILABLE",
@@ -92,7 +100,20 @@ class IntakeCleanPreflightMixin:
                 raise MkbError("PROMPT_HASH_MISMATCH", "CLI clean prompt bytes are unavailable", 503) from exc
             if prompt_digest != prompt.content_sha256:
                 raise MkbError("PROMPT_HASH_MISMATCH", "CLI clean prompt bytes do not match the frozen pointer", 503)
-            llm = ClaudeCliCleanLanguageModel(self._claude_cli, system_prompt_file=prompt_path)
+            raw_plan = state.get("generation_provider_plan")
+            provider_plan = (
+                tuple(raw_plan)
+                if isinstance(raw_plan, list | tuple)
+                and all(isinstance(item, str) and item for item in raw_plan)
+                else None
+            )
+            primary_model = state.get("generation_primary_model")
+            llm = ClaudeCliCleanLanguageModel(
+                self._claude_cli,
+                system_prompt_file=prompt_path,
+                provider_plan=provider_plan,
+                model=primary_model if isinstance(primary_model, str) else None,
+            )
         result = await dispatch_clean(
             command.process_key,
             text=decoded if isinstance(decoded, str) else None,

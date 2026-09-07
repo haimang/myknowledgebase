@@ -47,6 +47,7 @@ class IntakeCoreMixin:
         inference: InferenceFacade | None = None,
         claude_cli: ClaudeCliPort | None = None,
         live_inference: bool = False,
+        generation_local_enabled: bool | None = None,
         billing: object | None = None,
         clean_llm: object | None = None,
         clean_prompt: CleanPrompt | None = None,
@@ -74,6 +75,9 @@ class IntakeCoreMixin:
         self._inference = inference
         self._claude_cli = claude_cli
         self._live_inference = live_inference
+        self._generation_local_enabled = (
+            live_inference if generation_local_enabled is None else generation_local_enabled
+        )
         self._billing = billing
         self._clean_llm = clean_llm
         self._clean_prompt = clean_prompt
@@ -137,6 +141,7 @@ class IntakeCoreMixin:
 
         try:
             state = await self._load_state(command)
+            state = await self._hydrate_generation_policy(command, state)
             material, route_extra, callback = await self._material_for(command, state)
             refs: dict[str, str] = {}
 
@@ -333,6 +338,37 @@ class IntakeCoreMixin:
                 body = await self._storage.read_verified(command.team_uuid, ObjectHandle(value=handle))
                 member["clean_text"] = body.decode("utf-8")
         return state
+
+    async def _hydrate_generation_policy(
+        self,
+        command: ProcessCommand,
+        state: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Copy only the frozen NS1 provider coordinates into stage state."""
+
+        try:
+            data = await self._storage.read_verified(
+                command.team_uuid,
+                ObjectHandle(value=command.config_snapshot_ref),
+            )
+            if _digest_bytes(data) != command.config_snapshot_digest:
+                raise MkbError("OBJECT_INTEGRITY_DIGEST", "Config snapshot failed its declared digest", 503)
+            snapshot = json.loads(data)
+            policy = snapshot.get("l2", {}).get("generation_policy") if isinstance(snapshot, dict) else None
+        except MkbError:
+            raise
+        except (TypeError, OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+            raise MkbError("GENERATION_CONFIG_SNAPSHOT_INVALID", "Generation policy snapshot is invalid", 503) from exc
+        if not isinstance(policy, dict):
+            return state
+        providers = policy.get("provider_plan")
+        primary_model = policy.get("primary_model")
+        next_state = dict(state)
+        if isinstance(providers, list) and all(isinstance(item, str) and item for item in providers):
+            next_state["generation_provider_plan"] = tuple(providers)
+        if isinstance(primary_model, str) and primary_model:
+            next_state["generation_primary_model"] = primary_model
+        return next_state
 
     @staticmethod
     def _scatter_child_state(

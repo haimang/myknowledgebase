@@ -12,6 +12,7 @@ from src.contracts.common.ids import stable_digest, uuid7
 from src.contracts.common.time import normalize_rfc3339, utc_now
 from src.persistence.ports import UnitOfWork
 from src.runtime.task.helpers import _json
+from src.runtime.task.model_capacity import assert_model_capacity_allowed, task_row_is_model_bearing
 
 
 class TaskProjectionsMixin:
@@ -324,6 +325,12 @@ class TaskProjectionsMixin:
                     "decision_uuid": existing["decision_uuid"],
                     "gate": self._gate_view(gate, target, target_data),
                 }
+            if request.action in {"approve", "reclean"} and task_row_is_model_bearing(task):
+                assert_model_capacity_allowed(
+                    priority=task.get("priority"),
+                    request_intent=task.get("request_intent"),
+                    config_snapshots=self.config_snapshots,
+                )
             if gate["status"] != "open":
                 raise ConflictError("gate-terminal", "Gate is already terminal")
             if gate["gate_revision"] != request.expected_gate_revision:

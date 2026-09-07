@@ -183,6 +183,18 @@ class ConfigSnapshotService:
         l2: dict[str, Any] = {
             "inference_vllm_base_url": self.settings.inference_vllm_base_url,
             "inference_mode": "live" if self.settings.live_inference else "deterministic",
+            "generation_policy": {
+                "local_enabled": self.settings.generation_local_enabled,
+                "provider_plan": list(self.settings.ns1_providers),
+                "primary_model": self.settings.ns1_primary_model,
+                "policy_digest": stable_digest(
+                    {
+                        "local_enabled": self.settings.generation_local_enabled,
+                        "provider_plan": self.settings.ns1_providers,
+                        "primary_model": self.settings.ns1_primary_model,
+                    }
+                ),
+            },
             "multimodal_supply": {
                 "enabled": self.settings.multimodal_enabled,
                 "capability": "s11.multimodal",
@@ -608,7 +620,14 @@ class ConfigSnapshotService:
 
     def _require_compression_channel(self, request: TaskCreateRequest) -> tuple[str, str]:
         channel, channel_source = self._resolve_compression_channel(request)
-        if channel_source == "explicit" and channel == "local-inference" and not self.settings.live_inference:
+        if (
+            channel_source == "explicit"
+            and channel == "local-inference"
+            and (
+                not self.settings.live_inference
+                or not getattr(self.settings, "generation_local_enabled", True)
+            )
+        ):
             raise MkbError(
                 "COMPRESSION_CHANNEL_UNAVAILABLE",
                 "local-inference compression requires live inference",

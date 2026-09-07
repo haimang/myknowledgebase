@@ -35,6 +35,7 @@ class ClaudeCliRequest:
     timeout_seconds: float = 900.0
     role: Literal["clean", "markdown", "json", "summarizer"] | None = None
     granularity_set: tuple[int, ...] = (0, 1, 2)
+    provider_plan: tuple[str, ...] | None = None
 
     @property
     def structured(self) -> bool:
@@ -51,6 +52,11 @@ class ClaudeCliResult:
     session_id: str | None = None
     usage: Mapping[str, object] | None = None
     is_error: bool = False
+    provider: str = "claude"
+    model: str | None = None
+    attempt_ordinal: int = 0
+    fallback_from: str | None = None
+    fallback_reason: str | None = None
 
 
 class ClaudeCliPort(Protocol):
@@ -378,7 +384,7 @@ def _digest_text(value: str) -> str:
 
 
 _CLI_ENV_KEYS = frozenset({"PATH", "LANG", "HOME", "LC_ALL", "LC_CTYPE", "TERM"})
-_CLI_ENV_PREFIXES = ("ANTHROPIC_", "CLAUDE_")
+_CLI_ENV_PREFIXES = ("ANTHROPIC_", "CLAUDE_", "AGY_", "CURSOR_", "GROK_")
 
 
 def _cli_child_env(env: Mapping[str, str] | None) -> dict[str, str]:
@@ -490,9 +496,18 @@ class RecordingStub:
 class ClaudeCliCleanLanguageModel:
     """Adapt the CLI port to the existing intake clean-language-model port."""
 
-    def __init__(self, cli: ClaudeCliPort, *, system_prompt_file: str | Path) -> None:
+    def __init__(
+        self,
+        cli: ClaudeCliPort,
+        *,
+        system_prompt_file: str | Path,
+        provider_plan: tuple[str, ...] | None = None,
+        model: str | None = None,
+    ) -> None:
         self._cli = cli
         self._system_prompt_file = system_prompt_file
+        self._provider_plan = provider_plan
+        self._model = model
 
     async def complete(
         self,
@@ -512,6 +527,8 @@ class ClaudeCliCleanLanguageModel:
                 user_prompt=material,
                 system_prompt_file=self._system_prompt_file,
                 role="clean",
+                provider_plan=self._provider_plan,
+                model=self._model,
             )
         )
         if not isinstance(result.text, str) or not result.text.strip():
